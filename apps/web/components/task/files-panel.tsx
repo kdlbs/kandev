@@ -8,6 +8,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { deleteFile } from '@/lib/ws/workspace-files';
 import { FileBrowser } from '@/components/task/file-browser';
 import type { OpenFileTab } from '@/lib/types/backend';
+import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
 
 type FilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
@@ -16,6 +17,7 @@ type FilesPanelProps = {
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const isArchived = useIsTaskArchived();
   const { toast } = useToast();
 
   const handleDeleteFile = useCallback(async (path: string) => {
@@ -39,6 +41,8 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
       });
     }
   }, [activeSessionId, toast]);
+
+  if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
     <PanelRoot>

@@ -168,6 +168,10 @@ func (m *mockRepository) CreateTaskSessionWorktree(ctx context.Context, worktree
 func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	return nil
 }
+func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
+	return nil, nil
+}
 
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	return nil, nil
@@ -197,7 +201,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error       
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int) ([]*models.Task, int, error) {
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
 	return nil, 0, nil
 }
 func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {

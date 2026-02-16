@@ -293,6 +293,7 @@ type BackendWorkflowStep = {
   events?: StepEvents;
   allow_manual_move?: boolean;
   is_start_step?: boolean;
+  auto_archive_after_hours?: number;
   created_at: string;
   updated_at: string;
 };
@@ -307,6 +308,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   events: step.events,
   allow_manual_move: step.allow_manual_move,
   is_start_step: step.is_start_step,
+  auto_archive_after_hours: step.auto_archive_after_hours,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -351,7 +353,7 @@ export async function createWorkflowStepAction(payload: {
 
 export async function updateWorkflowStepAction(
   stepId: string,
-  payload: Partial<Pick<WorkflowStep, 'name' | 'position' | 'color' | 'prompt' | 'events' | 'allow_manual_move' | 'is_start_step'>>
+  payload: Partial<Pick<WorkflowStep, 'name' | 'position' | 'color' | 'prompt' | 'events' | 'allow_manual_move' | 'is_start_step' | 'auto_archive_after_hours'>>
 ): Promise<WorkflowStep> {
   const body: Record<string, unknown> = {};
   if (payload.name !== undefined) body.name = payload.name;
@@ -361,6 +363,7 @@ export async function updateWorkflowStepAction(
   if (payload.events !== undefined) body.events = payload.events;
   if (payload.allow_manual_move !== undefined) body.allow_manual_move = payload.allow_manual_move;
   if (payload.is_start_step !== undefined) body.is_start_step = payload.is_start_step;
+  if (payload.auto_archive_after_hours !== undefined) body.auto_archive_after_hours = payload.auto_archive_after_hours;
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps/${stepId}`, {
     method: 'PUT',
     body: JSON.stringify(body),

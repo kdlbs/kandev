@@ -79,6 +79,7 @@ export type WorkflowStep = {
   events?: StepEvents;
   allow_manual_move?: boolean;
   is_start_step?: boolean;
+  auto_archive_after_hours?: number;
   created_at: string;
   updated_at: string;
 };
@@ -219,6 +220,7 @@ export type Task = {
   primary_session_id?: string | null;
   session_count?: number | null;
   review_status?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
   metadata?: Record<string, unknown> | null;
@@ -240,6 +242,7 @@ export type WorkflowStepDTO = {
   events?: StepEvents;
   allow_manual_move: boolean;
   is_start_step?: boolean;
+  auto_archive_after_hours?: number;
   created_at?: string;
   updated_at?: string;
 };

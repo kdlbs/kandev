@@ -81,10 +81,41 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     'task.updated': (message) => {
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
+        const taskId = message.payload.task_id;
         let next = state;
 
+        // If the task was archived, remove it from the kanban board (like delete)
+        if (message.payload.archived_at) {
+          if (state.kanban.workflowId === wfId) {
+            next = {
+              ...next,
+              kanban: {
+                ...next.kanban,
+                tasks: next.kanban.tasks.filter((t) => t.id !== taskId),
+              },
+            };
+          }
+          const snapshot = state.kanbanMulti.snapshots[wfId];
+          if (snapshot) {
+            next = {
+              ...next,
+              kanbanMulti: {
+                ...next.kanbanMulti,
+                snapshots: {
+                  ...next.kanbanMulti.snapshots,
+                  [wfId]: {
+                    ...snapshot,
+                    tasks: snapshot.tasks.filter((t) => t.id !== taskId),
+                  },
+                },
+              },
+            };
+          }
+          return next;
+        }
+
         if (state.kanban.workflowId === wfId) {
-          const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
+          const existing = state.kanban.tasks.find((task) => task.id === taskId);
           const nextTask = buildTaskFromPayload(message.payload, existing);
           next = {
             ...next,
@@ -94,7 +125,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
         const snapshot = state.kanbanMulti.snapshots[wfId];
         if (snapshot) {
-          const existing = snapshot.tasks.find((task) => task.id === message.payload.task_id);
+          const existing = snapshot.tasks.find((task) => task.id === taskId);
           const nextTask = buildTaskFromPayload(message.payload, existing);
           next = upsertMultiTask(next, wfId, nextTask);
         }

@@ -19,6 +19,7 @@ type TaskSwitcherItem = {
   repositoryPath?: string;
   diffStats?: DiffStats;
   updatedAt?: string;
+  isArchived?: boolean;
 };
 
 type TaskSwitcherProps = {
@@ -27,6 +28,7 @@ type TaskSwitcherProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   deletingTaskId?: string | null;
   isLoading?: boolean;
@@ -49,6 +51,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onArchiveTask,
   onDeleteTask,
   deletingTaskId,
   isLoading = false,
@@ -97,10 +100,12 @@ export const TaskSwitcher = memo(function TaskSwitcher({
               description={repoLabel}
               stepName={stepName}
               state={task.state}
+              isArchived={task.isArchived}
               isSelected={isSelected}
               diffStats={task.diffStats}
               updatedAt={task.updatedAt}
               onClick={() => onSelectTask(task.id)}
+              onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
               onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
               isDeleting={deletingTaskId === task.id}
             />

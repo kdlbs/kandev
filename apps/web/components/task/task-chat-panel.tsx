@@ -28,6 +28,7 @@ import {
 } from '@/lib/state/slices/diff-comments';
 import { getFileName } from '@/lib/utils/file-path';
 import type { ContextItem } from '@/lib/types/context';
+import { useIsTaskArchived } from './task-archived-context';
 import type { DiffComment } from '@/lib/diff/types';
 import type { DocumentComment } from '@/lib/state/slices/ui/types';
 
@@ -78,6 +79,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onOpenFileAtLine,
   isPanelFocused,
 }: TaskChatPanelProps) {
+  const isArchived = useIsTaskArchived();
   const [isSending, setIsSending] = useState(false);
   const lastAgentMessageCountRef = useRef(0);
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -479,6 +481,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       </PanelBody>
 
       {/* Sticky input at bottom */}
+      {isArchived ? (
+        <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
+          This task is archived and read-only.
+        </div>
+      ) : (
       <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
         <ChatInputContainer
           ref={chatInputRef}
@@ -526,6 +533,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           isPanelFocused={isPanelFocused}
         />
       </div>
+      )}
     </PanelRoot>
   );
 });

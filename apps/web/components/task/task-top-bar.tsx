@@ -4,22 +4,22 @@ import { memo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  IconArrowLeft,
   IconBug,
   IconCopy,
-  IconDots,
   IconGitBranch,
   IconCheck,
+  IconHome,
   IconSettings,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from '@kandev/ui/dropdown-menu';
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@kandev/ui/breadcrumb';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
 import { CommitStatBadge } from '@/components/diff-stat';
@@ -50,6 +50,7 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  isArchived?: boolean;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -66,12 +67,12 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  isArchived,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [copiedRepo, setCopiedRepo] = useState(false);
   const [copiedWorktree, setCopiedWorktree] = useState(false);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   const router = useRouter();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
@@ -86,8 +87,6 @@ const TaskTopBar = memo(function TaskTopBar({
       setTimeout(() => setCopiedBranch(false), 500);
     }
   };
-
-  // Preview controls are handled by a dedicated component.
 
   const handleCopyRepo = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -108,21 +107,34 @@ const TaskTopBar = memo(function TaskTopBar({
   };
 
   return (
-    <header className="flex items-center justify-between px-3 py-1 border-b border-border">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/">
-            <IconArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-        </Button>
-        {repositoryName && (
-          <>
-            <span className="text-sm text-muted-foreground">{repositoryName}</span>
-            <span className="text-sm text-muted-foreground">›</span>
-          </>
-        )}
-        <span className="text-sm font-medium">{taskTitle ?? 'Task details'}</span>
+    <header className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Breadcrumb>
+          <BreadcrumbList className="flex-nowrap text-sm">
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+                  <IconHome className="h-4 w-4" />
+                </Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            {repositoryName && (
+              <>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <span className="text-muted-foreground">{repositoryName}</span>
+                </BreadcrumbItem>
+              </>
+            )}
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage className="font-medium">
+                {taskTitle ?? 'Task details'}
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
         {displayBranch && (
           <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
             <Tooltip>
@@ -237,9 +249,10 @@ const TaskTopBar = memo(function TaskTopBar({
           currentStepId={currentStepId ?? null}
           taskId={taskId ?? null}
           workflowId={workflowId ?? null}
+          isArchived={isArchived}
         />
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 justify-end">
         {DEBUG_UI && onToggleDebugOverlay && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -258,45 +271,30 @@ const TaskTopBar = memo(function TaskTopBar({
           </Tooltip>
         )}
         <DocumentControls activeSessionId={activeSessionId ?? null} />
-        <EditorsMenu activeSessionId={activeSessionId ?? null} />
-
-        <VcsSplitButton
-          sessionId={activeSessionId ?? null}
-          baseBranch={baseBranch}
-          taskTitle={taskTitle}
-          displayBranch={displayBranch}
-        />
-
-        {/* More Options (3-dot) Dropdown */}
-        <DropdownMenu open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant={moreMenuOpen ? "default" : "outline"} className="cursor-pointer px-2">
-              <IconDots className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-[220px]">
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => {
-                if (worktreePath) {
-                  navigator.clipboard?.writeText(worktreePath);
-                }
-              }}
-              disabled={!worktreePath}
-            >
-              <IconCopy className="h-4 w-4" />
-              Copy workspace path
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="cursor-pointer"
+        {!isArchived && (
+          <>
+            <EditorsMenu activeSessionId={activeSessionId ?? null} />
+            <VcsSplitButton
+              sessionId={activeSessionId ?? null}
+              baseBranch={baseBranch}
+              taskTitle={taskTitle}
+              displayBranch={displayBranch}
+            />
+          </>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="cursor-pointer px-2"
               onClick={() => router.push('/settings/general')}
             >
               <IconSettings className="h-4 w-4" />
-              Open Settings
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Settings</TooltipContent>
+        </Tooltip>
       </div>
 
     </header>

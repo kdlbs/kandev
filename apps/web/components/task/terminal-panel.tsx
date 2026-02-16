@@ -6,6 +6,7 @@ import { PanelRoot, PanelBody } from './panel-primitives';
 import { PassthroughTerminal } from './passthrough-terminal';
 import { ShellTerminal } from './shell-terminal';
 import { useAppStore } from '@/components/state-provider';
+import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
 
 export const TerminalPanel = memo(function TerminalPanel(
   props: IDockviewPanelProps<{ terminalId: string; type?: 'shell' | 'dev-server'; processId?: string }>
@@ -26,6 +27,9 @@ export const TerminalPanel = memo(function TerminalPanel(
     processId ? state.processes.processesById[processId] : undefined
   );
   const isStopping = devProcess?.status === 'stopping';
+  const isArchived = useIsTaskArchived();
+
+  if (isArchived) return <ArchivedPanelPlaceholder message="Terminal not available — this task is archived" />;
 
   if (type === 'dev-server' && processId) {
     return (

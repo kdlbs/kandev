@@ -85,6 +85,7 @@ export type TaskEventPayload = {
   primary_session_id?: string | null;
   session_count?: number | null;
   review_status?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  archived_at?: string | null;
   updated_at?: string;
 };
 

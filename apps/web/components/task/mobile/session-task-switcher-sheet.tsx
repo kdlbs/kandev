@@ -14,9 +14,10 @@ import { WorkspaceSwitcher } from '../workspace-switcher';
 import { TaskCreateDialog } from '@/components/task-create-dialog';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { linkToSession } from '@/lib/links';
-import { listTaskSessions, fetchWorkflowSnapshot, listWorkflows } from '@/lib/api';
+import { fetchWorkflowSnapshot, listWorkflows } from '@/lib/api';
 import { useTasks } from '@/hooks/use-tasks';
 import { useTaskActions } from '@/hooks/use-task-actions';
+import { useTaskRemoval } from '@/hooks/use-task-removal';
 import type { TaskState, Workspace, Repository, TaskSession, Task, WorkflowSnapshot } from '@/lib/types/http';
 import type { KanbanState } from '@/lib/state/slices';
 
@@ -84,8 +85,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
-  const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
   const store = useAppStoreApi();
 
   const selectedTaskId = useMemo(() => {
@@ -96,7 +95,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   }, [activeSessionId, activeTaskId, sessionsById]);
 
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
-  const { deleteTaskById } = useTaskActions();
+  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
 
   // Get session info for a task (diff stats)
   const getSessionInfoForTask = useCallback(
@@ -148,31 +148,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     window.history.replaceState({}, '', linkToSession(sessionId));
   }, []);
 
-  const loadTaskSessionsForTask = useCallback(
-    async (taskId: string) => {
-      const state = store.getState();
-      if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
-        return state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      }
-      if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
-        return state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-      }
-      setTaskSessionsLoading(taskId, true);
-      try {
-        const response = await listTaskSessions(taskId, { cache: 'no-store' });
-        setTaskSessionsForTask(taskId, response.sessions ?? []);
-        return response.sessions ?? [];
-      } catch (error) {
-        console.error('Failed to load task sessions:', error);
-        setTaskSessionsForTask(taskId, []);
-        return [];
-      } finally {
-        setTaskSessionsLoading(taskId, false);
-      }
-    },
-    [setTaskSessionsForTask, setTaskSessionsLoading, store]
-  );
-
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const kanbanTasks = store.getState().kanban.tasks;
@@ -201,51 +176,29 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     [loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, store, onOpenChange]
   );
 
+  const handleArchiveTask = useCallback(
+    async (taskId: string) => {
+      try {
+        await archiveTaskById(taskId);
+        await removeTaskFromBoard(taskId);
+      } catch (error) {
+        console.error('Failed to archive task:', error);
+      }
+    },
+    [archiveTaskById, removeTaskFromBoard]
+  );
+
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
       setDeletingTaskId(taskId);
       try {
         await deleteTaskById(taskId);
-
-        const currentTasks = store.getState().kanban.tasks;
-        const remainingTasks = currentTasks.filter(
-          (item: KanbanState['tasks'][number]) => item.id !== taskId
-        );
-
-        store.setState((state) => ({
-          ...state,
-          kanban: {
-            ...state.kanban,
-            tasks: remainingTasks,
-          },
-        }));
-
-        const currentActiveTaskId = store.getState().tasks.activeTaskId;
-        if (currentActiveTaskId === taskId) {
-          if (remainingTasks.length > 0) {
-            const nextTask = remainingTasks[0];
-            if (nextTask.primarySessionId) {
-              setActiveSession(nextTask.id, nextTask.primarySessionId);
-              window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
-            } else {
-              const sessions = await loadTaskSessionsForTask(nextTask.id);
-              const sessionId = sessions[0]?.id ?? null;
-              if (sessionId) {
-                setActiveSession(nextTask.id, sessionId);
-                window.history.replaceState({}, '', linkToSession(sessionId));
-              } else {
-                setActiveTask(nextTask.id);
-              }
-            }
-          } else {
-            window.location.href = '/';
-          }
-        }
+        await removeTaskFromBoard(taskId);
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, store, setActiveSession, setActiveTask, loadTaskSessionsForTask]
+    [deleteTaskById, removeTaskFromBoard]
   );
 
   const handleWorkspaceChange = useCallback(
@@ -384,6 +337,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             activeTaskId={activeTaskId}
             selectedTaskId={selectedTaskId}
             onSelectTask={handleSelectTask}
+            onArchiveTask={handleArchiveTask}
             onDeleteTask={handleDeleteTask}
             deletingTaskId={deletingTaskId}
             isLoading={kanbanIsLoading}

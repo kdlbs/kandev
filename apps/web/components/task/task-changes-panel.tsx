@@ -36,6 +36,7 @@ import { hashDiff, normalizeDiffContent } from '@/components/review/types';
 import type { DiffComment } from '@/lib/diff/types';
 import { usePanelActions } from '@/hooks/use-panel-actions';
 import type { SelectedDiff } from './task-layout';
+import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
 
 type TaskChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -49,6 +50,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onClearSelected,
   onOpenFile: onOpenFileProp,
 }: TaskChangesPanelProps) {
+  const isArchived = useIsTaskArchived();
   const { openFile: panelOpenFile } = usePanelActions();
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
@@ -296,6 +298,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const reviewedCount = reviewedFiles.size;
   const totalCount = allFiles.length;
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
+
+  if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
     <PanelRoot>

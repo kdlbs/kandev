@@ -38,6 +38,7 @@ import { hashDiff, normalizeDiffContent } from '@/components/review/types';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { FileInfo } from '@/lib/state/store';
 import { useToast } from '@/components/toast-provider';
+import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
 import { usePanelActions } from '@/hooks/use-panel-actions';
 import { FileStatusIcon } from './file-status-icon';
 
@@ -55,6 +56,7 @@ type ChangesPanelProps = {
 };
 
 const ChangesPanel = memo(function ChangesPanel({ onSelectDiff }: ChangesPanelProps) {
+  const isArchived = useIsTaskArchived();
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -240,6 +242,8 @@ const ChangesPanel = memo(function ChangesPanel({ onSelectDiff }: ChangesPanelPr
     if (!activeSessionId) return;
     panelOpenFile(path);
   }, [activeSessionId, panelOpenFile]);
+
+  if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
     <PanelRoot>

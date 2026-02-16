@@ -79,29 +79,31 @@ type WorkflowTemplate struct {
 
 // StepDefinition represents a step in a workflow template (stored as JSON in WorkflowTemplate)
 type StepDefinition struct {
-	ID              string     `json:"id"`
-	Name            string     `json:"name"`
-	Position        int        `json:"position"`
-	Color           string     `json:"color"`
-	Prompt          string     `json:"prompt,omitempty"`
-	Events          StepEvents `json:"events"`
-	AllowManualMove bool       `json:"allow_manual_move"`
-	IsStartStep     bool       `json:"is_start_step"`
+	ID                    string     `json:"id"`
+	Name                  string     `json:"name"`
+	Position              int        `json:"position"`
+	Color                 string     `json:"color"`
+	Prompt                string     `json:"prompt,omitempty"`
+	Events                StepEvents `json:"events"`
+	AllowManualMove       bool       `json:"allow_manual_move"`
+	IsStartStep           bool       `json:"is_start_step"`
+	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 }
 
 // WorkflowStep represents a step in a workflow
 type WorkflowStep struct {
-	ID              string     `json:"id"`
-	WorkflowID      string     `json:"workflow_id"`
-	Name            string     `json:"name"`
-	Position        int        `json:"position"`
-	Color           string     `json:"color"`
-	Prompt          string     `json:"prompt,omitempty"`
-	Events          StepEvents `json:"events"`
-	AllowManualMove bool       `json:"allow_manual_move"`
-	IsStartStep     bool       `json:"is_start_step"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID                    string     `json:"id"`
+	WorkflowID            string     `json:"workflow_id"`
+	Name                  string     `json:"name"`
+	Position              int        `json:"position"`
+	Color                 string     `json:"color"`
+	Prompt                string     `json:"prompt,omitempty"`
+	Events                StepEvents `json:"events"`
+	AllowManualMove       bool       `json:"allow_manual_move"`
+	IsStartStep           bool       `json:"is_start_step"`
+	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.
