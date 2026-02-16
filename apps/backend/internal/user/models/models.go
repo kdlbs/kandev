@@ -19,7 +19,10 @@ type UserSettings struct {
 	DefaultEditorID        string    `json:"default_editor_id"`
 	EnablePreviewOnClick   bool      `json:"enable_preview_on_click"`
 	ChatSubmitKey          string    `json:"chat_submit_key"` // "enter" | "cmd_enter"
-	ReviewAutoMarkOnScroll bool      `json:"review_auto_mark_on_scroll"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ReviewAutoMarkOnScroll  bool      `json:"review_auto_mark_on_scroll"`
+	LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
+	LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
+	LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs"`
+	CreatedAt               time.Time                         `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }

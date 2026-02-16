@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/user/store"
 	"go.uber.org/zap"
@@ -32,7 +34,10 @@ type UpdateUserSettingsRequest struct {
 	DefaultEditorID        *string
 	EnablePreviewOnClick   *bool
 	ChatSubmitKey          *string
-	ReviewAutoMarkOnScroll *bool
+	ReviewAutoMarkOnScroll  *bool
+	LspAutoStartLanguages   *[]string
+	LspAutoInstallLanguages *[]string
+	LspServerConfigs        *map[string]map[string]interface{}
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -105,6 +110,21 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
+	if req.LspAutoStartLanguages != nil {
+		if err := validateLSPLanguages(*req.LspAutoStartLanguages); err != nil {
+			return nil, fmt.Errorf("lsp_auto_start_languages: %w", err)
+		}
+		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
+	}
+	if req.LspAutoInstallLanguages != nil {
+		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
+			return nil, fmt.Errorf("lsp_auto_install_languages: %w", err)
+		}
+		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
+	}
+	if req.LspServerConfigs != nil {
+		settings.LspServerConfigs = *req.LspServerConfigs
+	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
 		return nil, err
@@ -127,12 +147,25 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"default_editor_id":      settings.DefaultEditorID,
 		"enable_preview_on_click":    settings.EnablePreviewOnClick,
 		"chat_submit_key":            settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
+		"review_auto_mark_on_scroll":  settings.ReviewAutoMarkOnScroll,
+		"lsp_auto_start_languages":   settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages": settings.LspAutoInstallLanguages,
+		"lsp_server_configs":         settings.LspServerConfigs,
 		"updated_at":                 settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
+}
+
+func validateLSPLanguages(langs []string) error {
+	supported := installer.SupportedLanguages()
+	for _, lang := range langs {
+		if _, ok := supported[lang]; !ok {
+			return fmt.Errorf("unsupported language: %s", lang)
+		}
+	}
+	return nil
 }
 
 func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) error {

@@ -11,14 +11,14 @@ import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { PlanSelectionPopover } from './plan-selection-popover';
 import type { PlanComment } from './plan-comments';
-import type { TextSelection, CommentHighlight } from './markdown-editor';
+import type { TextSelection, CommentHighlight } from '@/components/editors/tiptap/tiptap-plan-editor';
 import type { DocumentComment } from '@/lib/state/slices/ui/types';
 
 const EMPTY_COMMENTS: DocumentComment[] = [];
 
-// Dynamic import to avoid SSR issues with Milkdown
-const MarkdownEditor = dynamic(
-  () => import('./markdown-editor').then((mod) => mod.MarkdownEditor),
+// Dynamic import to avoid SSR issues with TipTap
+const PlanEditor = dynamic(
+  () => import('@/components/editors/tiptap/tiptap-plan-editor').then((mod) => mod.TipTapPlanEditor),
   { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Loading editor...</div> }
 );
 
@@ -309,7 +309,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
         ref={editorWrapperRef}
         onClick={handleEmptyStateClick}
       >
-        <MarkdownEditor
+        <PlanEditor
           key={`${taskId}-${editorKey}`}
           value={draftContent}
           onChange={setDraftContent}

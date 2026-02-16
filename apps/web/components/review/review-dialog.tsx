@@ -22,6 +22,7 @@ type ReviewDialogProps = {
   baseBranch?: string;
   taskTitle?: string;
   onSendComments: (comments: DiffComment[]) => void;
+  onOpenFile?: (filePath: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
 };
@@ -34,6 +35,7 @@ export const ReviewDialog = memo(function ReviewDialog({
   baseBranch,
   taskTitle,
   onSendComments,
+  onOpenFile,
   gitStatusFiles,
   cumulativeDiff,
 }: ReviewDialogProps) {
@@ -257,6 +259,7 @@ export const ReviewDialog = memo(function ReviewDialog({
                 wordWrap={wordWrap}
                 onToggleReviewed={handleToggleReviewed}
                 onDiscard={handleDiscard}
+                onOpenFile={onOpenFile}
                 fileRefs={fileRefs}
               />
             ) : (

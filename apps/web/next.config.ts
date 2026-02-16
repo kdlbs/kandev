@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
     "192.168.1.116:3000",
   ],
   transpilePackages: ["@kandev/ui", "@kandev/theme", "@kandev/types"],
+  turbopack: {},
 };
 
 export default nextConfig;

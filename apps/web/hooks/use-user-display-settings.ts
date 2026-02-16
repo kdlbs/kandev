@@ -16,6 +16,9 @@ type DisplaySettings = {
   enablePreviewOnClick: boolean;
   chatSubmitKey: 'enter' | 'cmd_enter';
   reviewAutoMarkOnScroll: boolean;
+  lspAutoStartLanguages: string[];
+  lspAutoInstallLanguages: string[];
+  lspServerConfigs: Record<string, Record<string, unknown>>;
   loaded: boolean;
 };
 
@@ -73,6 +76,9 @@ export function useUserDisplaySettings({
         enablePreviewOnClick,
         chatSubmitKey: current.chatSubmitKey ?? 'cmd_enter',
         reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
+        lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
+        lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
+        lspServerConfigs: current.lspServerConfigs ?? {},
         loaded: true,
       };
       const sameWorkspace = normalized.workspaceId === current.workspaceId;
@@ -124,6 +130,9 @@ export function useUserDisplaySettings({
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
           reviewAutoMarkOnScroll: data.settings.review_auto_mark_on_scroll ?? true,
+          lspAutoStartLanguages: data.settings.lsp_auto_start_languages ?? [],
+          lspAutoInstallLanguages: data.settings.lsp_auto_install_languages ?? [],
+          lspServerConfigs: data.settings.lsp_server_configs ?? {},
           loaded: true,
         });
       })

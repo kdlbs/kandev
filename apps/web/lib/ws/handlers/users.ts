@@ -20,6 +20,8 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           enablePreviewOnClick: message.payload.enable_preview_on_click ?? false,
           chatSubmitKey: (message.payload.chat_submit_key as 'enter' | 'cmd_enter') ?? 'cmd_enter',
           reviewAutoMarkOnScroll: message.payload.review_auto_mark_on_scroll ?? true,
+          lspAutoStartLanguages: message.payload.lsp_auto_start_languages ?? [],
+          lspAutoInstallLanguages: message.payload.lsp_auto_install_languages ?? [],
           loaded: true,
         },
       }));

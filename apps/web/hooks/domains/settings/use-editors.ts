@@ -54,6 +54,9 @@ export function useEditors() {
           enablePreviewOnClick: data.settings.enable_preview_on_click ?? false,
           chatSubmitKey: data.settings.chat_submit_key ?? 'cmd_enter',
           reviewAutoMarkOnScroll: data.settings.review_auto_mark_on_scroll ?? true,
+          lspAutoStartLanguages: data.settings.lsp_auto_start_languages ?? [],
+          lspAutoInstallLanguages: data.settings.lsp_auto_install_languages ?? [],
+          lspServerConfigs: data.settings.lsp_server_configs ?? {},
           loaded: true,
         });
       })

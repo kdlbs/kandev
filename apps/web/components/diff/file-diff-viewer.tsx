@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { DiffViewer } from './diff-viewer';
+import { DiffViewerResolved as DiffViewer } from './diff-viewer-resolver';
 import { transformGitDiff } from '@/lib/diff';
 import type { DiffComment } from '@/lib/diff/types';
 

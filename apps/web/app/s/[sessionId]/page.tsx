@@ -229,6 +229,9 @@ export default async function SessionPage({
         enablePreviewOnClick: userSettings?.enable_preview_on_click ?? false,
         chatSubmitKey: userSettings?.chat_submit_key ?? 'cmd_enter',
         reviewAutoMarkOnScroll: userSettings?.review_auto_mark_on_scroll ?? true,
+        lspAutoStartLanguages: userSettings?.lsp_auto_start_languages ?? [],
+        lspAutoInstallLanguages: userSettings?.lsp_auto_install_languages ?? [],
+        lspServerConfigs: userSettings?.lsp_server_configs ?? {},
         loaded: Boolean(userSettings),
       },
     };
