@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
-import { DiffEditor } from '@monaco-editor/react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
+import type { editor as monacoEditor } from 'monaco-editor';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import type { FileDiffData } from '@/lib/diff/types';
@@ -19,6 +20,18 @@ type MonacoInlineDiffProps = {
 export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
   const { resolvedTheme } = useTheme();
   const language = getMonacoLanguage(data.filePath);
+  const diffEditorRef = useRef<monacoEditor.IStandaloneDiffEditor | null>(null);
+
+  const handleMount: DiffOnMount = useCallback((editor) => {
+    diffEditorRef.current = editor;
+  }, []);
+
+  // Fix: reset model before @monaco-editor/react's cleanup disposes models
+  useLayoutEffect(() => {
+    return () => {
+      try { diffEditorRef.current?.setModel(null); } catch { /* already disposed */ }
+    };
+  }, []);
 
   const { original, modified } = useMemo(() => {
     if (data.oldContent || data.newContent) {
@@ -66,6 +79,7 @@ export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
         original={original}
         modified={modified}
         theme={resolvedTheme === 'dark' ? 'kandev-dark' : 'kandev-light'}
+        onMount={handleMount}
         options={{
           readOnly: true,
           fontSize: 11,

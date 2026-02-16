@@ -174,3 +174,26 @@ export function extractCodeFromContent(
   const lines = content.split('\n');
   return lines.slice(startLine - 1, endLine).join('\n');
 }
+
+/**
+ * Compute simple line-level diff stats between two strings.
+ * Returns the number of added and deleted lines.
+ */
+export function computeLineDiffStats(
+  original: string,
+  current: string,
+): { additions: number; deletions: number } {
+  const originalLines = original.split('\n');
+  const currentLines = current.split('\n');
+  let additions = 0;
+  let deletions = 0;
+  const maxLen = Math.max(originalLines.length, currentLines.length);
+  for (let i = 0; i < maxLen; i++) {
+    const origLine = originalLines[i];
+    const currLine = currentLines[i];
+    if (origLine === undefined && currLine !== undefined) additions++;
+    else if (origLine !== undefined && currLine === undefined) deletions++;
+    else if (origLine !== currLine) { additions++; deletions++; }
+  }
+  return { additions, deletions };
+}

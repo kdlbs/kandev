@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } from 'react';
-import { PanelRoot, PanelBody, PanelToolbar } from './panel-primitives';
+import { PanelRoot, PanelBody, PanelHeaderBarSplit } from './panel-primitives';
 import {
   IconSettings,
   IconTextWrap,
@@ -30,10 +30,8 @@ import { getWebSocketClient } from '@/lib/ws/connection';
 import { updateUserSettings } from '@/lib/api';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import { ReviewDiffList } from '@/components/review/review-diff-list';
-import { ReviewDialog } from '@/components/review/review-dialog';
 import type { ReviewFile } from '@/components/review/types';
 import { hashDiff, normalizeDiffContent } from '@/components/review/types';
-import type { DiffComment } from '@/lib/diff/types';
 import { usePanelActions } from '@/hooks/use-panel-actions';
 import type { SelectedDiff } from './task-layout';
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
@@ -59,8 +57,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     return localStorage.getItem('diff-view-mode') === 'split';
   });
   const [wordWrap, setWordWrap] = useState(false);
-  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
-
   const { toast } = useToast();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -277,24 +273,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     markCommentsSent(comments.map((c) => c.id));
   }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
 
-  const handleDialogSendComments = useCallback(
-    (comments: DiffComment[]) => {
-      if (!activeTaskId || !activeSessionId || comments.length === 0) return;
-      const client = getWebSocketClient();
-      if (!client) return;
-      const markdown = formatReviewCommentsAsMarkdown(comments);
-      client.request('message.add', {
-        task_id: activeTaskId,
-        session_id: activeSessionId,
-        content: markdown,
-      }, 10000).catch(() => {
-        toast({ title: 'Failed to send comments', variant: 'error' });
-      });
-      setReviewDialogOpen(false);
-    },
-    [activeTaskId, activeSessionId, toast]
-  );
-
   const reviewedCount = reviewedFiles.size;
   const totalCount = allFiles.length;
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
@@ -304,108 +282,103 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   return (
     <PanelRoot>
       {/* Top bar */}
-      <PanelToolbar className="bg-card/50 min-h-[36px]">
-        {/* Settings cog */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="ghost" className="px-1.5 h-7 cursor-pointer">
-              <IconSettings className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuItem
-              className="cursor-pointer gap-2"
-              onSelect={(e) => {
-                e.preventDefault();
-                handleToggleAutoMark(!autoMarkOnScroll);
-              }}
-            >
-              <Checkbox
-                checked={autoMarkOnScroll}
-                className="pointer-events-none"
-              />
-              <span className="text-sm flex-1">Auto-mark reviewed on scroll</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Progress bar */}
-        {totalCount > 0 && (
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-20 h-1 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-            <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-              {reviewedCount}/{totalCount} Reviewed
-            </span>
-          </div>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Expand to review dialog */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="px-1.5 h-7 cursor-pointer"
-              onClick={() => setReviewDialogOpen(true)}
-            >
-              <IconArrowsMaximize className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Expand review</TooltipContent>
-        </Tooltip>
-
-        {/* Word wrap */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`px-1.5 h-7 cursor-pointer ${wordWrap ? 'bg-muted' : ''}`}
-              onClick={() => setWordWrap(!wordWrap)}
-            >
-              <IconTextWrap className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Toggle word wrap</TooltipContent>
-        </Tooltip>
-
-        {/* Split/Unified */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="px-1.5 h-7 cursor-pointer"
-              onClick={() => handleToggleSplitView(!splitView)}
-            >
-              {splitView ? (
-                <IconLayoutRows className="h-3.5 w-3.5" />
-              ) : (
-                <IconLayoutColumns className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{splitView ? 'Unified view' : 'Split view'}</TooltipContent>
-        </Tooltip>
-
-        {/* Fix Comments */}
-        {totalCommentCount > 0 && (
-          <Button size="sm" variant="outline" className="h-7 text-xs cursor-pointer" onClick={handleFixComments}>
-            <IconMessageForward className="h-3.5 w-3.5" />
-            Fix
-            <span className="ml-0.5 rounded-full bg-blue-500/30 px-1 py-0 text-[10px] font-medium text-blue-600 dark:text-blue-400">
-              {totalCommentCount}
-            </span>
-          </Button>
-        )}
-      </PanelToolbar>
+      <PanelHeaderBarSplit
+        left={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="ghost" className="px-1.5 h-5 cursor-pointer">
+                  <IconSettings className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuItem
+                  className="cursor-pointer gap-2"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    handleToggleAutoMark(!autoMarkOnScroll);
+                  }}
+                >
+                  <Checkbox
+                    checked={autoMarkOnScroll}
+                    className="pointer-events-none"
+                  />
+                  <span className="text-sm flex-1">Auto-mark reviewed on scroll</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {totalCount > 0 && (
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-20 h-1 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                  {reviewedCount}/{totalCount} Reviewed
+                </span>
+              </div>
+            )}
+          </>
+        }
+        right={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="px-1.5 h-5 cursor-pointer"
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-review-dialog'))}
+                >
+                  <IconArrowsMaximize className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Expand review</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`px-1.5 h-5 cursor-pointer ${wordWrap ? 'bg-muted' : ''}`}
+                  onClick={() => setWordWrap(!wordWrap)}
+                >
+                  <IconTextWrap className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Toggle word wrap</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="px-1.5 h-5 cursor-pointer"
+                  onClick={() => handleToggleSplitView(!splitView)}
+                >
+                  {splitView ? (
+                    <IconLayoutRows className="h-3.5 w-3.5" />
+                  ) : (
+                    <IconLayoutColumns className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{splitView ? 'Unified view' : 'Split view'}</TooltipContent>
+            </Tooltip>
+            {totalCommentCount > 0 && (
+              <Button size="sm" variant="outline" className="h-5 text-xs cursor-pointer" onClick={handleFixComments}>
+                <IconMessageForward className="h-3.5 w-3.5" />
+                Fix
+                <span className="ml-0.5 rounded-full bg-blue-500/30 px-1 py-0 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                  {totalCommentCount}
+                </span>
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Content */}
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
@@ -432,21 +405,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           />
         ) : null}
       </PanelBody>
-
-      {/* Review Dialog */}
-      {activeSessionId && (
-        <ReviewDialog
-          open={reviewDialogOpen}
-          onOpenChange={setReviewDialogOpen}
-          sessionId={activeSessionId}
-          baseBranch={baseBranch}
-          taskTitle={taskTitle}
-          onSendComments={handleDialogSendComments}
-          onOpenFile={handleOpenFile}
-          gitStatusFiles={gitStatus?.files ?? null}
-          cumulativeDiff={cumulativeDiff}
-        />
-      )}
     </PanelRoot>
   );
 });

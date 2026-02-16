@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { PanelRoot, PanelBody } from './panel-primitives';
 import { FileEditorContent } from './file-editor-content';
@@ -18,8 +18,15 @@ export const FileEditorPanel = memo(function FileEditorPanel(
   props: IDockviewPanelProps<{ path: string }>
 ) {
   const path = props.params.path;
-  const fileState = useDockviewStore((s) => s.openFiles.get(path));
+
+  // Subscribe to individual metadata fields — NOT the full fileState object.
+  // This prevents re-renders on every keystroke (content changes don't trigger re-render).
+  const hasFile = useDockviewStore((s) => s.openFiles.has(path));
+  const isDirty = useDockviewStore((s) => s.openFiles.get(path)?.isDirty ?? false);
+  const isBinary = useDockviewStore((s) => s.openFiles.get(path)?.isBinary ?? false);
+  const originalContent = useDockviewStore((s) => s.openFiles.get(path)?.originalContent ?? '');
   const setFileState = useDockviewStore((s) => s.setFileState);
+
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
@@ -29,7 +36,7 @@ export const FileEditorPanel = memo(function FileEditorPanel(
   // Self-load file content when state is missing (e.g. after hot reload clears the store)
   const loadingRef = useRef(false);
   useEffect(() => {
-    if (fileState || loadingRef.current || !activeSessionId) return;
+    if (hasFile || loadingRef.current || !activeSessionId) return;
     loadingRef.current = true;
 
     const client = getWebSocketClient();
@@ -52,9 +59,20 @@ export const FileEditorPanel = memo(function FileEditorPanel(
       })
       .catch(() => { /* will stay on loading state */ })
       .finally(() => { loadingRef.current = false; });
-  }, [fileState, activeSessionId, path, setFileState]);
+  }, [hasFile, activeSessionId, path, setFileState]);
 
-  if (!fileState) {
+  // Stable callbacks — avoid creating new arrow functions on every render
+  const onChange = useCallback(
+    (newContent: string) => handleFileChange(path, newContent),
+    [handleFileChange, path]
+  );
+  const onSave = useCallback(() => saveFile(path), [saveFile, path]);
+  const onDelete = useCallback(() => deleteFile(path), [deleteFile, path]);
+
+  // Read image content imperatively (only needed for non-editable image display)
+  const [imageContent, setImageContent] = useState<string | null>(null);
+
+  if (!hasFile) {
     return (
       <PanelRoot>
         <PanelBody padding={false} scroll={false} className="flex items-center justify-center text-muted-foreground text-sm">
@@ -65,19 +83,26 @@ export const FileEditorPanel = memo(function FileEditorPanel(
   }
 
   const extCategory = getFileCategory(path);
-  const category = fileState.isBinary
+  const category = isBinary
     ? extCategory === 'image'
       ? 'image'
       : 'binary'
     : 'text';
 
   if (category === 'image') {
+    // Read content imperatively for image display (not edited, so no need for reactive subscription)
+    const content = imageContent ?? (() => {
+      const c = useDockviewStore.getState().openFiles.get(path)?.content ?? '';
+      // Schedule state update outside of render to avoid setState-during-render
+      queueMicrotask(() => setImageContent(c));
+      return c;
+    })();
     return (
       <PanelRoot>
         <PanelBody padding={false} scroll={false}>
           <FileImageViewer
             path={path}
-            content={fileState.content}
+            content={content}
             worktreePath={activeSession?.worktree_path ?? undefined}
           />
         </PanelBody>
@@ -103,16 +128,15 @@ export const FileEditorPanel = memo(function FileEditorPanel(
       <PanelBody padding={false} scroll={false}>
         <FileEditorContent
           path={path}
-          content={fileState.content}
-          originalContent={fileState.originalContent}
-          isDirty={fileState.isDirty}
+          originalContent={originalContent}
+          isDirty={isDirty}
           isSaving={savingFiles.has(path)}
           sessionId={activeSessionId || undefined}
           worktreePath={activeSession?.worktree_path ?? undefined}
           enableComments={!!activeSessionId}
-          onChange={(newContent) => handleFileChange(path, newContent)}
-          onSave={() => saveFile(path)}
-          onDelete={() => deleteFile(path)}
+          onChange={onChange}
+          onSave={onSave}
+          onDelete={onDelete}
         />
       </PanelBody>
     </PanelRoot>

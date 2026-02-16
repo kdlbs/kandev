@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -43,6 +43,8 @@ import { startProcess } from '@/lib/api';
 import { createUserShell } from '@/lib/api/domains/user-shell-api';
 import { useRepositoryScripts } from '@/hooks/domains/workspace/use-repository-scripts';
 import { useLspFileOpener } from '@/hooks/use-lsp-file-opener';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
+import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 
 // Panel components
 import { TaskSessionSidebar, NewTaskButton } from './task-session-sidebar';
@@ -54,7 +56,15 @@ import { TaskPlanPanel } from './task-plan-panel';
 import { FileEditorPanel } from './file-editor-panel';
 import { TerminalPanel } from './terminal-panel';
 import { BrowserPanel } from './browser-panel';
+import { CommitDetailPanel } from './commit-detail-panel';
 import { PreviewController } from './preview/preview-controller';
+import { ReviewDialog } from '@/components/review/review-dialog';
+import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
+import { useGitOperations } from '@/hooks/use-git-operations';
+import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { useToast } from '@/components/toast-provider';
+import type { DiffComment } from '@/lib/diff/types';
 
 import type { Repository, RepositoryScript, Task, ProcessInfo } from '@/lib/types/http';
 import type { ProcessStatusEntry } from '@/lib/state/slices';
@@ -131,14 +141,50 @@ function DiffViewerPanelComponent() {
   );
 }
 
-function ChangesPanelWrapper() {
+function ChangesPanelWrapper(props: IDockviewPanelProps) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
+  const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
+  const { openFile } = useFileEditors();
 
-  const handleSelectDiff = useCallback((path: string, content?: string) => {
-    addDiffViewerPanel(path, content);
+  // Dynamic title with file count
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const { commits } = useSessionCommits(activeSessionId ?? null);
+
+  const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
+  const totalCount = fileCount + commits.length;
+
+  useEffect(() => {
+    const title = totalCount > 0 ? `Changes (${totalCount})` : 'Changes';
+    if (props.api.title !== title) {
+      props.api.setTitle(title);
+    }
+  }, [totalCount, props.api]);
+
+  const handleOpenFile = useCallback((path: string) => {
+    openFile(path);
+  }, [openFile]);
+
+  const handleOpenCommitDetail = useCallback((sha: string) => {
+    addCommitDetailPanel(sha);
+  }, [addCommitDetailPanel]);
+
+  const handleOpenDiffAll = useCallback(() => {
+    addDiffViewerPanel();
   }, [addDiffViewerPanel]);
 
-  return <ChangesPanel onSelectDiff={handleSelectDiff} />;
+  const handleOpenReview = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('open-review-dialog'));
+  }, []);
+
+  return (
+    <ChangesPanel
+      onOpenFile={handleOpenFile}
+      onOpenCommitDetail={handleOpenCommitDetail}
+      onOpenDiffAll={handleOpenDiffAll}
+      onOpenReview={handleOpenReview}
+    />
+  );
 }
 
 function FilesPanelWrapper() {
@@ -165,6 +211,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   chat: ChatPanel,
   'diff-viewer': DiffViewerPanelComponent,
   'file-editor': FileEditorPanel,
+  'commit-detail': CommitDetailPanel,
   changes: ChangesPanelWrapper,
   files: FilesPanelWrapper,
   terminal: TerminalPanel,
@@ -501,6 +548,47 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const effectiveSessionId = useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
+  // Review dialog state (lives here so it's available from any panel)
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const { toast } = useToast();
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const taskTitle = useAppStore((state) => {
+    if (!activeTaskId) return undefined;
+    return state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId)?.title;
+  });
+  const baseBranch = useAppStore((state) => {
+    if (!effectiveSessionId) return undefined;
+    return state.taskSessions.items[effectiveSessionId]?.base_branch;
+  });
+  const reviewGitStatus = useSessionGitStatus(effectiveSessionId);
+  const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
+  const { openFile: reviewOpenFile } = useFileEditors();
+
+  const handleReviewSendComments = useCallback(
+    (comments: DiffComment[]) => {
+      if (!activeTaskId || !effectiveSessionId || comments.length === 0) return;
+      const client = getWebSocketClient();
+      if (!client) return;
+      const markdown = formatReviewCommentsAsMarkdown(comments);
+      client.request('message.add', {
+        task_id: activeTaskId,
+        session_id: effectiveSessionId,
+        content: markdown,
+      }, 10000).catch(() => {
+        toast({ title: 'Failed to send comments', variant: 'error' });
+      });
+      setReviewDialogOpen(false);
+    },
+    [activeTaskId, effectiveSessionId, toast]
+  );
+
+  // Listen for open-review-dialog events from any panel
+  useEffect(() => {
+    const handler = () => setReviewDialogOpen(true);
+    window.addEventListener('open-review-dialog', handler);
+    return () => window.removeEventListener('open-review-dialog', handler);
+  }, []);
+
   // Connect LSP Go-to-Definition navigation to dockview file tabs
   useLspFileOpener();
 
@@ -693,6 +781,19 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         defaultRenderer="always"
         className="h-full"
       />
+      {effectiveSessionId && (
+        <ReviewDialog
+          open={reviewDialogOpen}
+          onOpenChange={setReviewDialogOpen}
+          sessionId={effectiveSessionId}
+          baseBranch={baseBranch}
+          taskTitle={taskTitle}
+          onSendComments={handleReviewSendComments}
+          onOpenFile={reviewOpenFile}
+          gitStatusFiles={reviewGitStatus?.files ?? null}
+          cumulativeDiff={reviewCumulativeDiff}
+        />
+      )}
     </div>
   );
 });

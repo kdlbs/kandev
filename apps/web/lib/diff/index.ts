@@ -21,6 +21,7 @@ export {
   normalizeDiffString,
   extractCodeFromDiff,
   extractCodeFromContent,
+  computeLineDiffStats,
   type FileMutation,
   type ModifyFilePayload,
 } from './adapter';

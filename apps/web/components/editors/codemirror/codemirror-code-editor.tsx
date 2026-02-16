@@ -14,13 +14,15 @@ import { toRelativePath } from '@/lib/utils';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
 import type { DiffComment } from '@/lib/diff/types';
+import { computeLineDiffStats } from '@/lib/diff';
 import { useToast } from '@/components/toast-provider';
 import { EditorCommentPopover } from '@/components/task/editor-comment-popover';
 import { CommentViewPopover } from '@/components/task/comment-view-popover';
+import { PanelHeaderBarSplit } from '@/components/task/panel-primitives';
+import { useDockviewStore } from '@/lib/state/dockview-store';
 
 type FileEditorContentProps = {
   path: string;
-  content: string;
   originalContent: string;
   isDirty: boolean;
   isSaving: boolean;
@@ -126,7 +128,6 @@ class CommentGutterMarker extends GutterMarker {
 
 export function CodeMirrorCodeEditor({
   path,
-  content,
   originalContent,
   isDirty,
   isSaving,
@@ -137,6 +138,12 @@ export function CodeMirrorCodeEditor({
   onSave,
   onDelete,
 }: FileEditorContentProps) {
+  // Read initial content from the store once (not reactive)
+  const [initialContent] = useState(
+    () => useDockviewStore.getState().openFiles.get(path)?.content ?? ''
+  );
+  const contentRef = useRef(initialContent);
+
   const [wrapEnabled, setWrapEnabled] = useState(true);
   const [textSelection, setTextSelection] = useState<TextSelection>(null);
   const [floatingButtonPos, setFloatingButtonPos] = useState<FloatingButtonPosition>(null);
@@ -354,33 +361,15 @@ export function CodeMirrorCodeEditor({
     return exts;
   }, [langExt, wrapEnabled, commentGutter, commentPlugin, selectionUpdateExtension]);
 
-  // Calculate diff stats when dirty
-  const diffStats = useMemo(() => {
-    if (!isDirty) return null;
-
-    const originalLines = originalContent.split('\n');
-    const currentLines = content.split('\n');
-
-    let additions = 0;
-    let deletions = 0;
-
-    const maxLen = Math.max(originalLines.length, currentLines.length);
-    for (let i = 0; i < maxLen; i++) {
-      const origLine = originalLines[i];
-      const currLine = currentLines[i];
-
-      if (origLine === undefined && currLine !== undefined) {
-        additions++;
-      } else if (origLine !== undefined && currLine === undefined) {
-        deletions++;
-      } else if (origLine !== currLine) {
-        additions++;
-        deletions++;
-      }
-    }
-
-    return { additions, deletions };
-  }, [isDirty, content, originalContent]);
+  // Diff stats — updated via onChange, not React props
+  const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);
+  const statsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const computeDiffStats = useCallback(() => {
+    if (!isDirty) { setDiffStats(null); return; }
+    setDiffStats(computeLineDiffStats(originalContent, contentRef.current));
+  }, [isDirty, originalContent]);
+  // Compute on mount and when settings change
+  useEffect(() => { computeDiffStats(); }, [computeDiffStats]);
 
   // Handle Cmd+I to open comment popover
   useEffect(() => {
@@ -429,9 +418,13 @@ export function CodeMirrorCodeEditor({
 
   const handleChange = useCallback(
     (value: string) => {
+      contentRef.current = value;
       onChange(value);
+      // Debounce diff stats update
+      if (statsTimerRef.current) clearTimeout(statsTimerRef.current);
+      statsTimerRef.current = setTimeout(computeDiffStats, 300);
     },
-    [onChange]
+    [onChange, computeDiffStats]
   );
 
   // Open comment popover from floating button
@@ -517,16 +510,19 @@ export function CodeMirrorCodeEditor({
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       {/* Editor header with save button */}
-      <div className="flex items-center justify-between px-2 border-foreground/10 border-b">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
-          {isDirty && diffStats && (
-            <span className="text-xs text-yellow-500">
-              {formatDiffStats(diffStats.additions, diffStats.deletions)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
+      <PanelHeaderBarSplit
+        left={
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+            {isDirty && diffStats && (
+              <span className="text-xs text-yellow-500">
+                {formatDiffStats(diffStats.additions, diffStats.deletions)}
+              </span>
+            )}
+          </div>
+        }
+        right={
+          <div className="flex items-center gap-1">
           {enableComments && sessionId && comments.length > 0 && (
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
               <IconMessagePlus className="h-3.5 w-3.5" />
@@ -583,14 +579,15 @@ export function CodeMirrorCodeEditor({
               </>
             )}
           </Button>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* CodeMirror editor */}
       <div className="flex-1 overflow-hidden relative">
         <CodeMirror
           ref={editorRef}
-          value={content}
+          value={initialContent}
           height="100%"
           theme={vscodeDark}
           extensions={extensions}

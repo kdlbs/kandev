@@ -46,7 +46,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
 
   return (
     <PanelRoot>
-      <PanelBody>
+      <PanelBody padding={false}>
         {activeSessionId ? (
           <FileBrowser
             sessionId={activeSessionId}

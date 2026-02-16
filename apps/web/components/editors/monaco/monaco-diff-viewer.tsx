@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
 import { useTheme } from 'next-themes';
@@ -116,6 +116,16 @@ export function MonacoDiffViewer({
   const wordWrap = wordWrapProp ?? wordWrapLocal;
   const diffEditorRef = useRef<monacoEditor.IStandaloneDiffEditor | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Fix: reset the DiffEditor model BEFORE @monaco-editor/react's useEffect cleanup
+  // disposes the models. useLayoutEffect cleanup runs before useEffect cleanup,
+  // so the DiffEditorWidget releases model references before models are disposed.
+  // This prevents "TextModel got disposed before DiffEditorWidget model got reset".
+  useLayoutEffect(() => {
+    return () => {
+      try { diffEditorRef.current?.setModel(null); } catch { /* already disposed */ }
+    };
+  }, []);
 
   // Context menu state
   type ContextMenuState = {

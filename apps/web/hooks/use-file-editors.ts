@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDockviewStore, type FileEditorState } from '@/lib/state/dockview-store';
 import { useAppStore } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
@@ -28,19 +28,28 @@ export function consumePendingCursorPosition(path: string): { line: number; colu
   return pos;
 }
 
+/** Read openFiles from the store without subscribing to changes. */
+function getOpenFiles() {
+  return useDockviewStore.getState().openFiles;
+}
+
 export function useFileEditors() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { toast } = useToast();
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
 
-  const openFiles = useDockviewStore((s) => s.openFiles);
+  // No reactive subscription to openFiles — callbacks use getState() instead.
+  // Persistence is handled by a zustand store subscriber (see below).
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
   const removeFileState = useDockviewStore((s) => s.removeFileState);
   const clearFileStates = useDockviewStore((s) => s.clearFileStates);
   const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
-  const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
   const api = useDockviewStore((s) => s.api);
+
+  // Use refs for callbacks that don't need to cause re-renders of consumers.
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
 
   // Restore file tabs from sessionStorage on session change.
   // The module-level guard prevents multiple hook instances from running this.
@@ -116,15 +125,20 @@ export function useFileEditors() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId]);
 
-  // Persist open file tabs to sessionStorage
+  // Persist open file tabs via zustand store subscriber — does NOT cause React re-renders.
+  // This replaces the old useEffect that subscribed reactively to `openFiles`.
   useEffect(() => {
-    if (!activeSessionId) return;
-    // Don't persist while restoration is still loading tabs or during layout restore
-    if (_restorationInProgress) return;
-    if (isRestoringLayout) return;
-    const tabsToSave = Array.from(openFiles.values()).map(({ path, name }) => ({ path, name }));
-    saveOpenFileTabs(activeSessionId, tabsToSave);
-  }, [activeSessionId, openFiles, isRestoringLayout]);
+    const unsub = useDockviewStore.subscribe((state, prevState) => {
+      if (state.openFiles === prevState.openFiles) return;
+      const sessionId = activeSessionIdRef.current;
+      if (!sessionId) return;
+      if (_restorationInProgress) return;
+      if (state.isRestoringLayout) return;
+      const tabsToSave = Array.from(state.openFiles.values()).map(({ path, name }) => ({ path, name }));
+      saveOpenFileTabs(sessionId, tabsToSave);
+    });
+    return unsub;
+  }, []);
 
   // Persist active center panel to sessionStorage
   useEffect(() => {
@@ -152,11 +166,12 @@ export function useFileEditors() {
 
   const openFile = useCallback(async (filePath: string) => {
     const client = getWebSocketClient();
-    const currentSessionId = activeSessionId;
+    const currentSessionId = activeSessionIdRef.current;
     if (!client || !currentSessionId) return;
 
-    // If already open, just focus it
-    if (openFiles.has(filePath)) {
+    // Read current state without subscribing
+    const files = getOpenFiles();
+    if (files.has(filePath)) {
       const name = filePath.split('/').pop() || filePath;
       addFileEditorPanel(filePath, name);
       return;
@@ -186,29 +201,32 @@ export function useFileEditors() {
         variant: 'error',
       });
     }
-  }, [activeSessionId, openFiles, setFileState, addFileEditorPanel, toast]);
+  }, [setFileState, addFileEditorPanel, toast]);
 
   const handleFileChange = useCallback((path: string, newContent: string) => {
-    const file = openFiles.get(path);
+    // Read current state without subscribing
+    const file = getOpenFiles().get(path);
     if (!file) return;
     updateFileState(path, {
       content: newContent,
       isDirty: newContent !== file.originalContent,
     });
-  }, [openFiles, updateFileState]);
+  }, [updateFileState]);
 
   const saveFile = useCallback(async (path: string) => {
-    const file = openFiles.get(path);
+    // Read current state without subscribing
+    const file = getOpenFiles().get(path);
     if (!file || !file.isDirty) return;
 
     const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
+    const currentSessionId = activeSessionIdRef.current;
+    if (!client || !currentSessionId) return;
 
     setSavingFiles((prev) => new Set(prev).add(path));
 
     try {
       const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-      const response = await updateFileContent(client, activeSessionId, path, diff, file.originalHash);
+      const response = await updateFileContent(client, currentSessionId, path, diff, file.originalHash);
 
       if (response.success && response.new_hash) {
         updateFileState(path, {
@@ -244,14 +262,15 @@ export function useFileEditors() {
         return next;
       });
     }
-  }, [openFiles, activeSessionId, updateFileState, toast]);
+  }, [updateFileState, toast]);
 
   const deleteFileAction = useCallback(async (path: string) => {
     const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
+    const currentSessionId = activeSessionIdRef.current;
+    if (!client || !currentSessionId) return;
 
     try {
-      const response = await deleteFile(client, activeSessionId, path);
+      const response = await deleteFile(client, currentSessionId, path);
       if (response.success) {
         // Remove dockview panel (which will trigger removeFileState via onDidRemovePanel)
         const dockApi = useDockviewStore.getState().api;
@@ -273,10 +292,9 @@ export function useFileEditors() {
         variant: 'error',
       });
     }
-  }, [activeSessionId, toast]);
+  }, [toast]);
 
   return {
-    openFiles,
     savingFiles,
     openFile,
     saveFile,
