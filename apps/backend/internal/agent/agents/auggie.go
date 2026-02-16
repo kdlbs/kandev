@@ -53,7 +53,8 @@ func (a *Auggie) ID() string          { return "auggie" }
 func (a *Auggie) Name() string        { return "Augment Coding Agent" }
 func (a *Auggie) DisplayName() string { return "Auggie" }
 func (a *Auggie) Description() string { return "Auggie CLI-powered autonomous coding agent." }
-func (a *Auggie) Enabled() bool       { return true }
+func (a *Auggie) Enabled() bool        { return true }
+func (a *Auggie) DisplayOrder() int    { return 3 }
 
 func (a *Auggie) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

@@ -49,7 +49,8 @@ func (a *Copilot) DisplayName() string { return "Copilot" }
 func (a *Copilot) Description() string {
 	return "GitHub Copilot CLI-powered autonomous coding agent using the Copilot SDK protocol."
 }
-func (a *Copilot) Enabled() bool { return true }
+func (a *Copilot) Enabled() bool      { return true }
+func (a *Copilot) DisplayOrder() int   { return 5 }
 
 func (a *Copilot) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

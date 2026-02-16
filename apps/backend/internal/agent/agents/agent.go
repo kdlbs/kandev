@@ -25,6 +25,7 @@ type Agent interface {
 	DisplayName() string
 	Description() string
 	Enabled() bool
+	DisplayOrder() int // lower = higher priority in listings
 
 	// --- Assets ---
 	Logo(variant LogoVariant) []byte // nil if unavailable

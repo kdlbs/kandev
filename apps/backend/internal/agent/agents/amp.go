@@ -48,7 +48,8 @@ func (a *Amp) DisplayName() string { return "Amp" }
 func (a *Amp) Description() string {
 	return "Sourcegraph Amp CLI-powered autonomous coding agent using stream-json protocol."
 }
-func (a *Amp) Enabled() bool { return true }
+func (a *Amp) Enabled() bool      { return true }
+func (a *Amp) DisplayOrder() int   { return 6 }
 
 func (a *Amp) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

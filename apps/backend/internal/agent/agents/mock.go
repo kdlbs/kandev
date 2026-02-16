@@ -38,7 +38,8 @@ func (a *MockAgent) DisplayName() string { return "Mock" }
 func (a *MockAgent) Description() string {
 	return "Mock agent for testing. Generates simulated responses with all message types."
 }
-func (a *MockAgent) Enabled() bool { return a.enabled }
+func (a *MockAgent) Enabled() bool      { return a.enabled }
+func (a *MockAgent) DisplayOrder() int   { return 99 }
 
 func (a *MockAgent) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
