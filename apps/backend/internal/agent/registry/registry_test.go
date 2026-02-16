@@ -24,6 +24,7 @@ func (a *testAgent) Name() string                  { return a.name }
 func (a *testAgent) DisplayName() string            { return a.name }
 func (a *testAgent) Description() string            { return a.description }
 func (a *testAgent) Enabled() bool                  { return a.enabled }
+func (a *testAgent) DisplayOrder() int               { return 0 }
 func (a *testAgent) Logo(agents.LogoVariant) []byte { return nil }
 func (a *testAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error) {
 	return nil, agents.ErrNotSupported

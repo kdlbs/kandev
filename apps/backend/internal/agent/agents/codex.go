@@ -49,7 +49,8 @@ func (a *Codex) DisplayName() string { return "Codex" }
 func (a *Codex) Description() string {
 	return "OpenAI Codex CLI-powered autonomous coding agent using the Codex app-server protocol."
 }
-func (a *Codex) Enabled() bool { return true }
+func (a *Codex) Enabled() bool      { return true }
+func (a *Codex) DisplayOrder() int   { return 2 }
 
 func (a *Codex) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

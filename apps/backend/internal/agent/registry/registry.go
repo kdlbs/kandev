@@ -3,6 +3,7 @@ package registry
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -99,6 +100,9 @@ func (r *Registry) List() []agents.Agent {
 	for _, ag := range r.agents {
 		result = append(result, ag)
 	}
+	slices.SortStableFunc(result, func(a, b agents.Agent) int {
+		return a.DisplayOrder() - b.DisplayOrder()
+	})
 	return result
 }
 
@@ -113,6 +117,9 @@ func (r *Registry) ListEnabled() []agents.Agent {
 			result = append(result, ag)
 		}
 	}
+	slices.SortStableFunc(result, func(a, b agents.Agent) int {
+		return a.DisplayOrder() - b.DisplayOrder()
+	})
 	return result
 }
 
