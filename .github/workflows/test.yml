@@ -1,0 +1,7 @@
+name: Test
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: homelab-runner
+    steps:
+      - run: echo "hello from homelab"

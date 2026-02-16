@@ -20,14 +20,11 @@ import {
   IconGripVertical,
   IconPlus,
   IconTrash,
-  IconRobot,
-  IconClipboard,
-  IconArrowRight,
   IconChevronRight,
   IconInfoCircle,
   IconRosetteNumber1,
-  IconMessageForward,
 } from '@tabler/icons-react';
+import { StepCapabilityIcons } from '@/components/step-capability-icons';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
 import { Textarea } from '@kandev/ui/textarea';
@@ -220,11 +217,6 @@ function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }
     transition,
   };
 
-  const hasAuto = hasOnEnterAction(step, 'auto_start_agent');
-  const hasPlan = hasOnEnterAction(step, 'enable_plan_mode');
-  const hasTransition = getTransitionType(step) !== 'none';
-  const hasOnTurnStart = getOnTurnStartTransitionType(step) !== 'none';
-
   return (
     <div
       ref={setNodeRef}
@@ -276,51 +268,9 @@ function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }
         </div>
 
         {/* Event icons */}
-        <div className="flex items-center gap-1.5 text-muted-foreground">
-          {hasOnTurnStart && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconMessageForward className="h-3.5 w-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>On user message</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {hasAuto && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconRobot className="h-3.5 w-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>Auto-start agent</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {hasPlan && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconClipboard className="h-3.5 w-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>Plan mode</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {hasTransition && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <IconArrowRight className="h-3.5 w-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>Auto-transition</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {!hasAuto && !hasPlan && !hasTransition && !hasOnTurnStart && (
-            <span className="text-xs text-muted-foreground/50">manual</span>
-          )}
-        </div>
+        <StepCapabilityIcons events={step.events} fallback={
+          <span className="text-xs text-muted-foreground/50">manual</span>
+        } />
       </div>
 
       {/* Delete button on hover */}

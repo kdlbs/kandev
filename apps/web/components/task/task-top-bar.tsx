@@ -49,9 +49,11 @@ type TaskTopBarProps = {
   onToggleDebugOverlay?: () => void;
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
+  workflowId?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
+  taskId,
   activeSessionId,
   taskTitle,
   baseBranch,
@@ -63,6 +65,7 @@ const TaskTopBar = memo(function TaskTopBar({
   onToggleDebugOverlay,
   workflowSteps,
   currentStepId,
+  workflowId,
 }: TaskTopBarProps) {
   const [copiedBranch, setCopiedBranch] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -232,6 +235,8 @@ const TaskTopBar = memo(function TaskTopBar({
         <WorkflowStepper
           steps={workflowSteps}
           currentStepId={currentStepId ?? null}
+          taskId={taskId ?? null}
+          workflowId={workflowId ?? null}
         />
       )}
       <div className="flex items-center gap-2">
