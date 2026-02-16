@@ -239,6 +239,7 @@ export type WorkflowStepDTO = {
   prompt?: string;
   events?: StepEvents;
   allow_manual_move: boolean;
+  is_start_step?: boolean;
   created_at?: string;
   updated_at?: string;
 };

@@ -42,6 +42,9 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
             color: step.color ?? 'bg-neutral-400',
             position: step.position,
             events: step.events,
+            allow_manual_move: step.allow_manual_move,
+            prompt: step.prompt,
+            is_start_step: step.is_start_step,
           }));
           const stepIds = new Set(steps.map((s) => s.id));
 

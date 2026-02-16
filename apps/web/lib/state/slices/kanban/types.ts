@@ -1,8 +1,23 @@
 import type { TaskState as TaskStatus } from '@/lib/types/http';
 
+export type KanbanStepEvents = {
+  on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+};
+
 export type KanbanState = {
   workflowId: string | null;
-  steps: Array<{ id: string; title: string; color: string; position: number; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }>;
+  steps: Array<{
+    id: string;
+    title: string;
+    color: string;
+    position: number;
+    events?: KanbanStepEvents;
+    allow_manual_move?: boolean;
+    prompt?: string;
+    is_start_step?: boolean;
+  }>;
   tasks: Array<{
     id: string;
     workflowStepId: string;

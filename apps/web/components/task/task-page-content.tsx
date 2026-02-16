@@ -103,7 +103,16 @@ export function TaskPageContent({
   useTasks(task?.workflow_id ?? null);
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workflowSteps = useMemo(
-    () => kanbanSteps.map((s) => ({ id: s.id, name: s.title, color: s.color, position: s.position })),
+    () => kanbanSteps.map((s) => ({
+      id: s.id,
+      name: s.title,
+      color: s.color,
+      position: s.position,
+      events: s.events,
+      allow_manual_move: s.allow_manual_move,
+      prompt: s.prompt,
+      is_start_step: s.is_start_step,
+    })),
     [kanbanSteps]
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -260,6 +269,7 @@ export function TaskPageContent({
             onToggleDebugOverlay={() => setShowDebugOverlay((prev) => !prev)}
             workflowSteps={workflowSteps}
             currentStepId={task?.workflow_step_id ?? null}
+            workflowId={task?.workflow_id ?? null}
           />
         )}
 
