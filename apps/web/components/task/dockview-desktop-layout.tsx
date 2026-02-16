@@ -60,7 +60,6 @@ import { CommitDetailPanel } from './commit-detail-panel';
 import { PreviewController } from './preview/preview-controller';
 import { ReviewDialog } from '@/components/review/review-dialog';
 import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
-import { useGitOperations } from '@/hooks/use-git-operations';
 import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useToast } from '@/components/toast-provider';
@@ -552,10 +551,6 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const { toast } = useToast();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const taskTitle = useAppStore((state) => {
-    if (!activeTaskId) return undefined;
-    return state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId)?.title;
-  });
   const baseBranch = useAppStore((state) => {
     if (!effectiveSessionId) return undefined;
     return state.taskSessions.items[effectiveSessionId]?.base_branch;
@@ -787,7 +782,6 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
           onOpenChange={setReviewDialogOpen}
           sessionId={effectiveSessionId}
           baseBranch={baseBranch}
-          taskTitle={taskTitle}
           onSendComments={handleReviewSendComments}
           onOpenFile={reviewOpenFile}
           gitStatusFiles={reviewGitStatus?.files ?? null}

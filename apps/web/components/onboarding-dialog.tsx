@@ -20,8 +20,15 @@ import {
   IconX,
   IconLoader2,
   IconChevronDown,
+  IconCommand,
+  IconSearch,
+  IconHome,
+  IconGitCommit,
+  IconTerminal2,
+  IconArrowDown,
 } from '@tabler/icons-react';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@kandev/ui/collapsible';
+import { Kbd } from '@kandev/ui/kbd';
 import { AgentLogo } from '@/components/agent-logo';
 import { ProfileFormFields, type ProfileFormData } from '@/components/settings/profile-form-fields';
 import { profileToPermissionsMap, permissionsToProfilePatch } from '@/lib/agent-permissions';
@@ -40,7 +47,7 @@ type AgentSetting = {
   dirty: boolean;
 };
 
-const TOTAL_STEPS = 3;
+const TOTAL_STEPS = 4;
 
 const RUNTIMES = [
   {
@@ -178,11 +185,13 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             {step === 0 && 'AI Agents'}
             {step === 1 && 'Environments'}
             {step === 2 && 'Agentic Workflows'}
+            {step === 3 && 'Command Panel'}
           </DialogTitle>
           <DialogDescription className="text-center">
             {step === 0 && 'These AI coding agents were discovered on your system.'}
             {step === 1 && 'Agents can run in different runtime environments.'}
             {step === 2 && 'Workflows define the steps and automation for your tasks.'}
+            {step === 3 && 'Quick access to actions from anywhere with a keyboard shortcut.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -197,6 +206,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           )}
           {step === 1 && <StepEnvironments />}
           {step === 2 && <StepWorkflows templates={templates} loading={loadingTemplates} />}
+          {step === 3 && <StepCommandPanel />}
         </div>
 
         {/* Progress dots */}
@@ -388,6 +398,78 @@ function StepWorkflows({ templates, loading }: { templates: WorkflowTemplate[]; 
       <p className="text-xs text-muted-foreground">
         Workflows control the steps, automation, and agent behavior for your tasks. You can add
         more workflows from Settings.
+      </p>
+    </div>
+  );
+}
+
+const COMMAND_PANEL_PREVIEW_ITEMS = [
+  { icon: IconSearch, label: 'Search Tasks', trailing: '→' },
+  { icon: IconHome, label: 'Go to Home' },
+  { icon: IconGitCommit, label: 'Commit Changes' },
+  { icon: IconArrowDown, label: 'Pull' },
+  { icon: IconTerminal2, label: 'Add Terminal Panel' },
+];
+
+function StepCommandPanel() {
+  return (
+    <div className="space-y-4">
+      {/* Mock command panel preview */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        {/* Search input */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b">
+          <IconSearch className="h-3.5 w-3.5 text-muted-foreground/50" />
+          <span className="text-xs text-muted-foreground/50">Type a command...</span>
+        </div>
+        {/* Sample commands */}
+        <div className="py-1">
+          {COMMAND_PANEL_PREVIEW_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 px-3 py-1.5 text-sm first:bg-muted/50"
+              >
+                <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="flex-1 text-xs">{item.label}</span>
+                {item.trailing && (
+                  <span className="text-xs text-muted-foreground">{item.trailing}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* Footer */}
+        <div className="flex items-center gap-3 px-3 py-1.5 border-t text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd>
+            <span className="text-[0.6rem]">Navigate</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Kbd>↵</Kbd>
+            <span className="text-[0.6rem]">Select</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Kbd>esc</Kbd>
+            <span className="text-[0.6rem]">Close</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Shortcut hint */}
+      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+        <span>Press</span>
+        <span className="inline-flex items-center gap-0.5">
+          <Kbd><IconCommand className="size-3" /></Kbd>
+          <Kbd>K</Kbd>
+        </span>
+        <span>to open it anytime</span>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Navigate between pages, search tasks, trigger git operations, and manage panels — all
+        without leaving the keyboard. Context-aware commands appear based on the active page.
       </p>
     </div>
   );

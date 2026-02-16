@@ -1,10 +1,10 @@
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { IconCheck, IconX, IconInfoCircle } from '@tabler/icons-react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { IconCheck, IconX, IconInfoCircle, IconLoader2 } from '@tabler/icons-react';
 import { cn, generateUUID } from '@/lib/utils';
 
-type ToastVariant = 'default' | 'success' | 'error';
+type ToastVariant = 'default' | 'success' | 'error' | 'loading';
 
 type Toast = {
   id: string;
@@ -16,16 +16,24 @@ type Toast = {
 type ToastInput = Omit<Toast, 'id'> & { duration?: number };
 
 type ToastContextValue = {
-  toast: (input: ToastInput) => void;
+  toast: (input: ToastInput) => string;
+  updateToast: (id: string, input: Partial<ToastInput>) => void;
+  dismissToast: (id: string) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
-const variantStyles: Record<ToastVariant, { container: string; icon: string; IconComponent: typeof IconCheck }> = {
+const variantStyles: Record<ToastVariant, { container: string; icon: string; IconComponent: typeof IconCheck; spin?: boolean }> = {
   default: {
     container: 'border-border/60 bg-background',
     icon: 'text-muted-foreground',
     IconComponent: IconInfoCircle,
+  },
+  loading: {
+    container: 'border-border/60 bg-background',
+    icon: 'text-muted-foreground',
+    IconComponent: IconLoader2,
+    spin: true,
   },
   success: {
     container: 'border-green-500/30 bg-green-500/10 dark:bg-green-500/5',
@@ -41,13 +49,22 @@ const variantStyles: Record<ToastVariant, { container: string; icon: string; Ico
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    timersRef.current.delete(id);
   }, []);
 
+  const scheduleRemoval = useCallback((id: string, duration: number) => {
+    const existing = timersRef.current.get(id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => removeToast(id), duration);
+    timersRef.current.set(id, timer);
+  }, [removeToast]);
+
   const toast = useCallback(
-    (input: ToastInput) => {
+    (input: ToastInput): string => {
       const id = generateUUID();
       const nextToast: Toast = {
         id,
@@ -56,13 +73,45 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         variant: input.variant ?? 'default',
       };
       setToasts((prev) => [...prev, nextToast]);
-      const duration = input.duration ?? 4000;
-      window.setTimeout(() => removeToast(id), duration);
+      // Loading toasts don't auto-dismiss
+      if (input.variant !== 'loading') {
+        scheduleRemoval(id, input.duration ?? 4000);
+      }
+      return id;
+    },
+    [scheduleRemoval]
+  );
+
+  const updateToast = useCallback(
+    (id: string, input: Partial<ToastInput>) => {
+      setToasts((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                ...(input.title !== undefined && { title: input.title }),
+                ...(input.description !== undefined && { description: input.description }),
+                ...(input.variant !== undefined && { variant: input.variant }),
+              }
+            : t
+        )
+      );
+      // When transitioning away from loading, schedule auto-dismiss
+      if (input.variant && input.variant !== 'loading') {
+        scheduleRemoval(id, input.duration ?? 4000);
+      }
+    },
+    [scheduleRemoval]
+  );
+
+  const dismissToast = useCallback(
+    (id: string) => {
+      removeToast(id);
     },
     [removeToast]
   );
 
-  const value = useMemo(() => ({ toast }), [toast]);
+  const value = useMemo(() => ({ toast, updateToast, dismissToast }), [toast, updateToast, dismissToast]);
 
   return (
     <ToastContext.Provider value={value}>
@@ -82,7 +131,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               )}
             >
               <div className={cn('mt-0.5 flex-shrink-0', styles.icon)}>
-                <Icon className="h-5 w-5" />
+                <Icon className={cn('h-5 w-5', styles.spin && 'animate-spin')} />
               </div>
               <div className="flex-1 space-y-1">
                 {t.title && (

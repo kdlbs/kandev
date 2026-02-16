@@ -277,8 +277,6 @@ const TaskTopBar = memo(function TaskTopBar({
             <VcsSplitButton
               sessionId={activeSessionId ?? null}
               baseBranch={baseBranch}
-              taskTitle={taskTitle}
-              displayBranch={displayBranch}
             />
           </>
         )}

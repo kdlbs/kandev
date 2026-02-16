@@ -63,14 +63,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
-  const taskTitle = useAppStore((state) => {
-    if (!state.tasks.activeTaskId) return undefined;
-    return state.kanban.tasks.find((t) => t.id === state.tasks.activeTaskId)?.title;
-  });
-  const baseBranch = useAppStore((state) => {
-    if (!activeSessionId) return undefined;
-    return state.taskSessions.items[activeSessionId]?.base_branch;
-  });
 
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);

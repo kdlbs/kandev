@@ -13,6 +13,7 @@ import { KanbanHeader } from './kanban/kanban-header';
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from '@/hooks/domains/kanban';
 import { useAllWorkflowSnapshots } from '@/hooks/domains/kanban/use-all-workflow-snapshots';
 import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
+import { HomepageCommands } from './homepage-commands';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { linkToSession } from '@/lib/links';
 import {
@@ -202,6 +203,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
 
   return (
     <div className="h-dvh w-full flex flex-col">
+      <HomepageCommands onCreateTask={handleCreate} />
       <KanbanHeader
         onCreateTask={handleCreate}
         workspaceId={workspaceState.activeId ?? undefined}

@@ -20,7 +20,6 @@ type ReviewDialogProps = {
   onOpenChange: (open: boolean) => void;
   sessionId: string;
   baseBranch?: string;
-  taskTitle?: string;
   onSendComments: (comments: DiffComment[]) => void;
   onOpenFile?: (filePath: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
@@ -33,7 +32,6 @@ export const ReviewDialog = memo(function ReviewDialog({
   onOpenChange,
   sessionId,
   baseBranch,
-  taskTitle,
   onSendComments,
   onOpenFile,
   gitStatusFiles,
@@ -221,7 +219,6 @@ export const ReviewDialog = memo(function ReviewDialog({
           totalCount={totalCount}
           commentCount={totalCommentCount}
           baseBranch={baseBranch}
-          taskTitle={taskTitle}
           splitView={splitView}
           onToggleSplitView={handleToggleSplitView}
           wordWrap={wordWrap}

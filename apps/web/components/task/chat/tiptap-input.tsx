@@ -393,6 +393,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(
     // ── Editor ────────────────────────────────────────────────────
 
     const editor = useEditor({
+      immediatelyRender: false,
       extensions: [
         Document,
         Paragraph,
@@ -501,7 +502,6 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(
         if (sid) setChatDraftContent(sid, e.getJSON());
       },
       editable: !disabled,
-      immediatelyRender: false,
     });
 
     // Guard to prevent circular updates when syncing external value → editor
