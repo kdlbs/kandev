@@ -18,9 +18,10 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 # Copy with symlinks dereferenced so pnpm's .pnpm/ structure survives
-# zip/unzip (adm-zip can't handle symlinks). The standalone output may
-# contain broken symlinks from partial tracing — --safe-links skips those
-# and rsync exits with code 23 (partial transfer), which is expected.
+# archiving (symlinks cause issues on Windows even inside tar). The
+# standalone output may contain broken symlinks from partial tracing —
+# --safe-links skips those and rsync exits with code 23 (partial transfer),
+# which is expected.
 rsync -a --copy-links --safe-links "$WEB_DIR/.next/standalone/" "$OUT_DIR/" || {
   rc=$?
   if [ "$rc" -eq 23 ]; then
@@ -29,6 +30,16 @@ rsync -a --copy-links --safe-links "$WEB_DIR/.next/standalone/" "$OUT_DIR/" || {
     exit "$rc"
   fi
 }
+# Next.js require-hook.js resolves styled-jsx at startup, but pnpm's .pnpm
+# virtual store layout puts it out of reach from web/node_modules/next/.
+# Copy it next to next so Node's module resolution finds it.
+NEXT_MODULES="$OUT_DIR/web/node_modules"
+STYLED_JSX_SRC="$OUT_DIR/node_modules/.pnpm/node_modules/styled-jsx"
+if [ -d "$STYLED_JSX_SRC" ] && [ -d "$NEXT_MODULES/next" ] && [ ! -d "$NEXT_MODULES/styled-jsx" ]; then
+  cp -R "$STYLED_JSX_SRC" "$NEXT_MODULES/styled-jsx"
+  echo "Hoisted styled-jsx into web/node_modules/"
+fi
+
 mkdir -p "$OUT_DIR/.next"
 cp -R "$WEB_DIR/.next/static" "$OUT_DIR/.next/"
 

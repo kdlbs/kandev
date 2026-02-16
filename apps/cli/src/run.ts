@@ -43,10 +43,10 @@ async function prepareReleaseBundle({
   const platformDir = getPlatformDir();
   const release = await getRelease(version);
   const tag = release.tag_name || "latest";
-  const assetName = `kandev-${platformDir}.zip`;
+  const assetName = `kandev-${platformDir}.tar.gz`;
   const cacheDir = path.join(CACHE_DIR, tag, platformDir);
 
-  const zipPath = await ensureAsset(release, assetName, cacheDir, (downloaded, total) => {
+  const archivePath = await ensureAsset(release, assetName, cacheDir, (downloaded, total) => {
     const percent = total ? Math.round((downloaded / total) * 100) : 0;
     const mb = (downloaded / (1024 * 1024)).toFixed(1);
     const totalMb = total ? (total / (1024 * 1024)).toFixed(1) : "?";
@@ -54,7 +54,7 @@ async function prepareReleaseBundle({
   });
   process.stderr.write("\n");
 
-  ensureExtracted(zipPath, cacheDir);
+  ensureExtracted(archivePath, cacheDir);
   const bundleDir = findBundleRoot(cacheDir);
 
   const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
@@ -65,12 +65,6 @@ async function prepareReleaseBundle({
   const agentctlBin = path.join(bundleDir, "bin", getBinaryName("agentctl"));
   if (!fs.existsSync(agentctlBin)) {
     throw new Error(`agentctl binary not found at ${agentctlBin}`);
-  }
-
-  // Ensure binaries are executable (adm-zip doesn't preserve Unix permissions)
-  if (process.platform !== "win32") {
-    fs.chmodSync(backendBin, 0o755);
-    fs.chmodSync(agentctlBin, 0o755);
   }
 
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
