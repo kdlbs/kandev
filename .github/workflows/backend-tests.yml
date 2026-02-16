@@ -24,21 +24,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-        # CGO toolchain requirement,
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc
-
       - name: Set up Go
+        if: ${{ !contains(runner.name, 'homelab') }}
         uses: actions/setup-go@v6
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Verify dependencies
-        run: go mod verify
 
       - name: Build
         run: go build -v ./cmd/kandev
@@ -46,11 +37,11 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6
+          version: v2.9
           args: ./...
           working-directory: apps/backend
 
-      - name: Run tests with coverage
+      - name: Run tests
         run: |
           set -o pipefail
           go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... 2>&1 | tee test-results.json
@@ -60,15 +51,6 @@ jobs:
         if: always()
         with:
           fromJSONFile: apps/backend/test-results.json
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: apps/backend/coverage.out
-          flags: backend
-          name: backend-coverage
-          fail_ci_if_error: false
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4

@@ -5,18 +5,16 @@ repos:
       - id: go-tests
         name: Go tests (backend)
         entry: bash -c 'cd apps/backend && go test ./...'
-        language: golang
+        language: system
         files: \.go$
         pass_filenames: false
-        additional_dependencies: []
 
       - id: go-lint
         name: Go Lint (backend)
         entry: bash -c 'cd apps/backend && golangci-lint run'
-        language: golang
+        language: system
         files: \.go$
         pass_filenames: false
-        additional_dependencies: []
 
   # Web app (TypeScript/React) hooks
   - repo: local
