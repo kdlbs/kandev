@@ -31,6 +31,17 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
+      - name: Cache Go modules
+        if: ${{ contains(runner.name, 'homelab') }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: go-${{ runner.os }}-${{ hashFiles('apps/backend/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
       - name: Build
         run: go build -v ./cmd/kandev
 
