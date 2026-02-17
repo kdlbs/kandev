@@ -83,7 +83,7 @@ export const Combobox = memo(function Combobox({
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className={cn("w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0", className)} align="start">
+      <PopoverContent portal={false} className={cn("w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0 max-h-[var(--radix-popover-content-available-height)]", className)} align="start">
         <Command value={highlighted} onValueChange={setHighlighted}>
           {dropdownLabel ? (
             <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">

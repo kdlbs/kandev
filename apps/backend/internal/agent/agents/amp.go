@@ -5,8 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -87,10 +85,6 @@ func (a *Amp) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: ampStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *Amp) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return adapter.NewAmpAdapter(cfg, log), nil
-}
-
 func (a *Amp) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input").
 		Model(NewParam("-m", "{model}"), opts.Model).
@@ -105,7 +99,6 @@ func (a *Amp) Runtime() *RuntimeConfig {
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolAmp,
 		ModelFlag:      NewParam("-m", "{model}"),
 		SessionConfig: SessionConfig{

@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/streamjson"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -59,10 +56,6 @@ func (a *MockAgent) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: mockStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *MockAgent) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newStreamJSONAdapterWrapper(streamjson.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	binary := "mock-agent"
 	if a.binaryPath != "" {
@@ -80,7 +73,6 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		WorkingDir:  "{workspace}",
 		Env:         map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolClaudeCode,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{

@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/streamjson"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -80,10 +77,6 @@ func (a *ClaudeCode) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: claudeCodeStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *ClaudeCode) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newStreamJSONAdapterWrapper(streamjson.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *ClaudeCode) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.29",
 		"-p", "--output-format=stream-json", "--input-format=stream-json",
@@ -106,7 +99,6 @@ func (a *ClaudeCode) Runtime() *RuntimeConfig {
 		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolClaudeCode,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{

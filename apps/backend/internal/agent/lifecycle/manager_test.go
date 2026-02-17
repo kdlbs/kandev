@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -48,10 +47,6 @@ func (a *testAgent) IsInstalled(_ context.Context) (*agents.DiscoveryResult, err
 func (a *testAgent) DefaultModel() string { return a.defaultModel }
 func (a *testAgent) ListModels(_ context.Context) (*agents.ModelList, error) {
 	return &agents.ModelList{}, nil
-}
-
-func (a *testAgent) CreateAdapter(_ *adapter.Config, _ *logger.Logger) (adapter.AgentAdapter, error) {
-	return nil, agents.ErrNotSupported
 }
 
 func (a *testAgent) BuildCommand(_ agents.CommandOptions) agents.Command { return agents.Command{} }

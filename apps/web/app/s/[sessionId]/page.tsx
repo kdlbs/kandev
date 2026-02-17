@@ -13,6 +13,7 @@ import {
   listTaskSessions,
   listWorkspaces,
 } from '@/lib/api';
+import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
 import { listSessionTurns } from '@/lib/api/domains/session-api';
 import { fetchTerminals } from '@/lib/api/domains/user-shell-api';
 import type { ListMessagesResponse, Task } from '@/lib/types/http';
@@ -151,12 +152,7 @@ export default async function SessionPage({
       },
       agentProfiles: {
         items: agents.agents.flatMap((agent) =>
-          agent.profiles.map((profile) => ({
-            id: profile.id,
-            label: `${profile.agent_display_name} • ${profile.name}`,
-            agent_id: agent.id,
-            agent_name: agent.name,
-          }))
+          agent.profiles.map((profile) => toAgentProfileOption(agent, profile))
         ),
         version: 0,
       },

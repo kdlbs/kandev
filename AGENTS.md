@@ -272,13 +272,13 @@ lib/api/domains/                    # API clients
 
 Static analysis runs in CI and pre-commit. New code **must** stay within these limits:
 
-**Go** (`apps/backend/.golangci.yml` — errors on new code only):
+**Go** (`apps/backend/.golangci.yml` - errors on new code only):
 - Functions: **≤80 lines**, **≤50 statements**
 - Cyclomatic complexity: **≤15** · Cognitive complexity: **≤30**
 - Nesting depth: **≤5** · Naked returns only in functions **≤30 lines**
 - No duplicated blocks (**≥150 tokens**) · Repeated strings → constants (**≥3 occurrences**)
 
-**TypeScript** (`apps/web/eslint.config.mjs` — warnings, will become errors):
+**TypeScript** (`apps/web/eslint.config.mjs` - warnings, will become errors):
 - Files: **≤600 lines** · Functions: **≤100 lines**
 - Cyclomatic complexity: **≤15** · Cognitive complexity: **≤20**
 - Nesting depth: **≤4** · Parameters: **≤5**
@@ -311,7 +311,7 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 
 ## Maintaining This File
 
-This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Codex via `AGENTS.md`). If your changes make any section of this file outdated or inaccurate — e.g., you add/remove/rename packages, change architectural patterns, add new adapters, modify store slices, or change conventions — **update the relevant sections of this file as part of the same PR**. Keep descriptions concise and factual. Do not add speculative or aspirational content.
+This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Codex via `AGENTS.md`). If your changes make any section of this file outdated or inaccurate - e.g., you add/remove/rename packages, change architectural patterns, add new adapters, modify store slices, or change conventions - **update the relevant sections of this file as part of the same PR**. Keep descriptions concise and factual. Do not add speculative or aspirational content.
 
 ---
 

@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/codex"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -75,10 +72,6 @@ func (a *Codex) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: codexStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *Codex) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newCodexAdapterWrapper(codex.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *Codex) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@openai/codex@0.98.0", "app-server").
 		Model(NewParam("-c", "model=\"{model}\""), opts.Model).
@@ -100,7 +93,6 @@ func (a *Codex) Runtime() *RuntimeConfig {
 			{Source: "{home}/.codex", Target: "/root/.codex"},
 		},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolCodex,
 		ModelFlag:      NewParam("-c", "model=\"{model}\""),
 		SessionConfig: SessionConfig{

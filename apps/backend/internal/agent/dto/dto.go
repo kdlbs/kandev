@@ -75,10 +75,9 @@ type ListAgentTypesRequest struct{}
 type AgentTypeDTO struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
-	Description  string   `json:"description,omitempty"`
-	Image        string   `json:"image"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	Enabled      bool     `json:"enabled"`
+	Description string `json:"description,omitempty"`
+	Image       string `json:"image"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // ListAgentTypesResponse is the response for agent.types
@@ -126,21 +125,19 @@ type AgentExecutionData struct {
 func FromAgentType(t *AgentTypeData) AgentTypeDTO {
 	return AgentTypeDTO{
 		ID:           t.ID,
-		Name:         t.Name,
-		Description:  t.Description,
-		Image:        t.Image,
-		Capabilities: t.Capabilities,
-		Enabled:      t.Enabled,
+		Name:        t.Name,
+		Description: t.Description,
+		Image:       t.Image,
+		Enabled:     t.Enabled,
 	}
 }
 
 // AgentTypeData is the input data for FromAgentType (avoids circular import)
 type AgentTypeData struct {
-	ID           string
-	Name         string
-	Description  string
-	Image        string
-	Capabilities []string
-	Enabled      bool
+	ID          string
+	Name        string
+	Description string
+	Image       string
+	Enabled     bool
 }
 

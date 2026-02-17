@@ -5,8 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -87,10 +85,6 @@ func (a *Copilot) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: copilotStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *Copilot) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return adapter.NewCopilotAdapter(cfg, log), nil
-}
-
 func (a *Copilot) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@github/copilot@0.0.406", "--server", "--log-level", "error").
 		Model(NewParam("--model", "{model}"), opts.Model).
@@ -106,7 +100,6 @@ func (a *Copilot) Runtime() *RuntimeConfig {
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolCopilot,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{

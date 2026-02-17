@@ -1,6 +1,7 @@
 import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
+import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     'agent.available.updated': (message) => {
@@ -28,11 +29,11 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     },
     'agent.profile.created': (message) => {
       store.setState((state) => {
-        const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
-        const agentName = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id)?.name ?? '';
+        const agent = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id);
+        const agentStub = { id: message.payload.profile.agent_id, name: agent?.name ?? '' };
         const nextProfiles = [
           ...state.agentProfiles.items.filter((profile) => profile.id !== message.payload.profile.id),
-          { id: message.payload.profile.id, label, agent_id: message.payload.profile.agent_id, agent_name: agentName },
+          toAgentProfileOption(agentStub, message.payload.profile),
         ];
         const nextAgents = state.settingsAgents.items.map((item) =>
           item.id === message.payload.profile.agent_id
@@ -67,11 +68,11 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     },
     'agent.profile.updated': (message) => {
       store.setState((state) => {
-        const label = `${message.payload.profile.agent_display_name} • ${message.payload.profile.name}`;
-        const agentName = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id)?.name ?? '';
+        const agent = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id);
+        const agentStub = { id: message.payload.profile.agent_id, name: agent?.name ?? '' };
         const nextProfiles = state.agentProfiles.items.map((profile) =>
           profile.id === message.payload.profile.id
-            ? { ...profile, label, agent_id: message.payload.profile.agent_id, agent_name: agentName }
+            ? toAgentProfileOption(agentStub, message.payload.profile)
             : profile
         );
         const nextAgents = state.settingsAgents.items.map((item) =>

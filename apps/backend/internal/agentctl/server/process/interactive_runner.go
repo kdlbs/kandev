@@ -41,6 +41,7 @@ type InteractiveStartRequest struct {
 	DefaultRows     int              `json:"default_rows,omitempty"`     // Default rows if ImmediateStart (default 40)
 	InitialCommand       string `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
 	DisableTurnDetection bool   `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
+	IsUserShell          bool   `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
 }
 
 // InteractiveProcessInfo represents the state of an interactive process.
@@ -79,6 +80,10 @@ type interactiveProcess struct {
 	// Status tracking (vt10x-based TUI detection)
 	statusTracker *StatusTracker
 	lastState     AgentState
+
+	// User shell flag - when true, process is excluded from session-level lookups
+	// (ResizeBySession, GetPtyWriterBySession) to prevent conflicts with passthrough processes
+	isUserShell bool
 
 	// Deferred start - process created lazily on first resize
 	// This ensures PTY is created at exact frontend dimensions
@@ -189,9 +194,9 @@ func (r *InteractiveRunner) SetStateCallback(cb AgentStateCallback) {
 	r.stateCallback = cb
 }
 
-// createStatusDetector creates the appropriate detector based on the detector type.
-// The idle detector is the default - it relies on the idle timer mechanism for turn detection.
-func createStatusDetector(detectorType string) StatusDetector {
+// createStatusDetector creates a status detector for TUI state tracking.
+// Currently always returns an idle detector that relies on the idle timer mechanism.
+func createStatusDetector() StatusDetector {
 	return NewIdleDetector()
 }
 
@@ -251,6 +256,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		promptPattern: promptPattern,
 		idleTimeout:   idleTimeout,
 		lastState:     StateUnknown,
+		isUserShell:   req.IsUserShell,
 		stopSignal:    make(chan struct{}),
 		waitDone:      make(chan struct{}),
 		// Store start parameters for deferred initialization
@@ -337,7 +343,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	// Create status tracker if a detector is configured
 	var statusTracker *StatusTracker
 	if req.StatusDetector != "" {
-		detector := createStatusDetector(req.StatusDetector)
+		detector := createStatusDetector()
 		config := StatusTrackerConfig{
 			Rows:            rows,
 			Cols:            cols,
@@ -568,30 +574,15 @@ func (r *InteractiveRunner) GetBuffer(processID string) ([]ProcessOutputChunk, b
 	return proc.buffer.snapshot(), true
 }
 
-// ResizeBySession resizes the PTY for a process by session ID.
-// On first resize, this triggers lazy process start at the exact frontend dimensions.
-func (r *InteractiveRunner) ResizeBySession(sessionID string, cols, rows uint16) error {
-	r.mu.RLock()
-	var proc *interactiveProcess
-	for _, p := range r.processes {
-		if p.info.SessionID == sessionID {
-			proc = p
-			break
-		}
-	}
-	r.mu.RUnlock()
-
-	if proc == nil {
-		return fmt.Errorf("no process found for session %s", sessionID)
-	}
-
+// lazyStartAndResize handles the common pattern of lazy-starting a process on the first
+// resize and then resizing its PTY and status tracker. All three public Resize* methods
+// delegate here to avoid duplicating the start-once + resize logic.
+func (r *InteractiveRunner) lazyStartAndResize(proc *interactiveProcess, cols, rows uint16, logFields ...zap.Field) error {
 	// Lazy start: spawn process on first resize when we have exact dimensions
 	var startErr error
 	proc.startOnce.Do(func() {
-		r.logger.Info("first resize received - starting process",
-			zap.String("session_id", sessionID),
-			zap.Uint16("cols", cols),
-			zap.Uint16("rows", rows))
+		fields := append([]zap.Field{zap.Uint16("cols", cols), zap.Uint16("rows", rows)}, logFields...)
+		r.logger.Info("first resize received - starting process", fields...)
 		startErr = r.startProcess(proc, int(cols), int(rows))
 	})
 	if startErr != nil {
@@ -603,17 +594,69 @@ func (r *InteractiveRunner) ResizeBySession(sessionID string, cols, rows uint16)
 	statusTracker := proc.statusTracker
 	proc.mu.Unlock()
 
-	// If process started, resize the PTY
-	// On Unix this sends SIGWINCH; on Windows it updates the ConPTY dimensions
+	// Resize the PTY (Unix: SIGWINCH, Windows: ConPTY dimensions)
 	if ptyInstance != nil {
 		if err := ptyInstance.Resize(cols, rows); err != nil {
 			return fmt.Errorf("failed to resize PTY: %w", err)
 		}
 	}
 
-	// Also resize the status tracker's virtual terminal
+	// Also resize the status tracker's virtual terminal (if present)
 	if statusTracker != nil {
 		statusTracker.Resize(int(cols), int(rows))
+	}
+
+	return nil
+}
+
+// ResizeByProcessID resizes the PTY for a specific process by its ID.
+// On first resize, this triggers lazy process start at the exact frontend dimensions.
+// This is preferred over ResizeBySession when the process ID is known, as it avoids
+// ambiguity when multiple processes exist for the same session.
+func (r *InteractiveRunner) ResizeByProcessID(processID string, cols, rows uint16) error {
+	proc, ok := r.get(processID)
+	if !ok {
+		return fmt.Errorf("process not found: %s", processID)
+	}
+
+	if err := r.lazyStartAndResize(proc, cols, rows,
+		zap.String("process_id", processID),
+		zap.String("session_id", proc.info.SessionID),
+	); err != nil {
+		return err
+	}
+
+	r.logger.Debug("resized PTY",
+		zap.String("process_id", processID),
+		zap.String("session_id", proc.info.SessionID),
+		zap.Uint16("cols", cols),
+		zap.Uint16("rows", rows))
+
+	return nil
+}
+
+// ResizeBySession resizes the PTY for a process by session ID.
+// On first resize, this triggers lazy process start at the exact frontend dimensions.
+// Skips user shell processes to avoid conflicts with passthrough processes.
+func (r *InteractiveRunner) ResizeBySession(sessionID string, cols, rows uint16) error {
+	r.mu.RLock()
+	var proc *interactiveProcess
+	for _, p := range r.processes {
+		if p.info.SessionID == sessionID && !p.isUserShell {
+			proc = p
+			break
+		}
+	}
+	r.mu.RUnlock()
+
+	if proc == nil {
+		return fmt.Errorf("no process found for session %s", sessionID)
+	}
+
+	if err := r.lazyStartAndResize(proc, cols, rows,
+		zap.String("session_id", sessionID),
+	); err != nil {
+		return err
 	}
 
 	r.logger.Debug("resized PTY",
@@ -968,7 +1011,9 @@ func (p *interactiveProcess) snapshot(includeOutput bool) InteractiveProcessInfo
 // SetDirectOutput sets a direct output writer for a process.
 // When set, PTY output bypasses the event bus and goes directly to this writer.
 // This is used for the dedicated binary WebSocket in passthrough mode.
-// Also tracks the WebSocket at the session level to survive process restarts.
+// For non-user-shell processes, also tracks the WebSocket at the session level
+// to survive process restarts. User shells are excluded from session-level tracking
+// to prevent overwriting the agent terminal's WebSocket.
 // Returns error if process not found.
 func (r *InteractiveRunner) SetDirectOutput(processID string, writer DirectOutputWriter) error {
 	proc, ok := r.get(processID)
@@ -983,21 +1028,26 @@ func (r *InteractiveRunner) SetDirectOutput(processID string, writer DirectOutpu
 	proc.hasActiveWebSocket = true
 	proc.directOutputMu.Unlock()
 
-	// Also track at session level for restart support
-	r.sessionWsMu.Lock()
-	r.sessionWs[sessionID] = &sessionWebSocket{writer: writer}
-	r.sessionWsMu.Unlock()
+	// Track at session level for restart support (agent passthrough only).
+	// User shells have their own tracking via userShells map and must not
+	// overwrite the agent terminal's session-level WebSocket.
+	if !proc.isUserShell {
+		r.sessionWsMu.Lock()
+		r.sessionWs[sessionID] = &sessionWebSocket{writer: writer}
+		r.sessionWsMu.Unlock()
+	}
 
 	r.logger.Info("direct output set for process",
 		zap.String("process_id", processID),
-		zap.String("session_id", sessionID))
+		zap.String("session_id", sessionID),
+		zap.Bool("is_user_shell", proc.isUserShell))
 
 	return nil
 }
 
 // ClearDirectOutput clears the direct output writer for a process.
 // Output will return to the normal event bus path.
-// Also clears the session-level WebSocket tracking.
+// For non-user-shell processes, also clears the session-level WebSocket tracking.
 func (r *InteractiveRunner) ClearDirectOutput(processID string) error {
 	proc, ok := r.get(processID)
 	if !ok {
@@ -1014,10 +1064,12 @@ func (r *InteractiveRunner) ClearDirectOutput(processID string) error {
 	proc.hasActiveWebSocket = false
 	proc.directOutputMu.Unlock()
 
-	// Also clear session-level tracking
-	r.sessionWsMu.Lock()
-	delete(r.sessionWs, sessionID)
-	r.sessionWsMu.Unlock()
+	// Clear session-level tracking (agent passthrough only)
+	if !proc.isUserShell {
+		r.sessionWsMu.Lock()
+		delete(r.sessionWs, sessionID)
+		r.sessionWsMu.Unlock()
+	}
 
 	r.logger.Info("direct output cleared for process",
 		zap.String("process_id", processID),
@@ -1027,17 +1079,18 @@ func (r *InteractiveRunner) ClearDirectOutput(processID string) error {
 }
 
 // ClearDirectOutputBySession clears the direct output for a session.
-// This is used when the terminal WebSocket disconnects.
+// This is used when the agent terminal WebSocket disconnects.
+// Only clears non-user-shell processes to avoid disrupting user shell terminals.
 func (r *InteractiveRunner) ClearDirectOutputBySession(sessionID string) {
 	// Clear session-level tracking
 	r.sessionWsMu.Lock()
 	delete(r.sessionWs, sessionID)
 	r.sessionWsMu.Unlock()
 
-	// Also clear from any process with this session
+	// Clear from non-user-shell processes with this session
 	r.mu.RLock()
 	for _, proc := range r.processes {
-		if proc.info.SessionID == sessionID {
+		if proc.info.SessionID == sessionID && !proc.isUserShell {
 			proc.directOutputMu.Lock()
 			proc.directOutput = nil
 			proc.hasActiveWebSocket = false
@@ -1113,11 +1166,12 @@ func (r *InteractiveRunner) GetPtyWriter(processID string) (io.Writer, error) {
 
 // GetPtyWriterBySession returns a writer for sending input to the PTY for a session.
 // This is used to reconnect after a process restart.
+// Skips user shell processes to avoid conflicts with passthrough processes.
 func (r *InteractiveRunner) GetPtyWriterBySession(sessionID string) (io.Writer, string, error) {
 	r.mu.RLock()
 	var proc *interactiveProcess
 	for _, p := range r.processes {
-		if p.info.SessionID == sessionID {
+		if p.info.SessionID == sessionID && !p.isUserShell {
 			proc = p
 			break
 		}
@@ -1344,6 +1398,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, sessionID, termi
 		WorkingDir:           workingDir,
 		InitialCommand:       initialCommand,
 		DisableTurnDetection: true, // User shells must not trigger turn complete / MarkReady
+		IsUserShell:          true, // Exclude from session-level lookups (ResizeBySession, GetPtyWriterBySession)
 	}
 
 	info, err := r.Start(ctx, req)
@@ -1500,31 +1555,10 @@ func (r *InteractiveRunner) ResizeUserShell(sessionID, terminalID string, cols, 
 		return fmt.Errorf("process not found: %s", entry.ProcessID)
 	}
 
-	// Lazy start: spawn process on first resize when we have exact dimensions
-	var startErr error
-	proc.startOnce.Do(func() {
-		r.logger.Info("first resize received for user shell - starting process",
-			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID),
-			zap.Uint16("cols", cols),
-			zap.Uint16("rows", rows))
-		startErr = r.startProcess(proc, int(cols), int(rows))
-	})
-	if startErr != nil {
-		return fmt.Errorf("failed to start process on first resize: %w", startErr)
-	}
-
-	proc.mu.Lock()
-	ptyInstance := proc.ptmx
-	proc.mu.Unlock()
-
-	if ptyInstance != nil {
-		if err := ptyInstance.Resize(cols, rows); err != nil {
-			return fmt.Errorf("failed to resize PTY: %w", err)
-		}
-	}
-
-	return nil
+	return r.lazyStartAndResize(proc, cols, rows,
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID),
+	)
 }
 
 // GetUserShellPtyWriter returns the PTY writer for a user shell.
@@ -1581,26 +1615,23 @@ func containsDSRQuery(data []byte) bool {
 }
 
 // containsDA1Query checks if data contains a Primary Device Attributes query.
-// DA1 query is: ESC [ c or ESC [ 0 c (but NOT ESC [ <digit> c which is cursor forward)
+// DA1 query is: ESC [ c or ESC [ 0 c (but NOT ESC [ <digit> c where digit is 1-9,
+// since those are cursor forward sequences).
 func containsDA1Query(data []byte) bool {
-	// Check for exact ESC [ c sequence
-	csiC := []byte("\x1b[c")
-	for i := 0; i <= len(data)-len(csiC); i++ {
-		if data[i] == '\x1b' && i+2 < len(data) && data[i+1] == '[' && data[i+2] == 'c' {
-			// Make sure it's not preceded by a digit (which would make it cursor forward)
-			// ESC [ c is valid, ESC [ 0 c is valid, but ESC [ 1 c is cursor forward
-			if i+2 == len(data)-1 {
-				// ESC [ c at end
-				return true
-			}
-			// Check what's before 'c' - if it's just '[' or '[0' it's DA1
-			// We already matched ESC [ c, so this is valid
+	for i := 0; i+2 < len(data); i++ {
+		if data[i] != '\x1b' || data[i+1] != '[' {
+			continue
+		}
+		// ESC [ c — DA1 with no parameter
+		if data[i+2] == 'c' {
 			return true
 		}
+		// ESC [ 0 c — DA1 with explicit 0 parameter
+		if data[i+2] == '0' && i+3 < len(data) && data[i+3] == 'c' {
+			return true
+		}
+		// ESC [ <1-9> c would be cursor forward — skip it
 	}
-
-	// Check for ESC [ 0 c
-	csi0C := []byte("\x1b[0c")
-	return bytes.Contains(data, csi0C)
+	return false
 }
 

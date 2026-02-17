@@ -14,7 +14,7 @@ Git operations are executed **in agentctl**, not in the backend. This ensures co
 | **Push** | Worktree → Remote | Push local commits to remote |
 | **Rebase** | Base → Worktree | Rebase worktree branch onto base branch (rewrites history) |
 | **Merge** | Base → Worktree | Merge base branch into worktree branch (creates merge commit) |
-| **Abort** | — | Abort an in-progress merge or rebase |
+| **Abort** | - | Abort an in-progress merge or rebase |
 
 ## Architecture
 

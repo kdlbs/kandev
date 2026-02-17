@@ -49,7 +49,6 @@ type AgentType struct {
 	DockerTag        string            `json:"docker_tag"`
 	DefaultResources ResourceLimits    `json:"default_resources"`
 	EnvironmentVars  map[string]string `json:"environment_vars,omitempty"`
-	Capabilities     []string          `json:"capabilities,omitempty"`
 	Enabled          bool              `json:"enabled"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`

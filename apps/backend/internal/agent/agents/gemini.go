@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -90,10 +87,6 @@ func (a *Gemini) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: geminiStaticModels(), SupportsDynamic: false}, nil
 }
 
-func (a *Gemini) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newACPAdapterWrapper(acp.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@google/gemini-cli@0.25.2", "--experimental-acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
@@ -108,7 +101,6 @@ func (a *Gemini) Runtime() *RuntimeConfig {
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolACP,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{

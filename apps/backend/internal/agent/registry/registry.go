@@ -74,7 +74,7 @@ func (r *Registry) Get(id string) (agents.Agent, bool) {
 }
 
 // GetDefault returns the default agent.
-// It tries "auggie" first, then falls back to the first enabled agent.
+// It tries "auggie" first, then falls back to the enabled agent with the lowest DisplayOrder.
 func (r *Registry) GetDefault() (agents.Agent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -83,13 +83,18 @@ func (r *Registry) GetDefault() (agents.Agent, error) {
 		return ag, nil
 	}
 
+	// Collect enabled agents and sort by DisplayOrder for deterministic fallback
+	var enabled []agents.Agent
 	for _, ag := range r.agents {
 		if ag.Enabled() {
-			return ag, nil
+			enabled = append(enabled, ag)
 		}
 	}
-
-	return nil, fmt.Errorf("no default agent type available")
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("no default agent type available")
+	}
+	sortByDisplayOrder(enabled)
+	return enabled[0], nil
 }
 
 // sortByDisplayOrder sorts agents by their DisplayOrder in ascending order.
@@ -182,7 +187,6 @@ func ToAPIType(ag agents.Agent) *v1.AgentType {
 			MemoryLimit: fmt.Sprintf("%dM", rt.ResourceLimits.MemoryMB),
 		},
 		EnvironmentVars: rt.Env,
-		Capabilities:    rt.Capabilities,
 		Enabled:         ag.Enabled(),
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),

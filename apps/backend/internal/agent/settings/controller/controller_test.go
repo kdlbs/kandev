@@ -9,7 +9,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -45,10 +44,6 @@ func (a *testAgent) DefaultModel() string { return "" }
 
 func (a *testAgent) ListModels(ctx context.Context) (*agents.ModelList, error) {
 	return &agents.ModelList{}, nil
-}
-
-func (a *testAgent) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return nil, agents.ErrNotSupported
 }
 
 // BuildCommand builds a command using runtime config, model flag, and permission flags.
