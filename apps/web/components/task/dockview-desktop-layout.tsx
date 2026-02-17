@@ -43,6 +43,7 @@ import { startProcess } from '@/lib/api';
 import { createUserShell } from '@/lib/api/domains/user-shell-api';
 import { useRepositoryScripts } from '@/hooks/domains/workspace/use-repository-scripts';
 import { useLspFileOpener } from '@/hooks/use-lsp-file-opener';
+import { useEditorKeybinds } from '@/hooks/use-editor-keybinds';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 
@@ -613,6 +614,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   // Connect LSP Go-to-Definition navigation to dockview file tabs
   useLspFileOpener();
+
+  // Global editor keybinds (tab nav, terminal toggle)
+  useEditorKeybinds();
 
   // Keep sessionIdRef in sync for use inside event handlers
   useEffect(() => {
