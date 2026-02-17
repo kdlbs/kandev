@@ -14,6 +14,7 @@ import {
   IconTerminal2,
   IconFileText,
   IconFileDiff,
+  IconFilePlus,
 } from '@tabler/icons-react';
 import { useRegisterCommands } from '@/hooks/use-register-commands';
 import { useGitOperations } from '@/hooks/use-git-operations';
@@ -21,6 +22,8 @@ import { useGitWithFeedback } from '@/hooks/use-git-with-feedback';
 import { usePanelActions } from '@/hooks/use-panel-actions';
 import { useVcsDialogs } from '@/components/vcs/vcs-dialogs';
 import { getWebSocketClient } from '@/lib/ws/connection';
+import { createFile } from '@/lib/ws/workspace-files';
+import { useDockviewStore } from '@/lib/state/dockview-store';
 import type { CommandItem } from '@/lib/commands/types';
 
 type SessionCommandsProps = {
@@ -147,6 +150,32 @@ export function SessionCommands({ sessionId, baseBranch, isAgentRunning, hasWork
           },
         },
       );
+    }
+
+    // Workspace — file operations
+    if (hasWorktree) {
+      items.push({
+        id: 'workspace-create-file',
+        label: 'Create File',
+        group: 'Workspace',
+        icon: <IconFilePlus className="size-3.5" />,
+        keywords: ['create', 'new', 'file', 'add'],
+        enterMode: 'input',
+        inputPlaceholder: 'File path relative to workspace root...',
+        onInputSubmit: async (path) => {
+          const client = getWebSocketClient();
+          if (!client || !sessionId) return;
+          try {
+            const response = await createFile(client, sessionId, path);
+            if (response.success) {
+              const name = path.split('/').pop() || path;
+              useDockviewStore.getState().addFileEditorPanel(path, name);
+            }
+          } catch (error) {
+            console.error('Failed to create file:', error);
+          }
+        },
+      });
     }
 
     // Panels — always available on session page

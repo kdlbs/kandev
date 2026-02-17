@@ -269,16 +269,16 @@ export function useFileEditors() {
     const currentSessionId = activeSessionIdRef.current;
     if (!client || !currentSessionId) return;
 
+    // Close the editor tab immediately (optimistic)
+    const dockApi = useDockviewStore.getState().api;
+    const panel = dockApi?.getPanel(`file:${path}`);
+    if (panel) {
+      dockApi?.removePanel(panel);
+    }
+
     try {
       const response = await deleteFile(client, currentSessionId, path);
-      if (response.success) {
-        // Remove dockview panel (which will trigger removeFileState via onDidRemovePanel)
-        const dockApi = useDockviewStore.getState().api;
-        const panel = dockApi?.getPanel(`file:${path}`);
-        if (panel) {
-          dockApi?.removePanel(panel);
-        }
-      } else {
+      if (!response.success) {
         toast({
           title: 'Delete failed',
           description: response.error || 'Failed to delete file',

@@ -38,11 +38,11 @@ import { useSessionFileReviews } from '@/hooks/use-session-file-reviews';
 import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
 import { hashDiff, normalizeDiffContent } from '@/components/review/types';
 import { getWebSocketClient } from '@/lib/ws/connection';
-import { deleteFile } from '@/lib/ws/workspace-files';
 import type { FileInfo } from '@/lib/state/store';
 import { FileBrowser } from '@/components/task/file-browser';
 import { SessionTabs, type SessionTab } from '@/components/session-tabs';
 import { useToast } from '@/components/toast-provider';
+import { useFileOperations } from '@/hooks/use-file-operations';
 import type { OpenFileTab } from '@/lib/types/backend';
 import {
   getFilesPanelTab,
@@ -82,6 +82,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const gitOps = useGitOperations(activeSessionId ?? null);
   const { toast } = useToast();
+  const { createFile: baseCreateFile, deleteFile: hookDeleteFile } = useFileOperations(activeSessionId ?? null);
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
 
@@ -170,28 +171,17 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     }
   }, [fileToDiscard, gitOps, toast]);
 
-  // Handle delete file
-  const handleDeleteFile = useCallback(async (path: string) => {
-    const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
-
-    try {
-      const response = await deleteFile(client, activeSessionId, path);
-      if (!response.success) {
-        toast({
-          title: 'Failed to delete file',
-          description: response.error || 'An unknown error occurred',
-          variant: 'error',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Failed to delete file',
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
-        variant: 'error',
-      });
+  // Handle create file (wraps shared hook to also open the new file)
+  const handleCreateFile = useCallback(async (path: string): Promise<boolean> => {
+    const ok = await baseCreateFile(path);
+    if (ok) {
+      const name = path.split('/').pop() || path;
+      const { calculateHash } = await import('@/lib/utils/file-diff');
+      const hash = await calculateHash('');
+      onOpenFile({ path, name, content: '', originalContent: '', originalHash: hash, isDirty: false });
     }
-  }, [activeSessionId, toast]);
+    return ok;
+  }, [baseCreateFile, onOpenFile]);
 
   // Convert git status files to array for display
   const changedFiles = useMemo(() => {
@@ -612,7 +602,8 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
               <FileBrowser
                 sessionId={activeSessionId}
                 onOpenFile={onOpenFile}
-                onDeleteFile={handleDeleteFile}
+                onCreateFile={handleCreateFile}
+                onDeleteFile={hookDeleteFile}
                 isSearchOpen={isSearchOpen}
                 onCloseSearch={() => setIsSearchOpen(false)}
                 activeFilePath={activeFilePath}

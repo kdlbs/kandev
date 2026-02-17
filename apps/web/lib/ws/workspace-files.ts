@@ -76,6 +76,29 @@ export async function updateFileContent(
 }
 
 /**
+ * File create response from backend
+ */
+export type FileCreateResponse = {
+  path: string;
+  success: boolean;
+  error?: string;
+};
+
+/**
+ * Create a new file in the workspace
+ */
+export async function createFile(
+  client: WebSocketClient,
+  sessionId: string,
+  path: string
+): Promise<FileCreateResponse> {
+  return client.request<FileCreateResponse>('workspace.file.create', {
+    session_id: sessionId,
+    path,
+  });
+}
+
+/**
  * File delete response from backend
  */
 export type FileDeleteResponse = {

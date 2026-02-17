@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -29,6 +30,7 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
+	d.RegisterFunc(ws.ActionWorkspaceFileCreate, h.wsCreateFile)
 	d.RegisterFunc(ws.ActionWorkspaceFileDelete, h.wsDeleteFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 }
@@ -155,40 +157,68 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
-// wsDeleteFile handles workspace.file.delete action
-func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+// resolveSessionFileClient parses session_id + path from the message payload
+// and returns the agentctl client, or an error response.
+func (h *WorkspaceFileHandlers) resolveSessionFileClient(
+	msg *ws.Message,
+) (sessionID, path string, client *agentctl.Client, errResp *ws.Message) {
 	var req struct {
 		SessionID string `json:"session_id"`
 		Path      string `json:"path"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return "", "", nil, errResp
 	}
-
 	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return "", "", nil, errResp
 	}
 	if req.Path == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
+		return "", "", nil, errResp
 	}
 
-	// Get agent execution for this session
 	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
 	if !found {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+		return "", "", nil, errResp
+	}
+	c := execution.GetAgentCtlClient()
+	if c == nil {
+		errResp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+		return "", "", nil, errResp
+	}
+	return req.SessionID, req.Path, c, nil
+}
+
+// wsCreateFile handles workspace.file.create action
+func (h *WorkspaceFileHandlers) wsCreateFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	sessionID, path, client, errResp := h.resolveSessionFileClient(msg)
+	if errResp != nil {
+		return errResp, nil
 	}
 
-	// Get agentctl client
-	client := execution.GetAgentCtlClient()
-	if client == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
-	}
-
-	// Delete file via agentctl
-	response, err := client.DeleteFile(ctx, req.Path)
+	response, err := client.CreateFile(ctx, path)
 	if err != nil {
-		h.logger.Error("failed to delete file", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
+		h.logger.Error("failed to create file", zap.Error(err), zap.String("session_id", sessionID), zap.String("path", path))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to create file: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsDeleteFile handles workspace.file.delete action
+func (h *WorkspaceFileHandlers) wsDeleteFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	sessionID, path, client, errResp := h.resolveSessionFileClient(msg)
+	if errResp != nil {
+		return errResp, nil
+	}
+
+	response, err := client.DeleteFile(ctx, path)
+	if err != nil {
+		h.logger.Error("failed to delete file", zap.Error(err), zap.String("session_id", sessionID), zap.String("path", path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to delete file: %v", err), nil)
 	}
 

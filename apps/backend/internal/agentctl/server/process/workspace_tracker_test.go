@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -370,4 +373,242 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for path traversal, got nil")
 	}
+}
+
+// setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
+func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
+	t.Helper()
+	dir := t.TempDir()
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(dir, log)
+	return dir, wt
+}
+
+func TestCreateFile(t *testing.T) {
+	t.Run("basic creation", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		err := wt.CreateFile("hello.txt")
+		if err != nil {
+			t.Fatalf("CreateFile failed: %v", err)
+		}
+		info, err := os.Stat(filepath.Join(dir, "hello.txt"))
+		if err != nil {
+			t.Fatalf("file not found after creation: %v", err)
+		}
+		if info.Size() != 0 {
+			t.Errorf("expected empty file, got size %d", info.Size())
+		}
+	})
+
+	t.Run("content is empty", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		_ = wt.CreateFile("empty.txt")
+		data, err := os.ReadFile(filepath.Join(dir, "empty.txt"))
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if len(data) != 0 {
+			t.Errorf("expected empty content, got %d bytes", len(data))
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		err := wt.CreateFile("../../etc/passwd")
+		if err == nil {
+			t.Fatal("expected error for path traversal, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("already existing file", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		writeFile(t, dir, "exists.txt", "content")
+		err := wt.CreateFile("exists.txt")
+		if err == nil {
+			t.Fatal("expected error for existing file, got nil")
+		}
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("expected 'already exists' error, got: %v", err)
+		}
+	})
+
+	t.Run("intermediate directory creation", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		err := wt.CreateFile("subdir/deep/file.txt")
+		if err != nil {
+			t.Fatalf("CreateFile with subdirs failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "subdir", "deep", "file.txt")); err != nil {
+			t.Fatalf("nested file not found: %v", err)
+		}
+	})
+}
+
+func TestDeleteFile(t *testing.T) {
+	t.Run("basic deletion", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		writeFile(t, dir, "doomed.txt", "bye")
+		err := wt.DeleteFile("doomed.txt")
+		if err != nil {
+			t.Fatalf("DeleteFile failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "doomed.txt")); !os.IsNotExist(err) {
+			t.Errorf("expected file to be deleted, stat returned: %v", err)
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		err := wt.DeleteFile("../../etc/passwd")
+		if err == nil {
+			t.Fatal("expected error for path traversal, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("non-existent file", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		err := wt.DeleteFile("ghost.txt")
+		if err == nil {
+			t.Fatal("expected error for non-existent file, got nil")
+		}
+		if !strings.Contains(err.Error(), "does not exist") {
+			t.Errorf("expected 'does not exist' error, got: %v", err)
+		}
+	})
+
+	t.Run("directory deletion rejected", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		if err := os.Mkdir(filepath.Join(dir, "mydir"), 0o755); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		err := wt.DeleteFile("mydir")
+		if err == nil {
+			t.Fatal("expected error for directory deletion, got nil")
+		}
+		if !strings.Contains(err.Error(), "cannot delete directory") {
+			t.Errorf("expected 'cannot delete directory' error, got: %v", err)
+		}
+	})
+}
+
+func TestFsOpToString(t *testing.T) {
+	tests := []struct {
+		op   fsnotify.Op
+		want string
+	}{
+		{fsnotify.Create, types.FileOpCreate},
+		{fsnotify.Write, types.FileOpWrite},
+		{fsnotify.Remove, types.FileOpRemove},
+		{fsnotify.Rename, types.FileOpRename},
+		{fsnotify.Chmod, types.FileOpRefresh},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.op.String(), func(t *testing.T) {
+			got := fsOpToString(tt.op)
+			if got != tt.want {
+				t.Errorf("fsOpToString(%v) = %q, want %q", tt.op, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEmitFileChanges(t *testing.T) {
+	t.Run("zero changes sends refresh", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		sub := wt.SubscribeWorkspaceStream()
+		defer wt.UnsubscribeWorkspaceStream(sub)
+
+		// Drain initial git status message from subscribe
+		select {
+		case <-sub:
+		case <-time.After(time.Second):
+		}
+
+		wt.emitFileChanges(nil)
+
+		select {
+		case msg := <-sub:
+			if msg.FileChange == nil {
+				t.Fatal("expected FileChange, got nil")
+			}
+			if msg.FileChange.Operation != types.FileOpRefresh {
+				t.Errorf("expected refresh op, got %q", msg.FileChange.Operation)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for message")
+		}
+	})
+
+	t.Run("specific changes sent individually", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		sub := wt.SubscribeWorkspaceStream()
+		defer wt.UnsubscribeWorkspaceStream(sub)
+
+		// Drain the initial git status message from subscribe
+		select {
+		case <-sub:
+		case <-time.After(time.Second):
+		}
+
+		changes := []types.FileChangeNotification{
+			{Timestamp: time.Now(), Path: "a.txt", Operation: types.FileOpCreate},
+			{Timestamp: time.Now(), Path: "b.txt", Operation: types.FileOpWrite},
+		}
+		wt.emitFileChanges(changes)
+
+		for i, want := range changes {
+			select {
+			case msg := <-sub:
+				if msg.FileChange == nil {
+					t.Fatalf("change %d: expected FileChange, got nil", i)
+				}
+				if msg.FileChange.Path != want.Path {
+					t.Errorf("change %d: path = %q, want %q", i, msg.FileChange.Path, want.Path)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("change %d: timed out", i)
+			}
+		}
+	})
+
+	t.Run("over 50 changes sends refresh", func(t *testing.T) {
+		_, wt := setupTestDir(t)
+		sub := wt.SubscribeWorkspaceStream()
+		defer wt.UnsubscribeWorkspaceStream(sub)
+
+		// Drain initial message
+		select {
+		case <-sub:
+		case <-time.After(time.Second):
+		}
+
+		changes := make([]types.FileChangeNotification, 51)
+		for i := range changes {
+			changes[i] = types.FileChangeNotification{
+				Timestamp: time.Now(),
+				Path:      "file.txt",
+				Operation: types.FileOpWrite,
+			}
+		}
+		wt.emitFileChanges(changes)
+
+		select {
+		case msg := <-sub:
+			if msg.FileChange == nil {
+				t.Fatal("expected FileChange, got nil")
+			}
+			if msg.FileChange.Operation != types.FileOpRefresh {
+				t.Errorf("expected refresh op, got %q", msg.FileChange.Operation)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for message")
+		}
+	})
 }
