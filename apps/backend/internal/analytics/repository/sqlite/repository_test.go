@@ -2,38 +2,39 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 )
 
 // createTestDB sets up a SQLite database with all required schemas for analytics queries.
-func createTestDB(t *testing.T) *sql.DB {
+func createTestDB(t *testing.T) *sqlx.DB {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
-	t.Cleanup(func() { _ = dbConn.Close() })
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
 
 	// Create tables that analytics queries depend on
 	schema := `
 	CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS boards (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		name TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
@@ -45,8 +46,8 @@ func createTestDB(t *testing.T) *sql.DB {
 		events TEXT,
 		allow_manual_move INTEGER DEFAULT 1,
 		auto_archive_after_hours INTEGER DEFAULT 0,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
@@ -55,25 +56,25 @@ func createTestDB(t *testing.T) *sql.DB {
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
-		archived_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		archived_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		source_type TEXT NOT NULL DEFAULT 'local',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		deleted_at DATETIME
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		UNIQUE(task_id, repository_id)
 	);
 	CREATE TABLE IF NOT EXISTS task_sessions (
@@ -83,18 +84,18 @@ func createTestDB(t *testing.T) *sql.DB {
 		agent_profile_snapshot TEXT DEFAULT '{}',
 		repository_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'CREATED',
-		started_at DATETIME NOT NULL,
-		completed_at DATETIME,
-		updated_at DATETIME NOT NULL
+		started_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS task_session_turns (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
-		started_at DATETIME NOT NULL,
-		completed_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		started_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS task_session_messages (
 		id TEXT PRIMARY KEY,
@@ -103,26 +104,26 @@ func createTestDB(t *testing.T) *sql.DB {
 		author_type TEXT NOT NULL DEFAULT 'user',
 		type TEXT NOT NULL DEFAULT 'message',
 		content TEXT NOT NULL,
-		created_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL
 	);
 	CREATE TABLE IF NOT EXISTS task_session_commits (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
 		commit_sha TEXT NOT NULL,
-		committed_at DATETIME NOT NULL,
+		committed_at TIMESTAMP NOT NULL,
 		files_changed INTEGER DEFAULT 0,
 		insertions INTEGER DEFAULT 0,
 		deletions INTEGER DEFAULT 0,
-		created_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL
 	);
 	`
-	if _, err := dbConn.Exec(schema); err != nil {
+	if _, err := sqlxDB.Exec(schema); err != nil {
 		t.Fatalf("failed to create schema: %v", err)
 	}
-	return dbConn
+	return sqlxDB
 }
 
-func execOrFatal(t *testing.T, dbConn *sql.DB, query string, args ...any) {
+func execOrFatal(t *testing.T, dbConn *sqlx.DB, query string, args ...any) {
 	t.Helper()
 	if _, err := dbConn.Exec(query, args...); err != nil {
 		t.Fatalf("exec failed: %v", err)

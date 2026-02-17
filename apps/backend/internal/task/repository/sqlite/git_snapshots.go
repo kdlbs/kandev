@@ -39,12 +39,12 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
 			id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			ahead, behind, files, triggered_by, metadata, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, snapshot.ID, snapshot.SessionID, string(snapshot.SnapshotType), snapshot.Branch,
+	`), snapshot.ID, snapshot.SessionID, string(snapshot.SnapshotType), snapshot.Branch,
 		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
 		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt)
 
@@ -59,13 +59,13 @@ func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string)
 	var filesJSON string
 	var metadataJSON string
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
 		ORDER BY created_at DESC LIMIT 1
-	`, sessionID).Scan(
+	`), sessionID).Scan(
 		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
@@ -98,13 +98,13 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 	var filesJSON string
 	var metadataJSON string
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
 		ORDER BY created_at ASC LIMIT 1
-	`, sessionID).Scan(
+	`), sessionID).Scan(
 		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
@@ -144,7 +144,7 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := r.db.QueryContext(ctx, query, sessionID)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,13 +197,13 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 		commit.CreatedAt = time.Now().UTC()
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_commits (
 			id, session_id, commit_sha, parent_sha, author_name, author_email,
 			commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 			files_changed, insertions, deletions, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, commit.ID, commit.SessionID, commit.CommitSHA, commit.ParentSHA,
+	`), commit.ID, commit.SessionID, commit.CommitSHA, commit.ParentSHA,
 		commit.AuthorName, commit.AuthorEmail, commit.CommitMessage, commit.CommittedAt,
 		commit.PreCommitSnapshotID, commit.PostCommitSnapshotID, commit.FilesChanged,
 		commit.Insertions, commit.Deletions, commit.CreatedAt)
@@ -214,14 +214,14 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 // GetSessionCommits retrieves all commits for a session, ordered by committed_at descending.
 // Returns an empty slice if no commits are found.
 func (r *Repository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, commit_sha, parent_sha, author_name, author_email,
 		       commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 		       files_changed, insertions, deletions, created_at
 		FROM task_session_commits
 		WHERE session_id = ?
 		ORDER BY committed_at DESC
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -253,14 +253,14 @@ func (r *Repository) GetSessionCommits(ctx context.Context, sessionID string) ([
 func (r *Repository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
 	commit := &models.SessionCommit{}
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, commit_sha, parent_sha, author_name, author_email,
 		       commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 		       files_changed, insertions, deletions, created_at
 		FROM task_session_commits
 		WHERE session_id = ?
 		ORDER BY committed_at DESC LIMIT 1
-	`, sessionID).Scan(
+	`), sessionID).Scan(
 		&commit.ID, &commit.SessionID, &commit.CommitSHA, &commit.ParentSHA,
 		&commit.AuthorName, &commit.AuthorEmail, &commit.CommitMessage,
 		&commit.CommittedAt, &commit.PreCommitSnapshotID, &commit.PostCommitSnapshotID,
@@ -275,6 +275,6 @@ func (r *Repository) GetLatestSessionCommit(ctx context.Context, sessionID strin
 
 // DeleteSessionCommit removes a commit record from the database.
 func (r *Repository) DeleteSessionCommit(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM task_session_commits WHERE id = ?`, id)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_commits WHERE id = ?`), id)
 	return err
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/prompts/models"
 )
@@ -16,12 +17,13 @@ func createTestRepo(t *testing.T) (*sqliteRepository, func()) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
-	repo, err := newSQLiteRepositoryWithDB(dbConn)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create repo: %v", err)
 	}
 	cleanup := func() {
-		if err := dbConn.Close(); err != nil {
+		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
 		if err := repo.Close(); err != nil {

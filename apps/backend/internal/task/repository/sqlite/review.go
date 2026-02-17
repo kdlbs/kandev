@@ -20,7 +20,7 @@ func (r *Repository) UpsertSessionFileReview(ctx context.Context, review *models
 	}
 	review.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO session_file_reviews (
 			id, session_id, file_path, reviewed, diff_hash, reviewed_at, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -29,7 +29,7 @@ func (r *Repository) UpsertSessionFileReview(ctx context.Context, review *models
 			diff_hash = excluded.diff_hash,
 			reviewed_at = excluded.reviewed_at,
 			updated_at = excluded.updated_at
-	`, review.ID, review.SessionID, review.FilePath, review.Reviewed,
+	`), review.ID, review.SessionID, review.FilePath, review.Reviewed,
 		review.DiffHash, review.ReviewedAt, review.CreatedAt, review.UpdatedAt)
 
 	return err
@@ -37,12 +37,12 @@ func (r *Repository) UpsertSessionFileReview(ctx context.Context, review *models
 
 // GetSessionFileReviews retrieves all file reviews for a session.
 func (r *Repository) GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, file_path, reviewed, diff_hash, reviewed_at, created_at, updated_at
 		FROM session_file_reviews
 		WHERE session_id = ?
 		ORDER BY file_path
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +69,6 @@ func (r *Repository) GetSessionFileReviews(ctx context.Context, sessionID string
 
 // DeleteSessionFileReviews deletes all file reviews for a session.
 func (r *Repository) DeleteSessionFileReviews(ctx context.Context, sessionID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM session_file_reviews WHERE session_id = ?`, sessionID)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM session_file_reviews WHERE session_id = ?`), sessionID)
 	return err
 }

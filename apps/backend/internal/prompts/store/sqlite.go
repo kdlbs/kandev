@@ -9,20 +9,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/prompts/models"
 )
 
 type sqliteRepository struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	ownsDB bool
 }
 
-func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -42,8 +43,8 @@ func (r *sqliteRepository) initSchema() error {
 			name TEXT NOT NULL UNIQUE,
 			content TEXT NOT NULL,
 			builtin INTEGER NOT NULL DEFAULT 0,
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
 		);
 	`
 	if _, err := r.db.Exec(schema); err != nil {
@@ -95,11 +96,11 @@ func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, e
 }
 
 func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE id = ?
-	`, id)
+	`), id)
 	prompt := &models.Prompt{}
 	var builtinInt int
 	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
@@ -110,11 +111,11 @@ func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*model
 }
 
 func (r *sqliteRepository) GetPromptByName(ctx context.Context, name string) (*models.Prompt, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE name = ?
-	`, name)
+	`), name)
 	prompt := &models.Prompt{}
 	var builtinInt int
 	if err := row.Scan(&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt, &prompt.CreatedAt, &prompt.UpdatedAt); err != nil {
@@ -140,10 +141,10 @@ func (r *sqliteRepository) CreatePrompt(ctx context.Context, prompt *models.Prom
 		builtinInt = 1
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt)
+	`), prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt)
 	return err
 }
 
@@ -154,16 +155,16 @@ func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prom
 	prompt.Name = strings.TrimSpace(prompt.Name)
 	prompt.Content = strings.TrimSpace(prompt.Content)
 	prompt.UpdatedAt = time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE custom_prompts
 		SET name = ?, content = ?, updated_at = ?
 		WHERE id = ?
-	`, prompt.Name, prompt.Content, prompt.UpdatedAt, prompt.ID)
+	`), prompt.Name, prompt.Content, prompt.UpdatedAt, prompt.ID)
 	return err
 }
 
 func (r *sqliteRepository) DeletePrompt(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM custom_prompts WHERE id = ?`, id)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM custom_prompts WHERE id = ?`), id)
 	return err
 }
 
@@ -174,7 +175,7 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 	for _, prompt := range builtinPrompts {
 		// Check if prompt already exists
 		var exists bool
-		err := r.db.QueryRow("SELECT 1 FROM custom_prompts WHERE id = ?", prompt.ID).Scan(&exists)
+		err := r.db.QueryRow(r.db.Rebind("SELECT 1 FROM custom_prompts WHERE id = ?"), prompt.ID).Scan(&exists)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
@@ -183,10 +184,10 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 		}
 
 		// Insert built-in prompt
-		_, err = r.db.Exec(`
+		_, err = r.db.Exec(r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)
-		`, prompt.ID, prompt.Name, prompt.Content, 1, prompt.CreatedAt, prompt.UpdatedAt)
+		`), prompt.ID, prompt.Name, prompt.Content, 1, prompt.CreatedAt, prompt.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to insert built-in prompt %s: %w", prompt.ID, err)
 		}

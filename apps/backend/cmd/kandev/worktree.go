@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"database/sql"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
@@ -57,7 +58,7 @@ func (a *bootMsgAdapter) UpdateMessage(ctx context.Context, message *models.Mess
 	return a.svc.UpdateMessage(ctx, message)
 }
 
-func provideWorktreeManager(dbConn *sql.DB, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
+func provideWorktreeManager(dbConn *sqlx.DB, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
 	manager, cleanup, err := worktree.Provide(dbConn, cfg, log)
 	if err != nil {
 		return nil, nil, nil, err

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,28 +16,30 @@ import (
 	"github.com/kandev/kandev/internal/workflow/repository"
 )
 
-func setupTestService(t *testing.T) (*Service, *sql.DB) {
-	db, err := sql.Open("sqlite3", ":memory:")
+func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
+	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
+	sqlxDB := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
 
 	// Create workflows table (normally created by task repo)
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workflows (
+	_, err = sqlxDB.Exec(`CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
-		description TEXT DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+		description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 	)`)
 	require.NoError(t, err)
 
-	repo, err := repository.NewWithDB(db)
+	repo, err := repository.NewWithDB(sqlxDB)
 	require.NoError(t, err)
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	return NewService(repo, log), db
+	return NewService(repo, log), sqlxDB
 }
 
-func insertWorkflow(t *testing.T, db *sql.DB, id, name string) {
-	_, err := db.Exec("INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', ?, datetime('now'), datetime('now'))", id, name)
+func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
+	now := time.Now().UTC()
+	_, err := db.Exec("INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, '', ?, ?, ?)", id, name, now, now)
 	require.NoError(t, err)
 }
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -28,10 +28,10 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, executor.ID, executor.Name, executor.Type, executor.Status, commonsqlite.BoolToInt(executor.IsSystem), commonsqlite.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
 	return err
 }
 
@@ -41,10 +41,10 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 	var isSystem int
 	var resumable int
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE id = ? AND deleted_at IS NULL
-	`, id).Scan(
+	`), id).Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
 		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
 	)
@@ -73,10 +73,10 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, executor.Name, executor.Type, executor.Status, commonsqlite.BoolToInt(executor.IsSystem), commonsqlite.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
+	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -89,9 +89,9 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
-	`, now, now, id)
+	`), now, now, id)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	}
 	running.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 			agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
@@ -178,14 +178,14 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			last_seen_at = excluded.last_seen_at,
 			error_message = excluded.error_message,
 			updated_at = excluded.updated_at
-	`,
+	`),
 		running.ID,
 		running.SessionID,
 		running.TaskID,
 		running.ExecutorID,
 		running.Runtime,
 		running.Status,
-		commonsqlite.BoolToInt(running.Resumable),
+		dialect.BoolToInt(running.Resumable),
 		running.ResumeToken,
 		running.AgentExecutionID,
 		running.ContainerID,
@@ -256,14 +256,14 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	var resumable int
 	var lastSeen sql.NullTime
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 		       agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
 		       created_at, updated_at
 		FROM executors_running
 		WHERE session_id = ?
-	`, sessionID).Scan(
+	`), sessionID).Scan(
 		&running.ID,
 		&running.SessionID,
 		&running.TaskID,
@@ -302,7 +302,7 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
-	result, err := r.db.ExecContext(ctx, `DELETE FROM executors_running WHERE session_id = ?`, sessionID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
 	if err != nil {
 		return err
 	}
@@ -315,11 +315,11 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE executor_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
-	`, executorID).Scan(&exists)
+	`), executorID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

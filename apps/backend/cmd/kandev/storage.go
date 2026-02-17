@@ -1,7 +1,7 @@
 package main
 
 import (
-	"database/sql"
+	"github.com/jmoiron/sqlx"
 
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/config"
@@ -17,7 +17,7 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-func provideRepositories(cfg *config.Config, log *logger.Logger) (*sql.DB, *Repositories, []func() error, error) {
+func provideRepositories(cfg *config.Config, log *logger.Logger) (*sqlx.DB, *Repositories, []func() error, error) {
 	cleanups := make([]func() error, 0, 6)
 	dbConn, cleanup, err := persistence.Provide(cfg, log)
 	if err != nil {

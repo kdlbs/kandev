@@ -13,17 +13,17 @@ import (
 
 // AddTaskToWorkflow adds a task to a workflow with placement
 func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workflow_id = ?, workflow_step_id = ?, position = ?, updated_at = ? WHERE id = ?
-	`, workflowID, workflowStepID, position, time.Now().UTC(), taskID)
+	`), workflowID, workflowStepID, position, time.Now().UTC(), taskID)
 	return err
 }
 
 // RemoveTaskFromWorkflow removes a task from a workflow
 func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workflow_id = '', workflow_step_id = '', position = 0, updated_at = ? WHERE id = ? AND workflow_id = ?
-	`, time.Now().UTC(), taskID, workflowID)
+	`), time.Now().UTC(), taskID, workflowID)
 	return err
 }
 
@@ -38,10 +38,10 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.CreatedAt = now
 	workflow.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.CreatedAt, workflow.UpdatedAt)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -51,10 +51,10 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 	workflow := &models.Workflow{}
 	var workflowTemplateID sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, workspace_id, name, description, workflow_template_id, created_at, updated_at
 		FROM workflows WHERE id = ?
-	`, id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.CreatedAt, &workflow.UpdatedAt)
+	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.CreatedAt, &workflow.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workflow not found: %s", id)
@@ -73,9 +73,9 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	workflow.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, workflow_template_id = ?, updated_at = ? WHERE id = ?
-	`, workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.UpdatedAt, workflow.ID)
+	`), workflow.Name, workflow.Description, workflow.WorkflowTemplateID, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 
 // DeleteWorkflow deletes a workflow by ID
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 	}
 	query += " ORDER BY created_at DESC"
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

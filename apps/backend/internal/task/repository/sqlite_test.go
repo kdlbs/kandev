@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,16 +23,17 @@ func createTestSQLiteRepo(t *testing.T) (*sqlite.Repository, func()) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo, err := sqlite.NewWithDB(dbConn)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := sqlite.NewWithDB(sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}
-	if _, err := worktree.NewSQLiteStore(repo.DB()); err != nil {
+	if _, err := worktree.NewSQLiteStore(sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 
 	cleanup := func() {
-		if err := dbConn.Close(); err != nil {
+		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
 		if err := repo.Close(); err != nil {
@@ -488,7 +490,8 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo1, err := sqlite.NewWithDB(dbConn1)
+	sqlxDB1 := sqlx.NewDb(dbConn1, "sqlite3")
+	repo1, err := sqlite.NewWithDB(sqlxDB1)
 	if err != nil {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
@@ -499,7 +502,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err := repo1.Close(); err != nil {
 		t.Fatalf("failed to close repo: %v", err)
 	}
-	if err := dbConn1.Close(); err != nil {
+	if err := sqlxDB1.Close(); err != nil {
 		t.Fatalf("failed to close sqlite db: %v", err)
 	}
 
@@ -508,12 +511,13 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
-	repo2, err := sqlite.NewWithDB(dbConn2)
+	sqlxDB2 := sqlx.NewDb(dbConn2, "sqlite3")
+	repo2, err := sqlite.NewWithDB(sqlxDB2)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}
 	defer func() {
-		if err := dbConn2.Close(); err != nil {
+		if err := sqlxDB2.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
 		if err := repo2.Close(); err != nil {
@@ -1317,8 +1321,8 @@ func TestSQLiteRepository_ListTasksForAutoArchive(t *testing.T) {
 			allow_manual_move INTEGER DEFAULT 1,
 			is_start_step INTEGER DEFAULT 0,
 			auto_archive_after_hours INTEGER DEFAULT 0,
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
 		)
 	`)
 	if err != nil {

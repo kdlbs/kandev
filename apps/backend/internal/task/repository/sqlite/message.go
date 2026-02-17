@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -45,10 +46,10 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
 
 	return err
 }
@@ -59,10 +60,10 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE id = ?
-	`, id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -80,10 +81,10 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 
 // ListMessages returns all messages for a session ordered by creation time.
 func (r *Repository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +169,7 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 		args = append(args, limit+1)
 	}
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -208,7 +209,7 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 
 // DeleteMessage deletes a message by ID
 func (r *Repository) DeleteMessage(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_messages WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_messages WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -228,11 +229,13 @@ func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, tool
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	err := r.db.QueryRowContext(ctx, `
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ?
+		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
 		ORDER BY created_at ASC LIMIT 1
-	`, sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	`, dialect.JSONExtract(drv, "metadata", "tool_call_id"))
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -251,10 +254,12 @@ func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendi
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	err := r.db.QueryRowContext(ctx, `
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.pending_id') = ?
-	`, sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
+	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -274,11 +279,13 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	err := r.db.QueryRowContext(ctx, `
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE json_extract(metadata, '$.pending_id') = ?
+		FROM task_session_messages WHERE %s = ?
 		ORDER BY created_at DESC LIMIT 1
-	`, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -294,13 +301,17 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 // CompleteRunningToolCallsForTurn marks all "running" tool call messages for a turn as "complete".
 // This is a safety net to ensure no tool calls remain stuck in "running" state after a turn completes.
 func (r *Repository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = json_set(metadata, '$.status', 'complete')
+		SET metadata = %s
 		WHERE turn_id = ?
-		  AND json_extract(metadata, '$.status') = 'running'
-		  AND json_extract(metadata, '$.tool_call_id') IS NOT NULL
-	`, turnID)
+		  AND %s = 'running'
+		  AND %s
+	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
+		dialect.JSONExtract(drv, "metadata", "status"),
+		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), turnID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to complete running tool calls for turn %s: %w", turnID, err)
 	}
@@ -321,10 +332,10 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 		requestsInput = 1
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
 		WHERE id = ?
-	`, message.Content, requestsInput, string(message.Type), string(metadataJSON), message.ID)
+	`), message.Content, requestsInput, string(message.Type), string(metadataJSON), message.ID)
 	if err != nil {
 		return err
 	}

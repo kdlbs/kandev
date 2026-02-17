@@ -10,24 +10,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/editors/discovery"
 	"github.com/kandev/kandev/internal/editors/models"
 )
 
 type sqliteRepository struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -67,8 +68,8 @@ func (r *sqliteRepository) initSchema() error {
 		config TEXT,
 		installed INTEGER NOT NULL DEFAULT 0,
 		enabled INTEGER NOT NULL DEFAULT 1,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`
 	_, err := r.db.Exec(schema)
@@ -146,20 +147,20 @@ func (r *sqliteRepository) ListEditors(ctx context.Context) ([]*models.Editor, e
 }
 
 func (r *sqliteRepository) GetEditorByType(ctx context.Context, editorType string) (*models.Editor, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at
 		FROM editors
 		WHERE type = ?
-	`, editorType)
+	`), editorType)
 	return scanEditor(row)
 }
 
 func (r *sqliteRepository) GetEditorByID(ctx context.Context, editorID string) (*models.Editor, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at
 		FROM editors
 		WHERE id = ?
-	`, editorID)
+	`), editorID)
 	return scanEditor(row)
 }
 
@@ -174,7 +175,7 @@ func (r *sqliteRepository) UpsertEditors(ctx context.Context, editors []*models.
 		}
 	}()
 
-	stmt, err := tx.PrepareContext(ctx, `
+	stmt, err := tx.PrepareContext(ctx, r.db.Rebind(`
 		INSERT INTO editors (id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(type) DO UPDATE SET
@@ -186,7 +187,7 @@ func (r *sqliteRepository) UpsertEditors(ctx context.Context, editors []*models.
 			installed = excluded.installed,
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at
-	`)
+	`))
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -219,8 +220,8 @@ func (r *sqliteRepository) UpsertEditors(ctx context.Context, editors []*models.
 			editor.Command,
 			editor.Scheme,
 			configValue,
-			sqlite.BoolToInt(editor.Installed),
-			sqlite.BoolToInt(editor.Enabled),
+			dialect.BoolToInt(editor.Installed),
+			dialect.BoolToInt(editor.Enabled),
 			editor.CreatedAt,
 			editor.UpdatedAt,
 		)
@@ -248,10 +249,10 @@ func (r *sqliteRepository) CreateEditor(ctx context.Context, editor *models.Edit
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO editors (id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, editor.ID, editor.Type, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, sqlite.BoolToInt(editor.Installed), sqlite.BoolToInt(editor.Enabled), editor.CreatedAt, editor.UpdatedAt)
+	`), editor.ID, editor.Type, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, dialect.BoolToInt(editor.Installed), dialect.BoolToInt(editor.Enabled), editor.CreatedAt, editor.UpdatedAt)
 	return err
 }
 
@@ -264,16 +265,16 @@ func (r *sqliteRepository) UpdateEditor(ctx context.Context, editor *models.Edit
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE editors
 		SET name = ?, kind = ?, command = ?, scheme = ?, config = ?, installed = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
-	`, editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, sqlite.BoolToInt(editor.Installed), sqlite.BoolToInt(editor.Enabled), editor.UpdatedAt, editor.ID)
+	`), editor.Name, editor.Kind, editor.Command, editor.Scheme, configValue, dialect.BoolToInt(editor.Installed), dialect.BoolToInt(editor.Enabled), editor.UpdatedAt, editor.ID)
 	return err
 }
 
 func (r *sqliteRepository) DeleteEditor(ctx context.Context, editorID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM editors WHERE id = ?`, editorID)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM editors WHERE id = ?`), editorID)
 	return err
 }
 
@@ -329,6 +330,6 @@ func (r *sqliteRepository) deleteBuiltinsNotIn(ctx context.Context, types map[st
 		`DELETE FROM editors WHERE kind = 'built_in' AND type NOT IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
-	_, err := r.db.ExecContext(ctx, query, args...)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
 }

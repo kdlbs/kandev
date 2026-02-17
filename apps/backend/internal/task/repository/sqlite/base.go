@@ -4,20 +4,22 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	ownsDB bool
 }
 
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
-func NewWithDB(dbConn *sql.DB) (*Repository, error) {
+func NewWithDB(dbConn *sqlx.DB) (*Repository, error) {
 	return newRepository(dbConn, false)
 }
 
-func newRepository(dbConn *sql.DB, ownsDB bool) (*Repository, error) {
+func newRepository(dbConn *sqlx.DB, ownsDB bool) (*Repository, error) {
 	repo := &Repository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -40,7 +42,7 @@ func (r *Repository) Close() error {
 
 // DB returns the underlying sql.DB instance for shared access
 func (r *Repository) DB() *sql.DB {
-	return r.db
+	return r.db.DB
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes
@@ -65,8 +67,8 @@ func (r *Repository) initSchema() error {
 		default_executor_id TEXT DEFAULT '',
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS executors (
@@ -77,9 +79,9 @@ func (r *Repository) initSchema() error {
 		is_system INTEGER NOT NULL DEFAULT 0,
 		resumable INTEGER NOT NULL DEFAULT 1,
 		config TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		deleted_at DATETIME
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS executors_running (
@@ -99,10 +101,10 @@ func (r *Repository) initSchema() error {
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
-		last_seen_at DATETIME,
+		last_seen_at TIMESTAMP,
 		error_message TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS environments (
@@ -114,9 +116,9 @@ func (r *Repository) initSchema() error {
 		image_tag TEXT DEFAULT '',
 		dockerfile TEXT DEFAULT '',
 		build_config TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		deleted_at DATETIME
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS workflows (
@@ -125,8 +127,8 @@ func (r *Repository) initSchema() error {
 		workflow_template_id TEXT DEFAULT '',
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS tasks (
@@ -140,8 +142,9 @@ func (r *Repository) initSchema() error {
 		priority INTEGER DEFAULT 0,
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		archived_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
 	);
 
@@ -152,8 +155,8 @@ func (r *Repository) initSchema() error {
 		base_branch TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
 		UNIQUE(task_id, repository_id)
@@ -175,9 +178,9 @@ func (r *Repository) initSchema() error {
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
 		dev_script TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		deleted_at DATETIME,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 	);
 
@@ -187,13 +190,14 @@ func (r *Repository) initSchema() error {
 		name TEXT NOT NULL,
 		command TEXT NOT NULL,
 		position INTEGER DEFAULT 0,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
@@ -212,8 +216,8 @@ func (r *Repository) initSchema() error {
 		title TEXT NOT NULL DEFAULT 'Plan',
 		content TEXT NOT NULL DEFAULT '',
 		created_by TEXT NOT NULL DEFAULT 'agent',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
@@ -235,7 +239,7 @@ func (r *Repository) initSchema() error {
 		requests_input INTEGER DEFAULT 0,
 		type TEXT NOT NULL DEFAULT 'message',
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 		FOREIGN KEY (turn_id) REFERENCES task_session_turns(id) ON DELETE CASCADE
 	);
@@ -249,11 +253,11 @@ func (r *Repository) initSchema() error {
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
-		started_at DATETIME NOT NULL,
-		completed_at DATETIME,
+		started_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
@@ -278,11 +282,12 @@ func (r *Repository) initSchema() error {
 		state TEXT NOT NULL DEFAULT 'CREATED',
 		error_message TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
-		started_at DATETIME NOT NULL,
-		completed_at DATETIME,
-		updated_at DATETIME NOT NULL,
+		started_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL,
 		is_primary INTEGER DEFAULT 0,
 		workflow_step_id TEXT DEFAULT '',
+		is_passthrough INTEGER DEFAULT 0,
 		review_status TEXT DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
@@ -300,10 +305,10 @@ func (r *Repository) initSchema() error {
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		merged_at DATETIME,
-		deleted_at DATETIME,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		merged_at TIMESTAMP,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 		UNIQUE(session_id, worktree_id)
 	);
@@ -333,7 +338,7 @@ func (r *Repository) initSchema() error {
 		files TEXT DEFAULT '{}',
 		triggered_by TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
@@ -348,13 +353,13 @@ func (r *Repository) initSchema() error {
 		author_name TEXT DEFAULT '',
 		author_email TEXT DEFAULT '',
 		commit_message TEXT DEFAULT '',
-		committed_at DATETIME NOT NULL,
+		committed_at TIMESTAMP NOT NULL,
 		pre_commit_snapshot_id TEXT DEFAULT '',
 		post_commit_snapshot_id TEXT DEFAULT '',
 		files_changed INTEGER DEFAULT 0,
 		insertions INTEGER DEFAULT 0,
 		deletions INTEGER DEFAULT 0,
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 
@@ -373,9 +378,9 @@ func (r *Repository) initSchema() error {
 		file_path TEXT NOT NULL,
 		reviewed INTEGER NOT NULL DEFAULT 0,
 		diff_hash TEXT NOT NULL DEFAULT '',
-		reviewed_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		reviewed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 		UNIQUE(session_id, file_path)
 	);
@@ -398,58 +403,6 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
-	if err := r.ensureArchivedAtColumn(); err != nil {
-		return err
-	}
-
-	if err := r.ensureIsPassthroughColumn(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// ensureColumnExists checks if a column exists on a table and runs the provided
-// SQL statements to add it if missing.
-func (r *Repository) ensureColumnExists(table, column string, migrationSQL ...string) error {
-	rows, err := r.db.Query("PRAGMA table_info(" + table + ")")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == column {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, stmt := range migrationSQL {
-		if _, err := r.db.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *Repository) ensureIsPassthroughColumn() error {
-	return r.ensureColumnExists("task_sessions", "is_passthrough",
-		"ALTER TABLE task_sessions ADD COLUMN is_passthrough INTEGER DEFAULT 0")
-}
-
-func (r *Repository) ensureArchivedAtColumn() error {
-	return r.ensureColumnExists("tasks", "archived_at",
-		"ALTER TABLE tasks ADD COLUMN archived_at DATETIME",
-		"CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)")
-}

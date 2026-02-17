@@ -1,16 +1,16 @@
 // Package sqlite provides SQLite-based analytics repository implementations.
 package sqlite
 
-import "database/sql"
+import "github.com/jmoiron/sqlx"
 
 // Repository provides SQLite-based analytics operations.
 type Repository struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
 // NewWithDB creates a new analytics repository with an existing database connection.
 // It automatically creates performance indexes for stats queries.
-func NewWithDB(dbConn *sql.DB) (*Repository, error) {
+func NewWithDB(dbConn *sqlx.DB) (*Repository, error) {
 	repo := &Repository{db: dbConn}
 	if err := repo.ensureStatsIndexes(); err != nil {
 		return nil, err
@@ -79,7 +79,6 @@ func (r *Repository) ensureStatsIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_repos_workspace
 			ON repositories(workspace_id)
 			WHERE deleted_at IS NULL`,
-
 	}
 
 	for _, idx := range indexes {
@@ -90,4 +89,3 @@ func (r *Repository) ensureStatsIndexes() error {
 
 	return nil
 }
-

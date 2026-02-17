@@ -7,16 +7,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 // SQLiteStore implements Store interface using SQLite.
 type SQLiteStore struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
 // NewSQLiteStore creates a new SQLite-backed worktree store.
-// It uses the provided sql.DB connection and ensures the task_session_worktrees table exists.
-func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
+// It uses the provided sqlx.DB connection and ensures the task_session_worktrees table exists.
+func NewSQLiteStore(db *sqlx.DB) (*SQLiteStore, error) {
 	store := &SQLiteStore{db: db}
 	if err := store.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize worktree schema: %w", err)
@@ -36,10 +37,10 @@ func (s *SQLiteStore) initSchema() error {
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		merged_at DATETIME,
-		deleted_at DATETIME,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		merged_at TIMESTAMP,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 		UNIQUE(session_id, worktree_id)
 	);
@@ -73,7 +74,7 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		wt.UpdatedAt = now
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_session_worktrees (
 			id, session_id, worktree_id, repository_id, position,
 			worktree_path, worktree_branch, status,
@@ -87,7 +88,7 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
-	`, uuid.New().String(), wt.SessionID, wt.ID, wt.RepositoryID, 0,
+	`), uuid.New().String(), wt.SessionID, wt.ID, wt.RepositoryID, 0,
 		wt.Path, wt.Branch, wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 
@@ -100,7 +101,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 	var mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -119,7 +120,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		LEFT JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE tsw.worktree_id = ?
-	`, id).Scan(
+	`), id).Scan(
 		&wt.ID,
 		&wt.SessionID,
 		&wt.TaskID,
@@ -164,7 +165,7 @@ func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID stri
 	var mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -183,7 +184,7 @@ func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID stri
 		INNER JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE tsw.session_id = ? AND tsw.status = ?
-	`, sessionID, StatusActive).Scan(
+	`), sessionID, StatusActive).Scan(
 		&wt.ID,
 		&wt.SessionID,
 		&wt.TaskID,
@@ -229,7 +230,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 	var mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
-	err := s.db.QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -249,7 +250,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE s.task_id = ? AND tsw.status = ?
 		ORDER BY tsw.created_at DESC LIMIT 1
-	`, taskID, StatusActive).Scan(
+	`), taskID, StatusActive).Scan(
 		&wt.ID,
 		&wt.SessionID,
 		&wt.TaskID,
@@ -290,7 +291,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 
 // GetWorktreesByTaskID retrieves all worktrees for a task.
 func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -309,7 +310,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		INNER JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE s.task_id = ? ORDER BY tsw.created_at DESC
-	`, taskID)
+	`), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +321,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 
 // GetWorktreesByRepositoryID retrieves all worktrees for a repository.
 func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -339,7 +340,7 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 		LEFT JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE tsw.repository_id = ?
-	`, repoID)
+	`), repoID)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +374,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 		args = append(args, wt.SessionID)
 	}
 
-	result, err := s.db.ExecContext(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
@@ -387,7 +388,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 
 // DeleteWorktree removes a worktree record.
 func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE worktree_id = ?`, id)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM task_session_worktrees WHERE worktree_id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -401,7 +402,7 @@ func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
 
 // ListActiveWorktrees returns all worktrees with status 'active'.
 func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -420,7 +421,7 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 		LEFT JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
 		WHERE tsw.status = ?
-	`, StatusActive)
+	`), StatusActive)
 	if err != nil {
 		return nil, err
 	}

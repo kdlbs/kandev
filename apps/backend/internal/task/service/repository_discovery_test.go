@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -278,13 +279,14 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	repoImpl, cleanup, err := repository.Provide(dbConn)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repoImpl, cleanup, err := repository.Provide(sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
 	repo := repository.Repository(repoImpl)
 	t.Cleanup(func() {
-		if err := dbConn.Close(); err != nil {
+		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
 		}
 		if err := cleanup(); err != nil {

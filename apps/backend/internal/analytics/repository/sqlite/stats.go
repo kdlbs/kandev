@@ -3,9 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/internal/analytics/models"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // parseTimeString parses time strings in various SQLite formats
@@ -33,36 +35,32 @@ func parseTimeString(s string) time.Time {
 
 // GetTaskStats retrieves aggregated statistics for all tasks in a workspace
 func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.TaskStats, error) {
-	var startArg interface{}
+	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	// Use separate subqueries for counts and duration to avoid row multiplication
-	query := `
+	drv := r.db.DriverName()
+	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+
+	query := fmt.Sprintf(`
 		SELECT
-			t.id,
-			t.title,
-			t.workspace_id,
-			t.workflow_id,
-			t.state,
+			t.id, t.title, t.workspace_id, t.workflow_id, t.state,
 			COALESCE(session_stats.session_count, 0) as session_count,
 			COALESCE(session_stats.turn_count, 0) as turn_count,
 			COALESCE(session_stats.message_count, 0) as message_count,
 			COALESCE(session_stats.user_message_count, 0) as user_message_count,
 			COALESCE(session_stats.tool_call_count, 0) as tool_call_count,
 			COALESCE(turn_stats.total_duration_ms, 0) as total_duration_ms,
-			t.created_at,
-			session_stats.last_completed_at
+			t.created_at, session_stats.last_completed_at
 		FROM tasks t
 		LEFT JOIN (
-			SELECT
-				s.task_id,
+			SELECT s.task_id,
 				COUNT(DISTINCT s.id) as session_count,
 				COUNT(DISTINCT turn.id) as turn_count,
 				COUNT(DISTINCT msg.id) as message_count,
 				COUNT(DISTINCT CASE WHEN msg.author_type = 'user' THEN msg.id END) as user_message_count,
-				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%' THEN msg.id END) as tool_call_count,
+				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) as tool_call_count,
 				MAX(s.completed_at) as last_completed_at
 			FROM task_sessions s
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
@@ -71,13 +69,8 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 			GROUP BY s.task_id
 		) session_stats ON session_stats.task_id = t.id
 		LEFT JOIN (
-			SELECT
-				s.task_id,
-				SUM(CASE
-					WHEN turn.completed_at IS NOT NULL
-					THEN (julianday(turn.completed_at) - julianday(turn.started_at)) * 86400000
-					ELSE 0
-				END) as total_duration_ms
+			SELECT s.task_id,
+				SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END) as total_duration_ms
 			FROM task_sessions s
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			WHERE (? IS NULL OR s.started_at >= ?)
@@ -85,13 +78,10 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		) turn_stats ON turn_stats.task_id = t.id
 		WHERE t.workspace_id = ? AND (? IS NULL OR t.created_at >= ?)
 		ORDER BY t.updated_at DESC
-	`
+	`, dur)
 
-	rows, err := r.db.QueryContext(
-		ctx,
-		query,
-		startArg, startArg,
-		startArg, startArg,
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
+		startArg, startArg, startArg, startArg,
 		workspaceID, startArg, startArg,
 	)
 	if err != nil {
@@ -99,34 +89,27 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 	}
 	defer func() { _ = rows.Close() }()
 
+	return r.scanTaskStats(rows)
+}
+
+func (r *Repository) scanTaskStats(rows *sql.Rows) ([]*models.TaskStats, error) {
 	var results []*models.TaskStats
 	for rows.Next() {
 		var stat models.TaskStats
-		var completedAtStr sql.NullString // Use NullString to handle legacy string dates
-		var createdAtStr string           // Handle legacy string dates
-		var totalDurationMs float64       // SQLite returns float from julianday math
+		var completedAtStr sql.NullString
+		var createdAtStr string
+		var totalDurationMs float64
 		err := rows.Scan(
-			&stat.TaskID,
-			&stat.TaskTitle,
-			&stat.WorkspaceID,
-			&stat.WorkflowID,
-			&stat.State,
-			&stat.SessionCount,
-			&stat.TurnCount,
-			&stat.MessageCount,
-			&stat.UserMessageCount,
-			&stat.ToolCallCount,
-			&totalDurationMs,
-			&createdAtStr,
-			&completedAtStr,
+			&stat.TaskID, &stat.TaskTitle, &stat.WorkspaceID, &stat.WorkflowID, &stat.State,
+			&stat.SessionCount, &stat.TurnCount, &stat.MessageCount,
+			&stat.UserMessageCount, &stat.ToolCallCount, &totalDurationMs,
+			&createdAtStr, &completedAtStr,
 		)
 		if err != nil {
 			return nil, err
 		}
 		stat.TotalDurationMs = int64(totalDurationMs)
-		// Parse created_at from string
 		stat.CreatedAt = parseTimeString(createdAtStr)
-		// Parse completed_at from string if valid
 		if completedAtStr.Valid && completedAtStr.String != "" {
 			parsedTime := parseTimeString(completedAtStr.String)
 			if !parsedTime.IsZero() {
@@ -135,20 +118,20 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		}
 		results = append(results, &stat)
 	}
-
 	return results, rows.Err()
 }
 
 // GetGlobalStats retrieves workspace-wide aggregated statistics
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
-	var startArg interface{}
+	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	// Use separate subqueries to avoid row multiplication from JOINs
-	// Count tasks in the last workflow step (highest position) as completed
-	query := `
+	drv := r.db.DriverName()
+	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+
+	query := fmt.Sprintf(`
 		SELECT
 			(SELECT COUNT(*) FROM tasks WHERE workspace_id = ? AND (? IS NULL OR created_at >= ?)) as total_tasks,
 			(SELECT COUNT(*) FROM tasks t
@@ -174,20 +157,18 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			(SELECT COUNT(*) FROM task_session_messages msg
 			 JOIN task_sessions s ON s.id = msg.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
-			 WHERE t.workspace_id = ? AND msg.type LIKE 'tool_%' AND (? IS NULL OR s.started_at >= ?)) as total_tool_calls,
+			 WHERE t.workspace_id = ? AND msg.type LIKE 'tool_%%' AND (? IS NULL OR s.started_at >= ?)) as total_tool_calls,
 			(SELECT COALESCE(SUM(
-				CASE WHEN turn.completed_at IS NOT NULL
-				THEN (julianday(turn.completed_at) - julianday(turn.started_at)) * 86400000
-				ELSE 0 END
+				CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END
 			), 0) FROM task_session_turns turn
 			 JOIN task_sessions s ON s.id = turn.task_session_id
 			 JOIN tasks t ON t.id = s.task_id
 			 WHERE t.workspace_id = ? AND (? IS NULL OR s.started_at >= ?)) as total_duration_ms
-	`
+	`, dur)
 
 	var stats models.GlobalStats
-	var totalDurationMs float64 // SQLite returns float from julianday math
-	err := r.db.QueryRowContext(ctx, query,
+	var totalDurationMs float64
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query),
 		workspaceID, startArg, startArg,
 		workspaceID, startArg, startArg,
 		workspaceID, startArg, startArg,
@@ -198,22 +179,15 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 		workspaceID, startArg, startArg,
 		workspaceID, startArg, startArg,
 	).Scan(
-		&stats.TotalTasks,
-		&stats.CompletedTasks,
-		&stats.InProgressTasks,
-		&stats.TotalSessions,
-		&stats.TotalTurns,
-		&stats.TotalMessages,
-		&stats.TotalUserMessages,
-		&stats.TotalToolCalls,
-		&totalDurationMs,
+		&stats.TotalTasks, &stats.CompletedTasks, &stats.InProgressTasks,
+		&stats.TotalSessions, &stats.TotalTurns, &stats.TotalMessages,
+		&stats.TotalUserMessages, &stats.TotalToolCalls, &totalDurationMs,
 	)
 	if err != nil {
 		return nil, err
 	}
 	stats.TotalDurationMs = int64(totalDurationMs)
 
-	// Calculate averages
 	if stats.TotalTasks > 0 {
 		stats.AvgTurnsPerTask = float64(stats.TotalTurns) / float64(stats.TotalTasks)
 		stats.AvgMessagesPerTask = float64(stats.TotalMessages) / float64(stats.TotalTasks)
@@ -225,13 +199,18 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 
 // GetDailyActivity retrieves daily activity statistics for the last N days
 func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) {
-	query := `
+	drv := r.db.DriverName()
+	dateStart := dialect.DateNowMinusDays(drv, "?")
+	datePlus := dialect.DatePlusOneDay(drv, "date")
+	curDate := dialect.CurrentDate(drv)
+	dateOfTurn := dialect.DateOf(drv, "turn.started_at")
+	dateOfMsg := dialect.DateOf(drv, "msg.created_at")
+
+	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
-			SELECT date('now', '-' || ? || ' days')
+			SELECT %s
 			UNION ALL
-			SELECT date(date, '+1 day')
-			FROM dates
-			WHERE date < date('now')
+			SELECT %s FROM dates WHERE date < %s
 		)
 		SELECT
 			d.date,
@@ -241,7 +220,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 		FROM dates d
 		LEFT JOIN (
 			SELECT
-				date(turn.started_at) as activity_date,
+				%s as activity_date,
 				COUNT(DISTINCT turn.id) as turn_count,
 				COUNT(DISTINCT msg.id) as message_count,
 				COUNT(DISTINCT t.id) as task_count
@@ -249,14 +228,14 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 			JOIN task_sessions s ON s.id = turn.task_session_id
 			JOIN tasks t ON t.id = s.task_id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-				AND date(msg.created_at) = date(turn.started_at)
+				AND %s = %s
 			WHERE t.workspace_id = ?
-			GROUP BY date(turn.started_at)
+			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`
+	`, dateStart, datePlus, curDate, dateOfTurn, dateOfMsg, dateOfTurn, dateOfTurn)
 
-	rows, err := r.db.QueryContext(ctx, query, days-1, workspaceID)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), days-1, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,13 +244,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 	var results []*models.DailyActivity
 	for rows.Next() {
 		var activity models.DailyActivity
-		err := rows.Scan(
-			&activity.Date,
-			&activity.TurnCount,
-			&activity.MessageCount,
-			&activity.TaskCount,
-		)
-		if err != nil {
+		if err := rows.Scan(&activity.Date, &activity.TurnCount, &activity.MessageCount, &activity.TaskCount); err != nil {
 			return nil, err
 		}
 		results = append(results, &activity)
@@ -282,39 +255,37 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 
 // GetCompletedTaskActivity retrieves completed task counts for the last N days
 func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID string, days int) ([]*models.CompletedTaskActivity, error) {
-	query := `
+	drv := r.db.DriverName()
+	dateStart := dialect.DateNowMinusDays(drv, "?")
+	datePlus := dialect.DatePlusOneDay(drv, "date")
+	curDate := dialect.CurrentDate(drv)
+	dateOfCompleted := dialect.DateOf(drv, "ts.completed_at")
+
+	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
-			SELECT date('now', '-' || ? || ' days')
+			SELECT %s
 			UNION ALL
-			SELECT date(date, '+1 day')
-			FROM dates
-			WHERE date < date('now')
+			SELECT %s FROM dates WHERE date < %s
 		)
-		SELECT
-			d.date,
-			COALESCE(activity.completed_tasks, 0) as completed_tasks
+		SELECT d.date, COALESCE(activity.completed_tasks, 0) as completed_tasks
 		FROM dates d
 		LEFT JOIN (
-			SELECT
-				date(ts.completed_at) as activity_date,
-				COUNT(DISTINCT t.id) as completed_tasks
+			SELECT %s as activity_date, COUNT(DISTINCT t.id) as completed_tasks
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			JOIN (
 				SELECT task_id, MAX(completed_at) as completed_at
-				FROM task_sessions
-				WHERE completed_at IS NOT NULL
-				GROUP BY task_id
+				FROM task_sessions WHERE completed_at IS NOT NULL GROUP BY task_id
 			) ts ON ts.task_id = t.id
 			WHERE t.workspace_id = ?
 			  AND (t.archived_at IS NOT NULL
 			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
-			GROUP BY date(ts.completed_at)
+			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`
+	`, dateStart, datePlus, curDate, dateOfCompleted, dateOfCompleted)
 
-	rows, err := r.db.QueryContext(ctx, query, days-1, workspaceID)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), days-1, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,11 +294,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 	var results []*models.CompletedTaskActivity
 	for rows.Next() {
 		var activity models.CompletedTaskActivity
-		err := rows.Scan(
-			&activity.Date,
-			&activity.CompletedTasks,
-		)
-		if err != nil {
+		if err := rows.Scan(&activity.Date, &activity.CompletedTasks); err != nil {
 			return nil, err
 		}
 		results = append(results, &activity)
@@ -338,15 +305,17 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 
 // GetRepositoryStats retrieves aggregated statistics for repositories in a workspace
 func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error) {
-	var startArg interface{}
+	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	query := `
+	drv := r.db.DriverName()
+	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+
+	query := fmt.Sprintf(`
 		SELECT
-			r.id,
-			r.name,
+			r.id, r.name,
 			COALESCE(task_stats.total_tasks, 0) as total_tasks,
 			COALESCE(task_stats.completed_tasks, 0) as completed_tasks,
 			COALESCE(task_stats.in_progress_tasks, 0) as in_progress_tasks,
@@ -362,8 +331,7 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			COALESCE(git_stats.total_deletions, 0) as total_deletions
 		FROM repositories r
 		LEFT JOIN (
-			SELECT
-				tr.repository_id,
+			SELECT tr.repository_id,
 				COUNT(DISTINCT t.id) as total_tasks,
 				COUNT(DISTINCT CASE WHEN ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id) THEN t.id END) as completed_tasks,
 				COUNT(DISTINCT CASE WHEN t.state = 'IN_PROGRESS' THEN t.id END) as in_progress_tasks
@@ -374,13 +342,12 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			GROUP BY tr.repository_id
 		) task_stats ON task_stats.repository_id = r.id
 		LEFT JOIN (
-			SELECT
-				tr.repository_id,
+			SELECT tr.repository_id,
 				COUNT(DISTINCT s.id) as session_count,
 				COUNT(DISTINCT turn.id) as turn_count,
 				COUNT(DISTINCT msg.id) as message_count,
 				COUNT(DISTINCT CASE WHEN msg.author_type = 'user' THEN msg.id END) as user_message_count,
-				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%' THEN msg.id END) as tool_call_count
+				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) as tool_call_count
 			FROM task_repositories tr
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
@@ -389,13 +356,8 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			GROUP BY tr.repository_id
 		) session_stats ON session_stats.repository_id = r.id
 		LEFT JOIN (
-			SELECT
-				tr.repository_id,
-				COALESCE(SUM(CASE
-					WHEN turn.completed_at IS NOT NULL
-					THEN (julianday(turn.completed_at) - julianday(turn.started_at)) * 86400000
-					ELSE 0
-				END), 0) as total_duration_ms
+			SELECT tr.repository_id,
+				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
 			FROM task_repositories tr
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
@@ -403,8 +365,7 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			GROUP BY tr.repository_id
 		) duration_stats ON duration_stats.repository_id = r.id
 		LEFT JOIN (
-			SELECT
-				s.repository_id,
+			SELECT s.repository_id,
 				COUNT(DISTINCT c.id) as total_commits,
 				COALESCE(SUM(c.files_changed), 0) as total_files_changed,
 				COALESCE(SUM(c.insertions), 0) as total_insertions,
@@ -414,18 +375,13 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 			WHERE s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
 			GROUP BY s.repository_id
 		) git_stats ON git_stats.repository_id = r.id
-		WHERE r.workspace_id = ?
-		AND r.deleted_at IS NULL
+		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
 		ORDER BY total_duration_ms DESC, total_tasks DESC, r.name ASC
-	`
+	`, dur)
 
-	rows, err := r.db.QueryContext(
-		ctx,
-		query,
-		startArg, startArg,
-		startArg, startArg,
-		startArg, startArg,
-		startArg, startArg,
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
+		startArg, startArg, startArg, startArg,
+		startArg, startArg, startArg, startArg,
 		workspaceID,
 	)
 	if err != nil {
@@ -438,21 +394,12 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 		var stats models.RepositoryStats
 		var totalDurationMs float64
 		err := rows.Scan(
-			&stats.RepositoryID,
-			&stats.RepositoryName,
-			&stats.TotalTasks,
-			&stats.CompletedTasks,
-			&stats.InProgressTasks,
-			&stats.SessionCount,
-			&stats.TurnCount,
-			&stats.MessageCount,
-			&stats.UserMessageCount,
-			&stats.ToolCallCount,
-			&totalDurationMs,
-			&stats.TotalCommits,
-			&stats.TotalFilesChanged,
-			&stats.TotalInsertions,
-			&stats.TotalDeletions,
+			&stats.RepositoryID, &stats.RepositoryName,
+			&stats.TotalTasks, &stats.CompletedTasks, &stats.InProgressTasks,
+			&stats.SessionCount, &stats.TurnCount, &stats.MessageCount,
+			&stats.UserMessageCount, &stats.ToolCallCount, &totalDurationMs,
+			&stats.TotalCommits, &stats.TotalFilesChanged,
+			&stats.TotalInsertions, &stats.TotalDeletions,
 		)
 		if err != nil {
 			return nil, err
@@ -466,32 +413,27 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 
 // GetAgentUsage retrieves usage statistics per agent profile
 func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.AgentUsage, error) {
-	var startArg interface{}
+	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	query := `
+	drv := r.db.DriverName()
+	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+	jeName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "name")
+	jeDisplay := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "agent_display_name")
+	jeModel := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model")
+	jeModelName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "model_name")
+	jeLLM := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "llm")
+
+	query := fmt.Sprintf(`
 		SELECT
 			s.agent_profile_id,
-			COALESCE(
-				json_extract(s.agent_profile_snapshot, '$.name'),
-				json_extract(s.agent_profile_snapshot, '$.agent_display_name'),
-				s.agent_profile_id
-			) as agent_profile_name,
-			COALESCE(
-				json_extract(s.agent_profile_snapshot, '$.model'),
-				json_extract(s.agent_profile_snapshot, '$.model_name'),
-				json_extract(s.agent_profile_snapshot, '$.llm'),
-				''
-			) as agent_model,
+			COALESCE(%s, %s, s.agent_profile_id) as agent_profile_name,
+			COALESCE(%s, %s, %s, '') as agent_model,
 			COUNT(DISTINCT s.id) as session_count,
 			COUNT(DISTINCT turn.id) as turn_count,
-			COALESCE(SUM(CASE
-				WHEN turn.completed_at IS NOT NULL
-				THEN (julianday(turn.completed_at) - julianday(turn.started_at)) * 86400000
-				ELSE 0
-			END), 0) as total_duration_ms
+			COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
 		LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
@@ -499,9 +441,9 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		GROUP BY s.agent_profile_id
 		ORDER BY session_count DESC
 		LIMIT ?
-	`
+	`, jeName, jeDisplay, jeModel, jeModelName, jeLLM, dur)
 
-	rows, err := r.db.QueryContext(ctx, query, workspaceID, startArg, startArg, limit)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), workspaceID, startArg, startArg, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -512,12 +454,8 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		var usage models.AgentUsage
 		var totalDurationMs float64
 		err := rows.Scan(
-			&usage.AgentProfileID,
-			&usage.AgentProfileName,
-			&usage.AgentModel,
-			&usage.SessionCount,
-			&usage.TurnCount,
-			&totalDurationMs,
+			&usage.AgentProfileID, &usage.AgentProfileName, &usage.AgentModel,
+			&usage.SessionCount, &usage.TurnCount, &totalDurationMs,
 		)
 		if err != nil {
 			return nil, err
@@ -531,7 +469,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 
 // GetGitStats retrieves aggregated git statistics for a workspace
 func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error) {
-	var startArg interface{}
+	var startArg any
 	if start != nil {
 		startArg = start.UTC().Format(time.RFC3339)
 	}
@@ -549,11 +487,9 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 	`
 
 	var stats models.GitStats
-	err := r.db.QueryRowContext(ctx, query, workspaceID, startArg, startArg).Scan(
-		&stats.TotalCommits,
-		&stats.TotalFilesChanged,
-		&stats.TotalInsertions,
-		&stats.TotalDeletions,
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), workspaceID, startArg, startArg).Scan(
+		&stats.TotalCommits, &stats.TotalFilesChanged,
+		&stats.TotalInsertions, &stats.TotalDeletions,
 	)
 	if err != nil {
 		return nil, err
