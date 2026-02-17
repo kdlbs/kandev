@@ -20,6 +20,7 @@ import { EditorCommentPopover } from '@/components/task/editor-comment-popover';
 import { CommentViewPopover } from '@/components/task/comment-view-popover';
 import { PanelHeaderBarSplit } from '@/components/task/panel-primitives';
 import { useDockviewStore } from '@/lib/state/dockview-store';
+import { useCommandPanelOpen } from '@/lib/commands/command-registry';
 
 type FileEditorContentProps = {
   path: string;
@@ -153,6 +154,7 @@ export function CodeMirrorCodeEditor({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const { toast } = useToast();
+  const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
   // Comment store
   const addComment = useDiffCommentsStore((state) => state.addComment);
@@ -395,6 +397,36 @@ export function CodeMirrorCodeEditor({
     wrapper.addEventListener('keydown', handleKeyDown, true);
     return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
   }, [enableComments, sessionId, currentSelection, floatingButtonPos]);
+
+  // Cmd/Ctrl+K to open command panel — capture phase intercepts before CodeMirror
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandPanelOpen(true);
+      }
+    };
+    wrapper.addEventListener('keydown', handler, true);
+    return () => wrapper.removeEventListener('keydown', handler, true);
+  }, [setCommandPanelOpen]);
+
+  // Alt+Z to toggle word wrap — capture phase
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyZ') {
+        e.preventDefault();
+        e.stopPropagation();
+        setWrapEnabled((prev) => !prev);
+      }
+    };
+    wrapper.addEventListener('keydown', handler, true);
+    return () => wrapper.removeEventListener('keydown', handler, true);
+  }, []);
 
   // Handle Cmd/Ctrl+S keyboard shortcut and Escape
   useEffect(() => {

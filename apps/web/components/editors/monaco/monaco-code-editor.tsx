@@ -228,7 +228,7 @@ export function MonacoCodeEditor({
 
   // Handle editor mount
   const handleEditorDidMount: OnMount = useCallback(
-    (editor, _monaco) => {
+    (editor, monaco) => {
       editorRef.current = editor;
       setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
@@ -288,8 +288,20 @@ export function MonacoCodeEditor({
         }
       });
       disposablesRef.current.push(glyphDisposable);
+
+      // Override Monaco's built-in Cmd+K chord to open command panel
+      editor.addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK,
+        () => { setCommandPanelOpen(true); }
+      );
+
+      // Alt+Z to toggle word wrap
+      editor.addCommand(
+        monaco.KeyMod.Alt | monaco.KeyCode.KeyZ,
+        () => { setWrapEnabled((prev) => !prev); }
+      );
     },
-    [path, enableComments, sessionId]
+    [path, enableComments, sessionId, setCommandPanelOpen, setWrapEnabled]
   );
 
   // Cleanup disposables
@@ -475,21 +487,6 @@ export function MonacoCodeEditor({
     wrapper.addEventListener('keydown', handleKeyDown, true);
     return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
   }, [enableComments, sessionId, currentSelection]);
-
-  // Cmd+K for command panel — capture phase prevents Monaco from swallowing the shortcut
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        e.stopPropagation();
-        setCommandPanelOpen(true);
-      }
-    };
-    wrapper.addEventListener('keydown', handleKeyDown, true);
-    return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
-  }, [setCommandPanelOpen]);
 
   // Escape to close inline forms
   useEffect(() => {
