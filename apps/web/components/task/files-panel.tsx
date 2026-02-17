@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { PanelRoot, PanelBody } from './panel-primitives';
 import { useAppStore } from '@/components/state-provider';
 import { useFileOperations } from '@/hooks/use-file-operations';
@@ -13,7 +13,6 @@ type FilesPanelProps = {
 };
 
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const isArchived = useIsTaskArchived();
   const { createFile, deleteFile } = useFileOperations(activeSessionId ?? null);
@@ -40,8 +39,6 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onOpenFile={onOpenFile}
             onCreateFile={handleCreateFile}
             onDeleteFile={deleteFile}
-            isSearchOpen={isSearchOpen}
-            onCloseSearch={() => setIsSearchOpen(false)}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-xs">

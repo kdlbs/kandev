@@ -22,6 +22,7 @@ import {
 } from '@/lib/local-storage';
 import { useToast } from '@/components/toast-provider';
 import { InlineFileInput } from './inline-file-input';
+import { PanelHeaderBar, PanelHeaderBarSplit } from './panel-primitives';
 
 /**
  * Merge a freshly-fetched tree node into an existing one, preserving
@@ -49,13 +50,16 @@ function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTre
   return { ...existing, ...incoming, children: mergedChildren };
 }
 
+/** Sort comparator: directories first, then alphabetical by name. */
+const compareTreeNodes = (a: FileTreeNode, b: FileTreeNode): number => {
+  if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+  return a.name.localeCompare(b.name);
+};
+
 /** Insert a file node into a parent folder, keeping children sorted (dirs first, then alpha). */
 function insertNodeInTree(root: FileTreeNode, parentPath: string, node: FileTreeNode): FileTreeNode {
   if (root.path === parentPath || (parentPath === '' && root.path === '')) {
-    const children = [...(root.children ?? []), node].sort((a, b) => {
-      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    const children = [...(root.children ?? []), node].sort(compareTreeNodes);
     return { ...root, children };
   }
   if (!root.children) return root;
@@ -77,12 +81,10 @@ type FileBrowserProps = {
   onOpenFile: (file: OpenFileTab) => void;
   onCreateFile?: (path: string) => Promise<boolean>;
   onDeleteFile?: (path: string) => Promise<boolean>;
-  isSearchOpen?: boolean;
-  onCloseSearch?: () => void;
   activeFilePath?: string | null;
 };
 
-export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile, isSearchOpen = false, onCloseSearch, activeFilePath }: FileBrowserProps) {
+export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile, activeFilePath }: FileBrowserProps) {
   const { toast } = useToast();
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -99,6 +101,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
 
   // Search state
+  const [isSearchActive, setIsSearchActive] = useState(false);
   const [localSearchQuery, setLocalSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -176,14 +179,14 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
 
   // Focus search input when search opens
   useEffect(() => {
-    if (isSearchOpen && searchInputRef.current) {
+    if (isSearchActive && searchInputRef.current) {
       searchInputRef.current.focus();
     }
-  }, [isSearchOpen]);
+  }, [isSearchActive]);
 
   // Clear search when closing
   useEffect(() => {
-    if (!isSearchOpen) {
+    if (!isSearchActive) {
       setLocalSearchQuery('');
       setSearchResults(null);
       setIsSearching(false);
@@ -191,7 +194,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
         clearTimeout(searchTimeoutRef.current);
       }
     }
-  }, [isSearchOpen]);
+  }, [isSearchActive]);
 
   const clearRetryTimer = useCallback(() => {
     if (retryTimerRef.current) {
@@ -474,16 +477,16 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
     }, 300);
   }, [sessionId]);
 
-  // Close search (clears and notifies parent)
+  // Close search and clear state
   const handleCloseSearch = useCallback(() => {
+    setIsSearchActive(false);
     setLocalSearchQuery('');
     setSearchResults(null);
     setIsSearching(false);
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
-    onCloseSearch?.();
-  }, [onCloseSearch]);
+  }, []);
 
   // Cleanup search timeout on unmount
   useEffect(() => {
@@ -547,39 +550,6 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
     }
   }, [expandedPaths, sessionId, tree, showLoading, hideLoading]);
 
-  const openFile = useCallback(async (node: FileTreeNode) => {
-    if (node.is_dir) return;
-
-    try {
-      const client = getWebSocketClient();
-      if (!client) return;
-
-      const response: FileContentResponse = await requestFileContent(client, sessionId, node.path);
-
-      // Calculate hash for the file content
-      const { calculateHash } = await import('@/lib/utils/file-diff');
-      const hash = await calculateHash(response.content);
-
-      onOpenFile({
-        path: node.path,
-        name: node.name,
-        content: response.content,
-        originalContent: response.content,
-        originalHash: hash,
-        isDirty: false,
-        isBinary: response.is_binary,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'Unknown error';
-      toast({
-        title: 'Failed to open file',
-        description: reason,
-        variant: 'error',
-      });
-    }
-  }, [sessionId, onOpenFile, toast]);
-
-  // Open file from search result (path only)
   const openFileByPath = useCallback(async (path: string) => {
     try {
       const client = getWebSocketClient();
@@ -587,11 +557,9 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
 
       const response: FileContentResponse = await requestFileContent(client, sessionId, path);
 
-      // Calculate hash for the file content
       const { calculateHash } = await import('@/lib/utils/file-diff');
       const hash = await calculateHash(response.content);
 
-      // Extract filename from path
       const name = path.split('/').pop() || path;
 
       onOpenFile({
@@ -629,7 +597,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
             isActiveFolder && "bg-muted/50"
           )}
           style={{ paddingLeft: `${depth * 12 + 8 + (node.is_dir ? 0 : 20)}px` }}
-          onClick={() => (node.is_dir ? toggleExpand(node) : openFile(node))}
+          onClick={() => (node.is_dir ? toggleExpand(node) : openFileByPath(node.path))}
         >
           {node.is_dir && (
             <span className="flex-shrink-0">
@@ -698,12 +666,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
               />
             )}
             {node.children && [...node.children]
-              .sort((a, b) => {
-                // Folders first, then alphabetically
-                if (a.is_dir && !b.is_dir) return -1;
-                if (!a.is_dir && b.is_dir) return 1;
-                return a.name.localeCompare(b.name);
-              })
+              .sort(compareTreeNodes)
               .map((child) => renderTreeNode(child, depth + 1))}
           </div>
         )}
@@ -755,102 +718,117 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
 
   return (
     <div className="flex flex-col h-full">
-      {/* Search input - only shown when search is open */}
-      {isSearchOpen && (
-        <div className="px-2 pb-2">
-          <div className="relative">
+      {/* Header toolbar */}
+      {tree && loadState === 'loaded' && (
+        isSearchActive ? (
+          <PanelHeaderBar className="group/header">
             {isSearching ? (
-              <IconLoader2 className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none animate-spin" />
+              <IconLoader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin shrink-0" />
             ) : (
-              <IconSearch className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <IconSearch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             )}
             <Input
               ref={searchInputRef}
               type="text"
               value={localSearchQuery}
               onChange={handleSearchChange}
+              onKeyDown={(e) => { if (e.key === 'Escape') handleCloseSearch(); }}
               placeholder="Search files..."
-              className="pl-7 pr-7 h-7 text-xs"
+              className="flex-1 min-w-0 h-5 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 px-2"
             />
             <button
-              type="button"
+              className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
               onClick={handleCloseSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <IconX className="h-3.5 w-3.5" />
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Header toolbar */}
-      {tree && loadState === 'loaded' && (
-        <div className="group/header flex items-center gap-1 border-b border-border/50 px-2 py-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="relative shrink-0 cursor-pointer"
-                onClick={() => {
-                  if (fullPath) void copyPath(fullPath);
-                }}
-              >
-                <IconFolderOpen className={cn("h-3.5 w-3.5 text-muted-foreground transition-opacity", copied ? "opacity-0" : "group-hover/header:opacity-0")} />
-                {copied ? (
-                  <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
-                ) : (
-                  <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
+          </PanelHeaderBar>
+        ) : (
+          <PanelHeaderBarSplit
+            className="group/header"
+            left={
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="relative shrink-0 cursor-pointer"
+                      onClick={() => {
+                        if (fullPath) void copyPath(fullPath);
+                      }}
+                    >
+                      <IconFolderOpen className={cn("h-3.5 w-3.5 text-muted-foreground transition-opacity", copied ? "opacity-0" : "group-hover/header:opacity-0")} />
+                      {copied ? (
+                        <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
+                      ) : (
+                        <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Copy workspace path</TooltipContent>
+                </Tooltip>
+                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                  {displayPath}
+                </span>
+              </>
+            }
+            right={
+              <>
+                {onCreateFile && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                        onClick={handleStartCreate}
+                      >
+                        <IconPlus className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>New file</TooltipContent>
+                  </Tooltip>
                 )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Copy workspace path</TooltipContent>
-          </Tooltip>
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-            {displayPath}
-          </span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {onCreateFile && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                    onClick={handleStartCreate}
-                  >
-                    <IconPlus className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>New file</TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                  onClick={() => openFolder()}
-                >
-                  <IconFolderShare className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Open workspace folder</TooltipContent>
-            </Tooltip>
-            {expandedPaths.size > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                    onClick={collapseAll}
-                  >
-                    <IconListTree className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Collapse all</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-        </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                      onClick={() => openFolder()}
+                    >
+                      <IconFolderShare className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open workspace folder</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                      onClick={() => setIsSearchActive(true)}
+                    >
+                      <IconSearch className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Search files</TooltipContent>
+                </Tooltip>
+                {expandedPaths.size > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                        onClick={collapseAll}
+                      >
+                        <IconListTree className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Collapse all</TooltipContent>
+                  </Tooltip>
+                )}
+              </>
+            }
+          />
+        )
       )}
 
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
-        {isSearchOpen && searchResults !== null ? (
+        {isSearchActive && searchResults !== null ? (
           renderSearchResults()
         ) : isSessionFailed ? (
           <div className="p-4 text-sm text-destructive/80 space-y-2">
@@ -887,11 +865,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
               />
             )}
             {tree.children && [...tree.children]
-              .sort((a, b) => {
-                if (a.is_dir && !b.is_dir) return -1;
-                if (!a.is_dir && b.is_dir) return 1;
-                return a.name.localeCompare(b.name);
-              })
+              .sort(compareTreeNodes)
               .map((child) => renderTreeNode(child, 0))}
           </div>
         ) : (

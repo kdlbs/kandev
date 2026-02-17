@@ -10,7 +10,6 @@ import {
   IconChevronRight,
   IconGitCommit,
   IconLoader2,
-  IconSearch,
   IconColumns,
 } from '@tabler/icons-react';
 
@@ -75,7 +74,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
   const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
@@ -92,11 +90,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
   const userClickedFilesTabRef = useRef(false);
   // Track previous changed files count for auto-switch detection
   const prevChangedCountRef = useRef(0);
-
-  // Close search when switching tabs
-  useEffect(() => {
-    setIsSearchOpen(false);
-  }, [topTab]);
 
   // State for commit diffs
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
@@ -344,28 +337,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
     },
   ];
 
-  // Contextual buttons based on active tab
-  const tabRightContent = useMemo(() => {
-    if (topTab === 'files') {
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground cursor-pointer"
-              onClick={() => setIsSearchOpen(true)}
-            >
-              <IconSearch className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Search files</TooltipContent>
-        </Tooltip>
-      );
-    }
-    // No contextual buttons for diff tab (for now)
-    return null;
-  }, [topTab]);
-
   return (
     <SessionPanel borderSide="left">
       <SessionTabs
@@ -373,7 +344,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
         activeTab={topTab}
         onTabChange={(value) => handleTabChange(value as 'diff' | 'files')}
         className="flex-1 min-h-0"
-        rightContent={tabRightContent}
       >
         <TabsContent value="diff" className="flex-1 min-h-0">
           <SessionPanelContent className="flex flex-col">
@@ -604,8 +574,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, 
                 onOpenFile={onOpenFile}
                 onCreateFile={handleCreateFile}
                 onDeleteFile={hookDeleteFile}
-                isSearchOpen={isSearchOpen}
-                onCloseSearch={() => setIsSearchOpen(false)}
                 activeFilePath={activeFilePath}
               />
             ) : (
