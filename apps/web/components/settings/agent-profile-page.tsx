@@ -46,6 +46,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
           label: `${agentProfile.agent_display_name} • ${agentProfile.name}`,
           agent_id: agentItem.id,
           agent_name: agentItem.name,
+          cli_passthrough: agentProfile.cli_passthrough,
         }))
       )
     );

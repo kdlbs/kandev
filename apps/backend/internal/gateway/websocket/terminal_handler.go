@@ -139,36 +139,17 @@ func (w *wsWriter) Close() error {
 	return nil
 }
 
-// HandleTerminalWS handles WebSocket connections at /xterm.js/:sessionId
+// HandleTerminalWS handles WebSocket connections at /terminal/:sessionId
 // This creates a binary WebSocket bridge between xterm.js and the PTY.
-// Query parameter terminalId determines the type of terminal:
-// - "default" or empty: Agent passthrough terminal (CLI passthrough mode)
-// - "shell-1", "shell-2", etc.: Independent user shell terminals
+// Query parameter "mode" determines the type of terminal:
+// - "agent": Agent passthrough terminal (CLI passthrough mode)
+// - "shell": Independent user shell terminal (requires terminalId query param)
 func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 	sessionID := c.Param("sessionId")
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
 		return
 	}
-
-	terminalID := c.Query("terminalId")
-	// terminalId is required - "default" is for agent passthrough, anything else is for user shells
-	// Empty terminalId is rejected to prevent accidental fallback behavior
-	if terminalID == "" {
-		h.logger.Warn("terminal WebSocket connection rejected: terminalId query parameter is required (use 'default' for agent passthrough or a unique ID for user shells)",
-			zap.String("session_id", sessionID),
-			zap.String("raw_query", c.Request.URL.RawQuery),
-			zap.String("remote_addr", c.Request.RemoteAddr))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId query parameter is required"})
-		return
-	}
-
-	h.logger.Info("terminal WebSocket connection request",
-		zap.String("session_id", sessionID),
-		zap.String("terminal_id", terminalID),
-		zap.Bool("is_agent_passthrough", terminalID == "default"),
-		zap.String("raw_query", c.Request.URL.RawQuery),
-		zap.String("remote_addr", c.Request.RemoteAddr))
 
 	// Get the interactive runner first
 	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
@@ -178,14 +159,41 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 		return
 	}
 
-	// Route based on terminal ID
-	if terminalID != "default" {
-		// User shell terminal - create independent shell process
-		h.handleUserShellWS(c, sessionID, terminalID, interactiveRunner)
-		return
-	}
+	// Route based on explicit mode parameter
+	mode := c.Query("mode")
+	switch mode {
+	case "agent":
+		h.logger.Info("terminal WebSocket connection request",
+			zap.String("session_id", sessionID),
+			zap.String("mode", "agent"),
+			zap.String("remote_addr", c.Request.RemoteAddr))
+		h.handleAgentPassthroughWS(c, sessionID, interactiveRunner)
 
-	// Agent passthrough terminal - existing logic
+	case "shell":
+		terminalID := c.Query("terminalId")
+		if terminalID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId required for shell mode"})
+			return
+		}
+		h.logger.Info("terminal WebSocket connection request",
+			zap.String("session_id", sessionID),
+			zap.String("mode", "shell"),
+			zap.String("terminal_id", terminalID),
+			zap.String("remote_addr", c.Request.RemoteAddr))
+		h.handleUserShellWS(c, sessionID, terminalID, interactiveRunner)
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode query param required: agent or shell"})
+	}
+}
+
+// handleAgentPassthroughWS handles WebSocket connections for agent passthrough terminals.
+// It ensures a passthrough execution exists, upgrades to WebSocket, and bridges I/O.
+func (h *TerminalHandler) handleAgentPassthroughWS(
+	c *gin.Context,
+	sessionID string,
+	interactiveRunner *process.InteractiveRunner,
+) {
 	// Ensure passthrough execution exists and is running.
 	// This handles:
 	// 1. Normal case: execution exists with running process

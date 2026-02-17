@@ -596,7 +596,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
           {activeTaskId ? (
             isPassthroughMode ? (
               <div className="flex-1 min-h-0 h-full" style={{ minHeight: '150px' }}>
-                <PassthroughTerminal key={activeSessionId} sessionId={sessionId} terminalId="default" />
+                <PassthroughTerminal key={activeSessionId} sessionId={sessionId} mode="agent" />
               </div>
             ) : (
               <TaskChatPanel

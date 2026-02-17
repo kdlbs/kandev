@@ -13,11 +13,12 @@ import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl
 import { getBackendConfig } from '@/lib/config';
 import { getTerminalTheme } from '@/lib/terminal-theme';
 
-type PassthroughTerminalProps = {
+type BaseProps = {
   sessionId?: string | null;
-  terminalId?: string; // Terminal tab identifier (e.g., "shell-1", "shell-2")
-  label?: string;      // Label for plain shell terminals (sent to backend for persistence)
 };
+type AgentTerminalProps = BaseProps & { mode: 'agent'; label?: string };
+type ShellTerminalProps = BaseProps & { mode: 'shell'; terminalId: string; label?: string };
+type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
 
 // Debug flag - set to true to see detailed logs
 const DEBUG = false;
@@ -33,15 +34,17 @@ const MIN_HEIGHT = 100;
  * PassthroughTerminal provides direct terminal interaction with an agent CLI.
  *
  * Design: Dedicated Binary WebSocket + AttachAddon
- * - Uses a dedicated WebSocket connection to /xterm.js/:sessionId
+ * - Uses a dedicated WebSocket connection to /terminal/:sessionId
  * - Raw binary frames bypass JSON encoding/decoding latency
  * - AttachAddon (official xterm.js addon) handles the bridging
  * - Unicode11Addon enables proper unicode character support
  * - Resize commands sent via binary protocol: [0x01][JSON {cols, rows}]
  */
-export function PassthroughTerminal({ sessionId: propSessionId, terminalId, label }: PassthroughTerminalProps) {
+export function PassthroughTerminal(props: PassthroughTerminalProps) {
+  const { sessionId: propSessionId, mode, label } = props;
+  const terminalId = mode === 'shell' ? props.terminalId : undefined;
   // Debug: log props on every render
-  log('Render - props:', { propSessionId, terminalId, label });
+  log('Render - props:', { propSessionId, mode, terminalId, label });
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -313,7 +316,7 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
 
   // Connect WebSocket when ready
   useEffect(() => {
-    log('WebSocket effect:', { taskId, sessionId, terminalId, canConnect, hasTerminal: !!xtermRef.current });
+    log('WebSocket effect:', { taskId, sessionId, mode, terminalId, canConnect, hasTerminal: !!xtermRef.current });
 
     if (!taskId || !sessionId || !canConnect) {
       log('WebSocket effect: early return - missing requirements', { taskId, sessionId, canConnect });
@@ -343,18 +346,17 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
         wsRef.current = null;
       }
 
-      // Build WebSocket URL - terminalId is required for user shells
-      // If terminalId is not provided, this is an error for user shell terminals
-      if (!terminalId) {
-        log('ERROR: terminalId is required but was not provided!', { sessionId, terminalId });
-        return;
+      // Build WebSocket URL based on mode
+      let wsUrl: string;
+      if (mode === 'agent') {
+        wsUrl = `${wsBaseUrl}/terminal/${sessionId}?mode=agent`;
+      } else {
+        wsUrl = `${wsBaseUrl}/terminal/${sessionId}?mode=shell&terminalId=${encodeURIComponent(terminalId!)}`;
       }
-      let wsUrl = `${wsBaseUrl}/xterm.js/${sessionId}?terminalId=${encodeURIComponent(terminalId)}`;
       if (label) {
-        // For plain shell terminals, send the label for persistence
         wsUrl += `&label=${encodeURIComponent(label)}`;
       }
-      log('Connecting to', wsUrl, { terminalId, label });
+      log('Connecting to', wsUrl, { mode, terminalId, label });
 
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
@@ -427,7 +429,7 @@ export function PassthroughTerminal({ sessionId: propSessionId, terminalId, labe
         wsRef.current = null;
       }
     };
-  }, [taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, terminalId, label]);
+  }, [taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, mode, terminalId, label]);
 
   return (
     <div

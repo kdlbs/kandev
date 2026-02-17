@@ -201,6 +201,11 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
 }
 
+// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
+func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	return a.mgr.IsPassthroughSession(ctx, sessionID)
+}
+
 // ResolveAgentProfile resolves an agent profile ID to profile information
 func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
 	info, err := a.mgr.ResolveAgentProfile(ctx, profileID)

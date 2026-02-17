@@ -50,11 +50,25 @@ type OnTurnCompleteAction struct {
 	Config map[string]interface{}   `json:"config,omitempty"`
 }
 
+// OnExitActionType represents the type of action to execute when leaving a step.
+type OnExitActionType string
+
+const (
+	OnExitDisablePlanMode OnExitActionType = "disable_plan_mode"
+)
+
+// OnExitAction represents an action to execute when leaving a step.
+type OnExitAction struct {
+	Type   OnExitActionType       `json:"type"`
+	Config map[string]interface{} `json:"config,omitempty"`
+}
+
 // StepEvents contains event-driven actions for a workflow step.
 type StepEvents struct {
 	OnEnter        []OnEnterAction        `json:"on_enter,omitempty"`
 	OnTurnStart    []OnTurnStartAction    `json:"on_turn_start,omitempty"`
 	OnTurnComplete []OnTurnCompleteAction  `json:"on_turn_complete,omitempty"`
+	OnExit         []OnExitAction         `json:"on_exit,omitempty"`
 }
 
 // ReviewStatus represents the review state of a session
@@ -183,5 +197,6 @@ func RemapStepEvents(events StepEvents, idMap map[string]string) StepEvents {
 		}
 		result.OnTurnComplete = append(result.OnTurnComplete, a)
 	}
+	result.OnExit = append(result.OnExit, events.OnExit...)
 	return result
 }

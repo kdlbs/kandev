@@ -19,6 +19,9 @@ export type OnTurnStartActionType = 'move_to_next' | 'move_to_previous' | 'move_
 // On Turn Complete action types
 export type OnTurnCompleteActionType = 'move_to_next' | 'move_to_previous' | 'move_to_step' | 'disable_plan_mode';
 
+// On Exit action types
+export type OnExitActionType = 'disable_plan_mode';
+
 export type OnEnterAction = {
   type: OnEnterActionType;
   config?: Record<string, unknown>;
@@ -34,10 +37,16 @@ export type OnTurnCompleteAction = {
   config?: Record<string, unknown>;
 };
 
+export type OnExitAction = {
+  type: OnExitActionType;
+  config?: Record<string, unknown>;
+};
+
 export type StepEvents = {
   on_enter?: OnEnterAction[];
   on_turn_start?: OnTurnStartAction[];
   on_turn_complete?: OnTurnCompleteAction[];
+  on_exit?: OnExitAction[];
 };
 
 // Workflow Review Status
@@ -278,6 +287,7 @@ export type TaskSession = {
   updated_at: string;
   // Workflow fields
   is_primary?: boolean;
+  is_passthrough?: boolean;
   workflow_step_id?: string;
   review_status?: WorkflowReviewStatus;
 };

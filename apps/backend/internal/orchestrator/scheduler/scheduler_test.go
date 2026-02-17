@@ -67,6 +67,10 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	return false
+}
+
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil
 }

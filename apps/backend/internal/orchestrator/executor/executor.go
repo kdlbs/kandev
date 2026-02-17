@@ -66,6 +66,9 @@ type AgentManagerClient interface {
 	// SetExecutionDescription updates the task description in an existing execution's metadata.
 	// Used when starting an agent on a session whose workspace was already launched.
 	SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error
+
+	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
+	IsPassthroughSession(ctx context.Context, sessionID string) bool
 }
 
 // AgentProfileInfo contains resolved profile information
@@ -356,6 +359,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	// Resolve agent profile to get model and other settings for snapshot
 	var agentProfileSnapshot map[string]interface{}
+	var isPassthrough bool
 	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
 		agentProfileSnapshot = map[string]interface{}{
 			"id":                           profileInfo.ProfileID,
@@ -367,6 +371,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 			"cli_passthrough":              profileInfo.CLIPassthrough,
 		}
+		isPassthrough = profileInfo.CLIPassthrough
 	} else {
 		agentProfileSnapshot = map[string]interface{}{
 			"id":    agentProfileID,
@@ -388,6 +393,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
 		IsPrimary:            true,
+		IsPassthrough:        isPassthrough,
 	}
 	if workflowStepID != "" {
 		session.WorkflowStepID = &workflowStepID

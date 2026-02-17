@@ -2,6 +2,7 @@ package queue
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -195,22 +196,25 @@ func TestUnlimitedQueue(t *testing.T) {
 }
 
 func TestFIFOWithSamePriority(t *testing.T) {
-	q := NewTaskQueue(10)
+	synctest.Test(t, func(t *testing.T) {
+		q := NewTaskQueue(10)
 
-	// All tasks have same priority - should be FIFO
-	_ = q.Enqueue(createTestTask("first", 5))
-	time.Sleep(1 * time.Millisecond) // Ensure different timestamps
-	_ = q.Enqueue(createTestTask("second", 5))
-	time.Sleep(1 * time.Millisecond)
-	_ = q.Enqueue(createTestTask("third", 5))
+		// All tasks have same priority - should be FIFO
+		// Using 1s sleeps with synctest fake clock ensures distinct timestamps instantly
+		_ = q.Enqueue(createTestTask("first", 5))
+		time.Sleep(1 * time.Second)
+		_ = q.Enqueue(createTestTask("second", 5))
+		time.Sleep(1 * time.Second)
+		_ = q.Enqueue(createTestTask("third", 5))
 
-	first := q.Dequeue()
-	if first.TaskID != "first" {
-		t.Errorf("expected 'first' with FIFO ordering, got %s", first.TaskID)
-	}
+		first := q.Dequeue()
+		if first.TaskID != "first" {
+			t.Errorf("expected 'first' with FIFO ordering, got %s", first.TaskID)
+		}
 
-	second := q.Dequeue()
-	if second.TaskID != "second" {
-		t.Errorf("expected 'second' with FIFO ordering, got %s", second.TaskID)
-	}
+		second := q.Dequeue()
+		if second.TaskID != "second" {
+			t.Errorf("expected 'second' with FIFO ordering, got %s", second.TaskID)
+		}
+	})
 }

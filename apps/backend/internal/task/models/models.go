@@ -226,6 +226,7 @@ type TaskSession struct {
 
 	// Workflow-related fields
 	IsPrimary      bool    `json:"is_primary"`                 // Whether this is the primary session for the task
+	IsPassthrough  bool    `json:"is_passthrough"`             // Whether this session uses passthrough (PTY) mode
 	WorkflowStepID *string `json:"workflow_step_id,omitempty"` // Current workflow step ID
 	ReviewStatus   *string `json:"review_status,omitempty"`    // pending, approved
 }
@@ -274,6 +275,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	if s.RepositorySnapshot != nil {
 		result["repository_snapshot"] = s.RepositorySnapshot
 	}
+	result["is_passthrough"] = s.IsPassthrough
 	return result
 }
 

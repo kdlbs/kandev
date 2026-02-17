@@ -41,12 +41,15 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         const agentProfileId = payload.agent_profile_id;
         const agentProfileSnapshot = payload.agent_profile_snapshot as Record<string, unknown> | undefined;
 
+        const isPassthrough = payload.is_passthrough as boolean | undefined;
+
         // Build the update object with all possible fields
         const sessionUpdate: Record<string, unknown> = {};
         if (newState) sessionUpdate.state = newState;
         if (reviewStatus !== undefined) sessionUpdate.review_status = reviewStatus;
         if (workflowStepId !== undefined) sessionUpdate.workflow_step_id = workflowStepId;
         if (agentProfileSnapshot) sessionUpdate.agent_profile_snapshot = agentProfileSnapshot;
+        if (isPassthrough !== undefined) sessionUpdate.is_passthrough = isPassthrough;
 
         if (existingSession) {
           // Update existing session - preserve all existing fields

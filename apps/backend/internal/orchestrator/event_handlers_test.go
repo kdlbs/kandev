@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -81,6 +82,34 @@ func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, erro
 func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v1.TaskState) error {
 	m.updatedStates[taskID] = state
 	return nil
+}
+
+// mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
+type mockAgentManager struct {
+	isPassthrough bool
+}
+
+func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
+func (m *mockAgentManager) StopAgent(_ context.Context, _ string, _ bool) error { return nil }
+func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, _ string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error { return nil }
+func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
+	return nil
+}
+func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool { return false }
+func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
+	return nil
+}
+func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
+	return m.isPassthrough
 }
 
 // --- Helpers ---
@@ -164,11 +193,16 @@ func seedSession(t *testing.T, repo repository.Repository, taskID, sessionID, wo
 
 // createTestService creates a Service with minimal dependencies for event handler testing.
 func createTestService(repo repository.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo) *Service {
+	return createTestServiceWithAgent(repo, stepGetter, taskRepo, &mockAgentManager{})
+}
+
+func createTestServiceWithAgent(repo repository.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	return &Service{
 		logger:             testLogger(),
 		repo:               repo,
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
 	}
 }
 
@@ -561,6 +595,144 @@ func TestSetSessionPlanMode(t *testing.T) {
 		}
 		if pm, ok := session.Metadata["plan_mode"].(bool); !ok || !pm {
 			t.Error("expected plan_mode to be true after initialization")
+		}
+	})
+}
+
+func TestProcessOnExit(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no actions is a no-op", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
+			Events: wfmodels.StepEvents{},
+		}
+
+		// Should not panic or modify anything
+		svc.processOnExit(ctx, "t1", "s1", step)
+	})
+
+	t.Run("disable_plan_mode clears plan mode", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Set plan_mode in session metadata
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
+			Events: wfmodels.StepEvents{
+				OnExit: []wfmodels.OnExitAction{
+					{Type: wfmodels.OnExitDisablePlanMode},
+				},
+			},
+		}
+
+		svc.processOnExit(ctx, "t1", "s1", step)
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata != nil {
+			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
+				t.Error("expected plan_mode to be cleared from session metadata")
+			}
+		}
+	})
+
+	t.Run("disable_plan_mode skipped for passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Set plan_mode in session metadata
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
+			Events: wfmodels.StepEvents{
+				OnExit: []wfmodels.OnExitAction{
+					{Type: wfmodels.OnExitDisablePlanMode},
+				},
+			},
+		}
+
+		svc.processOnExit(ctx, "t1", "s1", step)
+
+		// plan_mode should still be set
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata == nil {
+			t.Fatal("expected metadata to still be set")
+		}
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to remain true for passthrough session")
+		}
+	})
+}
+
+func TestProcessOnEnterPassthrough(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("plan mode not set for passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan Step",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterEnablePlanMode},
+				},
+			},
+		}
+
+		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		if session.Metadata != nil {
+			if _, hasPlanMode := session.Metadata["plan_mode"]; hasPlanMode {
+				t.Error("expected plan_mode NOT to be set for passthrough session")
+			}
+		}
+	})
+
+	t.Run("plan mode not cleared for passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Set plan_mode in session metadata
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{"plan_mode": true}
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step1", Name: "Regular Step",
+			Events: wfmodels.StepEvents{}, // no enable_plan_mode
+		}
+
+		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
+
+		// plan_mode should still be set since passthrough sessions skip plan mode management
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata == nil {
+			t.Fatal("expected metadata to still be set")
+		}
+		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
+			t.Error("expected plan_mode to remain true for passthrough session")
 		}
 	})
 }

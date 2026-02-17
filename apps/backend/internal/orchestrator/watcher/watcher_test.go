@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -202,157 +203,163 @@ func TestStopNotRunning(t *testing.T) {
 }
 
 func TestTaskEventHandling(t *testing.T) {
-	eventBus := newMockEventBus()
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
 
-	var receivedData TaskEventData
-	var received bool
-	var mu sync.Mutex
+		var receivedData TaskEventData
+		var received bool
+		var mu sync.Mutex
 
-	handlers := EventHandlers{
-		OnTaskStateChanged: func(ctx context.Context, data TaskEventData) {
-			mu.Lock()
-			receivedData = data
-			received = true
-			mu.Unlock()
-		},
-	}
-	log := createTestLogger()
+		handlers := EventHandlers{
+			OnTaskStateChanged: func(ctx context.Context, data TaskEventData) {
+				mu.Lock()
+				receivedData = data
+				received = true
+				mu.Unlock()
+			},
+		}
+		log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
-	_ = w.Start(context.Background())
-	defer func() {
-		_ = w.Stop()
-	}()
+		w := NewWatcher(eventBus, handlers, log)
+		_ = w.Start(context.Background())
+		defer func() {
+			_ = w.Stop()
+		}()
 
-	// Simulate publishing a task state changed event
-	oldState := v1.TaskStateTODO
-	newState := v1.TaskStateInProgress
-	event := bus.NewEvent(events.TaskStateChanged, "test", map[string]interface{}{
-		"task_id":   "task-123",
-		"old_state": string(oldState),
-		"new_state": string(newState),
+		// Simulate publishing a task state changed event
+		oldState := v1.TaskStateTODO
+		newState := v1.TaskStateInProgress
+		event := bus.NewEvent(events.TaskStateChanged, "test", map[string]interface{}{
+			"task_id":   "task-123",
+			"old_state": string(oldState),
+			"new_state": string(newState),
+		})
+
+		_ = eventBus.Publish(context.Background(), events.TaskStateChanged, event)
+
+		// Wait for goroutines in mock event bus to settle
+		synctest.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !received {
+			t.Error("OnTaskStateChanged handler was not called")
+		}
+		if receivedData.TaskID != "task-123" {
+			t.Errorf("expected task_id = 'task-123', got %s", receivedData.TaskID)
+		}
 	})
-
-	_ = eventBus.Publish(context.Background(), events.TaskStateChanged, event)
-
-	// Wait for handler to be called
-	time.Sleep(50 * time.Millisecond)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if !received {
-		t.Error("OnTaskStateChanged handler was not called")
-	}
-	if receivedData.TaskID != "task-123" {
-		t.Errorf("expected task_id = 'task-123', got %s", receivedData.TaskID)
-	}
 }
 
 func TestAgentEventHandling(t *testing.T) {
-	eventBus := newMockEventBus()
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
 
-	var receivedData AgentEventData
-	var received bool
-	var mu sync.Mutex
+		var receivedData AgentEventData
+		var received bool
+		var mu sync.Mutex
 
-	handlers := EventHandlers{
-		OnAgentCompleted: func(ctx context.Context, data AgentEventData) {
-			mu.Lock()
-			receivedData = data
-			received = true
-			mu.Unlock()
-		},
-	}
-	log := createTestLogger()
+		handlers := EventHandlers{
+			OnAgentCompleted: func(ctx context.Context, data AgentEventData) {
+				mu.Lock()
+				receivedData = data
+				received = true
+				mu.Unlock()
+			},
+		}
+		log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
-	_ = w.Start(context.Background())
-	defer func() {
-		_ = w.Stop()
-	}()
+		w := NewWatcher(eventBus, handlers, log)
+		_ = w.Start(context.Background())
+		defer func() {
+			_ = w.Stop()
+		}()
 
-	// Simulate publishing an agent completed event
-	exitCode := 0
-	event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
-		"task_id":            "task-123",
-		"agent_execution_id": "agent-456",
-		"agent_type":         "test-agent",
-		"exit_code":          exitCode,
+		// Simulate publishing an agent completed event
+		exitCode := 0
+		event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
+			"task_id":            "task-123",
+			"agent_execution_id": "agent-456",
+			"agent_type":         "test-agent",
+			"exit_code":          exitCode,
+		})
+
+		_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
+
+		// Wait for goroutines in mock event bus to settle
+		synctest.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !received {
+			t.Error("OnAgentCompleted handler was not called")
+		}
+		if receivedData.TaskID != "task-123" {
+			t.Errorf("expected task_id = 'task-123', got %s", receivedData.TaskID)
+		}
+		if receivedData.AgentExecutionID != "agent-456" {
+			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
 	})
-
-	_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
-
-	// Wait for handler to be called
-	time.Sleep(50 * time.Millisecond)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if !received {
-		t.Error("OnAgentCompleted handler was not called")
-	}
-	if receivedData.TaskID != "task-123" {
-		t.Errorf("expected task_id = 'task-123', got %s", receivedData.TaskID)
-	}
-	if receivedData.AgentExecutionID != "agent-456" {
-		t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
-	}
 }
 
 func TestAgentStreamEventHandling(t *testing.T) {
-	eventBus := newMockEventBus()
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
 
-	var receivedPayload *lifecycle.AgentStreamEventPayload
-	var received bool
-	var mu sync.Mutex
+		var receivedPayload *lifecycle.AgentStreamEventPayload
+		var received bool
+		var mu sync.Mutex
 
-	handlers := EventHandlers{
-		OnAgentStreamEvent: func(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-			mu.Lock()
-			receivedPayload = payload
-			received = true
-			mu.Unlock()
-		},
-	}
-	log := createTestLogger()
+		handlers := EventHandlers{
+			OnAgentStreamEvent: func(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+				mu.Lock()
+				receivedPayload = payload
+				received = true
+				mu.Unlock()
+			},
+		}
+		log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
-	_ = w.Start(context.Background())
-	defer func() {
-		_ = w.Stop()
-	}()
+		w := NewWatcher(eventBus, handlers, log)
+		_ = w.Start(context.Background())
+		defer func() {
+			_ = w.Stop()
+		}()
 
-	// Simulate publishing an agent stream event
-	event := bus.NewEvent(events.BuildAgentStreamSubject("session-789"), "test", map[string]interface{}{
-		"type":       "agent/event",
-		"task_id":    "task-789",
-		"session_id": "session-789",
-		"agent_id":   "agent-123",
-		"timestamp":  time.Now().Format(time.RFC3339),
-		"data": map[string]interface{}{
-			"type":         "tool_call",
-			"tool_call_id": "tc-1",
-			"tool_name":    "view",
-			"tool_title":   "View file",
-			"tool_status":  "running",
-		},
+		// Simulate publishing an agent stream event
+		event := bus.NewEvent(events.BuildAgentStreamSubject("session-789"), "test", map[string]interface{}{
+			"type":       "agent/event",
+			"task_id":    "task-789",
+			"session_id": "session-789",
+			"agent_id":   "agent-123",
+			"timestamp":  time.Now().Format(time.RFC3339),
+			"data": map[string]interface{}{
+				"type":         "tool_call",
+				"tool_call_id": "tc-1",
+				"tool_name":    "view",
+				"tool_title":   "View file",
+				"tool_status":  "running",
+			},
+		})
+
+		_ = eventBus.Publish(context.Background(), events.BuildAgentStreamWildcardSubject(), event)
+
+		// Wait for goroutines in mock event bus to settle
+		synctest.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !received {
+			t.Error("OnAgentStreamEvent handler was not called")
+		}
+		if receivedPayload == nil {
+			t.Error("received payload should not be nil")
+		}
+		if receivedPayload.TaskID != "task-789" {
+			t.Errorf("expected task_id = 'task-789', got %s", receivedPayload.TaskID)
+		}
 	})
-
-	_ = eventBus.Publish(context.Background(), events.BuildAgentStreamWildcardSubject(), event)
-
-	// Wait for handler to be called
-	time.Sleep(50 * time.Millisecond)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if !received {
-		t.Error("OnAgentStreamEvent handler was not called")
-	}
-	if receivedPayload == nil {
-		t.Error("received payload should not be nil")
-	}
-	if receivedPayload.TaskID != "task-789" {
-		t.Errorf("expected task_id = 'task-789', got %s", receivedPayload.TaskID)
-	}
 }
 
 func TestNoHandlersRegistered(t *testing.T) {

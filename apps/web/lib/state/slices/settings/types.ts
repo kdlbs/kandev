@@ -36,6 +36,7 @@ export type AgentProfileOption = {
   label: string;
   agent_id: string;
   agent_name: string;
+  cli_passthrough?: boolean;
 };
 
 export type AgentProfilesState = {

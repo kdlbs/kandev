@@ -4,6 +4,7 @@ export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 export type KanbanState = {

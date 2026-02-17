@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -58,16 +59,12 @@ func TestMemoryEventBus_PublishSubscribe(t *testing.T) {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	select {
-	case e := <-received:
-		if e.ID != event.ID {
-			t.Errorf("Expected event ID %s, got %s", event.ID, e.ID)
-		}
-		if e.Type != event.Type {
-			t.Errorf("Expected event type %s, got %s", event.Type, e.Type)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Timeout waiting for event")
+	e := <-received
+	if e.ID != event.ID {
+		t.Errorf("Expected event ID %s, got %s", event.ID, e.ID)
+	}
+	if e.Type != event.Type {
+		t.Errorf("Expected event type %s, got %s", event.Type, e.Type)
 	}
 }
 
@@ -98,8 +95,6 @@ func TestMemoryEventBus_MultipleSubscribers(t *testing.T) {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond) // Allow goroutines to complete
-
 	if atomic.LoadInt32(&count) != 3 {
 		t.Errorf("Expected 3 handlers to be called, got %d", count)
 	}
@@ -126,7 +121,6 @@ func TestMemoryEventBus_Unsubscribe(t *testing.T) {
 	if err := bus.Publish(ctx, "test.unsub", event); err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	// Unsubscribe
 	if err := sub.Unsubscribe(); err != nil {
@@ -140,7 +134,6 @@ func TestMemoryEventBus_Unsubscribe(t *testing.T) {
 	if err := bus.Publish(ctx, "test.unsub", event); err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("Expected 1 handler call, got %d", count)
@@ -178,8 +171,6 @@ func TestMemoryEventBus_SingleTokenWildcard(t *testing.T) {
 	if err := bus.Publish(ctx, "events.order.created", event2); err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
-
-	time.Sleep(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&count) != 2 {
 		t.Errorf("Expected 2 events received, got %d", count)
@@ -256,8 +247,6 @@ func TestMemoryEventBus_WildcardNoMatch(t *testing.T) {
 		t.Fatalf("Publish failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
 	if atomic.LoadInt32(&count) != 0 {
 		t.Errorf("Expected 0 events (no match), got %d", count)
 	}
@@ -293,8 +282,6 @@ func TestMemoryEventBus_ExactMatch(t *testing.T) {
 	if err := bus.Publish(ctx, "events.user.updated", event1); err != nil {
 		t.Fatalf("Publish failed: %v", err)
 	}
-
-	time.Sleep(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&count) != 1 {
 		t.Errorf("Expected 1 event, got %d", count)
@@ -336,8 +323,6 @@ func TestMemoryEventBus_QueueSubscribe(t *testing.T) {
 			t.Fatalf("Publish failed: %v", err)
 		}
 	}
-
-	time.Sleep(100 * time.Millisecond)
 
 	// Each event should be handled by exactly one subscriber (round-robin)
 	if atomic.LoadInt32(&count) != 6 {
@@ -388,8 +373,6 @@ func TestMemoryEventBus_ConcurrentAccess(t *testing.T) {
 	if publishErrorCount > 0 {
 		t.Errorf("publish errors: %d", publishErrorCount)
 	}
-	time.Sleep(200 * time.Millisecond) // Allow handlers to complete
-
 	expectedCount := int32(numGoroutines * eventsPerGoroutine)
 	if atomic.LoadInt32(&receivedCount) != expectedCount {
 		t.Errorf("Expected %d events, got %d", expectedCount, receivedCount)
@@ -476,19 +459,21 @@ func TestMemoryEventBus_Request(t *testing.T) {
 }
 
 func TestMemoryEventBus_RequestTimeout(t *testing.T) {
-	log := newTestLogger(t)
-	bus := NewMemoryEventBus(log)
-	defer bus.Close()
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestLogger(t)
+		bus := NewMemoryEventBus(log)
+		defer bus.Close()
 
-	ctx := context.Background()
+		ctx := context.Background()
 
-	// Make a request with no responder
-	request := NewEvent("service.nonexistent", "requester", map[string]interface{}{})
+		// Make a request with no responder
+		request := NewEvent("service.nonexistent", "requester", map[string]interface{}{})
 
-	_, err := bus.Request(ctx, "service.nonexistent", request, 100*time.Millisecond)
-	if err == nil {
-		t.Error("Expected timeout error")
-	}
+		_, err := bus.Request(ctx, "service.nonexistent", request, 100*time.Millisecond)
+		if err == nil {
+			t.Error("Expected timeout error")
+		}
+	})
 }
 
 func TestNewEvent(t *testing.T) {
