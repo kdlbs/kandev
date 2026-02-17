@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { IconTrash } from '@tabler/icons-react';
+import { IconDownload, IconTrash } from '@tabler/icons-react';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
@@ -24,6 +24,7 @@ import {
 import type { Workflow, WorkflowStep } from '@/lib/types/http';
 import { useRequest } from '@/lib/http/use-request';
 import { useToast } from '@/components/toast-provider';
+import { WorkflowExportDialog } from '@/components/settings/workflow-export-dialog';
 import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
 import { WorkflowPipelineEditor } from '@/components/settings/workflow-pipeline-editor';
 import { generateUUID } from '@/lib/utils';
@@ -37,6 +38,7 @@ import {
   getWorkflowTaskCount,
   getStepTaskCount,
   bulkMoveTasks,
+  exportWorkflowAction,
 } from '@/app/actions/workspaces';
 
 type WorkflowCardProps = {
@@ -62,6 +64,8 @@ export function WorkflowCard({
 }: WorkflowCardProps) {
   const { toast } = useToast();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportJson, setExportJson] = useState('');
 
   // Workflow deletion migration state
   const [workflowTaskCount, setWorkflowTaskCount] = useState<number | null>(null);
@@ -399,6 +403,20 @@ export function WorkflowCard({
     }
   };
 
+  const handleExportWorkflow = async () => {
+    try {
+      const data = await exportWorkflowAction(workflow.id);
+      setExportJson(JSON.stringify(data, null, 2));
+      setExportOpen(true);
+    } catch (error) {
+      toast({
+        title: 'Failed to export workflow',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
   const activeSaveRequest = isNewWorkflow ? saveNewWorkflowRequest : saveWorkflowRequest;
 
   const hasTasks = workflowTaskCount !== null && workflowTaskCount > 0;
@@ -447,7 +465,18 @@ export function WorkflowCard({
             )}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {!isNewWorkflow && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleExportWorkflow}
+                className="cursor-pointer"
+              >
+                <IconDownload className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+            )}
             <Button
               type="button"
               variant="destructive"
@@ -537,6 +566,13 @@ export function WorkflowCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WorkflowExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="Export Workflow"
+        json={exportJson}
+      />
 
       {/* Step Delete Migration Dialog */}
       <Dialog open={stepDeleteOpen} onOpenChange={setStepDeleteOpen}>

@@ -49,6 +49,11 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.DELETE("/workflow/steps/:id", h.httpDeleteStep)
 	api.PUT("/workflows/:id/workflow/steps/reorder", h.httpReorderSteps)
 
+	// Export/Import routes
+	api.GET("/workflows/:id/export", h.httpExportWorkflow)
+	api.GET("/workspaces/:id/workflows/export", h.httpExportWorkflows)
+	api.POST("/workspaces/:id/workflows/import", h.httpImportWorkflows)
+
 	// History routes
 	api.GET("/sessions/:id/workflow/history", h.httpListHistoryBySession)
 }
@@ -203,6 +208,44 @@ func (h *Handlers) httpListHistoryBySession(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("failed to list history", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list history"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// HTTP handlers - Export/Import
+
+func (h *Handlers) httpExportWorkflow(c *gin.Context) {
+	resp, err := h.controller.ExportWorkflow(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to export workflow", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflow"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpExportWorkflows(c *gin.Context) {
+	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to export workflows", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpImportWorkflows(c *gin.Context) {
+	var req controller.ImportWorkflowsRequest
+	if err := c.ShouldBindJSON(&req.Data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	req.WorkspaceID = c.Param("id")
+	resp, err := h.controller.ImportWorkflows(c.Request.Context(), req)
+	if err != nil {
+		h.logger.Error("failed to import workflows", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

@@ -816,6 +816,35 @@ export type StatsResponse = {
   git_stats: GitStatsDTO;
 };
 
+// Workflow Export/Import types
+export type WorkflowExportData = {
+  version: number;
+  type: string;
+  workflows: WorkflowPortable[];
+};
+
+export type WorkflowPortable = {
+  name: string;
+  description?: string;
+  steps: StepPortable[];
+};
+
+export type StepPortable = {
+  name: string;
+  position: number;
+  color: string;
+  prompt?: string;
+  events: StepEvents;
+  is_start_step: boolean;
+  allow_manual_move: boolean;
+  auto_archive_after_hours?: number;
+};
+
+export type ImportWorkflowsResult = {
+  created: string[];
+  skipped: string[];
+};
+
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(step: { events?: StepEvents }, actionType: OnEnterActionType): boolean {
   return step.events?.on_enter?.some(a => a.type === actionType) ?? false;
