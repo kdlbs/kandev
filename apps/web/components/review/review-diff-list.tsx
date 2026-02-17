@@ -10,7 +10,11 @@ import { Checkbox } from '@kandev/ui/checkbox';
 import { Button } from '@kandev/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { FileDiffViewer } from '@/components/diff';
+import type { RevertBlockInfo } from '@/components/diff';
 import { FileActionsDropdown } from '@/components/editors/file-actions-dropdown';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { requestFileContent, updateFileContent } from '@/lib/ws/workspace-files';
+import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
 import type { ReviewFile } from './types';
 
 type ReviewDiffListProps = {
@@ -152,6 +156,24 @@ function FileDiffSection({
     onDiscard(file.path);
   }, [file.path, onDiscard]);
 
+  const handleRevertBlock = useCallback(async (filePath: string, info: RevertBlockInfo) => {
+    const client = getWebSocketClient();
+    if (!client) return;
+    try {
+      const response = await requestFileContent(client, sessionId, filePath);
+      if (response.error) return;
+      const currentContent = response.content;
+      const hash = await calculateHash(currentContent);
+      const lines = currentContent.split('\n');
+      lines.splice(info.addStart - 1, info.addCount, ...info.oldLines);
+      const newContent = lines.join('\n');
+      const diff = generateUnifiedDiff(currentContent, newContent, filePath);
+      await updateFileContent(client, sessionId, filePath, diff, hash);
+    } catch (err) {
+      console.error('Failed to revert change block:', err);
+    }
+  }, [sessionId]);
+
   return (
     <div ref={sectionRef} className="border-b border-border">
       {/* Sentinel for auto-mark-on-scroll */}
@@ -233,6 +255,8 @@ function FileDiffSection({
             diff={file.diff}
             status={file.status}
             enableComments
+            enableAcceptReject
+            onRevertBlock={handleRevertBlock}
             sessionId={sessionId}
             hideHeader
             wordWrap={wordWrap}

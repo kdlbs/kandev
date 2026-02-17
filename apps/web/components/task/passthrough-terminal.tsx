@@ -11,7 +11,7 @@ import { useAppStore } from '@/components/state-provider';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
 import { getBackendConfig } from '@/lib/config';
-import { getTerminalTheme } from '@/lib/terminal-theme';
+import { getTerminalTheme } from '@/lib/theme/terminal-theme';
 
 type PassthroughTerminalProps = {
   sessionId?: string | null;

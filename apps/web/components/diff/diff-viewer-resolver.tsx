@@ -5,6 +5,8 @@ import { useEditorProvider } from '@/hooks/use-editor-resolver';
 import { DiffViewer as PierreDiffViewer, DiffViewInline as PierreDiffViewInline } from './diff-viewer';
 import { MonacoDiffViewer } from '@/components/editors/monaco/monaco-diff-viewer';
 import type { FileDiffData, DiffComment } from '@/lib/diff/types';
+import type { RevertBlockInfo } from './diff-viewer';
+export type { RevertBlockInfo };
 
 interface DiffViewerResolverProps {
   data: FileDiffData;
@@ -18,7 +20,11 @@ interface DiffViewerResolverProps {
   hideHeader?: boolean;
   onOpenFile?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  enableAcceptReject?: boolean;
+  onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
   wordWrap?: boolean;
+  editable?: boolean;
+  onModifiedContentChange?: (filePath: string, content: string) => void;
 }
 
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {

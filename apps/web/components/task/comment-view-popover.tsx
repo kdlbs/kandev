@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
-import { IconTrash } from '@tabler/icons-react';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { IconTrash, IconGripHorizontal } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffComment } from '@/lib/diff/types';
@@ -21,6 +21,44 @@ export function CommentViewPopover({
 }: CommentViewPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  // Draggable position
+  const popoverWidth = 350;
+  const popoverHeight = 200;
+
+  const computeInitial = () => {
+    let left = position.x;
+    let top = position.y;
+    if (left + popoverWidth > window.innerWidth - 16) {
+      left = Math.max(16, window.innerWidth - popoverWidth - 16);
+    }
+    if (top + popoverHeight > window.innerHeight - 16) {
+      top = Math.max(16, position.y - popoverHeight);
+    }
+    return { left, top };
+  };
+
+  const [pos, setPos] = useState(computeInitial);
+  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: pos.left, origTop: pos.top };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = ev.clientX - dragRef.current.startX;
+      const dy = ev.clientY - dragRef.current.startY;
+      setPos({ left: dragRef.current.origLeft + dx, top: dragRef.current.origTop + dy });
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [pos.left, pos.top]);
+
   // Close on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -28,7 +66,6 @@ export function CommentViewPopover({
         onClose();
       }
     };
-    // Delay adding listener to avoid immediate close
     const timer = setTimeout(() => {
       document.addEventListener('mousedown', handleClickOutside);
     }, 100);
@@ -50,24 +87,6 @@ export function CommentViewPopover({
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
 
-  // Calculate position
-  const popoverWidth = 350;
-  const popoverHeight = 200;
-  const gap = 8;
-
-  let left = position.x + gap;
-  let top = position.y + gap;
-
-  // If would overflow right, shift left
-  if (left + popoverWidth > window.innerWidth - 16) {
-    left = Math.max(16, window.innerWidth - popoverWidth - 16);
-  }
-
-  // If would overflow bottom, position above
-  if (top + popoverHeight > window.innerHeight - 16) {
-    top = Math.max(16, position.y - popoverHeight - gap);
-  }
-
   // Format line range
   const formatLineRange = (start: number, end: number) => {
     return start === end ? `L${start}` : `L${start}-${end}`;
@@ -80,11 +99,19 @@ export function CommentViewPopover({
         'fixed z-50 w-[350px] max-h-[350px] overflow-auto rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl',
         'animate-in fade-in-0 zoom-in-95 duration-150'
       )}
-      style={{
-        left,
-        top,
-      }}
+      style={{ left: pos.left, top: pos.top }}
     >
+      {/* Drag handle */}
+      <div
+        className="flex items-center justify-between px-3 pt-2 pb-1 cursor-grab active:cursor-grabbing select-none sticky top-0 bg-popover/95 backdrop-blur-sm z-10"
+        onMouseDown={onDragStart}
+      >
+        <span className="text-xs text-muted-foreground">
+          {comments.length} comment{comments.length !== 1 ? 's' : ''}
+        </span>
+        <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/40" />
+      </div>
+
       {/* Comments list */}
       <div className="divide-y divide-border/30">
         {comments.map((comment) => (

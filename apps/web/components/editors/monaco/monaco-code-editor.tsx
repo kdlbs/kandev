@@ -5,7 +5,7 @@ import Editor, { type OnMount, type OnChange } from '@monaco-editor/react';
 import type { editor as monacoEditor, IDisposable } from 'monaco-editor';
 import { useTheme } from 'next-themes';
 import { Button } from '@kandev/ui/button';
-import { IconDeviceFloppy, IconLoader2, IconTrash, IconTextWrap, IconTextWrapDisabled, IconMessagePlus, IconArrowsDiff, IconPlugConnected, IconPlugOff, IconAlertTriangle } from '@tabler/icons-react';
+import { IconDeviceFloppy, IconLoader2, IconTrash, IconTextWrap, IconTextWrapDisabled, IconMessagePlus, IconArrowsDiff } from '@tabler/icons-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import { formatDiffStats } from '@/lib/utils/file-diff';
 import { toRelativePath } from '@/lib/utils';
@@ -13,19 +13,23 @@ import { getMonacoLanguage } from '@/lib/editor/language-map';
 import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from '@/lib/theme/editor-theme';
 import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
 import type { DiffComment } from '@/lib/diff/types';
+import { buildDiffComment, useCommentedLines } from '@/lib/diff/comment-utils';
 import { computeLineDiffStats } from '@/lib/diff';
 import { useToast } from '@/components/toast-provider';
-import { EditorCommentPopover } from '@/components/task/editor-comment-popover';
-import { CommentViewPopover } from '@/components/task/comment-view-popover';
+import { CommentForm } from '@/components/diff/comment-form';
+import { CommentDisplay } from '@/components/diff/comment-display';
 import { diffLines } from 'diff';
 import { FileActionsDropdown } from '@/components/editors/file-actions-dropdown';
 import { PanelHeaderBarSplit } from '@/components/task/panel-primitives';
 import { useAppStore } from '@/components/state-provider';
 import { useLsp } from '@/hooks/use-lsp';
-import type { LspStatus } from '@/lib/lsp/lsp-client-manager';
 import { lspClientManager } from '@/lib/lsp/lsp-client-manager';
 import { useDockviewStore } from '@/lib/state/dockview-store';
 import { consumePendingCursorPosition } from '@/hooks/use-file-editors';
+import { useCommandPanelOpen } from '@/lib/commands/command-registry';
+import { useGutterComments } from '@/hooks/use-gutter-comments';
+import { useEditorViewZoneComments } from '@/hooks/use-editor-view-zone-comments';
+import { LspStatusButton } from '@/components/editors/lsp-status-button';
 import { initMonacoThemes } from './monaco-init';
 
 initMonacoThemes();
@@ -43,98 +47,16 @@ type MonacoCodeEditorProps = {
   onDelete?: () => void;
 };
 
-type TextSelection = {
-  text: string;
+type FormZoneRange = {
   startLine: number;
   endLine: number;
-  position: { x: number; y: number };
+  codeContent: string;
 } | null;
 
 type FloatingButtonPosition = {
   x: number;
   y: number;
 } | null;
-
-type CommentViewState = {
-  comments: DiffComment[];
-  position: { x: number; y: number };
-} | null;
-
-function LspStatusButton({
-  status,
-  lspLanguage,
-  onToggle,
-}: {
-  status: LspStatus;
-  lspLanguage: string | null;
-  onToggle: () => void;
-}) {
-  if (!lspLanguage) return null;
-
-  type StateConfig = { icon: React.ReactNode; tooltip: string; clickable: boolean };
-  const configs: Record<string, StateConfig> = {
-    disabled: {
-      icon: <IconPlugOff className="h-3.5 w-3.5 text-muted-foreground/50" />,
-      tooltip: 'LSP: Off \u2014 click to start',
-      clickable: true,
-    },
-    connecting: {
-      icon: <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />,
-      tooltip: 'LSP: Connecting...',
-      clickable: true,
-    },
-    installing: {
-      icon: <IconLoader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />,
-      tooltip: 'LSP: Installing language server...',
-      clickable: false,
-    },
-    starting: {
-      icon: <IconLoader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />,
-      tooltip: 'LSP: Starting language server...',
-      clickable: true,
-    },
-    ready: {
-      icon: <IconPlugConnected className="h-3.5 w-3.5 text-emerald-500" />,
-      tooltip: 'LSP: Connected \u2014 click to stop',
-      clickable: true,
-    },
-    stopping: {
-      icon: <IconLoader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />,
-      tooltip: 'LSP: Stopping...',
-      clickable: false,
-    },
-    unavailable: {
-      icon: <IconPlugOff className="h-3.5 w-3.5 text-muted-foreground" />,
-      tooltip: `LSP: ${'reason' in status ? status.reason : 'Unavailable'}`,
-      clickable: true,
-    },
-    error: {
-      icon: <IconAlertTriangle className="h-3.5 w-3.5 text-yellow-500" />,
-      tooltip: `LSP: ${'reason' in status ? status.reason : 'Error'}`,
-      clickable: true,
-    },
-  };
-
-  const c = configs[status.state];
-  if (!c) return null;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 p-0 cursor-pointer"
-          onClick={c.clickable ? onToggle : undefined}
-          disabled={!c.clickable}
-        >
-          {c.icon}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{c.tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 export function MonacoCodeEditor({
   path,
@@ -158,24 +80,51 @@ export function MonacoCodeEditor({
   const contentRef = useRef(initialContent);
 
   const [wrapEnabled, setWrapEnabled] = useState(true);
-  const [textSelection, setTextSelection] = useState<TextSelection>(null);
+  const [formZoneRange, setFormZoneRange] = useState<FormZoneRange>(null);
   const [floatingButtonPos, setFloatingButtonPos] = useState<FloatingButtonPosition>(null);
   const [currentSelection, setCurrentSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null);
-  const [commentView, setCommentView] = useState<CommentViewState>(null);
   const [showDiffIndicators, setShowDiffIndicators] = useState(true);
+  const [editorInstance, setEditorInstance] = useState<monacoEditor.IStandaloneCodeEditor | null>(null);
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const onSaveRef = useRef(onSave);
-  onSaveRef.current = onSave;
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const diffDecorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const disposablesRef = useRef<IDisposable[]>([]);
   const { toast } = useToast();
+  const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
   const addComment = useDiffCommentsStore((state) => state.addComment);
   const removeComment = useDiffCommentsStore((state) => state.removeComment);
+  const updateComment = useDiffCommentsStore((state) => state.updateComment);
+  const editingCommentId = useDiffCommentsStore((state) => state.editingCommentId);
+  const setEditingComment = useDiffCommentsStore((state) => state.setEditingComment);
   const comments = useFileComments(sessionId ?? '', path);
+
+  // Gutter comment interactions (hover "+", click-to-select)
+  const commentedLines = useCommentedLines(comments);
+
+  const handleGutterSelectionComplete = useCallback(
+    (params: { range: { start: number; end: number }; code: string }) => {
+      setFormZoneRange({
+        startLine: params.range.start,
+        endLine: params.range.end,
+        codeContent: params.code,
+      });
+    },
+    []
+  );
+
+  const { clearGutterSelection } = useGutterComments(
+    editorInstance,
+    {
+      enabled: enableComments && !!sessionId,
+      commentedLines,
+      onSelectionComplete: handleGutterSelectionComplete,
+    }
+  );
 
   const language = getMonacoLanguage(path);
 
@@ -272,10 +221,16 @@ export function MonacoCodeEditor({
     return () => wrapper.removeEventListener('keydown', handler);
   }, []);
 
+  // Stable callback refs for ViewZone renders (avoids stale closures)
+  const handleCommentSubmitRef = useRef((_annotation: string) => {});
+  const handleCommentDeleteRef = useRef((_commentId: string) => {});
+  const handleCommentUpdateRef = useRef((_commentId: string, _annotation: string) => {});
+
   // Handle editor mount
   const handleEditorDidMount: OnMount = useCallback(
-    (editor, monaco) => {
+    (editor, _monaco) => {
       editorRef.current = editor;
+      setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
 
@@ -285,10 +240,6 @@ export function MonacoCodeEditor({
         editor.setPosition({ lineNumber: pendingPos.line, column: pendingPos.column });
         editor.revealLineInCenter(pendingPos.line);
       }
-
-      // Cmd/Ctrl+S is handled via DOM keydown on the wrapper (see useEffect below)
-      // because Monaco's addCommand registers globally and conflicts when
-      // multiple editor instances exist.
 
       // Selection change listener for comments
       if (enableComments && sessionId) {
@@ -314,26 +265,31 @@ export function MonacoCodeEditor({
         disposablesRef.current.push(disposable);
       }
 
-      // Gutter click for viewing comments
+      // Gutter click on commented lines → toggle editing
       const glyphDisposable = editor.onMouseDown((e) => {
-        if (e.target.type === 2 /* GUTTER_GLYPH_MARGIN */ || e.target.type === 3 /* GUTTER_LINE_NUMBERS */) {
+        if (e.target.type === 3 || e.target.type === 4) {
           const lineNumber = e.target.position?.lineNumber;
           if (!lineNumber) return;
 
-          const lineComments = comments.filter(
+          const { editingCommentId: currentEditing } = useDiffCommentsStore.getState();
+          const fileComments = useDiffCommentsStore.getState().getCommentsForFile(sessionId ?? '', path);
+          const lineComments = fileComments.filter(
             (c) => lineNumber >= c.startLine && lineNumber <= c.endLine
           );
-          if (lineComments.length > 0 && e.event.browserEvent) {
-            setCommentView({
-              comments: lineComments,
-              position: { x: e.event.browserEvent.clientX, y: e.event.browserEvent.clientY },
-            });
+          if (lineComments.length > 0) {
+            const firstComment = lineComments[0];
+            // Toggle: if already editing this comment, stop editing
+            if (currentEditing === firstComment.id) {
+              useDiffCommentsStore.getState().setEditingComment(null);
+            } else {
+              useDiffCommentsStore.getState().setEditingComment(firstComment.id);
+            }
           }
         }
       });
       disposablesRef.current.push(glyphDisposable);
     },
-    [path, enableComments, sessionId, comments]
+    [path, enableComments, sessionId]
   );
 
   // Cleanup disposables
@@ -370,21 +326,18 @@ export function MonacoCodeEditor({
         options: {
           isWholeLine: true,
           className: 'monaco-comment-line',
-          glyphMarginClassName: firstLines.has(lineNum)
-            ? 'monaco-comment-glyph'
-            : 'monaco-comment-glyph-bg',
-          glyphMarginHoverMessage: {
-            value: `${comments.filter((c) => lineNum >= c.startLine && lineNum <= c.endLine).length} comment(s) - click to view`,
-          },
+          lineNumberClassName: 'monaco-comment-line-number',
+          linesDecorationsClassName: firstLines.has(lineNum)
+            ? 'monaco-comment-bar-icon'
+            : 'monaco-comment-bar',
         },
       });
     }
 
     decorationsRef.current.set(decorations);
-  }, [comments]);
+  }, [comments, editorInstance]);
 
   // Diff gutter indicators — driven by Monaco model change events, not React props.
-  // We compute decorations using contentRef (updated by onChange) + originalContent prop.
   const updateDiffDecorations = useCallback(() => {
     if (!diffDecorationsRef.current || !editorRef.current) return;
 
@@ -459,17 +412,31 @@ export function MonacoCodeEditor({
     };
   }, [updateDiffDecorations]);
 
-  // Show floating button after mouse up
+  // Show floating button at end of selection
   useEffect(() => {
     const wrapper = wrapperRef.current;
-    if (!wrapper || !enableComments || !sessionId) return;
+    const editor = editorRef.current;
+    if (!wrapper || !editor || !enableComments || !sessionId) return;
 
     const handleMouseUp = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest('.floating-comment-btn')) return;
       setTimeout(() => {
-        if (currentSelection) {
-          setFloatingButtonPos({ x: mousePositionRef.current.x, y: mousePositionRef.current.y });
-        }
+        if (!currentSelection) return;
+        const sel = editor.getSelection();
+        if (!sel || sel.isEmpty()) return;
+        // Position at end of selection using editor coordinates
+        // endPos is relative to the editor's DOM container
+        const endPos = editor.getScrolledVisiblePosition({
+          lineNumber: sel.endLineNumber,
+          column: sel.endColumn,
+        });
+        if (!endPos) return;
+        // getScrolledVisiblePosition returns coords relative to the editor DOM node,
+        // which is inside the "relative" container where the button lives.
+        setFloatingButtonPos({
+          x: endPos.left,
+          y: endPos.top + endPos.height,
+        });
       }, 10);
     };
 
@@ -486,36 +453,80 @@ export function MonacoCodeEditor({
     };
   }, [enableComments, sessionId, currentSelection]);
 
-  // Cmd+I for comment popover
+  // Cmd+I to open inline comment form
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper || !enableComments || !sessionId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'i') {
-        if (!currentSelection || !floatingButtonPos) return;
+        if (!currentSelection) return;
         e.preventDefault();
         e.stopPropagation();
-        setTextSelection({ ...currentSelection, position: floatingButtonPos });
+        setFormZoneRange({
+          startLine: currentSelection.startLine,
+          endLine: currentSelection.endLine,
+          codeContent: currentSelection.text,
+        });
         setFloatingButtonPos(null);
       }
     };
 
     wrapper.addEventListener('keydown', handleKeyDown, true);
     return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
-  }, [enableComments, sessionId, currentSelection, floatingButtonPos]);
+  }, [enableComments, sessionId, currentSelection]);
 
-  // Escape to close popovers
+  // Cmd+K for command panel — capture phase prevents Monaco from swallowing the shortcut
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandPanelOpen(true);
+      }
+    };
+    wrapper.addEventListener('keydown', handleKeyDown, true);
+    return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
+  }, [setCommandPanelOpen]);
+
+  // Escape to close inline forms
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (textSelection) setTextSelection(null);
-        if (commentView) setCommentView(null);
+        if (formZoneRange) {
+          setFormZoneRange(null);
+          clearGutterSelection();
+        }
+        if (editingCommentId) setEditingComment(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [textSelection, commentView]);
+  }, [formZoneRange, editingCommentId, setEditingComment, clearGutterSelection]);
+
+  // Click outside to close editing mode / new comment form
+  useEffect(() => {
+    if (!editingCommentId && !formZoneRange) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-comment-zone]')) return;
+      if (editingCommentId) setEditingComment(null);
+      if (formZoneRange) {
+        setFormZoneRange(null);
+        clearGutterSelection();
+      }
+    };
+    // Delay to avoid closing immediately from the click that opened it
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleMouseDown);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [editingCommentId, formZoneRange, setEditingComment, clearGutterSelection]);
 
   const handleChange: OnChange = useCallback(
     (value) => {
@@ -531,30 +542,32 @@ export function MonacoCodeEditor({
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!currentSelection || !floatingButtonPos) return;
-      setTextSelection({ ...currentSelection, position: floatingButtonPos });
+      if (!currentSelection) return;
+      setFormZoneRange({
+        startLine: currentSelection.startLine,
+        endLine: currentSelection.endLine,
+        codeContent: currentSelection.text,
+      });
       setFloatingButtonPos(null);
     },
-    [currentSelection, floatingButtonPos]
+    [currentSelection]
   );
 
+  // Comment submit for new comments
   const handleCommentSubmit = useCallback(
     (annotation: string) => {
-      if (!textSelection || !sessionId) return;
-      const comment: DiffComment = {
-        id: `${path}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        sessionId,
+      if (!formZoneRange || !sessionId) return;
+      addComment(buildDiffComment({
         filePath: path,
-        startLine: textSelection.startLine,
-        endLine: textSelection.endLine,
+        sessionId,
+        startLine: formZoneRange.startLine,
+        endLine: formZoneRange.endLine,
         side: 'additions',
-        codeContent: textSelection.text,
         annotation,
-        createdAt: new Date().toISOString(),
-        status: 'pending',
-      };
-      addComment(comment);
-      setTextSelection(null);
+        codeContent: formZoneRange.codeContent,
+      }));
+      setFormZoneRange(null);
+      clearGutterSelection();
 
       // Clear editor selection
       const editor = editorRef.current;
@@ -565,29 +578,80 @@ export function MonacoCodeEditor({
 
       toast({ title: 'Comment added', description: 'Your comment will be sent with your next message.' });
     },
-    [textSelection, sessionId, path, addComment, toast]
+    [formZoneRange, sessionId, path, addComment, clearGutterSelection, toast]
   );
-
-  const handlePopoverClose = useCallback(() => setTextSelection(null), []);
 
   const handleDeleteComment = useCallback(
     (commentId: string) => {
       if (!sessionId) return;
       removeComment(sessionId, path, commentId);
-      if (commentView && commentView.comments.length <= 1) {
-        setCommentView(null);
-      } else if (commentView) {
-        setCommentView({
-          ...commentView,
-          comments: commentView.comments.filter((c) => c.id !== commentId),
-        });
-      }
       toast({ title: 'Comment deleted' });
     },
-    [sessionId, path, removeComment, commentView, toast]
+    [sessionId, path, removeComment, toast]
   );
 
-  const handleCommentViewClose = useCallback(() => setCommentView(null), []);
+  const handleUpdateComment = useCallback(
+    (commentId: string, annotation: string) => {
+      updateComment(commentId, { annotation });
+      setEditingComment(null);
+      toast({ title: 'Comment updated' });
+    },
+    [updateComment, setEditingComment, toast]
+  );
+
+  // Keep stable refs updated for ViewZone renders
+  useEffect(() => { handleCommentSubmitRef.current = handleCommentSubmit; }, [handleCommentSubmit]);
+  useEffect(() => { handleCommentDeleteRef.current = handleDeleteComment; }, [handleDeleteComment]);
+  useEffect(() => { handleCommentUpdateRef.current = handleUpdateComment; }, [handleUpdateComment]);
+
+  // Inline ViewZones for comments and new comment form
+  useEditorViewZoneComments(
+    editorInstance,
+    [comments, formZoneRange, editingCommentId],
+    (addZone) => {
+      // Existing comments → compact inline display or edit form
+      for (const comment of comments) {
+        const isEditing = editingCommentId === comment.id;
+        const node = isEditing ? (
+          <div className="px-2 py-0.5" data-comment-zone>
+            <CommentForm
+              initialContent={comment.annotation}
+              onSubmit={(c) => handleCommentUpdateRef.current(comment.id, c)}
+              onCancel={() => setEditingComment(null)}
+              isEditing
+            />
+          </div>
+        ) : (
+          <div className="px-2 py-0.5" data-comment-zone>
+            <CommentDisplay
+              comment={comment}
+              onDelete={() => handleCommentDeleteRef.current(comment.id)}
+              onEdit={() => setEditingComment(comment.id)}
+              showCode={false}
+              compact
+            />
+          </div>
+        );
+        addZone(comment.endLine, isEditing ? 120 : 32, node);
+      }
+
+      // New comment form
+      if (formZoneRange) {
+        addZone(
+          formZoneRange.endLine, 120,
+          <div className="px-2 py-1" data-comment-zone>
+            <CommentForm
+              onSubmit={(c) => handleCommentSubmitRef.current(c)}
+              onCancel={() => {
+                setFormZoneRange(null);
+                clearGutterSelection();
+              }}
+            />
+          </div>,
+        );
+      }
+    },
+  );
 
   // Diff stats — updated via Monaco model events, not React props
   const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);
@@ -729,7 +793,8 @@ export function MonacoCodeEditor({
             scrollBeyondLastLine: false,
             smoothScrolling: true,
             cursorSmoothCaretAnimation: 'on',
-            glyphMargin: enableComments,
+            glyphMargin: false,
+            lineDecorationsWidth: 10,
             folding: true,
             lineNumbers: 'on',
             renderLineHighlight: 'line',
@@ -749,37 +814,18 @@ export function MonacoCodeEditor({
         />
 
         {/* Floating comment button */}
-        {floatingButtonPos && !textSelection && (
+        {floatingButtonPos && !formZoneRange && (
           <Button
             size="sm"
             variant="secondary"
-            className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-            style={{ left: floatingButtonPos.x + 8, top: floatingButtonPos.y + 8 }}
+            className="floating-comment-btn absolute z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
+            style={{ left: floatingButtonPos.x + 4, top: floatingButtonPos.y + 2 }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={handleFloatingButtonClick}
           >
             <IconMessagePlus className="h-3.5 w-3.5" />
             Comment
           </Button>
-        )}
-
-        {textSelection && (
-          <EditorCommentPopover
-            selectedText={textSelection.text}
-            lineRange={{ start: textSelection.startLine, end: textSelection.endLine }}
-            position={textSelection.position}
-            onSubmit={handleCommentSubmit}
-            onClose={handlePopoverClose}
-          />
-        )}
-
-        {commentView && (
-          <CommentViewPopover
-            comments={commentView.comments}
-            position={commentView.position}
-            onDelete={handleDeleteComment}
-            onClose={handleCommentViewClose}
-          />
         )}
       </div>
     </div>
