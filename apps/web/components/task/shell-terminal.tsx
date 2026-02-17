@@ -8,7 +8,7 @@ import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
-import { getTerminalTheme } from '@/lib/terminal-theme';
+import { getTerminalTheme } from '@/lib/theme/terminal-theme';
 
 type ShellTerminalProps = {
   // Interactive shell mode - requires sessionId

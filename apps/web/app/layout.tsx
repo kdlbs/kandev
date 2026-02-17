@@ -8,6 +8,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
+import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 
 export const metadata: Metadata = {
   title: "Kandev - AI Kanban",
@@ -67,6 +68,7 @@ export default function RootLayout({
         ) : null}
         <StateProvider>
           <ThemeProvider>
+            <DiffWorkerPoolProvider>
             <TooltipProvider>
               <ToastProvider>
                 <CommandRegistryProvider>
@@ -77,6 +79,7 @@ export default function RootLayout({
                 </CommandRegistryProvider>
               </ToastProvider>
             </TooltipProvider>
+            </DiffWorkerPoolProvider>
           </ThemeProvider>
         </StateProvider>
       </body>

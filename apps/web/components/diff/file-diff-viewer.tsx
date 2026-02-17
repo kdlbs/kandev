@@ -4,33 +4,24 @@ import { memo, useMemo } from 'react';
 import { DiffViewerResolved as DiffViewer } from './diff-viewer-resolver';
 import { transformGitDiff } from '@/lib/diff';
 import type { DiffComment } from '@/lib/diff/types';
+import type { RevertBlockInfo } from './diff-viewer-resolver';
 
 interface FileDiffViewerProps {
-  /** File path */
   filePath: string;
-  /** Raw diff content */
   diff: string;
-  /** File status (M, A, D, etc.) */
   status?: string;
-  /** Enable line selection for comments */
   enableComments?: boolean;
-  /** Session ID for comment storage */
   sessionId?: string;
-  /** Callback when comment is added */
   onCommentAdd?: (comment: DiffComment) => void;
-  /** Callback when comment is deleted */
   onCommentDelete?: (commentId: string) => void;
-  /** External comments (controlled mode) */
   comments?: DiffComment[];
-  /** Additional class name */
   className?: string;
-  /** Whether to show in compact mode */
   compact?: boolean;
-  /** Whether to hide the file header */
   hideHeader?: boolean;
-  /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
-  /** External word wrap override */
+  onRevert?: (filePath: string) => void;
+  enableAcceptReject?: boolean;
+  onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
   wordWrap?: boolean;
 }
 
@@ -56,9 +47,11 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   compact,
   hideHeader,
   onOpenFile,
+  onRevert,
+  enableAcceptReject,
+  onRevertBlock,
   wordWrap,
 }: FileDiffViewerProps) {
-  // Memoize the transformation - only recalculates when raw data changes
   const data = useMemo(
     () => transformGitDiff(filePath, diff, status),
     [filePath, diff, status]
@@ -76,6 +69,9 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       compact={compact}
       hideHeader={hideHeader}
       onOpenFile={onOpenFile}
+      onRevert={onRevert}
+      enableAcceptReject={enableAcceptReject}
+      onRevertBlock={onRevertBlock}
       wordWrap={wordWrap}
     />
   );

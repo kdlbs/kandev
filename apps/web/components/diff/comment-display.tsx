@@ -29,23 +29,38 @@ export function CommentDisplay({
 
   if (compact) {
     return (
-      <div className="group flex items-start gap-2 rounded border border-border bg-muted/50 px-2 py-1.5 text-xs">
+      <div
+        className={`group flex items-start gap-2 rounded border border-border bg-muted/50 px-2 py-1.5 text-xs${onEdit ? ' cursor-pointer hover:bg-muted/80' : ''}`}
+        onClick={onEdit}
+      >
         <IconMessage className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <span className="text-muted-foreground">{lineRange}</span>
           <span className="mx-1 text-muted-foreground">·</span>
           <span className="break-words">{comment.annotation}</span>
         </div>
-        {onDelete && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onDelete}
-            className="h-4 w-4 shrink-0 cursor-pointer p-0 opacity-0 hover:text-destructive group-hover:opacity-100"
-          >
-            <IconTrash className="h-3 w-3" />
-          </Button>
-        )}
+        <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
+          {onEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              className="h-4 w-4 cursor-pointer p-0"
+            >
+              <IconEdit className="h-3 w-3" />
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="h-4 w-4 cursor-pointer p-0 hover:text-destructive"
+            >
+              <IconTrash className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       </div>
     );
   }

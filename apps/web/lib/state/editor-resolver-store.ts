@@ -20,9 +20,9 @@ const VALID_PROVIDERS: Record<EditorContext, EditorProvider[]> = {
 
 const DEFAULT_PROVIDERS: Record<EditorContext, EditorProvider> = {
   'code-editor': 'monaco',
-  'diff-viewer': 'monaco',
+  'diff-viewer': 'pierre-diffs',
   'chat-code-block': 'monaco',
-  'chat-diff': 'monaco',
+  'chat-diff': 'pierre-diffs',
   'plan-editor': 'tiptap',
 };
 
@@ -46,6 +46,16 @@ export const useEditorResolverStore = create<EditorResolverStore>()(
       getProvider: (context) => get().providers[context],
       getValidProviders: (context) => VALID_PROVIDERS[context],
     }),
-    { name: 'kandev-editor-providers' }
+    {
+      name: 'kandev-editor-providers',
+      version: 1,
+      migrate: (persisted) => {
+        const state = persisted as { providers: Record<EditorContext, EditorProvider> };
+        return {
+          ...state,
+          providers: { ...state.providers, 'diff-viewer': 'pierre-diffs', 'chat-diff': 'pierre-diffs' },
+        };
+      },
+    }
   )
 );

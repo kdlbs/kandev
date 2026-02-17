@@ -650,21 +650,37 @@
 
 /* Monaco Editor - Comment decorations */
 .monaco-comment-line {
-  background-color: rgba(99, 102, 241, 0.15) !important;
+  background-color: rgba(99, 102, 241, 0.12) !important;
+}
+
+/* Lines-decoration lane for commented lines — clickable bar */
+.monaco-comment-bar {
+  cursor: pointer !important;
+  background-color: rgba(99, 102, 241, 0.12) !important;
   border-left: 3px solid rgba(99, 102, 241, 0.6) !important;
 }
-
-.monaco-comment-glyph {
-  background-color: rgba(99, 102, 241, 0.2);
-  cursor: pointer;
+.monaco-comment-bar:hover {
+  background-color: rgba(99, 102, 241, 0.25) !important;
 }
 
-.monaco-comment-glyph::after {
+/* Chat bubble icon on the bar (first line of a comment only) */
+.monaco-comment-bar-icon {
+  cursor: pointer !important;
+  position: relative !important;
+  background-color: rgba(99, 102, 241, 0.12) !important;
+  border-left: 3px solid rgba(99, 102, 241, 0.6) !important;
+}
+.monaco-comment-bar-icon:hover {
+  background-color: rgba(99, 102, 241, 0.25) !important;
+}
+.monaco-comment-bar-icon::after {
   content: '';
-  display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: 12px;
   height: 12px;
-  margin: auto;
   background: rgba(99, 102, 241, 0.9);
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>");
@@ -672,12 +688,9 @@
   -webkit-mask-size: contain;
 }
 
-.monaco-comment-glyph:hover {
-  background-color: rgba(99, 102, 241, 0.35);
-}
-
-.monaco-comment-glyph-bg {
-  background-color: rgba(99, 102, 241, 0.2);
+/* Line number bg tint for commented lines */
+.monaco-comment-line-number {
+  background-color: rgba(99, 102, 241, 0.12) !important;
 }
 
 /* TipTap Plan Editor Styles */
@@ -930,21 +943,53 @@
   color: oklch(0.65 0.2 20);
 }
 
-/* Monaco Editor - Diff gutter indicators */
+/* Monaco Editor - Diff gutter indicators (colors from --git-addition / --git-deletion CSS vars) */
 .monaco-diff-added-gutter {
   width: 3px !important;
   margin-left: 3px;
-  background-color: #10b981 !important;
+  background-color: rgb(var(--git-addition)) !important;
 }
 .monaco-diff-modified-gutter {
   width: 3px !important;
   margin-left: 3px;
-  background-color: #3b82f6 !important;
+  background-color: rgb(var(--git-addition)) !important;
 }
 .monaco-diff-deleted-gutter {
   width: 0 !important;
   margin-left: 2px;
-  border-left: 4px solid #f43f5e !important;
+  border-left: 4px solid rgb(var(--git-deletion)) !important;
+}
+
+/* Monaco Editor - Gutter comment hint ("+" hover on decoration lane) */
+.monaco-gutter-comment-hint {
+  cursor: pointer !important;
+  position: relative !important;
+}
+.monaco-gutter-comment-hint::after {
+  content: '+';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  border-radius: 3px;
+  background-color: rgb(99 102 241); /* indigo-500 */
+}
+
+/* Monaco Editor - Gutter line selection highlight */
+.monaco-gutter-selected-line {
+  background-color: rgb(139 92 246 / 0.15) !important;
+}
+.monaco-gutter-selected-deco {
+  background-color: rgb(139 92 246 / 0.15) !important;
 }
 
 /* Monaco Editor - Peek view / references widget overrides */

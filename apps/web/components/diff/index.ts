@@ -2,6 +2,7 @@
 export { DiffViewerResolved as DiffViewer } from './diff-viewer-resolver';
 export { DiffViewInlineResolved as DiffViewInline } from './diff-viewer-resolver';
 export { FileDiffViewer } from './file-diff-viewer';
+export type { RevertBlockInfo } from './diff-viewer-resolver';
 export { CommentForm } from './comment-form';
 export { CommentDisplay } from './comment-display';
 

@@ -1,27 +1,25 @@
 'use client';
 
-import { useState, useCallback, useMemo, memo, useSyncExternalStore, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, memo, type ReactNode } from 'react';
 import { useTheme } from 'next-themes';
 import { FileDiff } from '@pierre/diffs/react';
 import { parsePatchFiles, parseDiffFromFile } from '@pierre/diffs';
-import type { FileDiffOptions, FileDiffMetadata, DiffLineAnnotation, RenderHeaderMetadataProps, AnnotationSide, SelectedLineRange } from '@pierre/diffs';
+import type { FileDiffOptions, FileDiffMetadata, DiffLineAnnotation, AnnotationSide, SelectedLineRange } from '@pierre/diffs';
 import { cn } from '@kandev/ui/lib/utils';
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@kandev/ui/tooltip';
-import { IconCopy, IconTextWrap, IconLayoutRows, IconLayoutColumns, IconPencil, IconPlus, IconArrowBackUp } from '@tabler/icons-react';
+import { IconPlus } from '@tabler/icons-react';
 import type { FileDiffData, DiffComment } from '@/lib/diff/types';
+import { buildDiffComment, useCommentActions } from '@/lib/diff/comment-utils';
+import { FONT } from '@/lib/theme/colors';
+import { useGlobalViewMode } from '@/hooks/use-global-view-mode';
 import { useDiffComments } from './use-diff-comments';
 import { CommentForm } from './comment-form';
 import { CommentDisplay } from './comment-display';
+import { useDiffHeaderToolbar } from './diff-header-toolbar';
+import { HunkActionBar } from './hunk-action-bar';
 
 /**
  * Check if Go code contains patterns that trigger catastrophic regex backtracking
  * in shiki's JavaScript regex engine.
- *
- * Bug: The Go TextMate grammar has a regex pattern that causes O(2^n) backtracking
- * when struct fields contain `interface{}` with struct tags like `json:"..."`.
- *
- * See: https://github.com/shikijs/textmate-grammars-themes/pull/183
  */
 function hasProblematicGoPattern(content: string | undefined): boolean {
   if (!content) return false;
@@ -29,103 +27,59 @@ function hasProblematicGoPattern(content: string | undefined): boolean {
   return problematicPattern.test(content);
 }
 
-/**
- * Check if a file is a Go file based on extension
- */
 function isGoFile(filePath: string): boolean {
   return filePath.endsWith('.go');
 }
 
-// Local storage key for global diff view mode
-const DIFF_VIEW_MODE_KEY = 'diff-view-mode';
-const DEFAULT_VIEW_MODE = 'unified' as const;
-
-// Custom event for syncing view mode across components
-const VIEW_MODE_CHANGE_EVENT = 'diff-view-mode-change';
-
-type ViewMode = 'split' | 'unified';
-
-// Helper to get view mode from localStorage
-function getStoredViewMode(): ViewMode {
-  if (typeof window === 'undefined') return DEFAULT_VIEW_MODE;
-  const stored = localStorage.getItem(DIFF_VIEW_MODE_KEY);
-  return stored === 'split' || stored === 'unified' ? stored : DEFAULT_VIEW_MODE;
-}
-
-// Helper to set view mode in localStorage and dispatch event
-function setStoredViewMode(mode: ViewMode): void {
-  localStorage.setItem(DIFF_VIEW_MODE_KEY, mode);
-  window.dispatchEvent(new CustomEvent(VIEW_MODE_CHANGE_EVENT, { detail: mode }));
-}
-
-// Hook to subscribe to global view mode changes
-function useGlobalViewMode(): [ViewMode, (mode: ViewMode) => void] {
-  const subscribe = useCallback((callback: () => void) => {
-    window.addEventListener(VIEW_MODE_CHANGE_EVENT, callback);
-    window.addEventListener('storage', callback);
-    return () => {
-      window.removeEventListener(VIEW_MODE_CHANGE_EVENT, callback);
-      window.removeEventListener('storage', callback);
-    };
-  }, []);
-
-  const getSnapshot = useCallback(() => getStoredViewMode(), []);
-  const getServerSnapshot = useCallback(() => DEFAULT_VIEW_MODE, []);
-
-  const viewMode = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-
-  return [viewMode, setStoredViewMode];
-}
+export type RevertBlockInfo = {
+  /** 1-based line number in the new file where additions start */
+  addStart: number;
+  /** Number of addition lines to remove (0 for pure deletions) */
+  addCount: number;
+  /** Original lines to restore (empty for pure additions) */
+  oldLines: string[];
+};
 
 interface DiffViewerProps {
-  /** Diff data to display */
   data: FileDiffData;
-  /** Enable line selection for comments */
   enableComments?: boolean;
-  /** Session ID for comment storage */
   sessionId?: string;
-  /** Callback when comment is added */
   onCommentAdd?: (comment: DiffComment) => void;
-  /** Callback when comment is deleted */
   onCommentDelete?: (commentId: string) => void;
-  /** External comments (controlled mode) */
   comments?: DiffComment[];
-  /** Additional class name */
   className?: string;
-  /** Whether to show in compact mode (smaller text, no header) */
   compact?: boolean;
-  /** Whether to hide the file header and toolbar */
   hideHeader?: boolean;
-  /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
-  /** External word wrap override (controlled mode) */
+  onRevert?: (filePath: string) => void;
+  enableAcceptReject?: boolean;
+  onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
   wordWrap?: boolean;
 }
 
 type AnnotationMetadata = {
-  type: 'comment' | 'new-comment-form';
+  type: 'comment' | 'new-comment-form' | 'hunk-actions';
   comment?: DiffComment;
   isEditing?: boolean;
+  changeBlockId?: string;
 };
 
-// Custom comparison for memo - only re-render if actual content changes
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {
-  // Compare data by content, not reference
   if (prevProps.data.filePath !== nextProps.data.filePath) return false;
   if (prevProps.data.diff !== nextProps.data.diff) return false;
   if (prevProps.data.oldContent !== nextProps.data.oldContent) return false;
   if (prevProps.data.newContent !== nextProps.data.newContent) return false;
-
-  // Compare other props
   if (prevProps.enableComments !== nextProps.enableComments) return false;
   if (prevProps.sessionId !== nextProps.sessionId) return false;
   if (prevProps.compact !== nextProps.compact) return false;
   if (prevProps.hideHeader !== nextProps.hideHeader) return false;
   if (prevProps.className !== nextProps.className) return false;
   if (prevProps.onOpenFile !== nextProps.onOpenFile) return false;
+  if (prevProps.onRevert !== nextProps.onRevert) return false;
+  if (prevProps.enableAcceptReject !== nextProps.enableAcceptReject) return false;
+  if (prevProps.onRevertBlock !== nextProps.onRevertBlock) return false;
   if (prevProps.wordWrap !== nextProps.wordWrap) return false;
 
-  // Comments array - compare by length and IDs
   const prevComments = prevProps.comments;
   const nextComments = nextProps.comments;
   if (prevComments !== nextComments) {
@@ -151,20 +105,20 @@ export const DiffViewer = memo(function DiffViewer({
   compact = false,
   hideHeader = false,
   onOpenFile,
+  onRevert,
+  enableAcceptReject = false,
+  onRevertBlock,
   wordWrap: wordWrapProp,
 }: DiffViewerProps) {
   const { resolvedTheme } = useTheme();
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
   const [showCommentForm, setShowCommentForm] = useState(false);
 
-  // Global view mode (synced via localStorage)
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
 
-  // Local state for word wrap (per-diff), overridable via prop
   const [wordWrapLocal, setWordWrap] = useState(false);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
 
-  // Use internal comment management if sessionId provided
   const {
     comments: internalComments,
     addComment,
@@ -182,8 +136,49 @@ export const DiffViewer = memo(function DiffViewer({
 
   const comments = externalComments || internalComments;
 
-  // Create annotations from comments + new comment form
-  const annotations = useMemo<DiffLineAnnotation<AnnotationMetadata>[]>(() => {
+  // Parse initial diff metadata
+  const initialDiffMetadata = useMemo<FileDiffMetadata | null>(() => {
+    let result: FileDiffMetadata | null = null;
+    if (data.diff) {
+      const parsed = parsePatchFiles(data.diff);
+      result = parsed[0]?.files[0] ?? null;
+    } else if (data.oldContent || data.newContent) {
+      result = parseDiffFromFile(
+        { name: data.filePath, contents: data.oldContent },
+        { name: data.filePath, contents: data.newContent }
+      );
+    }
+
+    if (result && isGoFile(data.filePath)) {
+      const contentToCheck = data.newContent || data.oldContent || data.diff;
+      if (hasProblematicGoPattern(contentToCheck)) {
+        result = { ...result, lang: 'text' };
+      }
+    }
+
+    return result;
+  }, [data.diff, data.oldContent, data.newContent, data.filePath]);
+
+  const fileDiffMetadata = initialDiffMetadata;
+
+  // Per-change-block revert info: changeBlockId → { addStart, addCount, oldLines }
+  const revertInfoRef = useRef<Map<string, RevertBlockInfo>>(new Map());
+
+  const handleRevertBlock = useCallback(
+    async (changeBlockId: string) => {
+      const info = revertInfoRef.current.get(changeBlockId);
+      if (!info) return;
+      await onRevertBlock?.(data.filePath, info);
+    },
+    [data.filePath, onRevertBlock]
+  );
+
+  // Map from "side:lineNumber" → changeBlockId for hover detection
+  const changeLineMapRef = useRef<Map<string, string>>(new Map());
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Annotations: comments, new comment form, and hunk accept/reject
+  const { annotations, lineMap, revertMap } = useMemo(() => {
     const result: DiffLineAnnotation<AnnotationMetadata>[] = comments.map((comment) => ({
       side: comment.side,
       lineNumber: comment.endLine,
@@ -194,21 +189,73 @@ export const DiffViewer = memo(function DiffViewer({
       },
     }));
 
-    // Add new comment form annotation at the selected line
     if (showCommentForm && selectedLines) {
       result.push({
         side: (selectedLines.side || 'additions') as AnnotationSide,
         lineNumber: Math.max(selectedLines.start, selectedLines.end),
-        metadata: {
-          type: 'new-comment-form' as const,
-        },
+        metadata: { type: 'new-comment-form' as const },
       });
     }
 
-    return result;
-  }, [comments, editingCommentId, showCommentForm, selectedLines]);
+    // Add undo annotations per change block within each hunk.
+    // Also build a line → changeBlockId mapping for hover detection,
+    // and a changeBlockId → RevertBlockInfo mapping for workspace revert.
+    const newLineMap = new Map<string, string>();
+    const newRevertMap = new Map<string, RevertBlockInfo>();
+    if (enableAcceptReject && fileDiffMetadata) {
+      let blockIdx = 0;
+      for (let hi = 0; hi < fileDiffMetadata.hunks.length; hi++) {
+        const hunk = fileDiffMetadata.hunks[hi];
+        if (hunk.additionCount === 0 && hunk.deletionCount === 0) continue;
+        let addLine = hunk.additionStart;
+        let delLine = hunk.deletionStart;
+        let lastCtxAdd = addLine > 1 ? addLine - 1 : addLine;
+        let lastCtxDel = delLine > 1 ? delLine - 1 : delLine;
+        for (const content of hunk.hunkContent) {
+          if (content.type === 'context') {
+            const len = content.lines.length;
+            lastCtxAdd = addLine + len - 1;
+            lastCtxDel = delLine + len - 1;
+            addLine += len;
+            delLine += len;
+          } else {
+            const aLen = content.additions.length;
+            const dLen = content.deletions.length;
+            if (aLen > 0 || dLen > 0) {
+              const cbId = `cb-${blockIdx++}`;
+              const side: AnnotationSide = aLen > 0 ? 'additions' : 'deletions';
+              const lineNumber = side === 'additions' ? lastCtxAdd : lastCtxDel;
+              result.push({
+                side,
+                lineNumber,
+                metadata: { type: 'hunk-actions', changeBlockId: cbId },
+              });
+              for (let l = 0; l < aLen; l++) newLineMap.set(`additions:${addLine + l}`, cbId);
+              for (let l = 0; l < dLen; l++) newLineMap.set(`deletions:${delLine + l}`, cbId);
+              newRevertMap.set(cbId, {
+                addStart: addLine,
+                addCount: aLen,
+                // Pierre stores lines with trailing \n — strip them since
+                // we splice into an array produced by split('\n')
+                oldLines: content.deletions.map(l => l.replace(/\r?\n$/, '')),
+              });
+            }
+            addLine += aLen;
+            delLine += dLen;
+          }
+        }
+      }
+    }
 
-  // Stable handler for line selection - only fires when selection is complete
+    return { annotations: result, lineMap: newLineMap, revertMap: newRevertMap };
+  }, [comments, editingCommentId, showCommentForm, selectedLines, enableAcceptReject, fileDiffMetadata]);
+
+  // Sync maps to refs outside of render (avoids react-hooks/refs violation)
+  useEffect(() => {
+    changeLineMapRef.current = lineMap;
+    revertInfoRef.current = revertMap;
+  }, [lineMap, revertMap]);
+
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
       setSelectedLines(range);
@@ -219,60 +266,105 @@ export const DiffViewer = memo(function DiffViewer({
     [enableComments]
   );
 
-  // Handler for comment submission
   const handleCommentSubmit = useCallback(
     (content: string) => {
       if (!selectedLines) return;
-
       if (onCommentAdd && externalComments !== undefined) {
-        const comment: DiffComment = {
-          id: `${data.filePath}-${Date.now()}`,
-          sessionId: sessionId || '',
+        onCommentAdd(buildDiffComment({
           filePath: data.filePath,
-          startLine: Math.min(selectedLines.start, selectedLines.end),
-          endLine: Math.max(selectedLines.start, selectedLines.end),
+          sessionId: sessionId || '',
+          startLine: selectedLines.start,
+          endLine: selectedLines.end,
           side: (selectedLines.side || 'additions') as DiffComment['side'],
-          codeContent: '',
           annotation: content,
-          createdAt: new Date().toISOString(),
-          status: 'pending',
-        };
-        onCommentAdd(comment);
+        }));
       } else if (sessionId) {
         addComment(selectedLines, content);
       }
-
       setShowCommentForm(false);
       setSelectedLines(null);
     },
     [selectedLines, sessionId, data.filePath, addComment, onCommentAdd, externalComments]
   );
 
-  // Handler for comment deletion
-  const handleCommentDelete = useCallback(
-    (commentId: string) => {
-      if (onCommentDelete && externalComments !== undefined) {
-        onCommentDelete(commentId);
-      } else {
-        removeComment(commentId);
-      }
-    },
-    [removeComment, onCommentDelete, externalComments]
-  );
+  const { handleCommentDelete, handleCommentUpdate } = useCommentActions({
+    removeComment, updateComment, setEditingComment,
+    onCommentDelete, externalComments,
+  });
 
-  // Handle comment update
-  const handleCommentUpdate = useCallback(
-    (commentId: string, content: string) => {
-      updateComment(commentId, { annotation: content });
-      setEditingComment(null);
-    },
-    [updateComment, setEditingComment]
-  );
+  // Show/hide undo buttons when hovering change lines (direct DOM, no re-renders)
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const activeBlockRef = useRef<string | null>(null);
+  const isHoveringButtonRef = useRef(false);
 
-  // Render annotation callback
+  const setBlockVisible = useCallback((cbId: string | null, visible: boolean) => {
+    if (!cbId) return;
+    const btn = wrapperRef.current?.querySelector(`[data-cb="${cbId}"] [data-undo-btn]`);
+    if (btn instanceof HTMLElement) {
+      btn.style.opacity = visible ? '1' : '0';
+      btn.style.pointerEvents = visible ? 'auto' : 'none';
+    }
+  }, []);
+
+  const showBlock = useCallback((cbId: string) => {
+    if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
+    if (activeBlockRef.current === cbId) return;
+    setBlockVisible(activeBlockRef.current, false);
+    activeBlockRef.current = cbId;
+    setBlockVisible(cbId, true);
+  }, [setBlockVisible]);
+
+  const hideBlock = useCallback(() => {
+    if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    hideTimeoutRef.current = setTimeout(() => {
+      if (isHoveringButtonRef.current) return; // Don't hide while mouse is on the button
+      setBlockVisible(activeBlockRef.current, false);
+      activeBlockRef.current = null;
+    }, 200);
+  }, [setBlockVisible]);
+
+  const onButtonEnter = useCallback(() => {
+    isHoveringButtonRef.current = true;
+    if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
+  }, []);
+
+  const onButtonLeave = useCallback(() => {
+    isHoveringButtonRef.current = false;
+    hideBlock();
+  }, [hideBlock]);
+
+  const showBlockRef = useRef(showBlock);
+  const hideBlockRef = useRef(hideBlock);
+  useEffect(() => { showBlockRef.current = showBlock; }, [showBlock]);
+  useEffect(() => { hideBlockRef.current = hideBlock; }, [hideBlock]);
+
+  const onLineEnter = useCallback((props: { lineType?: string; lineNumber?: number; annotationSide?: string }) => {
+    const { lineType, lineNumber, annotationSide } = props;
+    if (!lineType?.startsWith('change-') || lineNumber == null) { hideBlockRef.current(); return; }
+    const side = lineType === 'change-deletion' ? 'deletions' : 'additions';
+    const key = `${annotationSide ?? side}:${lineNumber}`;
+    const cbId = changeLineMapRef.current.get(key);
+    if (cbId) showBlockRef.current(cbId);
+    else hideBlockRef.current();
+  }, []);
+
+  const onLineLeave = useCallback(() => { hideBlockRef.current(); }, []);
+
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
-      const { type, comment, isEditing } = annotation.metadata;
+      const { type, comment, isEditing, changeBlockId } = annotation.metadata;
+
+      if (type === 'hunk-actions' && changeBlockId) {
+        return (
+          <HunkActionBar
+            key={changeBlockId}
+            changeBlockId={changeBlockId}
+            onRevert={() => handleRevertBlock(changeBlockId)}
+            onMouseEnter={onButtonEnter}
+            onMouseLeave={onButtonLeave}
+          />
+        );
+      }
 
       if (type === 'new-comment-form') {
         return (
@@ -316,115 +408,33 @@ export const DiffViewer = memo(function DiffViewer({
 
       return null;
     },
-    [setEditingComment, handleCommentDelete, handleCommentUpdate, handleCommentSubmit]
+    [setEditingComment, handleCommentDelete, handleCommentUpdate, handleCommentSubmit, handleRevertBlock, onButtonEnter, onButtonLeave]
   );
 
-  // Render header metadata toolbar for each diff file
-  const renderHeaderMetadata = useCallback(
-    (props: RenderHeaderMetadataProps): ReactNode => {
-      const filePath = props.fileDiff?.name || data.filePath;
-
-      return (
-        <div className="flex items-center gap-1">
-          {/* Copy diff button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                onClick={() => navigator.clipboard.writeText(data.diff || '')}
-              >
-                <IconCopy className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy diff</TooltipContent>
-          </Tooltip>
-
-          {/* Revert button (non-functional placeholder) */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                onClick={() => {
-                  // TODO: Implement revert functionality
-                }}
-              >
-                <IconArrowBackUp className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Revert changes</TooltipContent>
-          </Tooltip>
-
-          {/* Word wrap toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100',
-                  wordWrap && 'opacity-100 bg-muted'
-                )}
-                onClick={() => setWordWrap(!wordWrap)}
-              >
-                <IconTextWrap className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Toggle word wrap</TooltipContent>
-          </Tooltip>
-
-          {/* Split/Unified toggle (global) */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                onClick={() => setGlobalViewMode(globalViewMode === 'split' ? 'unified' : 'split')}
-              >
-                {globalViewMode === 'split' ? (
-                  <IconLayoutRows className="h-3.5 w-3.5" />
-                ) : (
-                  <IconLayoutColumns className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {globalViewMode === 'split' ? 'Switch to unified view' : 'Switch to split view'}
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Open in editor button */}
-          {onOpenFile && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                  onClick={() => onOpenFile(filePath)}
-                >
-                  <IconPencil className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Edit</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      );
-    },
-    [data.filePath, data.diff, wordWrap, globalViewMode, setGlobalViewMode, onOpenFile]
+  const toggleViewMode = useCallback(
+    () => setGlobalViewMode(globalViewMode === 'split' ? 'unified' : 'split'),
+    [globalViewMode, setGlobalViewMode]
   );
 
-  // Render hover utility (+) icon for adding comments
+  const toggleWordWrap = useCallback(
+    () => setWordWrap((v) => !v),
+    []
+  );
+
+  const renderHeaderMetadata = useDiffHeaderToolbar({
+    filePath: data.filePath,
+    diff: data.diff,
+    wordWrap,
+    onToggleWordWrap: toggleWordWrap,
+    viewMode: globalViewMode,
+    onToggleViewMode: toggleViewMode,
+    onOpenFile,
+    onRevert,
+  });
+
   const renderHoverUtility = useCallback(
     (): ReactNode => {
-      // Only show when comments are enabled
       if (!enableComments) return null;
-
       return (
         <div
           className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -437,74 +447,50 @@ export const DiffViewer = memo(function DiffViewer({
     [enableComments]
   );
 
-  // Determine if header/toolbar should be shown
   const showHeader = !hideHeader && !compact;
 
   const options = useMemo<FileDiffOptions<AnnotationMetadata>>(
     () => ({
       diffStyle: globalViewMode,
       themeType: resolvedTheme === 'dark' ? 'dark' : 'light',
-      theme: {
-        dark: 'github-dark-high-contrast',
-        light: 'github-light',
-      },
       enableLineSelection: enableComments,
       hunkSeparators: 'simple',
       enableHoverUtility: enableComments,
       diffIndicators: 'none',
       onLineSelectionEnd: handleLineSelectionEnd,
+      onLineEnter,
+      onLineLeave,
       disableFileHeader: !showHeader,
-      lineDiffType: 'word',
       overflow: wordWrap ? 'wrap' : 'scroll',
       unsafeCSS: `
-        /* Make container backgrounds transparent, but NOT diff line backgrounds
-         * Only target the root container and specific UI elements, not the diff content itself */
-        [data-diffs-root] {
-          background: transparent !important;
+        /* Override Pierre's inline theme — both CSS vars AND direct background-color */
+        pre[data-diffs] {
+          background-color: var(--background) !important;
+          --diffs-bg: var(--background) !important;
+          --diffs-bg-context: var(--background) !important;
+          --diffs-bg-buffer: var(--background) !important;
+          --diffs-bg-separator: var(--card) !important;
+          --diffs-bg-hover: var(--muted) !important;
+          --diffs-fg: var(--foreground) !important;
+          --diffs-fg-number: var(--muted-foreground) !important;
+          --diffs-addition-color-override: rgb(var(--git-addition)) !important;
+          --diffs-deletion-color-override: rgb(var(--git-deletion)) !important;
+          --diffs-font-size: ${FONT.size}px !important;
+          --diffs-font-family: ${FONT.mono} !important;
         }
-
-        /* Reduce icon size */
         [data-change-icon] {
           width: 12px !important;
           height: 12px !important;
         }
-
-        /* Adjust header padding */
         [data-diffs-header] {
           padding-inline: 12px !important;
+          background: var(--card) !important;
         }
       `,
     }),
-    [globalViewMode, resolvedTheme, enableComments, showHeader, handleLineSelectionEnd, wordWrap]
+    [globalViewMode, resolvedTheme, enableComments, showHeader, handleLineSelectionEnd, wordWrap, onLineEnter, onLineLeave]
   );
 
-  // Compute FileDiffMetadata from either diff string or content
-  const fileDiffMetadata = useMemo<FileDiffMetadata | null>(() => {
-    let result: FileDiffMetadata | null = null;
-    if (data.diff) {
-      const parsed = parsePatchFiles(data.diff);
-      result = parsed[0]?.files[0] ?? null;
-    } else if (data.oldContent || data.newContent) {
-      result = parseDiffFromFile(
-        { name: data.filePath, contents: data.oldContent },
-        { name: data.filePath, contents: data.newContent }
-      );
-    }
-
-    // Fix for shiki Go grammar catastrophic backtracking bug (PR #183)
-    // Disable syntax highlighting for Go files with interface{} + struct tags
-    if (result && isGoFile(data.filePath)) {
-      const contentToCheck = data.newContent || data.oldContent || data.diff;
-      if (hasProblematicGoPattern(contentToCheck)) {
-        result = { ...result, lang: 'text' };
-      }
-    }
-
-    return result;
-  }, [data.diff, data.oldContent, data.newContent, data.filePath]);
-
-  // Only pass selectedLines when we have a completed selection (form shown)
-  // During drag, let FileDiff manage its own internal state
   const controlledSelection = showCommentForm ? selectedLines : null;
 
   if (!fileDiffMetadata) {
@@ -520,7 +506,7 @@ export const DiffViewer = memo(function DiffViewer({
   }
 
   return (
-    <div className={cn('diff-viewer relative', className)}>
+    <div ref={wrapperRef} className={cn('diff-viewer', className)}>
       <FileDiff
         fileDiff={fileDiffMetadata}
         options={options}
@@ -529,11 +515,6 @@ export const DiffViewer = memo(function DiffViewer({
         renderAnnotation={renderAnnotation}
         renderHeaderMetadata={showHeader ? renderHeaderMetadata : undefined}
         renderHoverUtility={renderHoverUtility}
-        style={{
-          '--diffs-addition-color-override': 'rgb(var(--git-addition))',
-          '--diffs-deletion-color-override': 'rgb(var(--git-deletion))',
-          '--diffs-font-size': '12px',
-        } as React.CSSProperties}
         className={cn(
           'rounded-md border border-border/50',
           compact && 'text-xs'
@@ -543,11 +524,7 @@ export const DiffViewer = memo(function DiffViewer({
   );
 }, arePropsEqual);
 
-/**
- * Compact inline diff viewer for chat messages.
- * This is a convenience wrapper around DiffViewer with compact defaults.
- * @deprecated Use DiffViewer with compact={true} instead
- */
+/** Compact inline diff viewer for chat messages (Pierre implementation). */
 export function DiffViewInline({
   data,
   className,
