@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconLayoutColumns, IconPlus } from '@tabler/icons-react';
+import { IconDownload, IconLayoutColumns, IconPlus, IconUpload } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
@@ -17,14 +17,20 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@kandev/ui/dialog';
+import { Textarea } from '@kandev/ui/textarea';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { WorkflowCard } from '@/components/settings/workflow-card';
+import { WorkflowExportDialog } from '@/components/settings/workflow-export-dialog';
+import { useToast } from '@/components/toast-provider';
+import { useWorkflowSettings } from '@/hooks/domains/settings/use-workflow-settings';
 import { cn, generateUUID } from '@/lib/utils';
 import {
   deleteWorkflowAction,
   updateWorkflowAction,
+  exportAllWorkflowsAction,
+  importWorkflowsAction,
 } from '@/app/actions/workspaces';
-import type { Workflow, StepDefinition, WorkflowStep, Workspace, WorkflowTemplate } from '@/lib/types/http';
+import type { Workflow, StepDefinition, WorkflowStep, Workspace, WorkflowTemplate, WorkflowExportData } from '@/lib/types/http';
 
 type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
@@ -38,13 +44,24 @@ export function WorkspaceWorkflowsClient({
   workflowTemplates,
 }: WorkspaceWorkflowsClientProps) {
   const router = useRouter();
-  const [workflowItems, setWorkflowItems] = useState<Workflow[]>(workflows);
-  const [savedWorkflowItems, setSavedWorkflowItems] = useState<Workflow[]>(workflows);
+  const { toast } = useToast();
+  const { workflowItems, setWorkflowItems, setSavedWorkflowItems, isWorkflowDirty } =
+    useWorkflowSettings(workflows);
 
   // Dialog state for creating a new workflow
   const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+
+  // Export dialog state
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [exportJson, setExportJson] = useState('');
+
+  // Import dialog state
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const templateStepsById = useMemo(() => {
     return new Map(
@@ -76,17 +93,6 @@ export function WorkspaceWorkflowsClient({
       created_at: '',
       updated_at: '',
     }));
-
-  const savedWorkflowsById = useMemo(() => {
-    return new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow]));
-  }, [savedWorkflowItems]);
-
-  const isWorkflowDirty = (workflow: Workflow) => {
-    const saved = savedWorkflowsById.get(workflow.id);
-    if (!saved) return true;
-    if (workflow.name !== saved.name || workflow.description !== saved.description) return true;
-    return false;
-  };
 
   const handleOpenAddWorkflowDialog = () => {
     setNewWorkflowName('');
@@ -156,6 +162,60 @@ export function WorkspaceWorkflowsClient({
     );
   };
 
+  const handleExportAll = async () => {
+    if (!workspace) return;
+    try {
+      const data = await exportAllWorkflowsAction(workspace.id);
+      setExportJson(JSON.stringify(data, null, 2));
+      setIsExportDialogOpen(true);
+    } catch (error) {
+      toast({
+        title: 'Failed to export workflows',
+        description: error instanceof Error ? error.message : 'Request failed',
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setImportJson(event.target?.result as string);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleImport = async () => {
+    if (!workspace || !importJson.trim()) return;
+    setImportLoading(true);
+    try {
+      const data = JSON.parse(importJson.trim()) as WorkflowExportData;
+      const result = await importWorkflowsAction(workspace.id, data);
+      const created = result.created ?? [];
+      const skipped = result.skipped ?? [];
+      const parts: string[] = [];
+      if (created.length > 0) parts.push(`Created: ${created.join(', ')}`);
+      if (skipped.length > 0) parts.push(`Skipped (already exist): ${skipped.join(', ')}`);
+      toast({ title: 'Import complete', description: parts.join('. ') });
+      setIsImportDialogOpen(false);
+      setImportJson('');
+      if (created.length > 0) {
+        router.refresh();
+      }
+    } catch (error) {
+      toast({
+        title: 'Failed to import workflows',
+        description: error instanceof Error ? error.message : 'Invalid JSON',
+        variant: 'error',
+      });
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   if (!workspace) {
     return (
       <div>
@@ -192,10 +252,20 @@ export function WorkspaceWorkflowsClient({
         title="Workflows"
         description="Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself"
         action={
-          <Button size="sm" onClick={handleOpenAddWorkflowDialog} className="cursor-pointer">
-            <IconPlus className="h-4 w-4 mr-2" />
-            Add Workflow
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleExportAll} className="cursor-pointer">
+              <IconDownload className="h-4 w-4 mr-2" />
+              Export All
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setIsImportDialogOpen(true)} className="cursor-pointer">
+              <IconUpload className="h-4 w-4 mr-2" />
+              Import
+            </Button>
+            <Button size="sm" onClick={handleOpenAddWorkflowDialog} className="cursor-pointer">
+              <IconPlus className="h-4 w-4 mr-2" />
+              Add Workflow
+            </Button>
+          </div>
         }
       >
         <div className="grid gap-3">
@@ -227,6 +297,51 @@ export function WorkspaceWorkflowsClient({
           })}
         </div>
       </SettingsSection>
+
+      <WorkflowExportDialog
+        open={isExportDialogOpen}
+        onOpenChange={setIsExportDialogOpen}
+        title="Export Workflows"
+        json={exportJson}
+      />
+
+      {/* Import Workflows Dialog */}
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Workflows</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Upload JSON file</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileUpload}
+                className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Or paste JSON</Label>
+              <Textarea
+                placeholder='{"version": 1, "type": "kandev_workflow", "workflows": [...]}'
+                value={importJson}
+                onChange={(e) => setImportJson(e.target.value)}
+                className="font-mono text-xs max-h-96 overflow-y-auto"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} className="cursor-pointer">
+              Cancel
+            </Button>
+            <Button onClick={handleImport} disabled={!importJson.trim() || importLoading} className="cursor-pointer">
+              {importLoading ? 'Importing...' : 'Import'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Workflow Dialog */}
       <Dialog open={isAddWorkflowDialogOpen} onOpenChange={setIsAddWorkflowDialogOpen}>

@@ -198,3 +198,26 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 	}
 	return &ListHistoryResponse{History: history}, nil
 }
+
+// Export/Import types and methods
+
+// ImportWorkflowsRequest carries import data.
+type ImportWorkflowsRequest struct {
+	WorkspaceID string               `json:"workspace_id"`
+	Data        *models.WorkflowExport `json:"data"`
+}
+
+// ExportWorkflow exports a single workflow.
+func (c *Controller) ExportWorkflow(ctx context.Context, workflowID string) (*models.WorkflowExport, error) {
+	return c.svc.ExportWorkflow(ctx, workflowID)
+}
+
+// ExportWorkflows exports all workflows for a workspace.
+func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
+	return c.svc.ExportWorkflows(ctx, workspaceID)
+}
+
+// ImportWorkflows imports workflows into a workspace.
+func (c *Controller) ImportWorkflows(ctx context.Context, req ImportWorkflowsRequest) (*service.ImportResult, error) {
+	return c.svc.ImportWorkflows(ctx, req.WorkspaceID, req.Data)
+}

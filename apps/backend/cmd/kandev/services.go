@@ -11,6 +11,7 @@ import (
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -51,6 +52,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 
+	// Wire workflow provider to workflow service for export/import
+	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
+
 	return &Services{
 		Task:     taskSvc,
 		User:     userSvc,
@@ -90,4 +94,28 @@ func (a *startStepResolverAdapter) ResolveStartStep(ctx context.Context, workflo
 		return "", err
 	}
 	return step.ID, nil
+}
+
+// workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.
+type workflowProviderAdapter struct {
+	svc *taskservice.Service
+}
+
+// ListWorkflows implements workflowservice.WorkflowProvider.
+func (a *workflowProviderAdapter) ListWorkflows(ctx context.Context, workspaceID string) ([]*taskmodels.Workflow, error) {
+	return a.svc.ListWorkflows(ctx, workspaceID)
+}
+
+// GetWorkflow implements workflowservice.WorkflowProvider.
+func (a *workflowProviderAdapter) GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error) {
+	return a.svc.GetWorkflow(ctx, id)
+}
+
+// CreateWorkflow implements workflowservice.WorkflowProvider.
+func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error) {
+	return a.svc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: workspaceID,
+		Name:        name,
+		Description: description,
+	})
 }

@@ -18,6 +18,8 @@ import type {
   StepEvents,
   Workspace,
   WorkflowStep,
+  WorkflowExportData,
+  ImportWorkflowsResult,
   ListWorkflowTemplatesResponse,
   WorkflowTemplate,
   StepDefinition,
@@ -429,5 +431,25 @@ export async function moveSessionToStepAction(sessionId: string, stepId: string)
   return fetchJson(`${apiBaseUrl}/api/v1/sessions/${sessionId}/workflow-step`, {
     method: 'PUT',
     body: JSON.stringify({ step_id: stepId }),
+  });
+}
+
+// Workflow Export/Import
+
+export async function exportWorkflowAction(workflowId: string): Promise<WorkflowExportData> {
+  return fetchJson<WorkflowExportData>(`${apiBaseUrl}/api/v1/workflows/${workflowId}/export`);
+}
+
+export async function exportAllWorkflowsAction(workspaceId: string): Promise<WorkflowExportData> {
+  return fetchJson<WorkflowExportData>(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`);
+}
+
+export async function importWorkflowsAction(
+  workspaceId: string,
+  data: WorkflowExportData
+): Promise<ImportWorkflowsResult> {
+  return fetchJson<ImportWorkflowsResult>(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }

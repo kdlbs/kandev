@@ -9,14 +9,28 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
 )
 
+// WorkflowProvider gives the workflow service access to workflows owned by the task domain.
+type WorkflowProvider interface {
+	ListWorkflows(ctx context.Context, workspaceID string) ([]*taskmodels.Workflow, error)
+	GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error)
+	CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error)
+}
+
 // Service provides workflow business logic
 type Service struct {
-	repo   *repository.Repository
-	logger *logger.Logger
+	repo             *repository.Repository
+	logger           *logger.Logger
+	workflowProvider WorkflowProvider
+}
+
+// SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
+func (s *Service) SetWorkflowProvider(wp WorkflowProvider) {
+	s.workflowProvider = wp
 }
 
 // NewService creates a new workflow service
@@ -329,5 +343,113 @@ func (s *Service) ListHistoryBySession(ctx context.Context, sessionID string) ([
 		return nil, err
 	}
 	return history, nil
+}
+
+// ============================================================================
+// Export/Import Operations
+// ============================================================================
+
+// ImportResult holds the outcome of an import operation.
+type ImportResult struct {
+	Created []string `json:"created"`
+	Skipped []string `json:"skipped"`
+}
+
+// ExportWorkflow exports a single workflow with its steps as portable JSON.
+func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*models.WorkflowExport, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow: %w", err)
+	}
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list steps: %w", err)
+	}
+	stepMap := map[string][]*models.WorkflowStep{wf.ID: steps}
+	return models.BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap), nil
+}
+
+// ExportWorkflows exports all workflows for a workspace.
+func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
+	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workflows: %w", err)
+	}
+	stepMap := make(map[string][]*models.WorkflowStep, len(workflows))
+	for _, wf := range workflows {
+		steps, stepsErr := s.repo.ListStepsByWorkflow(ctx, wf.ID)
+		if stepsErr != nil {
+			return nil, fmt.Errorf("failed to list steps for workflow %s: %w", wf.ID, stepsErr)
+		}
+		stepMap[wf.ID] = steps
+	}
+	return models.BuildWorkflowExport(workflows, stepMap), nil
+}
+
+// ImportWorkflows imports workflows into a workspace. Deduplicates by name.
+func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, export *models.WorkflowExport) (*ImportResult, error) {
+	if err := export.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid export data: %w", err)
+	}
+
+	existing, err := s.workflowProvider.ListWorkflows(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing workflows: %w", err)
+	}
+	existingNames := make(map[string]bool, len(existing))
+	for _, wf := range existing {
+		existingNames[wf.Name] = true
+	}
+
+	result := &ImportResult{}
+	for _, pw := range export.Workflows {
+		if existingNames[pw.Name] {
+			result.Skipped = append(result.Skipped, pw.Name)
+			continue
+		}
+		if err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
+			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
+		}
+		result.Created = append(result.Created, pw.Name)
+	}
+
+	s.logger.Info("imported workflows",
+		zap.String("workspace_id", workspaceID),
+		zap.Int("created", len(result.Created)),
+		zap.Int("skipped", len(result.Skipped)))
+	return result, nil
+}
+
+func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) error {
+	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
+	if err != nil {
+		return fmt.Errorf("create workflow: %w", err)
+	}
+
+	// Generate UUIDs for all steps and build position→ID map.
+	posToID := make(map[int]string, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		posToID[sp.Position] = uuid.New().String()
+	}
+
+	// Create each step with remapped events.
+	for _, sp := range pw.Steps {
+		step := &models.WorkflowStep{
+			ID:                    posToID[sp.Position],
+			WorkflowID:            wf.ID,
+			Name:                  sp.Name,
+			Position:              sp.Position,
+			Color:                 sp.Color,
+			Prompt:                sp.Prompt,
+			Events:                models.ConvertPositionToStepID(sp.Events, posToID),
+			IsStartStep:           sp.IsStartStep,
+			AllowManualMove:       sp.AllowManualMove,
+			AutoArchiveAfterHours: sp.AutoArchiveAfterHours,
+		}
+		if err := s.repo.CreateStep(ctx, step); err != nil {
+			return fmt.Errorf("create step %q: %w", sp.Name, err)
+		}
+	}
+	return nil
 }
 
