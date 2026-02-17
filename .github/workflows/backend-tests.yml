@@ -51,6 +51,7 @@ jobs:
           version: v2.9
           args: ./...
           working-directory: apps/backend
+          only-new-issues: true
 
       - name: Run tests
         run: |

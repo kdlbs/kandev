@@ -5,19 +5,18 @@
 ## Repo Layout
 
 ```
-kandev-3/
-├── apps/
-│   ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
-│   ├── web/              # Next.js frontend (SSR + WS + Zustand)
-│   ├── packages/         # Shared packages/types
-│   └── landing/          # Marketing site (shares UI with web)
+apps/
+├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
+├── web/              # Next.js frontend (SSR + WS + Zustand)
+├── cli/              # CLI tool (TypeScript)
+└── packages/         # Shared packages/types
 ```
 
 ## Tooling
 
-- **Package manager**: `pnpm` workspace (root)
+- **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
-- **Frontend**: Next.js (`pnpm -C apps/web dev|lint|typecheck`)
+- **Frontend**: Next.js (`cd apps && pnpm --filter @kandev/web dev|lint|typecheck`)
 - **UI**: Shadcn components via `@kandev/ui`
 
 ---
@@ -30,31 +29,64 @@ kandev-3/
 apps/backend/
 ├── cmd/
 │   ├── kandev/           # Main backend binary entry point
-│   └── agentctl/         # Agentctl binary (runs inside containers or standalone)
+│   ├── agentctl/         # Agentctl binary (runs inside containers or standalone)
+│   └── mock-agent/       # Mock agent for testing
 ├── internal/
 │   ├── agent/
 │   │   ├── lifecycle/    # Agent instance management (see below)
+│   │   ├── agents/       # Agent type implementations
+│   │   ├── controller/   # Agent control operations
+│   │   ├── credentials/  # Agent credential management
+│   │   ├── discovery/    # Agent discovery
+│   │   ├── docker/       # Docker-specific agent logic
+│   │   ├── dto/          # Agent data transfer objects
+│   │   ├── handlers/     # Agent event handlers
 │   │   ├── registry/     # Agent type registry and defaults
 │   │   ├── runtime/      # Runtime name constants
+│   │   ├── settings/     # Agent settings
 │   │   └── mcpconfig/    # MCP server configuration
 │   ├── agentctl/
 │   │   ├── client/       # HTTP client for talking to agentctl
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── api/      # HTTP endpoints
+│   │       ├── adapter/  # Protocol adapters (ACP, Codex, Copilot, Amp)
 │   │       ├── instance/ # Multi-instance management
+│   │       ├── mcp/      # MCP server integration
 │   │       ├── process/  # Agent subprocess management
-│   │       └── adapter/  # Protocol adapters (ACP, Codex, REST, MCP)
+│   │       └── shell/    # Shell session management
 │   ├── orchestrator/     # Task execution coordination
 │   │   ├── executor/     # Launches agents via lifecycle manager
-│   │   ├── scheduler/    # Task scheduling
+│   │   ├── handlers/     # Orchestrator event handlers
+│   │   ├── messagequeue/ # Message queue for agent prompts
 │   │   ├── queue/        # Task queue
+│   │   ├── scheduler/    # Task scheduling
 │   │   └── watcher/      # Event handlers
 │   ├── task/
+│   │   ├── controller/   # Task HTTP/WS controllers
+│   │   ├── dto/          # Task data transfer objects
+│   │   ├── events/       # Task event types
+│   │   ├── handlers/     # Task event handlers
 │   │   ├── models/       # Task, Session, Executor, Message models
-│   │   ├── service/      # Task business logic
-│   │   └── repository/   # Database access (SQLite)
-│   ├── worktree/         # Git worktree management for workspace isolation
-│   └── events/           # Event bus for internal pub/sub
+│   │   ├── repository/   # Database access (SQLite)
+│   │   └── service/      # Task business logic
+│   ├── analytics/        # Usage analytics
+│   ├── clarification/    # Agent clarification handling
+│   ├── common/           # Shared utilities
+│   ├── db/               # Database initialization
+│   ├── debug/            # Debug tooling
+│   ├── editors/          # Editor integration
+│   ├── events/           # Event bus for internal pub/sub
+│   ├── gateway/          # WebSocket gateway
+│   ├── integration/      # External integrations
+│   ├── lsp/              # LSP server
+│   ├── mcp/              # MCP protocol support
+│   ├── notifications/    # Notification system
+│   ├── persistence/      # Persistence layer
+│   ├── prompts/          # Prompt management
+│   ├── sysprompt/        # System prompt injection
+│   ├── user/             # User management
+│   ├── workflow/         # Workflow engine
+│   └── worktree/         # Git worktree management for workspace isolation
 ```
 
 ### Key Concepts
@@ -66,13 +98,15 @@ apps/backend/
 - Located in `internal/orchestrator/`
 
 **Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
-- `Manager` - central coordinator for agent lifecycle
-- `Runtime` interface - abstracts execution environment (Docker, Standalone)
-- `ExecutionStore` - thread-safe in-memory execution tracking
-- `SessionManager` - ACP session initialization and resume
-- `StreamManager` - WebSocket stream connections to agentctl
-- `EventPublisher` - publishes events to the event bus
-- `ContainerManager` - Docker container operations
+- `Manager` (`manager.go`) - central coordinator for agent lifecycle
+- `Runtime` interface (`runtime.go`) - abstracts execution environment (Docker, Standalone, Remote Docker)
+- `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
+- `session.go` - ACP session initialization and resume
+- `streams.go` - WebSocket stream connections to agentctl
+- `events.go` - publishes events to the event bus
+- `container.go` - Docker container operations
+- `process_runner.go` - agent process launch and management
+- `profile_resolver.go` - resolves agent profiles/settings
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process
@@ -148,9 +182,12 @@ Client (WS)     Orchestrator        Lifecycle Manager       Runtime          age
 
 Protocol adapters normalize different agent CLIs:
 - `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
-- `ACPAdapter` - ACP JSON-RPC over stdio
-- `CodexAdapter` - Codex-style JSON-RPC
+- `ACP` - ACP JSON-RPC over stdio (Claude Code)
+- `Codex` - Codex-style JSON-RPC (OpenAI Codex)
+- `CopilotAdapter` - GitHub Copilot SDK
+- `AmpAdapter` - Sourcegraph Amp CLI
 - `process.Manager` owns subprocess, wires stdio to adapter
+- Factory pattern in `adapter/factory.go` selects adapter by agent type
 
 ---
 
@@ -196,19 +233,22 @@ SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 
 ```
 lib/state/
-├── store.ts (~370 lines)          # Root composition
+├── store.ts                        # Root composition
 ├── slices/                         # Domain slices
 │   ├── kanban/                    # boards, tasks, columns
 │   ├── session/                   # sessions, messages, turns, worktrees
 │   ├── session-runtime/           # shell, processes, git, context
 │   ├── workspace/                 # workspaces, repos, branches
 │   ├── settings/                  # executors, agents, editors, prompts
+│   ├── diff-comments/             # code review diff comments
 │   └── ui/                        # preview, connection, active state
 ├── hydration/                     # SSR merge strategies
-└── selectors/                     # Memoized selectors (future)
 
 hooks/domains/{kanban,session,workspace,settings}/  # Domain-organized hooks
-lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API clients
+lib/api/domains/                    # API clients
+├── kanban-api, session-api, workspace-api, settings-api, process-api
+├── plan-api, queue-api, workflow-api, stats-api
+├── user-shell-api, debug-api
 ```
 
 **Key State Paths:**
@@ -222,11 +262,30 @@ lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API client
 
 ### WS
 
-**Format:** `{id, type, action, payload, timestamp}`. See `docs/asyncapi.yaml` for all actions.
+**Format:** `{id, type, action, payload, timestamp}`.
 
 ---
 
 ## Best Practices
+
+### Code Quality (enforced by linters)
+
+Static analysis runs in CI and pre-commit. New code **must** stay within these limits:
+
+**Go** (`apps/backend/.golangci.yml` — errors on new code only):
+- Functions: **≤80 lines**, **≤50 statements**
+- Cyclomatic complexity: **≤15** · Cognitive complexity: **≤30**
+- Nesting depth: **≤5** · Naked returns only in functions **≤30 lines**
+- No duplicated blocks (**≥150 tokens**) · Repeated strings → constants (**≥3 occurrences**)
+
+**TypeScript** (`apps/web/eslint.config.mjs` — warnings, will become errors):
+- Files: **≤600 lines** · Functions: **≤100 lines**
+- Cyclomatic complexity: **≤15** · Cognitive complexity: **≤20**
+- Nesting depth: **≤4** · Parameters: **≤5**
+- No duplicated strings (**≥4 occurrences**) · No identical functions · No unused imports
+- No nested ternaries
+
+**When you hit a limit:** extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
 ### Backend
 - Provider pattern for DI; stderr for logs, stdout for ACP only
@@ -250,4 +309,10 @@ lib/api/domains/{kanban,session,workspace,settings,process}-api.ts  # API client
 
 ---
 
-**Last Updated**: 2026-02-01
+## Maintaining This File
+
+This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Codex via `AGENTS.md`). If your changes make any section of this file outdated or inaccurate — e.g., you add/remove/rename packages, change architectural patterns, add new adapters, modify store slices, or change conventions — **update the relevant sections of this file as part of the same PR**. Keep descriptions concise and factual. Do not add speculative or aspirational content.
+
+---
+
+**Last Updated**: 2026-02-17
