@@ -2,7 +2,7 @@
 
 ## Overview
 
-The stats system provides workspace-level analytics about tasks, agent sessions, repository activity, and git commits. It computes everything on-demand from existing tables — there are no dedicated stats tables.
+The stats system provides workspace-level analytics about tasks, agent sessions, repository activity, and git commits. It computes everything on-demand from existing tables - there are no dedicated stats tables.
 
 **Route**: `/stats` (with `?range=week|month|all`)
 
@@ -101,10 +101,10 @@ Key indexes: tasks(workspace_id, created_at), task_sessions(task_id, started_at)
 
 ## Known Limitations
 
-1. **No caching** — every page load runs all 7 queries
-2. **No real-time updates** — single fetch on page load, no WebSocket/polling
-3. **Git tracking gaps** — only commits made during task sessions are tracked
-4. **Duration precision** — `julianday()` returns float, cast to int64 (minor precision loss)
-5. **Incomplete turns** — turns with NULL `completed_at` count in totals but contribute 0ms to duration
-6. **"Month" = 30 days** — not a calendar month
-7. **Sequential queries** — the 7 repo calls in the handler run sequentially, not in parallel
+1. **No caching** - every page load runs all 7 queries
+2. **No real-time updates** - single fetch on page load, no WebSocket/polling
+3. **Git tracking gaps** - only commits made during task sessions are tracked
+4. **Duration precision** - `julianday()` returns float, cast to int64 (minor precision loss)
+5. **Incomplete turns** - turns with NULL `completed_at` count in totals but contribute 0ms to duration
+6. **"Month" = 30 days** - not a calendar month
+7. **Sequential queries** - the 7 repo calls in the handler run sequentially, not in parallel

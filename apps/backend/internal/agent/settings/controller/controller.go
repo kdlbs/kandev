@@ -294,8 +294,14 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 			return fmt.Errorf("unknown agent display name: %s", result.Name)
 		}
 		defaultModel := agentConfig.DefaultModel()
+		isPassthroughOnly := false
 		if defaultModel == "" {
-			return fmt.Errorf("unknown agent default model: %s", result.Name)
+			if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && ptAgent.PassthroughConfig().Supported {
+				isPassthroughOnly = true
+				defaultModel = "passthrough"
+			} else {
+				return fmt.Errorf("unknown agent default model: %s", result.Name)
+			}
 		}
 		agent, err := c.repo.GetAgentByName(ctx, result.Name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -357,6 +363,9 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 
 				// Re-resolve profile name from model display name
 				resolvedName := resolveModelDisplayName(modelList, profile.Model)
+				if isPassthroughOnly {
+					resolvedName = displayName
+				}
 				if profile.Name != resolvedName {
 					profile.Name = resolvedName
 					updated = true
@@ -374,6 +383,10 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 					profile.DangerouslySkipPermissions = skipPermissions
 					updated = true
 				}
+				if isPassthroughOnly && !profile.CLIPassthrough {
+					profile.CLIPassthrough = true
+					updated = true
+				}
 
 				if updated {
 					if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
@@ -385,6 +398,9 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		}
 
 		profileName := resolveModelDisplayName(modelList, defaultModel)
+		if isPassthroughOnly {
+			profileName = displayName
+		}
 		defaultProfile := &models.AgentProfile{
 			AgentID:                    agent.ID,
 			Name:                       profileName,
@@ -393,6 +409,7 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 			AutoApprove:                autoApprove,
 			AllowIndexing:              allowIndexing,
 			DangerouslySkipPermissions: skipPermissions,
+			CLIPassthrough:             isPassthroughOnly,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, defaultProfile); err != nil {
 			return err

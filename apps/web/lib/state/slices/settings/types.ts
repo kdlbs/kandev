@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentProfile,
   AvailableAgent,
   AgentDiscovery,
   CustomPrompt,
@@ -36,8 +37,22 @@ export type AgentProfileOption = {
   label: string;
   agent_id: string;
   agent_name: string;
-  cli_passthrough?: boolean;
+  cli_passthrough: boolean;
 };
+
+/** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
+export function toAgentProfileOption(
+  agent: Pick<Agent, 'id' | 'name'>,
+  profile: Pick<AgentProfile, 'id' | 'agent_display_name' | 'name'> & { cli_passthrough?: boolean },
+): AgentProfileOption {
+  return {
+    id: profile.id,
+    label: `${profile.agent_display_name} • ${profile.name}`,
+    agent_id: agent.id,
+    agent_name: agent.name,
+    cli_passthrough: profile.cli_passthrough ?? false,
+  };
+}
 
 export type AgentProfilesState = {
   items: AgentProfileOption[];

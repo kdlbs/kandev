@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -91,10 +88,6 @@ func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: models, SupportsDynamic: true}, nil
 }
 
-func (a *Auggie) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newACPAdapterWrapper(acp.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "@augmentcode/auggie@0.15.0", "--acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
@@ -117,7 +110,6 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 			{Source: "{workspace}", Target: "/workspace"},
 		},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolACP,
 		ModelFlag:      NewParam("--model", "{model}"),
 		WorkspaceFlag:  "--workspace-root",

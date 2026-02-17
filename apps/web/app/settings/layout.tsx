@@ -8,6 +8,7 @@ import {
   listExecutors,
   listWorkspaces,
 } from '@/lib/api';
+import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
 
 export default function SettingsLayout({
   children,
@@ -58,11 +59,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       agentProfiles: {
         items: agents.agents.flatMap((agent) =>
-          agent.profiles.map((profile) => ({
-            id: profile.id,
-            label: `${profile.agent_display_name} • ${profile.name}`,
-            agent_id: agent.id,
-          }))
+          agent.profiles.map((profile) => toAgentProfileOption(agent, profile))
         ),
       },
       settingsAgents: {

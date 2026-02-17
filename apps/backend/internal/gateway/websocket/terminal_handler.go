@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
@@ -258,13 +257,7 @@ func (h *TerminalHandler) runTerminalBridge(
 	var ptyWriter io.Writer
 	var directOutputSet bool
 
-	// Channel to signal cleanup to any spawned goroutines
-	done := make(chan struct{})
-
 	defer func() {
-		// Signal any background goroutines to stop
-		close(done)
-
 		// Clean up: clear direct output at session level (process may have been restarted with new ID)
 		interactiveRunner.ClearDirectOutputBySession(sessionID)
 		_ = wsw.Close()
@@ -305,119 +298,70 @@ func (h *TerminalHandler) runTerminalBridge(
 				}
 			}
 
-			// Now handle the resize - this sends SIGWINCH which triggers TUI redraw
-			h.handleResize(data[1:], sessionID, interactiveRunner)
+			// Handle resize — may return updated processID if process was restarted.
+			// Falls back to session-level resize when the old process is gone.
+			newProcessID := h.handleResize(data[1:], sessionID, processID, interactiveRunner)
+			if newProcessID != processID {
+				processID = newProcessID
+				directOutputSet = false
+				ptyWriter = nil
+			}
+
+			// Retry setupPtyAccess after resize — process may have been lazily started
+			// by the resize (deferred-start), so the PTY is now available.
+			if !directOutputSet {
+				if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
+					directOutputSet = true
+				}
+			}
 			continue
 		}
 
 		// Regular input - write to PTY if available
 		if ptyWriter != nil {
 			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error, attempting reconnect",
+				h.logger.Debug("PTY write error",
 					zap.String("session_id", sessionID),
+					zap.String("process_id", processID),
 					zap.Error(err))
 
-				// Try to reconnect to a new process (may have been restarted)
-				newWriter, newProcID := h.attemptReconnect(sessionID, interactiveRunner, wsw, done)
-				if newWriter != nil {
-					ptyWriter = newWriter
-					processID = newProcID
-					directOutputSet = true
-
-					// Retry write with new writer
-					if _, err := ptyWriter.Write(data); err != nil {
-						h.logger.Debug("PTY write error after reconnect",
-							zap.String("session_id", sessionID),
-							zap.Error(err))
-						continue
-					}
-					h.detectInputSubmission(sessionID, data)
-				} else {
-					h.logger.Debug("reconnect failed, PTY unavailable",
-						zap.String("session_id", sessionID))
-					// Don't return - keep trying on subsequent inputs
-					continue
-				}
-			} else {
-				// Detect Enter key (user submitted input) - notify lifecycle manager
-				h.detectInputSubmission(sessionID, data)
+				// Reset state and discover the new process immediately.
+				// Without this, the bridge would be stuck with the old processID
+				// until a resize message arrives (which may never come after restart).
+				ptyWriter = nil
+				directOutputSet = false
+				processID = h.discoverProcessBySession(sessionID, processID, interactiveRunner)
+				continue
 			}
+			// Detect Enter key (user submitted input) - notify lifecycle manager
+			h.detectInputSubmission(sessionID, data)
 		} else {
-			// PTY not ready yet - try to set it up
-			if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
-				directOutputSet = true
-				// Double-check ptyWriter is valid after setup
-				if ptyWriter == nil {
-					h.logger.Error("PTY writer is nil after successful setup",
-						zap.String("session_id", sessionID))
-					continue
+			// PTY not ready — try setup. If it fails, processID may be stale
+			// (process was restarted with a new ID). Discover the current process
+			// by session before giving up.
+			if !h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
+				newID := h.discoverProcessBySession(sessionID, processID, interactiveRunner)
+				if newID != processID {
+					processID = newID
+					h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter)
 				}
-				// Retry writing after setup
-				if _, err := ptyWriter.Write(data); err != nil {
-					h.logger.Debug("PTY write error after setup",
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-					continue
-				}
-				// Detect Enter key (user submitted input) - notify lifecycle manager
-				h.detectInputSubmission(sessionID, data)
-			} else {
+			}
+			if ptyWriter == nil {
 				h.logger.Debug("PTY not ready, dropping input",
 					zap.String("session_id", sessionID),
 					zap.Int("bytes", len(data)))
+				continue
 			}
-		}
-	}
-}
-
-// attemptReconnect tries to reconnect to a new process after the old one exited.
-// Returns the new PTY writer and process ID if successful, or nil if not.
-func (h *TerminalHandler) attemptReconnect(
-	sessionID string,
-	interactiveRunner *process.InteractiveRunner,
-	wsw *wsWriter,
-	done <-chan struct{},
-) (io.Writer, string) {
-	const maxRetries = 20         // 20 retries
-	const retryInterval = 100 * time.Millisecond // 100ms between retries = 2s total
-
-	for i := 0; i < maxRetries; i++ {
-		select {
-		case <-done:
-			// Bridge is shutting down
-			return nil, ""
-		default:
-		}
-
-		// Try to get the PTY writer for the session (may be a new process)
-		writer, newProcID, err := interactiveRunner.GetPtyWriterBySession(sessionID)
-		if err == nil && writer != nil {
-			// Found a new process - set up direct output
-			if err := interactiveRunner.SetDirectOutput(newProcID, wsw); err != nil {
-				h.logger.Debug("failed to set direct output during reconnect",
+			directOutputSet = true
+			if _, err := ptyWriter.Write(data); err != nil {
+				h.logger.Debug("PTY write error after setup",
 					zap.String("session_id", sessionID),
-					zap.String("process_id", newProcID),
 					zap.Error(err))
-			} else {
-				h.logger.Info("reconnected to new process after restart",
-					zap.String("session_id", sessionID),
-					zap.String("process_id", newProcID))
-				return writer, newProcID
+				continue
 			}
-		}
-
-		// Wait before retrying
-		select {
-		case <-done:
-			return nil, ""
-		case <-time.After(retryInterval):
+			h.detectInputSubmission(sessionID, data)
 		}
 	}
-
-	h.logger.Debug("reconnect attempts exhausted",
-		zap.String("session_id", sessionID),
-		zap.Int("attempts", maxRetries))
-	return nil, ""
 }
 
 // detectInputSubmission checks if the input contains Enter key and notifies
@@ -452,69 +396,31 @@ func (h *TerminalHandler) setupPtyAccess(
 	wsw *wsWriter,
 	ptyWriter *io.Writer,
 ) bool {
-	// Try to get PTY writer - this will fail if process hasn't started yet
-	writer, err := interactiveRunner.GetPtyWriter(processID)
-	if err != nil {
-		h.logger.Debug("PTY writer not ready yet",
-			zap.String("session_id", sessionID),
-			zap.String("process_id", processID))
-		return false
+	getWriter := func() (io.Writer, error) {
+		return interactiveRunner.GetPtyWriter(processID)
 	}
-
-	// Send buffered output to the terminal before switching to direct mode.
-	// This provides scrollback history when reconnecting to an existing session.
-	// We batch all chunks into a single write for efficiency.
-	if chunks, ok := interactiveRunner.GetBuffer(processID); ok && len(chunks) > 0 {
-		var combined bytes.Buffer
-		for _, chunk := range chunks {
-			combined.WriteString(chunk.Data)
-		}
-
-		if combined.Len() > 0 {
-			h.logger.Debug("sending buffered output to terminal",
-				zap.String("session_id", sessionID),
-				zap.Int("chunks", len(chunks)),
-				zap.Int("total_bytes", combined.Len()))
-
-			if _, writeErr := wsw.Write(combined.Bytes()); writeErr != nil {
-				h.logger.Warn("failed to send buffered output",
-					zap.String("session_id", sessionID),
-					zap.Error(writeErr))
-			}
-		}
-	}
-
-	// Set up direct output
-	if err := interactiveRunner.SetDirectOutput(processID, wsw); err != nil {
-		h.logger.Error("failed to set direct output",
-			zap.String("session_id", sessionID),
-			zap.String("process_id", processID),
-			zap.Error(err))
-		return false
-	}
-
-	*ptyWriter = writer
-
-	h.logger.Info("PTY access established",
-		zap.String("session_id", sessionID),
-		zap.String("process_id", processID))
-
-	return true
+	return h.setupPtyAccessCommon(sessionID, processID, interactiveRunner, wsw, ptyWriter, getWriter)
 }
 
 // handleResize processes a resize command from the WebSocket.
-// Returns the parsed dimensions (0, 0 if parsing failed).
+// Uses process-specific resize to avoid targeting the wrong process when multiple
+// processes exist for the same session (e.g., passthrough + user shell).
+// If the process was restarted (old process gone), falls back to session-level resize
+// and returns the new process ID.
 func (h *TerminalHandler) handleResize(
 	data []byte,
 	sessionID string,
+	processID string,
 	interactiveRunner *process.InteractiveRunner,
-) (cols, rows uint16) {
+) (effectiveProcessID string) {
+	effectiveProcessID = processID
+
 	var resize ResizePayload
 	if err := json.Unmarshal(data, &resize); err != nil {
 		h.logger.Warn("failed to parse resize command",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return 0, 0
+		return effectiveProcessID
 	}
 
 	if resize.Cols == 0 || resize.Rows == 0 {
@@ -522,27 +428,80 @@ func (h *TerminalHandler) handleResize(
 			zap.String("session_id", sessionID),
 			zap.Uint16("cols", resize.Cols),
 			zap.Uint16("rows", resize.Rows))
-		return 0, 0
+		return effectiveProcessID
 	}
 
-	// Resize triggers lazy process start if not already started
-	if err := interactiveRunner.ResizeBySession(sessionID, resize.Cols, resize.Rows); err != nil {
-		h.logger.Warn("failed to resize PTY",
-			zap.String("session_id", sessionID),
-			zap.Uint16("cols", resize.Cols),
-			zap.Uint16("rows", resize.Rows),
-			zap.Error(err))
-	} else {
+	// Resize the specific process by ID to avoid targeting the wrong process.
+	// If the process was restarted (old ID gone), fall back to session-level resize.
+	resizeErr := interactiveRunner.ResizeByProcessID(processID, resize.Cols, resize.Rows)
+	if resizeErr == nil {
 		h.logger.Debug("PTY resized",
 			zap.String("session_id", sessionID),
+			zap.String("process_id", processID),
 			zap.Uint16("cols", resize.Cols),
 			zap.Uint16("rows", resize.Rows))
 	}
 
-	// Give the process a moment to start if this was the first resize
-	time.Sleep(50 * time.Millisecond)
+	if resizeErr != nil {
+		h.logger.Debug("process-specific resize failed, trying session-level fallback",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", processID),
+			zap.Error(resizeErr))
+		effectiveProcessID = h.resizeBySessionFallback(sessionID, processID, resize.Cols, resize.Rows, interactiveRunner)
+	}
 
-	return resize.Cols, resize.Rows
+	return effectiveProcessID
+}
+
+// discoverProcessBySession looks up the current passthrough process for a session.
+// Returns the new processID if found and different from oldProcessID.
+// This is used when the bridge has a stale processID after a process restart.
+func (h *TerminalHandler) discoverProcessBySession(
+	sessionID string,
+	oldProcessID string,
+	interactiveRunner *process.InteractiveRunner,
+) string {
+	_, newProcID, _ := interactiveRunner.GetPtyWriterBySession(sessionID)
+	if newProcID != "" && newProcID != oldProcessID {
+		h.logger.Info("discovered new process by session lookup",
+			zap.String("session_id", sessionID),
+			zap.String("old_process_id", oldProcessID),
+			zap.String("new_process_id", newProcID))
+		return newProcID
+	}
+	return oldProcessID
+}
+
+// resizeBySessionFallback attempts a session-level resize when the process-specific
+// resize failed (e.g., process was restarted). Returns the new processID if found.
+func (h *TerminalHandler) resizeBySessionFallback(
+	sessionID string,
+	oldProcessID string,
+	cols, rows uint16,
+	interactiveRunner *process.InteractiveRunner,
+) string {
+	sessionErr := interactiveRunner.ResizeBySession(sessionID, cols, rows)
+	if sessionErr != nil {
+		h.logger.Warn("failed to resize PTY (both process and session)",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", oldProcessID),
+			zap.Uint16("cols", cols),
+			zap.Uint16("rows", rows),
+			zap.Error(sessionErr))
+		return oldProcessID
+	}
+
+	// Session-level resize succeeded — look up the new process ID
+	_, newProcID, _ := interactiveRunner.GetPtyWriterBySession(sessionID)
+	if newProcID != "" && newProcID != oldProcessID {
+		h.logger.Info("resize fallback succeeded, process ID updated",
+			zap.String("session_id", sessionID),
+			zap.String("old_process_id", oldProcessID),
+			zap.String("new_process_id", newProcID))
+		return newProcID
+	}
+
+	return oldProcessID
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.
@@ -780,26 +739,46 @@ func (h *TerminalHandler) setupUserShellPtyAccess(
 	wsw *wsWriter,
 	ptyWriter *io.Writer,
 ) bool {
-	// Get PTY writer for the user shell
-	writer, _, err := interactiveRunner.GetUserShellPtyWriter(sessionID, terminalID)
+	getWriter := func() (io.Writer, error) {
+		writer, _, err := interactiveRunner.GetUserShellPtyWriter(sessionID, terminalID)
+		return writer, err
+	}
+	return h.setupPtyAccessCommon(sessionID, processID, interactiveRunner, wsw, ptyWriter, getWriter)
+}
+
+// setupPtyAccessCommon is the shared implementation for setupPtyAccess and setupUserShellPtyAccess.
+// It gets a PTY writer via getWriter, sends buffered output, and sets up direct output.
+func (h *TerminalHandler) setupPtyAccessCommon(
+	sessionID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	getWriter func() (io.Writer, error),
+) bool {
+	writer, err := getWriter()
 	if err != nil {
-		h.logger.Debug("user shell PTY writer not ready",
+		h.logger.Debug("PTY writer not ready yet",
 			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID))
+			zap.String("process_id", processID))
 		return false
 	}
 
-	// Send buffered output
+	// Send buffered output to the terminal before switching to direct mode.
+	// This provides scrollback history when reconnecting to an existing session.
 	if chunks, ok := interactiveRunner.GetBuffer(processID); ok && len(chunks) > 0 {
 		var combined bytes.Buffer
 		for _, chunk := range chunks {
 			combined.WriteString(chunk.Data)
 		}
 		if combined.Len() > 0 {
+			h.logger.Debug("sending buffered output to terminal",
+				zap.String("session_id", sessionID),
+				zap.Int("chunks", len(chunks)),
+				zap.Int("total_bytes", combined.Len()))
 			if _, writeErr := wsw.Write(combined.Bytes()); writeErr != nil {
 				h.logger.Warn("failed to send buffered output",
 					zap.String("session_id", sessionID),
-					zap.String("terminal_id", terminalID),
 					zap.Error(writeErr))
 			}
 		}
@@ -807,18 +786,17 @@ func (h *TerminalHandler) setupUserShellPtyAccess(
 
 	// Set up direct output
 	if err := interactiveRunner.SetDirectOutput(processID, wsw); err != nil {
-		h.logger.Error("failed to set direct output for user shell",
+		h.logger.Error("failed to set direct output",
 			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID),
+			zap.String("process_id", processID),
 			zap.Error(err))
 		return false
 	}
 
 	*ptyWriter = writer
 
-	h.logger.Info("user shell PTY access established",
+	h.logger.Info("PTY access established",
 		zap.String("session_id", sessionID),
-		zap.String("terminal_id", terminalID),
 		zap.String("process_id", processID))
 
 	return true
@@ -864,7 +842,4 @@ func (h *TerminalHandler) handleUserShellResize(
 			zap.Uint16("cols", resize.Cols),
 			zap.Uint16("rows", resize.Rows))
 	}
-
-	// Give the process a moment to start if this was the first resize
-	time.Sleep(50 * time.Millisecond)
 }

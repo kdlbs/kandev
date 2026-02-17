@@ -1296,7 +1296,7 @@ export function TaskCreateDialog({
                     type="submit"
                     variant="default"
                     className="rounded-none border-0 cursor-pointer gap-1.5 h-full"
-                    disabled={isCreatingTask || !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch || !agentProfileId}
+                    disabled={isCreatingTask || !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch || !agentProfileId || (isCreateMode && (!workspaceId || !effectiveWorkflowId))}
                   >
                     {isCreatingTask ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconSend className="h-3.5 w-3.5" />}
                     {isCreatingTask ? 'Starting...' : 'Start task'}
@@ -1307,7 +1307,7 @@ export function TaskCreateDialog({
                         type="button"
                         variant="default"
                         className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full"
-                        disabled={isCreatingTask || !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch || !agentProfileId}
+                        disabled={isCreatingTask || !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch || !agentProfileId || (isCreateMode && (!workspaceId || !effectiveWorkflowId))}
                       >
                         <IconChevronDown className="h-3.5 w-3.5" />
                       </Button>
@@ -1332,7 +1332,7 @@ export function TaskCreateDialog({
                     isCreatingTask ||
                     (isSessionMode
                       ? (!hasDescription && !isPassthroughProfile) || !agentProfileId
-                      : !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch)
+                      : !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch || (isCreateMode && (!workspaceId || !effectiveWorkflowId)))
                   }
                 >
                   {isCreatingSession || isCreatingTask ? (

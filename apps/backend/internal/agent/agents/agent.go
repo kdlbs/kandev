@@ -9,8 +9,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -36,9 +34,6 @@ type Agent interface {
 	// --- Models ---
 	DefaultModel() string
 	ListModels(ctx context.Context) (*ModelList, error)
-
-	// --- Protocol ---
-	CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error)
 
 	// --- Execution ---
 	BuildCommand(opts CommandOptions) Command
@@ -132,7 +127,6 @@ type RuntimeConfig struct {
 	RequiredEnv    []string
 	Mounts         []MountTemplate
 	ResourceLimits ResourceLimits
-	Capabilities   []string
 	SessionConfig  SessionConfig
 	Protocol       agent.Protocol
 	ModelFlag      Param  // e.g. NewParam("--model", "{model}")
@@ -205,11 +199,6 @@ type PassthroughConfig struct {
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).
 const DefaultBufferMaxBytes int64 = 2 * 1024 * 1024
-
-// DefaultCapabilities is the standard set of capabilities shared by most agents.
-var DefaultCapabilities = []string{
-	"code_generation", "code_review", "refactoring", "testing", "shell_execution",
-}
 
 // DefaultResourceLimits is the standard resource limit set shared by most agents.
 var DefaultResourceLimits = ResourceLimits{

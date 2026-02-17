@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -32,9 +31,6 @@ func (a *testAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error
 }
 func (a *testAgent) DefaultModel() string { return "" }
 func (a *testAgent) ListModels(context.Context) (*agents.ModelList, error) {
-	return nil, agents.ErrNotSupported
-}
-func (a *testAgent) CreateAdapter(*adapter.Config, *logger.Logger) (adapter.AgentAdapter, error) {
 	return nil, agents.ErrNotSupported
 }
 func (a *testAgent) BuildCommand(agents.CommandOptions) agents.Command { return agents.Command{} }
@@ -66,7 +62,6 @@ func validAgentConfig(id, name string) *testAgent {
 				CPUCores:       1.0,
 				Timeout: time.Hour,
 			},
-			Capabilities: []string{"test"},
 		},
 	}
 }
@@ -306,7 +301,6 @@ func TestRegistry_ListEnabled_OrderedByDisplayOrder(t *testing.T) {
 func TestAgentTypeConfig_ToAPIType(t *testing.T) {
 	ag := validAgentConfig("test-agent", "Test Agent")
 	ag.description = "Test description"
-	ag.runtime.Capabilities = []string{"cap1", "cap2"}
 	ag.runtime.Env = map[string]string{"KEY": "value"}
 
 	apiType := ToAPIType(ag)
@@ -322,9 +316,6 @@ func TestAgentTypeConfig_ToAPIType(t *testing.T) {
 	}
 	if apiType.DockerImage != ag.runtime.Image {
 		t.Errorf("expected DockerImage %q, got %q", ag.runtime.Image, apiType.DockerImage)
-	}
-	if len(apiType.Capabilities) != len(ag.runtime.Capabilities) {
-		t.Errorf("expected %d capabilities, got %d", len(ag.runtime.Capabilities), len(apiType.Capabilities))
 	}
 	if apiType.Enabled != ag.Enabled() {
 		t.Errorf("expected Enabled %v, got %v", ag.Enabled(), apiType.Enabled)

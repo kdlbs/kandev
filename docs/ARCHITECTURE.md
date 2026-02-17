@@ -15,8 +15,6 @@ The current implementation uses a **unified binary architecture** instead of sep
 - ✅ **Permission request handling** - Auto-approval of workspace indexing and tool permissions
 - ✅ **Session resumption** for multi-turn agent conversations
 - ✅ WebSocket-first API for all operations (replacing REST)
-- 📋 JWT authentication
-- 📋 NATS event bus for distributed deployment
 
 ---
 
@@ -48,50 +46,6 @@ flowchart TB
 
 ---
 
-## Planned Architecture (Microservices) 📋
-
-### 1. API Gateway (WebSocket-First)
-**Port:** 8080
-**Purpose:** Single entry point for all client requests via WebSocket
-
-**Responsibilities:**
-- Route WebSocket messages to appropriate services
-- JWT authentication and authorization
-- **WebSocket connection management for all API operations**
-- **WebSocket message routing for real-time ACP streaming**
-- Rate limiting and request validation
-- CORS handling for WebSocket upgrade requests
-- API versioning via message schema
-
-**Dependencies:**
-- Task Service (internal)
-- Agent Manager (internal)
-- Orchestrator (internal - WebSocket message routing)
-- PostgreSQL (for user auth)
-
----
-
-### 2. Task Service
-**Port:** 8081  
-**Purpose:** Manage kanban tasks and boards
-
-**Responsibilities:**
-- CRUD operations for tasks and boards
-- Task state transitions
-- Task priority and scheduling metadata
-- Publish task events to NATS
-
-**Dependencies:**
-- PostgreSQL (tasks, boards, task_events tables)
-- NATS (event publishing)
-
-**Events Published:**
-- `task.created`
-- `task.updated`
-- `task.state_changed`
-- `task.deleted`
-
----
 
 ### 3. Orchestrator Service
 **Port:** 8082

@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/agentctl/server/adapter"
-	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/opencode"
-	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -95,10 +92,6 @@ func (a *OpenCode) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: models, SupportsDynamic: true}, nil
 }
 
-func (a *OpenCode) CreateAdapter(cfg *adapter.Config, log *logger.Logger) (adapter.AgentAdapter, error) {
-	return newOpenCodeAdapterWrapper(opencode.NewAdapter(cfg.ToSharedConfig(), log)), nil
-}
-
 func (a *OpenCode) BuildCommand(opts CommandOptions) Command {
 	return Cmd("npx", "-y", "opencode-ai@1.1.25", "serve", "--hostname", "127.0.0.1", "--port", "0").Build()
 }
@@ -110,7 +103,6 @@ func (a *OpenCode) Runtime() *RuntimeConfig {
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Capabilities:   []string{"code_generation", "code_review", "refactoring", "testing", "shell_execution"},
 		Protocol:       agent.ProtocolOpenCode,
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,

@@ -2762,8 +2762,12 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		}
 	}
 
-	// Start the interactive process
-	// Use the same settings as initial start (including wait_for_terminal)
+	// Start the interactive process.
+	// Always use immediate start on resume — the terminal WebSocket is already connected,
+	// so we don't need to wait for a resize to get exact dimensions. The first resize
+	// from the terminal will correct the dimensions. Without this, TUI apps that use
+	// WaitForTerminal would never start because the frontend may not send resizes
+	// to a process it doesn't know about yet.
 	startReq := process.InteractiveStartRequest{
 		SessionID:       sessionID,
 		Command:         cmd.Args(),
@@ -2774,7 +2778,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		StatusDetector:  pt.StatusDetector,
 		CheckInterval:   pt.CheckInterval,
 		StabilityWindow: pt.StabilityWindow,
-		ImmediateStart:  !pt.WaitForTerminal,
+		ImmediateStart:  true,
 		DefaultCols:     120,
 		DefaultRows:     40,
 	}
@@ -2807,8 +2811,8 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	// Connect to workspace stream for shell/git/file features.
-	// This re-establishes the connection that was lost on backend restart.
-	if m.streamManager != nil && execution.agentctl != nil {
+	// Only connect if not already connected (process restart reuses the same agentctl).
+	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
 		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
 

@@ -1,227 +1,152 @@
-# Kandev - Kanban Board with AI Agent Orchestration
+# Kandev
 
-A Kanban board system that integrates AI agent orchestration capabilities with **real-time Agent Communication Protocol (ACP) streaming**, allowing tasks to be automatically executed by AI agents running in isolated Docker containers.
+Manage tasks. Orchestrate agents. Review changes. Ship value.
 
-## Overview
+[Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md)
 
-Kandev combines traditional Kanban task management with automated AI agent execution and real-time feedback streaming. Users create tasks on a Kanban board, and when configured with an AI agent type, the system automatically launches Docker containers to execute those tasks against specified code repositories. **Real-time progress, logs, and results are streamed from agents to the frontend via WebSocket connections.**
+<!-- TODO: add screenshot -->
 
-### Key Features
+## What
 
-- **Kanban Board Management**: Create and manage tasks across multiple boards with columns
-- **AI Agent Orchestration**: Launch AI agents (Augment Agent) to execute tasks
-- **Real-Time ACP Streaming**: Live progress updates, logs, and results streamed from agents
-- **Session Resumption**: Agents can resume previous conversations using session IDs
-- **Docker Isolation**: Each agent runs in an isolated Docker container with resource limits
-- **Repository Integration**: Agents can work on code repositories with host credentials
-- **Host Credential Mounting**: Secure read-only mounting of SSH keys and Git credentials
-- **SQLite Persistence**: Lightweight file-based database for task and board storage
-- **Local Deployment**: Designed for client machines with minimal dependencies
 
-## Architecture
+Organize work across kanban and pipeline views with opinionated workflows. Assign agents from any provider, and review their output in an integrated workspace - file editor, file tree, terminal, browser preview, and git changes in one place. Terminal agent TUIs are great for running agents, but reviewing and iterating on changes there doesn't scale.
 
-The system runs as a **unified Go binary** that includes:
+Run it locally or self-host it on your own infrastructure and access it from anywhere via [Tailscale](https://tailscale.com/) or any VPN.
 
-- **Task Service**: Manages tasks, boards, and columns with SQLite persistence
-- **Agent Manager**: Manages Docker container lifecycle and ACP message streaming
-- **Orchestrator**: Coordinates agent launches and monitors execution
-- **WebSocket API**: Real-time bidirectional communication for all operations (Port 8080)
+Open source, multi-provider, no telemetry, not tied to any cloud.
 
-### Agent Communication Protocol (ACP)
+## Vision
 
-ACP is a JSON-based streaming protocol that enables real-time communication between AI agents and the backend:
+> **Humans stay in control.** Define tasks, build agentic workflows with gates, review every change, decide what ships.
 
-```
-Agent Container (stdout) → Agent Manager → Event Bus → API
-```
+- **Review-first** - Humans support production systems. We need to understand (yet) and trust the code that gets deployed.
+- **Your workflow** - Every team is different, and not every developer uses AI the same way. Define workflows once, share them across the team, and give everyone a consistent process for working with agents - regardless of experience level.
+- **Remote agents** - Running multiple agents on a large codebase can quickly saturate a local machine. The goal is a single control plane: offload execution to servers, orchestrate from anywhere, including your phone.
 
-**Message Types**: `progress`, `log`, `result`, `error`, `status`, `heartbeat`
+<details>
+<summary><strong>Where this is heading</strong></summary>
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+While agents can already plan, implement, test, and deploy autonomously with the right workflows, we don't yet trust their output enough for production-grade software without human review. Crossing that trust threshold will fundamentally transform our industry.
 
-## Supported Agent Types
+</details>
 
-1. **Augment Agent** (`augment-agent`)
-   - Uses Auggie CLI for code analysis, generation, debugging, refactoring
-   - Native ACP support via stdout JSON streaming
-   - Session resumption for multi-turn conversations
+## Features
 
-## Technology Stack
+- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode
+- **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, and chat in one IDE-like view
+- **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
+- **Agentic workflows** - Multi-step pipelines that chain agents through automated task routing. See [docs/workflows.md](docs/workflow-tips.md)
+- **CLI passthrough** - Drop into raw agent CLI mode for direct terminal interaction with any supported agent, leverage the full power of their TUIs
+- **Workspace isolation** - Git worktrees prevent concurrent agents from conflicting
+- **Flexible runtimes** - Run agents as local processes or in isolated Docker containers
+- **Session management** - Resume and review agent conversations
+- **Stats** - Track your productivity with stats on the completed tasks, agent turns, etc
 
-- **Backend**: Go 1.21+
-- **Database**: SQLite (with WAL mode)
-- **Container Runtime**: Docker
-- **Web Framework**: Gin
-- **Logging**: Zap (structured logging)
-- **Deployment**: Single binary for client machines
+## Supported Agents
+
+| Agent | Default Model | Other Models | Protocol |
+|-------|--------------|--------------|----------|
+| **Claude Code** | Sonnet 4.5 | Opus 4.6, Opus 4.5, Haiku 4.5 | stream-json |
+| **Codex** | GPT-5.2 Codex | GPT-5.1 Codex Max, GPT-5.1 Codex Mini, GPT-5.2 | Codex |
+| **GitHub Copilot** | GPT-4.1 | GPT-5.2, Claude Sonnet 4.5, Gemini 3 Pro, +10 more | Copilot SDK |
+| **Gemini CLI** | Gemini 3 Flash | Gemini 3 Pro | ACP |
+| **Amp** | Smart Mode | Deep Mode | stream-json |
+| **Auggie** | Sonnet 4.5 | Opus 4.5, GPT-5.1, GPT-5, Haiku 4.5 (dynamic) | ACP |
+| **OpenCode** | GPT-5 Nano | Claude Sonnet 4, Opus 4, etc (dynamic) | REST/SSE |
+
+> **CLI Passthrough mode** - we should be able to support any agent that has a CLI interface, even if they don't have an official API or SDK. The agent runs in a terminal session and we pass input/output through a websocket connection. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 
 ## Quick Start
 
-### Prerequisites
+> **Beta** - Under active development. Expect rough edges and breaking changes. Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-- Go 1.21 or higher
-- Docker
-- Augment CLI credentials (`~/.augment/session.json`)
-
-### Build and Run
-
-#### NPX Launcher (recommended)
+### NPX (recommended)
 
 ```bash
 npx kandev
 ```
 
-This downloads prebuilt backend + frontend bundles and starts them locally.
+This downloads prebuilt backend + frontend bundles and starts them locally. The worktrees and sqlite db will be created in `~/.kandev` by default. Should work on macOS, Linux, and Windows (WSL or native).
 
-#### From Source
-
-```bash
-cd apps/backend
-
-# Build the binary
-make build
-
-# Run the server (creates kandev.db in current directory)
-./bin/kandev
-
-# Or specify a custom database path
-KANDEV_DB_PATH=/path/to/kandev.db ./bin/kandev
-```
-
-### WebSocket API Usage
-
-**Connection**: `ws://localhost:8080/ws`
-
-#### Message Envelope
-
-```json
-{
-  "id": "correlation-uuid",
-  "type": "request|response|notification|error",
-  "action": "action.name",
-  "payload": {},
-  "timestamp": "2026-01-10T10:30:00Z"
-}
-```
-
-#### Key Message Actions
-
-- `board.create` - Create board
-- `board.list` - List boards
-- `column.create` - Create column
-- `task.create` - Create task
-- `agent.launch` - Launch agent
-- `agent.status` - Get agent status
-- `orchestrator.start` - Start task execution
-
-#### Example Usage (JavaScript)
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-// Create a board
-ws.send(JSON.stringify({
-  id: crypto.randomUUID(),
-  type: 'request',
-  action: 'board.create',
-  payload: { name: 'My Project', description: 'Project tasks' }
-}));
-
-// Create a task
-ws.send(JSON.stringify({
-  id: crypto.randomUUID(),
-  type: 'request',
-  action: 'task.create',
-  payload: {
-    board_id: '{board_id}',
-    column_id: '{column_id}',
-    title: 'Fix login bug',
-    description: 'Users cannot login'
-  }
-}));
-
-// Launch an agent
-ws.send(JSON.stringify({
-  id: crypto.randomUUID(),
-  type: 'request',
-  action: 'agent.launch',
-  payload: {
-    task_id: '{task_id}',
-    agent_type: 'augment-agent',
-    workspace_path: '/path/to/project',
-    env: {
-      AUGMENT_SESSION_AUTH: '...',
-      TASK_DESCRIPTION: 'What is 2+2?'
-    }
-  }
-}));
-
-// Handle responses and notifications
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === 'response') {
-    console.log('Response:', msg.payload);
-  } else if (msg.type === 'notification') {
-    // Real-time updates: acp.progress, acp.log, task.updated, etc.
-    console.log('Notification:', msg.action, msg.payload);
-  }
-};
-```
-
-See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for detailed API reference and next steps.
-
-## Project Structure
-
-```
-kandev/
-├── apps/
-│   ├── backend/              # Go backend services
-│   │   ├── cmd/kandev/       # Unified binary entry point
-│   │   ├── internal/
-│   │   │   ├── agent/        # Agent manager (docker, lifecycle, registry, api)
-│   │   │   ├── task/         # Task service (models, repository, service, api)
-│   │   │   ├── orchestrator/ # Orchestrator service
-│   │   │   ├── events/       # In-memory event bus
-│   │   │   └── common/       # Shared utilities (logger, config)
-│   │   ├── pkg/acp/          # ACP protocol types
-│   │   ├── dockerfiles/      # Agent container Dockerfiles
-│   │   └── Makefile
-│   └── web/                  # Frontend application
-├── docs/                     # Architecture and planning docs
-├── deployments/              # Deployment configs
-└── scripts/                  # Utility scripts (including e2e-test.sh)
-```
-
-## Configuration
-
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `KANDEV_DB_PATH` | `./kandev.db` | SQLite database file path |
-| `PORT` | `8080` | HTTP server port |
-
-## Development
+### From Source
 
 ```bash
-cd apps/backend
+# Clone the repository
+git clone git@github.com:kdlbs/kandev.git
+cd kandev
 
-# Build
-make build
-
-# Run tests
-make test
-
-# Format code
-go fmt ./...
-
-# Lint
-go vet ./...
+# Start in production mode
+make start
 ```
 
-## Pre-commit Hooks
+**Prerequisites:** Go 1.26+, Node.js 18+, pnpm, Docker (optional - needed for container runtimes)
 
-We use `pre-commit` to run the backend tests, web tests, and web lint before commits.
+## High level architecture
 
-### Install
+```mermaid
+graph LR
+    UI[Web UI] --> Backend
+
+
+        Backend["Backend (Orchestrator)"]
+
+
+    Backend --> W1 & W2
+
+    subgraph W1[Local Process]
+        Agent1[Agent CLI] --- WT1[Worktree]
+    end
+
+    subgraph W2[Docker Container]
+        Agent2[Agent CLI] --- WT2[Worktree]
+    end
+```
+
+We also want to add support for these remote runtimes:
+- Remote SSH - run agents on remote servers over SSH, using docker or local processes with workspace isolation
+- K8s operator - run agents in a Kubernetes cluster, with auto-scaling and resource management.
+
+<details>
+<summary><strong>Development</strong></summary>
+
+### Project Structure
+
+```
+apps/
+├── backend/    # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
+├── web/        # Next.js frontend (SSR, Zustand, real-time subscriptions)
+├── cli/        # CLI tool (npx kandev launcher)
+└── packages/   # Shared UI components & types
+```
+
+### Prerequisites
+
+- Go 1.21+
+- Node.js 18+
+- pnpm
+- Docker (optional)
+
+### Running Dev Servers
+
+```bash
+# Start everything (backend + frontend with auto ports)
+make dev
+
+# Or run separately
+make dev-backend    # Backend on :8080
+make dev-web        # Frontend on :3000
+```
+
+### Testing & Linting
+
+```bash
+make test           # Run all tests (backend + web)
+make lint           # Run all linters
+make typecheck      # TypeScript type checking
+make fmt            # Format all code
+```
+
+### Pre-commit Hooks
 
 ```bash
 # Install pre-commit (https://pre-commit.com/#install)
@@ -231,43 +156,30 @@ pipx install pre-commit
 pre-commit install
 ```
 
-### Run Manually
+</details>
 
-```bash
-# Run all hooks once
-pre-commit run --all-files
-```
+## Comparison to Other Tools
 
-### Hooks Config
+There are a couple similar tools in this space, and new ones appearing everyday. Here's what sets this one apart:
 
-The hooks are defined in `.pre-commit-config.yaml` and run these Makefile targets:
+- **Server-first architecture** - Not a desktop app. Runs as a server you can access from any device, including your phone. Start a task away from your computer and check in on it later.
+- **Remote runtimes** - Run agents on remote servers and Docker hosts, not just your local machine.
+- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, and OpenCode side by side. Not locked to one vendor.
+- **CLI passthrough and chat** - Interact with agents through structured chat messages or drop into raw CLI mode for full agent TUI capabilities.
+- **Open source and self-hostable** - No vendor lock-in, no telemetry, runs on your infrastructure.
 
-- `make test-backend`
-- `make test-web`
-- `make lint-web`
+## Contributing
 
-## Project Status
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
-✅ **Core Features Working**
-
-- [x] SQLite persistence for boards, columns, and tasks
-- [x] Agent lifecycle management with Docker
-- [x] ACP message streaming from containers
-- [x] Session resumption for multi-turn agent conversations
-- [x] WebSocket-first API for all operations
-- [x] Real-time bidirectional communication
-
-🚧 **In Progress**
-
-- [ ] Authentication and authorization
-- [ ] Frontend UI
-
-See [apps/backend/NEXT_STEPS.md](apps/backend/NEXT_STEPS.md) for the complete roadmap.
-
-## License
-
-[To be determined]
+See the [issue tracker](https://github.com/kdlbs/kandev/issues) for open tasks.
 
 ## Acknowledgments
 
-Built with Go and inspired by modern DevOps practices and AI-assisted development workflows.
+Built with these excellent open-source projects:
+
+[Monaco Editor](https://microsoft.github.io/monaco-editor/) · [Tiptap](https://tiptap.dev/) · [xterm.js](https://xtermjs.org/) · [dockview](https://dockview.dev/) · [CodeMirror](https://codemirror.net/) · [dnd-kit](https://dndkit.com/) · [Mermaid](https://mermaid.js.org/) · [Recharts](https://recharts.org/) · [TanStack Table](https://tanstack.com/table) · [Zustand](https://zustand.docs.pmnd.rs/) · [Shadcn/UI](https://ui.shadcn.com/) · [Radix UI](https://www.radix-ui.com/) · [Tailwind CSS](https://tailwindcss.com/)
+
+## License
+
+[AGPL-3.0](LICENSE)

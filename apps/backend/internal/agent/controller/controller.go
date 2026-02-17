@@ -152,12 +152,11 @@ func (c *Controller) ListAgentTypes(ctx context.Context, req dto.ListAgentTypesR
 			image = rt.Image
 		}
 		resp.Types = append(resp.Types, dto.FromAgentType(&dto.AgentTypeData{
-			ID:           t.ID(),
-			Name:         t.Name(),
-			Description:  t.Description(),
-			Image:        image,
-			Capabilities: t.Runtime().Capabilities,
-			Enabled:      t.Enabled(),
+			ID:          t.ID(),
+			Name:        t.Name(),
+			Description: t.Description(),
+			Image:       image,
+			Enabled:     t.Enabled(),
 		}))
 	}
 

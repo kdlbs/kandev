@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/components/state-provider';
 import { listAgents, listEnvironments, listExecutors } from '@/lib/api';
+import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
 
 export function useSettingsData(enabled = true) {
   const executors = useAppStore((state) => state.executors.items);
@@ -48,13 +49,7 @@ export function useSettingsData(enabled = true) {
           setSettingsAgents(response.agents);
           setAgentProfiles(
             response.agents.flatMap((agent) =>
-              agent.profiles.map((profile) => ({
-                id: profile.id,
-                label: `${profile.agent_display_name} • ${profile.name}`,
-                agent_id: agent.id,
-                agent_name: agent.name,
-                cli_passthrough: profile.cli_passthrough,
-              }))
+              agent.profiles.map((profile) => toAgentProfileOption(agent, profile))
             )
           );
         })

@@ -21,7 +21,7 @@ database:
   path: ./kandev.db
 ```
 
-No additional setup is needed — the database file is created automatically on first run.
+No additional setup is needed - the database file is created automatically on first run.
 
 ## PostgreSQL
 
@@ -71,4 +71,4 @@ KANDEV_DATABASE_PASSWORD=your-password \
 kandev
 ```
 
-Tables are created automatically on first run — no manual migrations needed.
+Tables are created automatically on first run - no manual migrations needed.
