@@ -64,6 +64,10 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	return false
+}
+
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
 	if m.resolveAgentProfileFunc != nil {
 		return m.resolveAgentProfileFunc(ctx, profileID)

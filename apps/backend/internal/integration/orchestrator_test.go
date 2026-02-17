@@ -426,6 +426,10 @@ func (s *SimulatedAgentManagerClient) ResolveAgentProfile(ctx context.Context, p
 	}, nil
 }
 
+func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	return false
+}
+
 // ============================================
 // ORCHESTRATOR TEST SERVER
 // ============================================
@@ -1116,6 +1120,16 @@ func TestOrchestratorStopTask(t *testing.T) {
 	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
 	require.NoError(t, err)
 
+	// Wait for the session to become active before stopping
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		session, sErr := ts.TaskRepo.GetTaskSession(context.Background(), sessionID)
+		if sErr == nil && session.State == models.TaskSessionStateRunning {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	// Stop task
 	stopResp, err := client.SendRequest("stop-1", ws.ActionOrchestratorStop, map[string]interface{}{
 		"task_id": taskID,
@@ -1126,7 +1140,9 @@ func TestOrchestratorStopTask(t *testing.T) {
 
 	var stopPayload map[string]interface{}
 	require.NoError(t, stopResp.ParsePayload(&stopPayload))
-	assert.True(t, stopPayload["success"].(bool))
+	success, ok := stopPayload["success"].(bool)
+	assert.True(t, ok, "expected 'success' key in stop response, got: %v", stopPayload)
+	assert.True(t, success)
 }
 
 func TestOrchestratorPromptTask(t *testing.T) {

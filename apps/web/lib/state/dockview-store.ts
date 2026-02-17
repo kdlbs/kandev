@@ -267,7 +267,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
             id: 'chat',
             component: 'chat',
             tabComponent: 'permanentTab',
-            title: 'Chat',
+            title: 'Agent',
         });
 
         // Sidebar panel — split off to the left
@@ -340,7 +340,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
             id: 'chat',
             component: 'chat',
             tabComponent: 'permanentTab',
-            title: 'Chat',
+            title: 'Agent',
             position: { referenceGroup: centerGroupId },
         });
     },

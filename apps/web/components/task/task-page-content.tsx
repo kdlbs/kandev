@@ -137,6 +137,9 @@ export function TaskPageContent({
   const storeSessionState = useAppStore((state) =>
     effectiveSessionId ? state.taskSessions.items[effectiveSessionId]?.state ?? null : null
   );
+  const isSessionPassthrough = useAppStore((state) =>
+    effectiveSessionId ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true : false
+  );
   const agentctlStatus = useSessionAgentctl(effectiveSessionId);
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? state.previewPanel.openBySessionId[effectiveSessionId] ?? false : false
@@ -247,6 +250,7 @@ export function TaskPageContent({
           baseBranch={task?.repositories?.[0]?.base_branch}
           isAgentRunning={isAgentWorking}
           hasWorktree={Boolean(worktreeBranch)}
+          isPassthrough={isSessionPassthrough}
         />
         {DEBUG_UI && showDebugOverlay && (
           <DebugOverlay

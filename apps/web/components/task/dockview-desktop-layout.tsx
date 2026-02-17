@@ -54,6 +54,8 @@ import { ChangesPanel } from './changes-panel';
 import { FilesPanel } from './files-panel';
 import { TaskPlanPanel } from './task-plan-panel';
 import { FileEditorPanel } from './file-editor-panel';
+import { PassthroughTerminal } from './passthrough-terminal';
+import { PanelRoot, PanelBody } from './panel-primitives';
 import { TerminalPanel } from './terminal-panel';
 import { BrowserPanel } from './browser-panel';
 import { CommitDetailPanel } from './commit-detail-panel';
@@ -115,6 +117,25 @@ function ChatPanel(props: IDockviewPanelProps) {
   const isPanelFocused = useDockviewStore((s) => s.activeGroupId === groupId);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { openFile } = useFileEditors();
+
+  const isPassthrough = useAppStore((state) => {
+    if (!sessionId) return false;
+    return state.taskSessions.items[sessionId]?.is_passthrough === true;
+  });
+
+  useEffect(() => {
+    props.api.setTitle('Agent');
+  }, [props.api]);
+
+  if (isPassthrough) {
+    return (
+      <PanelRoot>
+        <PanelBody padding={false} scroll={false}>
+          <PassthroughTerminal sessionId={sessionId} mode="agent" />
+        </PanelBody>
+      </PanelRoot>
+    );
+  }
 
   return (
     <TaskChatPanel
@@ -237,6 +258,10 @@ function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const isPassthrough = useAppStore((state) => {
+    if (!activeSessionId) return false;
+    return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
+  });
 
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
@@ -284,10 +309,12 @@ function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
             Browser
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => addPlanPanel(group.id)} className="cursor-pointer text-xs">
-            <IconFileText className="h-3.5 w-3.5 mr-1.5" />
-            Plan
-          </DropdownMenuItem>
+          {!isPassthrough && (
+            <DropdownMenuItem onClick={() => addPlanPanel(group.id)} className="cursor-pointer text-xs">
+              <IconFileText className="h-3.5 w-3.5 mr-1.5" />
+              Plan
+            </DropdownMenuItem>
+          )}
           {!hasChanges && (
             <DropdownMenuItem onClick={() => addChangesPanel(group.id)} className="cursor-pointer text-xs">
               <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
@@ -696,7 +723,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
               id: 'chat',
               component: 'chat',
               tabComponent: 'permanentTab',
-              title: 'Chat',
+              title: 'Agent',
               position: sidebarPanel
                 ? { direction: 'right', referencePanel: 'sidebar' }
                 : undefined,

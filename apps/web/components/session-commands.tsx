@@ -28,9 +28,10 @@ type SessionCommandsProps = {
   baseBranch?: string;
   isAgentRunning?: boolean;
   hasWorktree?: boolean;
+  isPassthrough?: boolean;
 };
 
-export function SessionCommands({ sessionId, baseBranch, isAgentRunning, hasWorktree }: SessionCommandsProps) {
+export function SessionCommands({ sessionId, baseBranch, isAgentRunning, hasWorktree, isPassthrough }: SessionCommandsProps) {
   const git = useGitOperations(sessionId);
   const panels = usePanelActions();
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -77,14 +78,16 @@ export function SessionCommands({ sessionId, baseBranch, isAgentRunning, hasWork
       });
     }
 
-    items.push({
-      id: 'session-plan-mode',
-      label: 'Toggle Plan Mode',
-      group: 'Session',
-      icon: <IconFileTextSpark className="size-3.5" />,
-      keywords: ['plan', 'mode', 'toggle'],
-      action: () => panels.addPlan(),
-    });
+    if (!isPassthrough) {
+      items.push({
+        id: 'session-plan-mode',
+        label: 'Toggle Plan Mode',
+        group: 'Session',
+        icon: <IconFileTextSpark className="size-3.5" />,
+        keywords: ['plan', 'mode', 'toggle'],
+        action: () => panels.addPlan(),
+      });
+    }
 
     // Git — only when worktree is set up
     if (hasWorktree) {
@@ -164,26 +167,30 @@ export function SessionCommands({ sessionId, baseBranch, isAgentRunning, hasWork
         keywords: ['terminal', 'shell', 'console'],
         action: () => panels.addTerminal(),
       },
-      {
+    );
+
+    if (!isPassthrough) {
+      items.push({
         id: 'panel-plan',
         label: 'Add Plan Panel',
         group: 'Panels',
         icon: <IconFileText className="size-3.5" />,
         keywords: ['plan', 'document'],
         action: () => panels.addPlan(),
-      },
-      {
-        id: 'panel-changes',
-        label: 'Add Changes Panel',
-        group: 'Panels',
-        icon: <IconFileDiff className="size-3.5" />,
-        keywords: ['changes', 'diff', 'git'],
-        action: () => panels.addChanges(),
-      },
-    );
+      });
+    }
+
+    items.push({
+      id: 'panel-changes',
+      label: 'Add Changes Panel',
+      group: 'Panels',
+      icon: <IconFileDiff className="size-3.5" />,
+      keywords: ['changes', 'diff', 'git'],
+      action: () => panels.addChanges(),
+    });
 
     return items.map((cmd) => ({ ...cmd, priority: PAGE_PRIORITY }));
-  }, [sessionId, git, panels, cancelTurn, baseBranch, isAgentRunning, hasWorktree, openCommitDialog, openPRDialog, runGitWithFeedback]);
+  }, [sessionId, git, panels, cancelTurn, baseBranch, isAgentRunning, hasWorktree, isPassthrough, openCommitDialog, openPRDialog, runGitWithFeedback]);
 
   useRegisterCommands(commands);
 

@@ -101,7 +101,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
             {activeTaskId ? (
               isPassthroughMode ? (
                 <div className="flex-1 min-h-0">
-                  <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} terminalId="default" />
+                  <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} mode="agent" />
                 </div>
               ) : (
                 <TaskChatPanel

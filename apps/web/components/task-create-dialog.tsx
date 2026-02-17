@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, FormEvent, memo, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { IconLoader2, IconGitBranch, IconFileInvoice, IconSend, IconChevronDown } from '@tabler/icons-react';
+import { IconLoader2, IconGitBranch, IconFileInvoice, IconSend, IconChevronDown, IconTerminal2 } from '@tabler/icons-react';
 import {
   Dialog,
   DialogContent,
@@ -294,6 +294,7 @@ type TaskFormInputsProps = {
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<{ getValue: () => string } | null>;
   disabled?: boolean;
+  placeholder?: string;
 };
 
 const TaskFormInputs = memo(function TaskFormInputs({
@@ -304,6 +305,7 @@ const TaskFormInputs = memo(function TaskFormInputs({
   onKeyDown,
   descriptionValueRef,
   disabled,
+  placeholder,
 }: TaskFormInputsProps) {
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -345,7 +347,7 @@ const TaskFormInputs = memo(function TaskFormInputs({
     <div>
       <Textarea
         ref={textareaRef}
-        placeholder={isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...'}
+        placeholder={placeholder ?? (isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...')}
         value={description}
         onChange={handleDescriptionChange}
         onKeyDown={onKeyDown}
@@ -430,6 +432,13 @@ export function TaskCreateDialog({
   );
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
+
+  // Detect passthrough profile to disable prompt textarea
+  const isPassthroughProfile = useMemo(() => {
+    if (!agentProfileId) return false;
+    const profile = agentProfiles.find((p: AgentProfileOption) => p.id === agentProfileId);
+    return profile?.cli_passthrough === true;
+  }, [agentProfileId, agentProfiles]);
 
   // Effective workflow/steps: use fetched steps when a different workflow is selected
   const effectiveWorkflowId = selectedWorkflowId ?? workflowId;
@@ -680,6 +689,7 @@ export function TaskCreateDialog({
       const parts = profile.label.split(' • ');
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? '';
+      const isPassthrough = profile.cli_passthrough === true;
       return {
         value: profile.id,
         label: profile.label,
@@ -689,11 +699,14 @@ export function TaskCreateDialog({
               <AgentLogo agentName={profile.agent_name} className="shrink-0" />
               <span>{agentLabel}</span>
             </span>
-            {profileLabel ? (
-              <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
-                {profileLabel}
-              </ScrollOnOverflow>
-            ) : null}
+            <span className="flex shrink-0 items-center gap-1.5">
+              {isPassthrough && <IconTerminal2 className="size-3.5 text-muted-foreground" title="Passthrough terminal" />}
+              {profileLabel ? (
+                <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
+                  {profileLabel}
+                </ScrollOnOverflow>
+              ) : null}
+            </span>
           </span>
         ),
       };
@@ -836,7 +849,8 @@ export function TaskCreateDialog({
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? '';
     const trimmedDescription = description.trim();
-    if (!trimmedDescription || !agentProfileId) return;
+    if (!agentProfileId) return;
+    if (!trimmedDescription && !isPassthroughProfile) return;
 
     // Legacy mode: delegate to parent
     if (onCreateSession) {
@@ -871,7 +885,7 @@ export function TaskCreateDialog({
     } finally {
       setIsCreatingSession(false);
     }
-  }, [agentProfileId, environmentId, executorId, onCreateSession, onOpenChange, resetForm, router, taskId, toast]);
+  }, [agentProfileId, environmentId, executorId, isPassthroughProfile, onCreateSession, onOpenChange, resetForm, router, taskId, toast]);
 
   const performTaskUpdate = useCallback(async () => {
     if (!editingTask) return null;
@@ -958,7 +972,7 @@ export function TaskCreateDialog({
 
     setIsCreatingTask(true);
     try {
-      if (trimmedDescription) {
+      if (trimmedDescription || isPassthroughProfile) {
         // "Start" mode: create task + start agent in background, stay on kanban
         // Backend resolves the start step automatically
         const taskResponse = await createTask({
@@ -975,7 +989,11 @@ export function TaskCreateDialog({
         const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
         onSuccess?.(taskResponse, 'create', { taskSessionId: newSessionId });
         resetForm();
-        onOpenChange(false);
+        if (isPassthroughProfile && newSessionId) {
+          router.push(linkToSession(newSessionId));
+        } else {
+          onOpenChange(false);
+        }
       } else {
         // "Plan" mode: create task + session only (no agent), navigate to session
         // Backend resolves the start step automatically
@@ -1019,7 +1037,7 @@ export function TaskCreateDialog({
     }
   }, [
     taskName, workspaceId, effectiveWorkflowId, repositoryId, selectedLocalRepo, agentProfileId, executorId,
-    getRepositoriesPayload, onSuccess, resetForm, onOpenChange,
+    isPassthroughProfile, getRepositoriesPayload, onSuccess, resetForm, onOpenChange,
     setActiveDocument, setPlanMode, router, toast,
   ]);
 
@@ -1137,8 +1155,12 @@ export function TaskCreateDialog({
               onDescriptionChange={setHasDescription}
               onKeyDown={handleKeyDown}
               descriptionValueRef={descriptionInputRef}
-              disabled={isTaskStarted}
+              disabled={isTaskStarted || isPassthroughProfile}
+              placeholder={isPassthroughProfile ? 'Sending a prompt is not supported in passthrough mode' : undefined}
             />
+            {isPassthroughProfile && hasDescription && (
+              <p className="text-xs text-amber-500">Prompt will be ignored — passthrough sessions don&apos;t support sending a prompt on start.</p>
+            )}
             {!isSessionMode && !isTaskStarted && (
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
                 <div>
@@ -1268,7 +1290,7 @@ export function TaskCreateDialog({
                     'Update'
                   )}
                 </Button>
-              ) : (isCreateMode && hasDescription) || (isEditMode && agentProfileId) ? (
+              ) : (isCreateMode && (hasDescription || isPassthroughProfile)) || (isEditMode && agentProfileId) ? (
                 <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
                   <Button
                     type="submit"
@@ -1309,7 +1331,7 @@ export function TaskCreateDialog({
                     isCreatingSession ||
                     isCreatingTask ||
                     (isSessionMode
-                      ? !hasDescription || !agentProfileId
+                      ? (!hasDescription && !isPassthroughProfile) || !agentProfileId
                       : !hasTitle || (!repositoryId && !selectedLocalRepo) || !branch)
                   }
                 >

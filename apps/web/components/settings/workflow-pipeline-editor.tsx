@@ -44,7 +44,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@kandev/ui/tooltip';
-import type { WorkflowStep, OnEnterAction, OnTurnStartAction, OnTurnCompleteAction } from '@/lib/types/http';
+import type { WorkflowStep, OnEnterAction, OnTurnStartAction, OnTurnCompleteAction, OnExitAction } from '@/lib/types/http';
 import { useDebouncedCallback } from '@/hooks/use-debounce';
 import { cn } from '@/lib/utils';
 
@@ -91,6 +91,10 @@ function getOnTurnStartTransitionType(step: WorkflowStep): string {
 
 function hasDisablePlanMode(step: WorkflowStep): boolean {
   return step.events?.on_turn_complete?.some((a) => a.type === 'disable_plan_mode') ?? false;
+}
+
+function hasOnExitAction(step: WorkflowStep, type: string): boolean {
+  return step.events?.on_exit?.some((a) => a.type === type) ?? false;
 }
 
 function getTransitionLabel(step: WorkflowStep): string {
@@ -366,6 +370,16 @@ function StepConfigPanel({ step, steps, onUpdate, onRemove, readOnly = false }: 
       ? onTurnComplete.filter((a) => a.type !== 'disable_plan_mode')
       : [...onTurnComplete, { type: 'disable_plan_mode' } as OnTurnCompleteAction];
     onUpdate({ events: { ...currentEvents, on_turn_complete: newOnTurnComplete } });
+  };
+
+  const toggleOnExitAction = (type: string) => {
+    const currentEvents = step.events ?? {};
+    const onExit = currentEvents.on_exit ?? [];
+    const exists = onExit.some((a) => a.type === type);
+    const newOnExit = exists
+      ? onExit.filter((a) => a.type !== type)
+      : [...onExit, { type } as OnExitAction];
+    onUpdate({ events: { ...currentEvents, on_exit: newOnExit } });
   };
 
   // Reset local state only when the step identity changes (not on local edits round-tripping)
@@ -657,6 +671,29 @@ function StepConfigPanel({ step, steps, onUpdate, onRemove, readOnly = false }: 
               )}
             </div>
           </div>
+
+          {/* On Exit */}
+          {hasOnEnterAction(step, 'enable_plan_mode') && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5">
+                <Label className="text-xs font-medium">On Exit</Label>
+                <HelpTip text="Runs when leaving this step (before entering the next step)." />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id={`${step.id}-exit-disable-plan`}
+                  checked={hasOnExitAction(step, 'disable_plan_mode')}
+                  onCheckedChange={() => {
+                    if (readOnly) return;
+                    toggleOnExitAction('disable_plan_mode');
+                  }}
+                  disabled={readOnly}
+                />
+                <Label htmlFor={`${step.id}-exit-disable-plan`} className="text-sm">Disable plan mode</Label>
+                <HelpTip text="Turn off plan mode when leaving this step." />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Prompt section */}

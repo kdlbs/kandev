@@ -2,6 +2,7 @@ import type React from 'react';
 import {
   IconArrowRight,
   IconClipboard,
+  IconDoorExit,
   IconMessageForward,
   IconRobot,
 } from '@tabler/icons-react';
@@ -28,8 +29,9 @@ export function StepCapabilityIcons({ events, className, fallback }: StepCapabil
   const hasTransition = events?.on_turn_complete?.some((a) =>
     ['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
   ) ?? false;
+  const hasOnExit = (events?.on_exit?.length ?? 0) > 0;
 
-  if (!hasOnTurnStart && !hasAuto && !hasPlan && !hasTransition) {
+  if (!hasOnTurnStart && !hasAuto && !hasPlan && !hasTransition && !hasOnExit) {
     return fallback ? <div className={className ?? 'flex items-center gap-1.5 text-muted-foreground'}>{fallback}</div> : null;
   }
 
@@ -72,6 +74,16 @@ export function StepCapabilityIcons({ events, className, fallback }: StepCapabil
               <IconArrowRight className="h-3.5 w-3.5" />
             </TooltipTrigger>
             <TooltipContent>Auto-transition</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      {hasOnExit && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <IconDoorExit className="h-3.5 w-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>On exit actions</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}

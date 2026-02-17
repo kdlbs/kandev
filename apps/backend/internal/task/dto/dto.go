@@ -141,6 +141,7 @@ type TaskSessionDTO struct {
 	UpdatedAt            time.Time               `json:"updated_at"`
 	// Workflow fields
 	IsPrimary      bool    `json:"is_primary"`
+	IsPassthrough  bool    `json:"is_passthrough"`
 	WorkflowStepID *string `json:"workflow_step_id,omitempty"`
 	ReviewStatus   *string `json:"review_status,omitempty"`
 }
@@ -430,6 +431,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
 		IsPrimary:      session.IsPrimary,
+		IsPassthrough:  session.IsPassthrough,
 		WorkflowStepID: session.WorkflowStepID,
 		ReviewStatus:   session.ReviewStatus,
 	}

@@ -216,6 +216,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
                     <PassthroughTerminal
                       key={terminal.id}
                       sessionId={sessionId ?? undefined}
+                      mode="shell"
                       terminalId={terminal.id}
                       label={terminal.type === 'shell' ? terminal.label : undefined}
                     />

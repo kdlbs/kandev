@@ -176,6 +176,7 @@ export type TaskSessionStateChangedPayload = {
   agent_profile_id?: string;
   agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  is_passthrough?: boolean;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
   workflow_step_id?: string;

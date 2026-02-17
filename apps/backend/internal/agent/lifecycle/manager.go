@@ -2487,6 +2487,15 @@ func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, d
 	return nil
 }
 
+// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
+func (m *Manager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return false
+	}
+	return execution.PassthroughProcessID != ""
+}
+
 // ResizePassthroughPTY resizes the PTY for a passthrough process.
 // Returns an error if the session is not in passthrough mode or if resizing fails.
 func (m *Manager) ResizePassthroughPTY(ctx context.Context, sessionID string, cols, rows uint16) error {

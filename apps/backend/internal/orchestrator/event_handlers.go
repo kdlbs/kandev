@@ -96,6 +96,11 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 		return
 	}
 
+	// Process on_turn_start workflow events (step transitions).
+	// For ACP sessions this happens in the message handler before PromptTask;
+	// for passthrough it happens here when the PTY detects user input.
+	s.processOnTurnStart(ctx, data.TaskID, data.SessionID)
+
 	// Move session to running and task to in progress
 	s.setSessionRunning(ctx, data.TaskID, data.SessionID)
 }
@@ -152,85 +157,96 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		zap.Bool("is_queued", queueStatus.IsQueued),
 		zap.Any("message", queueStatus.Message))
 
-	if queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID); exists {
-			// Skip if the queued message has empty content (might have been cleared accidentally)
-			if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
-				s.logger.Warn("skipping empty queued message",
-					zap.String("session_id", data.SessionID),
-					zap.String("queue_id", queuedMsg.ID))
+	// Skip queued messages for passthrough sessions — PromptTask uses ACP which
+	// doesn't work for passthrough, and writing to PTY stdin is unreliable.
+	// Check before TakeQueued to avoid destructively removing the message.
+	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
+		s.logger.Info("skipping queued message for passthrough session",
+			zap.String("session_id", data.SessionID))
+		return
+	}
 
-				// Still publish status change to clear frontend state
-				s.publishQueueStatusEvent(ctx, data.SessionID)
-				return
+	queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID)
+	if !exists {
+		s.logger.Debug("no queued message to execute",
+			zap.String("session_id", data.SessionID))
+		return
+	}
+
+	// Skip if the queued message has empty content (might have been cleared accidentally)
+	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+		s.logger.Warn("skipping empty queued message",
+			zap.String("session_id", data.SessionID),
+			zap.String("queue_id", queuedMsg.ID))
+
+		// Still publish status change to clear frontend state
+		s.publishQueueStatusEvent(ctx, data.SessionID)
+		return
+	}
+
+	s.logger.Info("auto-executing queued message",
+		zap.String("session_id", data.SessionID),
+		zap.String("task_id", queuedMsg.TaskID),
+		zap.String("queue_id", queuedMsg.ID))
+
+	// Publish queue status changed event to notify frontend
+	s.publishQueueStatusEvent(ctx, data.SessionID)
+
+	// Execute the queued message asynchronously
+	go func() {
+		promptCtx := context.Background() // Use a fresh context for async execution
+
+		// Create user message for the queued message (so it appears in chat history)
+		if s.messageCreator != nil {
+			turnID := s.getActiveTurnID(queuedMsg.SessionID)
+			if turnID == "" {
+				// Start a new turn if needed
+				s.startTurnForSession(promptCtx, queuedMsg.SessionID)
+				turnID = s.getActiveTurnID(queuedMsg.SessionID)
 			}
 
-			s.logger.Info("auto-executing queued message",
+			// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
+			// This matches the behavior of direct prompts
+			meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
+			err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
+			if err != nil {
+				s.logger.Error("failed to create user message for queued message",
+					zap.String("session_id", queuedMsg.SessionID),
+					zap.Error(err))
+				// Continue anyway - the prompt should still be sent
+			}
+		}
+
+		// Convert queue attachments to v1 attachments
+		attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
+		for i, att := range queuedMsg.Attachments {
+			attachments[i] = v1.MessageAttachment{
+				Type:     att.Type,
+				Data:     att.Data,
+				MimeType: att.MimeType,
+			}
+		}
+
+		_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
+			queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+		if err != nil {
+			s.logger.Error("failed to execute queued message",
 				zap.String("session_id", data.SessionID),
 				zap.String("task_id", queuedMsg.TaskID),
-				zap.String("queue_id", queuedMsg.ID))
+				zap.String("queue_id", queuedMsg.ID),
+				zap.Error(err))
 
-			// Publish queue status changed event to notify frontend
-			s.publishQueueStatusEvent(ctx, data.SessionID)
-
-			// Execute the queued message asynchronously
-			go func() {
-				promptCtx := context.Background() // Use a fresh context for async execution
-
-				// Create user message for the queued message (so it appears in chat history)
-				if s.messageCreator != nil {
-					turnID := s.getActiveTurnID(queuedMsg.SessionID)
-					if turnID == "" {
-						// Start a new turn if needed
-						s.startTurnForSession(promptCtx, queuedMsg.SessionID)
-						turnID = s.getActiveTurnID(queuedMsg.SessionID)
-					}
-
-					// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
-					// This matches the behavior of direct prompts
-					meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
-					err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
-					if err != nil {
-						s.logger.Error("failed to create user message for queued message",
-							zap.String("session_id", queuedMsg.SessionID),
-							zap.Error(err))
-						// Continue anyway - the prompt should still be sent
-					}
-				}
-
-				// Convert queue attachments to v1 attachments
-				attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
-				for i, att := range queuedMsg.Attachments {
-					attachments[i] = v1.MessageAttachment{
-						Type:     att.Type,
-						Data:     att.Data,
-						MimeType: att.MimeType,
-					}
-				}
-
-				_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-					queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
-				if err != nil {
-					s.logger.Error("failed to execute queued message",
-						zap.String("session_id", data.SessionID),
-						zap.String("task_id", queuedMsg.TaskID),
-						zap.String("queue_id", queuedMsg.ID),
-						zap.Error(err))
-
-					// TODO: Implement dead letter queue for failed queued messages
-					// Currently, failed messages are lost. Consider:
-					// 1. Retry mechanism with exponential backoff
-					// 2. Persist failed messages to database for manual intervention
-					// 3. Notification to user about failed queue execution
-					s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
-						zap.String("session_id", data.SessionID),
-						zap.String("queue_id", queuedMsg.ID),
-						zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
-				}
-			}()
-		} else {
-			s.logger.Debug("no queued message to execute",
-				zap.String("session_id", data.SessionID))
+			// TODO: Implement dead letter queue for failed queued messages
+			// Currently, failed messages are lost. Consider:
+			// 1. Retry mechanism with exponential backoff
+			// 2. Persist failed messages to database for manual intervention
+			// 3. Notification to user about failed queue execution
+			s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+				zap.String("session_id", data.SessionID),
+				zap.String("queue_id", queuedMsg.ID),
+				zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
 		}
+	}()
 }
 
 // handleAgentCompleted handles agent completion events
@@ -486,6 +502,9 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 // If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
+	// Process on_exit actions for the step we're leaving (before the step change)
+	s.processOnExit(ctx, taskID, sessionID, fromStep)
+
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
@@ -571,6 +590,8 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, step *wfmodels.WorkflowStep, taskDescription string) {
+	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
+
 	// Check if this step enables plan mode
 	hasPlanMode := false
 	for _, action := range step.Events.OnEnter {
@@ -580,9 +601,12 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 		}
 	}
 
-	// Auto-disable plan mode when entering a step that doesn't explicitly enable it
-	if !hasPlanMode {
-		s.clearSessionPlanMode(ctx, sessionID)
+	// Skip plan mode management for passthrough sessions — the CLI manages its own state.
+	// For ACP sessions, auto-disable plan mode when entering a step that doesn't explicitly enable it.
+	if !isPassthrough {
+		if !hasPlanMode {
+			s.clearSessionPlanMode(ctx, sessionID)
+		}
 	}
 
 	if len(step.Events.OnEnter) == 0 {
@@ -609,18 +633,23 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 	for _, action := range step.Events.OnEnter {
 		switch action.Type {
 		case wfmodels.OnEnterEnablePlanMode:
-			s.setSessionPlanMode(ctx, sessionID, true)
+			// Skip plan mode for passthrough — CLI manages its own state
+			if !isPassthrough {
+				s.setSessionPlanMode(ctx, sessionID, true)
+			}
 		case wfmodels.OnEnterAutoStartAgent:
 			hasAutoStart = true
 		}
 	}
 
-	if hasAutoStart {
+	// Skip auto-start for passthrough sessions — stdin is unreliable and the
+	// process may not be expecting input. Let the user interact directly.
+	if hasAutoStart && !isPassthrough {
 		// Build prompt from step configuration
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
 		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
-		// Auto-start the agent
+		// Auto-start the agent via ACP prompt
 		go func() {
 			bgCtx := context.Background()
 			_, err := s.PromptTask(bgCtx, taskID, sessionID, effectivePrompt, "", planMode, nil)
@@ -649,6 +678,28 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 				"orchestrator",
 				eventData,
 			))
+		}
+	}
+}
+
+// processOnExit processes the on_exit events for a step when leaving it.
+// This is called before transitioning to the next step. Only side-effect actions
+// are supported (no transitions — those are decided by on_turn_complete).
+func (s *Service) processOnExit(ctx context.Context, taskID, sessionID string, step *wfmodels.WorkflowStep) {
+	if len(step.Events.OnExit) == 0 {
+		return
+	}
+
+	// Skip plan mode management for passthrough sessions — the CLI manages its own state.
+	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
+
+	for _, action := range step.Events.OnExit {
+		if action.Type == wfmodels.OnExitDisablePlanMode && !isPassthrough {
+			s.clearSessionPlanMode(ctx, sessionID)
+			s.logger.Debug("on_exit: disabled plan mode",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name))
 		}
 	}
 }
@@ -1293,6 +1344,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"new_state":              string(nextState),
 			"agent_profile_id":       session.AgentProfileID,
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
+			"is_passthrough":         session.IsPassthrough,
 		}
 		// Include review_status and workflow_step_id if present to ensure frontend state consistency
 		if session.ReviewStatus != nil {

@@ -402,18 +402,22 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 
+	if err := r.ensureIsPassthroughColumn(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-// ensureArchivedAtColumn adds the archived_at column to tasks if it doesn't exist.
-func (r *Repository) ensureArchivedAtColumn() error {
-	rows, err := r.db.Query("PRAGMA table_info(tasks)")
+// ensureColumnExists checks if a column exists on a table and runs the provided
+// SQL statements to add it if missing.
+func (r *Repository) ensureColumnExists(table, column string, migrationSQL ...string) error {
+	rows, err := r.db.Query("PRAGMA table_info(" + table + ")")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var hasColumn bool
 	for rows.Next() {
 		var cid int
 		var name, colType string
@@ -423,21 +427,29 @@ func (r *Repository) ensureArchivedAtColumn() error {
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
 			return err
 		}
-		if name == "archived_at" {
-			hasColumn = true
-			break
+		if name == column {
+			return nil
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if hasColumn {
-		return nil
-	}
 
-	if _, err := r.db.Exec("ALTER TABLE tasks ADD COLUMN archived_at DATETIME"); err != nil {
-		return err
+	for _, stmt := range migrationSQL {
+		if _, err := r.db.Exec(stmt); err != nil {
+			return err
+		}
 	}
-	_, err = r.db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)")
-	return err
+	return nil
+}
+
+func (r *Repository) ensureIsPassthroughColumn() error {
+	return r.ensureColumnExists("task_sessions", "is_passthrough",
+		"ALTER TABLE task_sessions ADD COLUMN is_passthrough INTEGER DEFAULT 0")
+}
+
+func (r *Repository) ensureArchivedAtColumn() error {
+	return r.ensureColumnExists("tasks", "archived_at",
+		"ALTER TABLE tasks ADD COLUMN archived_at DATETIME",
+		"CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at)")
 }

@@ -50,6 +50,7 @@ export const TerminalPanel = memo(function TerminalPanel(
       <PanelBody padding={false} scroll={false}>
         <PassthroughTerminal
           sessionId={sessionId ?? undefined}
+          mode="shell"
           terminalId={terminalId}
         />
       </PanelBody>

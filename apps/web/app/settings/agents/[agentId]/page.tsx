@@ -164,6 +164,7 @@ function AgentSetupForm({
           label: `${profile.agent_display_name} • ${profile.name}`,
           agent_id: agent.id,
           agent_name: agent.name,
+          cli_passthrough: profile.cli_passthrough,
         }))
       )
     );

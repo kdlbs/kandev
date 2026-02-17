@@ -205,14 +205,15 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, workflow_step_id, review_status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			is_primary, workflow_step_id, review_status, is_passthrough
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
 		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
-		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus)
+		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		commonsqlite.BoolToInt(session.IsPassthrough))
 
 	return err
 }
@@ -228,6 +229,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
 	var isPrimary int
+	var isPassthrough int
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
@@ -236,7 +238,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE id = ?
 	`, id).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -244,7 +246,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &workflowStepID, &reviewStatus,
+		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
 	)
 
 	if err == sql.ErrNoRows {
@@ -256,6 +258,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
+	session.IsPassthrough = isPassthrough == 1
 	if workflowStepID.Valid {
 		session.WorkflowStepID = &workflowStepID.String
 	}
@@ -311,6 +314,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
 	var isPrimary int
+	var isPassthrough int
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
@@ -319,7 +323,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -327,7 +331,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &workflowStepID, &reviewStatus,
+		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
 	)
 
 	if err == sql.ErrNoRows {
@@ -339,6 +343,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
+	session.IsPassthrough = isPassthrough == 1
 	if workflowStepID.Valid {
 		session.WorkflowStepID = &workflowStepID.String
 	}
@@ -394,6 +399,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
 	var isPrimary int
+	var isPassthrough int
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
@@ -402,7 +408,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
@@ -412,7 +418,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &workflowStepID, &reviewStatus,
+		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
 	)
 
 	if err == sql.ErrNoRows {
@@ -424,6 +430,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
+	session.IsPassthrough = isPassthrough == 1
 	if workflowStepID.Valid {
 		session.WorkflowStepID = &workflowStepID.String
 	}
@@ -499,13 +506,14 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, workflow_step_id = ?, review_status = ?
+			is_primary = ?, workflow_step_id = ?, review_status = ?, is_passthrough = ?
 		WHERE id = ?
 	`, session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
 		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		commonsqlite.BoolToInt(session.IsPassthrough),
 		session.ID)
 	if err != nil {
 		return err
@@ -565,7 +573,7 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -594,7 +602,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`)
 	if err != nil {
@@ -623,7 +631,7 @@ func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID 
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
 	`, taskID)
 	if err != nil {
@@ -700,6 +708,7 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 		var repositorySnapshotJSON string
 		var completedAt sql.NullTime
 		var isPrimary int
+		var isPassthrough int
 		var workflowStepID sql.NullString
 		var reviewStatus sql.NullString
 
@@ -709,7 +718,7 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 			&session.RepositoryID, &session.BaseBranch,
 			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 			&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-			&isPrimary, &workflowStepID, &reviewStatus,
+			&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
 		)
 		if err != nil {
 			return nil, err
@@ -717,6 +726,7 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 
 		session.State = models.TaskSessionState(state)
 		session.IsPrimary = isPrimary == 1
+		session.IsPassthrough = isPassthrough == 1
 		if workflowStepID.Valid {
 			session.WorkflowStepID = &workflowStepID.String
 		}
@@ -870,6 +880,7 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 	var repositorySnapshotJSON string
 	var completedAt sql.NullTime
 	var isPrimary int
+	var isPassthrough int
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
@@ -878,7 +889,7 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
-		       is_primary, workflow_step_id, review_status
+		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? AND is_primary = 1 LIMIT 1
 	`, taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
@@ -886,7 +897,7 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &workflowStepID, &reviewStatus,
+		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
 	)
 
 	if err == sql.ErrNoRows {
@@ -898,6 +909,7 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
+	session.IsPassthrough = isPassthrough == 1
 	if workflowStepID.Valid {
 		session.WorkflowStepID = &workflowStepID.String
 	}
