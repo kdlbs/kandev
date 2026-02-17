@@ -185,6 +185,26 @@ type FileUpdateResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// FileCreateRequest represents a request to create a new file.
+//
+// HTTP endpoint: POST /api/v1/workspace/file/create
+type FileCreateRequest struct {
+	// Path is the file path (relative to workspace root).
+	Path string `json:"path"`
+}
+
+// FileCreateResponse represents a response to a file create request.
+type FileCreateResponse struct {
+	// Path is the file path.
+	Path string `json:"path"`
+
+	// Success indicates if the creation was successful.
+	Success bool `json:"success"`
+
+	// Error contains error message if the request failed.
+	Error string `json:"error,omitempty"`
+}
+
 // FileDeleteRequest represents a request to delete a file.
 //
 // HTTP endpoint: DELETE /api/v1/workspace/file

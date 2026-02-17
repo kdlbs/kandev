@@ -471,15 +471,50 @@ func (c *Client) ApplyFileDiff(ctx context.Context, path string, diff string, or
 	return &response, nil
 }
 
-// FileDeleteResponse represents a file delete response
-type FileDeleteResponse struct {
-	Path    string `json:"path"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+// CreateFile creates a new file via HTTP POST
+func (c *Client) CreateFile(ctx context.Context, path string) (*streams.FileCreateResponse, error) {
+	reqBody := streams.FileCreateRequest{Path: path}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/create", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file create response body", zap.Error(err))
+		}
+	}()
+
+	var response streams.FileCreateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file create error: %s", response.Error)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("file create failed")
+	}
+
+	return &response, nil
 }
 
 // DeleteFile deletes a file via HTTP DELETE
-func (c *Client) DeleteFile(ctx context.Context, path string) (*FileDeleteResponse, error) {
+func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDeleteResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, path)
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
@@ -497,7 +532,7 @@ func (c *Client) DeleteFile(ctx context.Context, path string) (*FileDeleteRespon
 		}
 	}()
 
-	var response FileDeleteResponse
+	var response streams.FileDeleteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}

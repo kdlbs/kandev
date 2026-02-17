@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash, IconRefresh, IconListTree, IconFolderShare, IconCopy, IconCheck } from '@tabler/icons-react';
+import { IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen, IconSearch, IconX, IconLoader2, IconTrash, IconRefresh, IconListTree, IconFolderShare, IconCopy, IconCheck, IconPlus } from '@tabler/icons-react';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { Input } from '@kandev/ui/input';
 import { FileIcon } from '@/components/ui/file-icon';
@@ -21,6 +21,7 @@ import {
   setFilesPanelScrollPosition,
 } from '@/lib/local-storage';
 import { useToast } from '@/components/toast-provider';
+import { InlineFileInput } from './inline-file-input';
 
 /**
  * Merge a freshly-fetched tree node into an existing one, preserving
@@ -48,22 +49,45 @@ function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTre
   return { ...existing, ...incoming, children: mergedChildren };
 }
 
+/** Insert a file node into a parent folder, keeping children sorted (dirs first, then alpha). */
+function insertNodeInTree(root: FileTreeNode, parentPath: string, node: FileTreeNode): FileTreeNode {
+  if (root.path === parentPath || (parentPath === '' && root.path === '')) {
+    const children = [...(root.children ?? []), node].sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { ...root, children };
+  }
+  if (!root.children) return root;
+  return { ...root, children: root.children.map((c) => insertNodeInTree(c, parentPath, node)) };
+}
+
+/** Remove a node by path from the tree. */
+function removeNodeFromTree(root: FileTreeNode, targetPath: string): FileTreeNode {
+  if (!root.children) return root;
+  const filtered = root.children.filter((c) => c.path !== targetPath);
+  return { ...root, children: filtered.map((c) => removeNodeFromTree(c, targetPath)) };
+}
+
 const MAX_RETRY_ATTEMPTS = 4;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 
 type FileBrowserProps = {
   sessionId: string;
   onOpenFile: (file: OpenFileTab) => void;
-  onDeleteFile?: (path: string) => void;
+  onCreateFile?: (path: string) => Promise<boolean>;
+  onDeleteFile?: (path: string) => Promise<boolean>;
   isSearchOpen?: boolean;
   onCloseSearch?: () => void;
   activeFilePath?: string | null;
 };
 
-export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen = false, onCloseSearch, activeFilePath }: FileBrowserProps) {
+export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile, isSearchOpen = false, onCloseSearch, activeFilePath }: FileBrowserProps) {
   const { toast } = useToast();
   const [tree, setTree] = useState<FileTreeNode | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
+  const [activeFolderPath, setActiveFolderPath] = useState<string>('');
   const [visibleLoadingPaths, setVisibleLoadingPaths] = useState<Set<string>>(new Set());
   const loadingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const [isLoadingTree, setIsLoadingTree] = useState(true);
@@ -97,6 +121,36 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
   const collapseAll = useCallback(() => {
     setExpandedPaths(new Set());
   }, []);
+
+  const handleStartCreate = useCallback(() => {
+    const folderPath = activeFolderPath;
+    // Expand the folder if it's collapsed
+    if (folderPath && !expandedPaths.has(folderPath)) {
+      setExpandedPaths((prev) => new Set(prev).add(folderPath));
+    }
+    setCreatingInPath(folderPath);
+  }, [activeFolderPath, expandedPaths]);
+
+  const handleCreateFileSubmit = useCallback((parentPath: string, name: string) => {
+    setCreatingInPath(null);
+    const newPath = parentPath ? `${parentPath}/${name}` : name;
+
+    // Optimistically insert the new file node
+    const newNode: FileTreeNode = { name, path: newPath, is_dir: false, size: 0 };
+    setTree((prev) => {
+      if (!prev) return prev;
+      return insertNodeInTree(prev, parentPath, newNode);
+    });
+
+    // Fire the actual request; revert on failure
+    onCreateFile?.(newPath).then((ok) => {
+      if (!ok) {
+        setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
+      }
+    }).catch(() => {
+      setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
+    });
+  }, [onCreateFile]);
 
   // Show loading spinner only after 150ms to avoid flash on fast loads
   const showLoading = useCallback((path: string) => {
@@ -267,30 +321,95 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     }
   }, [isTreeLoaded, sessionId]);
 
-  // Subscribe to file changes and refresh tree
+  // Subscribe to file changes and refresh only affected folders
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
 
-    const unsubscribe = client.on('session.workspace.file.changes', async () => {
-      // Refresh the root tree when any file changes.
-      // Merge new top-level children into the existing tree so that
-      // already-loaded subtrees (expanded folders) are preserved.
+    const unsubscribe = client.on('session.workspace.file.changes', async (msg) => {
+      const changes = msg.payload?.changes;
+      if (!changes || changes.length === 0) return;
+
+      // Collect candidate folders that may need refreshing:
+      // - the parent of each changed path (file created/deleted in that folder)
+      // - the path itself (in case backend reports a directory change)
+      const candidates = new Set<string>();
+      for (const change of changes) {
+        const p = change.path;
+        // Parent folder
+        const lastSlash = p.lastIndexOf('/');
+        candidates.add(lastSlash === -1 ? '' : p.substring(0, lastSlash));
+        // The path itself (could be a directory)
+        candidates.add(p);
+      }
+
+      // Only refresh folders we actually have loaded: root ('') or expanded
+      const foldersToRefresh = new Set<string>();
+      for (const c of candidates) {
+        if (c === '' || expandedPaths.has(c)) {
+          foldersToRefresh.add(c);
+        }
+      }
+
+      if (foldersToRefresh.size === 0) return;
+
       try {
-        const response = await requestFileTree(client, sessionId, '', 1);
-        const newRoot = response.root ?? null;
+        // Fetch fresh children for each affected folder
+        const folderUpdates = new Map<string, FileTreeNode[] | undefined>();
+        const fetches = Array.from(foldersToRefresh).map(async (folder) => {
+          try {
+            const res = await requestFileTree(client, sessionId, folder || '', 1);
+            folderUpdates.set(folder, res.root?.children);
+          } catch {
+            // Folder may have been removed
+          }
+        });
+        await Promise.all(fetches);
+
         setTree((prev) => {
-          if (!prev || !newRoot) return newRoot;
-          return mergeTreeNodes(prev, newRoot);
+          if (!prev) return prev;
+
+          // If root ('') was affected, merge root children
+          if (folderUpdates.has('')) {
+            const freshRootChildren = folderUpdates.get('');
+            const existingByPath = new Map(
+              (prev.children ?? []).map((c) => [c.path, c])
+            );
+            const mergedRootChildren = freshRootChildren?.map((incoming) => {
+              const existing = existingByPath.get(incoming.path);
+              if (existing && existing.is_dir && incoming.is_dir) {
+                return mergeTreeNodes(existing, incoming);
+              }
+              return incoming;
+            });
+            prev = { ...prev, children: mergedRootChildren };
+          }
+
+          // Patch subfolders with fresh children
+          const subFolders = Array.from(folderUpdates.keys()).filter((k) => k !== '');
+          if (subFolders.length === 0) return prev;
+
+          const patchNode = (node: FileTreeNode): FileTreeNode => {
+            if (node.is_dir && folderUpdates.has(node.path)) {
+              const freshChildren = folderUpdates.get(node.path);
+              return { ...node, children: freshChildren?.map(patchNode) };
+            }
+            if (node.children) {
+              return { ...node, children: node.children.map(patchNode) };
+            }
+            return node;
+          };
+
+          return patchNode(prev);
         });
         setLoadState('loaded');
       } catch (error) {
-        console.error('Failed to refresh file tree:', error);
+        console.error('[FileBrowser] Failed to refresh file tree:', error);
       }
     });
 
     return unsubscribe;
-  }, [sessionId]);
+  }, [sessionId, expandedPaths]);
 
   // Handle scroll events to save position
   const handleScroll = useCallback((event: Event) => {
@@ -383,6 +502,9 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
 
   const toggleExpand = useCallback(async (node: FileTreeNode) => {
     if (!node.is_dir) return;
+
+    // Track the last-clicked folder as active
+    setActiveFolderPath(node.path);
 
     const newExpanded = new Set(expandedPaths);
 
@@ -495,6 +617,7 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
     const isExpanded = expandedPaths.has(node.path);
     const isLoading = visibleLoadingPaths.has(node.path);
     const isActive = !node.is_dir && activeFilePath === node.path;
+    const isActiveFolder = node.is_dir && activeFolderPath === node.path;
 
     return (
       <div key={node.path}>
@@ -502,7 +625,8 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
           className={cn(
             "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
             "hover:bg-muted",
-            isActive && "bg-muted"
+            isActive && "bg-muted",
+            isActiveFolder && "bg-muted/50"
           )}
           style={{ paddingLeft: `${depth * 12 + 8 + (node.is_dir ? 0 : 20)}px` }}
           onClick={() => (node.is_dir ? toggleExpand(node) : openFile(node))}
@@ -546,7 +670,14 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
                     className="text-muted-foreground hover:text-destructive cursor-pointer"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeleteFile(node.path);
+                      // Optimistically remove, revert on failure
+                      const snapshot = tree;
+                      setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
+                      onDeleteFile(node.path).then((ok) => {
+                        if (!ok) setTree(snapshot);
+                      }).catch(() => {
+                        setTree(snapshot);
+                      });
                     }}
                   >
                     <IconTrash className="h-3.5 w-3.5" />
@@ -557,9 +688,16 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
             </div>
           )}
         </div>
-        {node.is_dir && isExpanded && node.children && (
+        {node.is_dir && isExpanded && (
           <div>
-            {[...node.children]
+            {creatingInPath === node.path && (
+              <InlineFileInput
+                depth={depth + 1}
+                onSubmit={(name) => handleCreateFileSubmit(node.path, name)}
+                onCancel={() => setCreatingInPath(null)}
+              />
+            )}
+            {node.children && [...node.children]
               .sort((a, b) => {
                 // Folders first, then alphabetically
                 if (a.is_dir && !b.is_dir) return -1;
@@ -670,6 +808,19 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
             {displayPath}
           </span>
           <div className="flex shrink-0 items-center gap-0.5">
+            {onCreateFile && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+                    onClick={handleStartCreate}
+                  >
+                    <IconPlus className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>New file</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -728,6 +879,13 @@ export function FileBrowser({ sessionId, onOpenFile, onDeleteFile, isSearchOpen 
           </div>
         ) : tree ? (
           <div className="pb-2">
+            {creatingInPath === '' && (
+              <InlineFileInput
+                depth={0}
+                onSubmit={(name) => handleCreateFileSubmit('', name)}
+                onCancel={() => setCreatingInPath(null)}
+              />
+            )}
             {tree.children && [...tree.children]
               .sort((a, b) => {
                 if (a.is_dir && !b.is_dir) return -1;

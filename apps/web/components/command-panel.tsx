@@ -59,6 +59,7 @@ export function CommandPanel() {
   const { toast } = useToast();
   const [mode, setMode] = useState<CommandPanelMode>('commands');
   const [search, setSearch] = useState('');
+  const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +90,7 @@ export function CommandPanel() {
       const t = setTimeout(() => {
         setMode('commands');
         setSearch('');
+        setInputCommand(null);
         setTaskResults([]);
       }, 200);
       return () => clearTimeout(t);
@@ -162,6 +164,7 @@ export function CommandPanel() {
   const handleSelect = useCallback(
     (cmd: CommandItemType) => {
       if (cmd.enterMode) {
+        if (cmd.enterMode === 'input') setInputCommand(cmd);
         setMode(cmd.enterMode);
         setSearch('');
         return;
@@ -186,34 +189,47 @@ export function CommandPanel() {
     [setOpen, router, toast]
   );
 
-  // Handle backspace on empty input to go back to commands mode
+  // Handle keyboard in sub-modes: Enter to submit, Backspace to go back
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (mode === 'input' && e.key === 'Enter' && search.trim() && inputCommand?.onInputSubmit) {
+        e.preventDefault();
+        setOpen(false);
+        inputCommand.onInputSubmit(search.trim());
+        return;
+      }
       if (mode !== 'commands' && e.key === 'Backspace' && !search) {
         e.preventDefault();
         setMode('commands');
         setSearch('');
+        setInputCommand(null);
       }
     },
-    [mode, search]
+    [mode, search, inputCommand, setOpen]
   );
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} overlayClassName="supports-backdrop-filter:backdrop-blur-none!">
       <Command shouldFilter={mode === 'commands'} loop>
         <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
-          {mode === 'search-tasks' && (
+          {mode !== 'commands' && (
             <button
-              onClick={() => { setMode('commands'); setSearch(''); }}
+              onClick={() => { setMode('commands'); setSearch(''); setInputCommand(null); }}
               className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <span>←</span>
-              <span>Tasks</span>
+              <span>{mode === 'input' ? inputCommand?.label : 'Tasks'}</span>
               <span className="text-muted-foreground/50">›</span>
             </button>
           )}
           <CommandInput
-            placeholder={mode === 'commands' ? 'Type a command...' : 'Search for tasks...'}
+            placeholder={
+              mode === 'input'
+                ? (inputCommand?.inputPlaceholder ?? 'Enter value...')
+                : mode === 'search-tasks'
+                  ? 'Search for tasks...'
+                  : 'Type a command...'
+            }
             value={search}
             onValueChange={setSearch}
             onKeyDown={handleKeyDown}
@@ -297,20 +313,28 @@ export function CommandPanel() {
               )}
             </>
           )}
+
+          {mode === 'input' && (
+            !search.trim()
+              ? <CommandEmpty>{inputCommand?.inputPlaceholder ?? 'Enter a value...'}</CommandEmpty>
+              : <CommandEmpty>Press Enter to confirm</CommandEmpty>
+          )}
         </CommandList>
 
         {/* Footer bar */}
         <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
-          <KbdGroup>
-            <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd>
-            <span>Navigate</span>
-          </KbdGroup>
+          {mode === 'commands' && (
+            <KbdGroup>
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              <span>Navigate</span>
+            </KbdGroup>
+          )}
           <KbdGroup>
             <Kbd>↵</Kbd>
-            <span>{mode === 'search-tasks' ? 'Open' : 'Select'}</span>
+            <span>{mode === 'input' ? 'Confirm' : mode === 'search-tasks' ? 'Open' : 'Select'}</span>
           </KbdGroup>
-          {mode === 'search-tasks' && (
+          {mode !== 'commands' && (
             <KbdGroup>
               <Kbd>⌫</Kbd>
               <span>Back</span>

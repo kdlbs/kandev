@@ -85,6 +85,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/file/create", s.handleFileCreate)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
 

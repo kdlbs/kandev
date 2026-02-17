@@ -52,6 +52,10 @@ type WorkspaceTracker struct {
 	// Debounce channel for filesystem change events
 	fsChangeTrigger chan struct{}
 
+	// Pending file changes accumulated between debounce flushes
+	pendingChanges   []types.FileChangeNotification
+	pendingChangesMu sync.Mutex
+
 	// Git polling interval
 	gitPollInterval time.Duration
 
@@ -174,12 +178,14 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			if pendingUpdate {
 				wt.updateGitStatus(ctx)
 				wt.updateFiles(ctx)
-				// Notify workspace stream subscribers that workspace changed
-				wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
-					Timestamp: time.Now(),
-					Path:      "",
-					Operation: "refresh",
-				})
+
+				// Drain pending changes and emit specific notifications
+				wt.pendingChangesMu.Lock()
+				changes := wt.pendingChanges
+				wt.pendingChanges = nil
+				wt.pendingChangesMu.Unlock()
+
+				wt.emitFileChanges(changes)
 				pendingUpdate = false
 			}
 			debounceTimer = nil
@@ -971,6 +977,39 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamGitReset(reset *types.GitResetN
 	}
 }
 
+// addPendingChange records a specific file change and triggers a debounced update.
+func (wt *WorkspaceTracker) addPendingChange(relPath, operation string) {
+	wt.pendingChangesMu.Lock()
+	wt.pendingChanges = append(wt.pendingChanges, types.FileChangeNotification{
+		Timestamp: time.Now(),
+		Path:      relPath,
+		Operation: operation,
+	})
+	wt.pendingChangesMu.Unlock()
+
+	// Trigger debounced update (non-blocking)
+	select {
+	case wt.fsChangeTrigger <- struct{}{}:
+	default:
+	}
+}
+
+// emitFileChanges sends accumulated file changes to subscribers.
+// Falls back to a single generic refresh when there are too many changes or none.
+func (wt *WorkspaceTracker) emitFileChanges(changes []types.FileChangeNotification) {
+	const maxSpecificChanges = 50
+	if len(changes) == 0 || len(changes) > maxSpecificChanges {
+		wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
+			Timestamp: time.Now(),
+			Operation: types.FileOpRefresh,
+		})
+		return
+	}
+	for i := range changes {
+		wt.notifyWorkspaceStreamFileChange(changes[i])
+	}
+}
+
 // notifyWorkspaceStreamFileChange sends file change notification to all workspace stream subscribers
 func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.FileChangeNotification) {
 	wt.workspaceSubMu.RLock()
@@ -1059,12 +1098,12 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 				}
 			}
 
-			// Trigger debounced update (non-blocking)
-			select {
-			case wt.fsChangeTrigger <- struct{}{}:
-			default:
-				// Channel full, update already pending
+			// Record specific change with relative path
+			relPath, relErr := filepath.Rel(wt.workDir, event.Name)
+			if relErr != nil {
+				relPath = event.Name
 			}
+			wt.addPendingChange(relPath, fsOpToString(event.Op))
 
 		case err, ok := <-wt.watcher.Errors:
 			if !ok {
@@ -1072,6 +1111,22 @@ func (wt *WorkspaceTracker) watchFilesystem(ctx context.Context) {
 			}
 			wt.logger.Debug("filesystem watcher error", zap.Error(err))
 		}
+	}
+}
+
+// fsOpToString converts an fsnotify operation to a FileOp string constant.
+func fsOpToString(op fsnotify.Op) string {
+	switch {
+	case op&fsnotify.Create != 0:
+		return types.FileOpCreate
+	case op&fsnotify.Write != 0:
+		return types.FileOpWrite
+	case op&fsnotify.Remove != 0:
+		return types.FileOpRemove
+	case op&fsnotify.Rename != 0:
+		return types.FileOpRename
+	default:
+		return types.FileOpRefresh
 	}
 }
 
@@ -1171,13 +1226,12 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	return node, nil
 }
 
-// GetFileContent returns the content of a file.
-// If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
-func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, error) {
+// resolveSafePath resolves reqPath to an absolute path within workDir,
+// rejecting any path traversal attempts.
+func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
 
-	// Resolve the full path - if already absolute and within workDir, use directly
 	var fullPath string
 	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
 		fullPath = cleanReqPath
@@ -1185,9 +1239,19 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 		fullPath = filepath.Join(wt.workDir, cleanReqPath)
 	}
 
-	// Path traversal protection
 	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return "", 0, false, fmt.Errorf("path traversal detected")
+		return "", fmt.Errorf("path traversal detected")
+	}
+
+	return fullPath, nil
+}
+
+// GetFileContent returns the content of a file.
+// If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
+func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, error) {
+	fullPath, err := wt.resolveSafePath(reqPath)
+	if err != nil {
+		return "", 0, false, err
 	}
 
 	// Check if file exists and is a regular file
@@ -1232,21 +1296,12 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 // ApplyFileDiff applies a unified diff to a file with conflict detection
 // Uses git apply for reliable, battle-tested patch application
 func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
+	fullPath, err := wt.resolveSafePath(reqPath)
+	if err != nil {
+		return "", err
+	}
+
 	cleanWorkDir := filepath.Clean(wt.workDir)
-	cleanReqPath := filepath.Clean(reqPath)
-
-	// Resolve the full path - if already absolute and within workDir, use directly
-	var fullPath string
-	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
-		fullPath = cleanReqPath
-	} else {
-		fullPath = filepath.Join(wt.workDir, cleanReqPath)
-	}
-
-	// Path traversal protection
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return "", fmt.Errorf("path traversal detected")
-	}
 
 	// Read current file content
 	currentContent, _, _, err := wt.GetFileContent(reqPath)
@@ -1289,15 +1344,12 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	// Calculate new hash
 	newHash := calculateSHA256(string(updatedContent))
 
-	// Trigger filesystem change notification
-	select {
-	case wt.fsChangeTrigger <- struct{}{}:
-	default:
-		// Channel already has a pending trigger, skip
-	}
+	// Notify with the relative path
+	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	wt.addPendingChange(relPath, types.FileOpWrite)
 
 	wt.logger.Debug("applied file diff using git apply",
-		zap.String("path", reqPath),
+		zap.String("path", relPath),
 		zap.String("old_hash", currentHash),
 		zap.String("new_hash", newHash),
 	)
@@ -1305,22 +1357,41 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	return newHash, nil
 }
 
-// DeleteFile deletes a file from the workspace
-func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
-	cleanWorkDir := filepath.Clean(wt.workDir)
-	cleanReqPath := filepath.Clean(reqPath)
-
-	// Resolve the full path - if already absolute and within workDir, use directly
-	var fullPath string
-	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
-		fullPath = cleanReqPath
-	} else {
-		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+// CreateFile creates a new file in the workspace
+func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
+	fullPath, err := wt.resolveSafePath(reqPath)
+	if err != nil {
+		return err
 	}
 
-	// Path traversal protection
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return fmt.Errorf("path traversal detected")
+	// Create intermediate directories
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// Atomically create the file, failing if it already exists
+	f, err := os.OpenFile(fullPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("file already exists: %s", reqPath)
+		}
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	_ = f.Close()
+
+	// Notify with the relative path
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	wt.addPendingChange(relPath, types.FileOpCreate)
+
+	return nil
+}
+
+func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
+	fullPath, err := wt.resolveSafePath(reqPath)
+	if err != nil {
+		return err
 	}
 
 	// Check if file exists
@@ -1342,16 +1413,10 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	// Trigger filesystem change notification
-	select {
-	case wt.fsChangeTrigger <- struct{}{}:
-	default:
-		// Channel already has a pending trigger, skip
-	}
-
-	wt.logger.Debug("deleted file",
-		zap.String("path", reqPath),
-	)
+	// Notify with the relative path
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	wt.addPendingChange(relPath, types.FileOpRemove)
 
 	return nil
 }

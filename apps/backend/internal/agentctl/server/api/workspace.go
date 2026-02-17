@@ -203,6 +203,39 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 	c.JSON(200, types.FileSearchResponse{Files: files})
 }
 
+// handleFileCreate handles file create requests via HTTP POST
+func (s *Server) handleFileCreate(c *gin.Context) {
+	var req streams.FileCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, streams.FileCreateResponse{Error: "invalid request: " + err.Error()})
+		return
+	}
+
+	if req.Path == "" {
+		c.JSON(400, streams.FileCreateResponse{Error: "path is required"})
+		return
+	}
+
+	s.logger.Info("handleFileCreate: creating file", zap.String("path", req.Path))
+
+	err := s.procMgr.GetWorkspaceTracker().CreateFile(req.Path)
+	if err != nil {
+		c.JSON(400, streams.FileCreateResponse{
+			Path:    req.Path,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("handleFileCreate: file created successfully", zap.String("path", req.Path))
+
+	c.JSON(200, streams.FileCreateResponse{
+		Path:    req.Path,
+		Success: true,
+	})
+}
+
 // handleFileDelete handles file delete requests via HTTP DELETE
 func (s *Server) handleFileDelete(c *gin.Context) {
 	path := c.Query("path")
