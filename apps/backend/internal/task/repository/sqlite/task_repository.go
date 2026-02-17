@@ -26,11 +26,11 @@ func (r *Repository) CreateTaskRepository(ctx context.Context, taskRepo *models.
 		metadataJSON = []byte("{}")
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_repositories (
 			id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.CreatedAt, taskRepo.UpdatedAt)
+	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.CreatedAt, taskRepo.UpdatedAt)
 	return err
 }
 
@@ -39,10 +39,10 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 	taskRepo := &models.TaskRepository{}
 	var metadataJSON string
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		FROM task_repositories WHERE id = ?
-	`, id).Scan(
+	`), id).Scan(
 		&taskRepo.ID,
 		&taskRepo.TaskID,
 		&taskRepo.RepositoryID,
@@ -68,12 +68,12 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 
 // ListTaskRepositories returns all repository links for a task
 func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		FROM task_repositories
 		WHERE task_id = ?
 		ORDER BY position ASC, created_at ASC
-	`, taskID)
+	`), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,11 +114,11 @@ func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.
 		metadataJSON = []byte("{}")
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_repositories SET
 			task_id = ?, repository_id = ?, base_branch = ?, position = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.UpdatedAt, taskRepo.ID)
+	`), taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.Position, string(metadataJSON), taskRepo.UpdatedAt, taskRepo.ID)
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.
 
 // DeleteTaskRepository deletes a task-repository link by ID
 func (r *Repository) DeleteTaskRepository(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_repositories WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (r *Repository) DeleteTaskRepository(ctx context.Context, id string) error 
 
 // DeleteTaskRepositoriesByTask deletes all repository links for a task
 func (r *Repository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM task_repositories WHERE task_id = ?`, taskID)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_repositories WHERE task_id = ?`), taskID)
 	return err
 }
 

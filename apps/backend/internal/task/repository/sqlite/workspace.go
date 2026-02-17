@@ -20,7 +20,7 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 	workspace.CreatedAt = now
 	workspace.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workspaces (
 			id,
 			name,
@@ -33,7 +33,7 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 			updated_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -45,10 +45,10 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultEnvironmentID sql.NullString
 	var defaultAgentProfileID sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
-	`, id).Scan(
+	`), id).Scan(
 		&workspace.ID,
 		&workspace.Name,
 		&workspace.Description,
@@ -79,7 +79,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	workspace.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workspaces
 		SET name = ?,
 			description = ?,
@@ -88,7 +88,7 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 			default_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ?
-	`, workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.UpdatedAt, workspace.ID)
+	`), workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 
 // DeleteWorkspace deletes a workspace by ID
 func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workspaces WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}

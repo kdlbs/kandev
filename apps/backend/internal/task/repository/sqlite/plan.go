@@ -26,20 +26,20 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 		plan.CreatedBy = "agent"
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt)
+	`), plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt)
 	return err
 }
 
 // GetTaskPlan retrieves a task plan by task ID.
 func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
 	plan := &models.TaskPlan{}
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, title, content, created_by, created_at, updated_at
 		FROM task_plans WHERE task_id = ?
-	`, taskID).Scan(&plan.ID, &plan.TaskID, &plan.Title, &plan.Content, &plan.CreatedBy, &plan.CreatedAt, &plan.UpdatedAt)
+	`), taskID).Scan(&plan.ID, &plan.TaskID, &plan.Title, &plan.Content, &plan.CreatedBy, &plan.CreatedAt, &plan.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil // Return nil, nil when no plan exists
@@ -54,10 +54,10 @@ func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.Ta
 func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
 	plan.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_plans SET title = ?, content = ?, created_by = ?, updated_at = ?
 		WHERE task_id = ?
-	`, plan.Title, plan.Content, plan.CreatedBy, plan.UpdatedAt, plan.TaskID)
+	`), plan.Title, plan.Content, plan.CreatedBy, plan.UpdatedAt, plan.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to update task plan: %w", err)
 	}
@@ -71,7 +71,7 @@ func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 
 // DeleteTaskPlan deletes a task plan by task ID.
 func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_plans WHERE task_id = ?`, taskID)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_plans WHERE task_id = ?`), taskID)
 	if err != nil {
 		return fmt.Errorf("failed to delete task plan: %w", err)
 	}

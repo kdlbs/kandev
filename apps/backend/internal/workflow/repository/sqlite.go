@@ -9,28 +9,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
 // Repository provides SQLite-based workflow storage operations.
 type Repository struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
 // NewWithDB creates a new SQLite repository with an existing database connection.
-func NewWithDB(db *sql.DB) (*Repository, error) {
+func NewWithDB(db *sqlx.DB) (*Repository, error) {
 	repo := &Repository{db: db}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
 	}
 	return repo, nil
-}
-
-// DB returns the underlying sql.DB instance for shared access.
-func (r *Repository) DB() *sql.DB {
-	return r.db
 }
 
 // initSchema creates the database tables if they don't exist.
@@ -43,8 +39,8 @@ func (r *Repository) initSchema() error {
 		description TEXT,
 		is_system INTEGER DEFAULT 0,
 		steps TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`
 	if _, err := r.db.Exec(templatesSchema); err != nil {
@@ -62,8 +58,10 @@ func (r *Repository) initSchema() error {
 		prompt TEXT,
 		events TEXT,
 		allow_manual_move INTEGER DEFAULT 1,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		is_start_step INTEGER DEFAULT 0,
+		auto_archive_after_hours INTEGER DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
@@ -72,32 +70,23 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("failed to create workflow_steps table: %w", err)
 	}
 
-	// Migrate old schema to new schema if needed
-	if err := r.migrateWorkflowSteps(); err != nil {
-		return fmt.Errorf("failed to migrate workflow_steps: %w", err)
+	// Create session_step_history table (id column differs between SQLite and PostgreSQL)
+	var idCol string
+	if r.db.DriverName() == "pgx" {
+		idCol = "id BIGSERIAL PRIMARY KEY"
+	} else {
+		idCol = "id INTEGER PRIMARY KEY AUTOINCREMENT"
 	}
-
-	// Add is_start_step column if not present
-	if err := r.addIsStartStepColumn(); err != nil {
-		return fmt.Errorf("failed to add is_start_step column: %w", err)
-	}
-
-	// Add auto_archive_after_hours column if not present
-	if err := r.addAutoArchiveColumn(); err != nil {
-		return fmt.Errorf("failed to add auto_archive_after_hours column: %w", err)
-	}
-
-	// Create session_step_history table
 	historySchema := `
 	CREATE TABLE IF NOT EXISTS session_step_history (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		` + idCol + `,
 		session_id TEXT NOT NULL,
 		from_step_id TEXT,
 		to_step_id TEXT NOT NULL,
 		trigger TEXT NOT NULL,
 		actor_id TEXT,
 		metadata TEXT,
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_session_step_history_session ON session_step_history(session_id);
@@ -119,261 +108,6 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
-// migrateWorkflowSteps detects old schema (has step_type column) and migrates data to new schema.
-func (r *Repository) migrateWorkflowSteps() error {
-	// Check if old column exists
-	var hasStepType bool
-	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "step_type" {
-			hasStepType = true
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	if !hasStepType {
-		return nil // Already on new schema
-	}
-
-	// Migrate: read old data, recreate table with new schema, insert converted data
-	type oldStep struct {
-		ID               string
-		WorkflowID       string
-		Name             string
-		Position         int
-		Color            sql.NullString
-		AutoStartAgent   int
-		PlanMode         int
-		RequireApproval  int
-		PromptPrefix     sql.NullString
-		PromptSuffix     sql.NullString
-		OnCompleteStepID sql.NullString
-		OnApprovalStepID sql.NullString
-		AllowManualMove  int
-		CreatedAt        time.Time
-		UpdatedAt        time.Time
-	}
-
-	oldRows, err := r.db.Query(`
-		SELECT id, workflow_id, name, position, color,
-			auto_start_agent, plan_mode, require_approval,
-			prompt_prefix, prompt_suffix, on_complete_step_id, on_approval_step_id,
-			allow_manual_move, created_at, updated_at
-		FROM workflow_steps
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to read old workflow_steps: %w", err)
-	}
-	defer func() { _ = oldRows.Close() }()
-
-	var oldSteps []oldStep
-	for oldRows.Next() {
-		var s oldStep
-		if err := oldRows.Scan(&s.ID, &s.WorkflowID, &s.Name, &s.Position, &s.Color,
-			&s.AutoStartAgent, &s.PlanMode, &s.RequireApproval,
-			&s.PromptPrefix, &s.PromptSuffix, &s.OnCompleteStepID, &s.OnApprovalStepID,
-			&s.AllowManualMove, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return fmt.Errorf("failed to scan old workflow step: %w", err)
-		}
-		oldSteps = append(oldSteps, s)
-	}
-	if err := oldRows.Err(); err != nil {
-		return err
-	}
-
-	// Drop old table and recreate within a transaction for atomicity
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin migration transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec("DROP TABLE workflow_steps"); err != nil {
-		return fmt.Errorf("failed to drop old workflow_steps table: %w", err)
-	}
-
-	newSchema := `
-	CREATE TABLE workflow_steps (
-		id TEXT PRIMARY KEY,
-		workflow_id TEXT NOT NULL,
-		name TEXT NOT NULL,
-		position INTEGER NOT NULL,
-		color TEXT,
-		prompt TEXT,
-		events TEXT,
-		allow_manual_move INTEGER DEFAULT 1,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
-	);
-	CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
-	`
-	if _, err := tx.Exec(newSchema); err != nil {
-		return fmt.Errorf("failed to recreate workflow_steps table: %w", err)
-	}
-
-	// Convert and insert old data
-	for _, s := range oldSteps {
-		events := convertOldStepToEvents(s.AutoStartAgent == 1, s.PlanMode == 1, s.RequireApproval == 1,
-			s.OnCompleteStepID, s.OnApprovalStepID)
-		eventsJSON, err := json.Marshal(events)
-		if err != nil {
-			return fmt.Errorf("failed to marshal events for step %s: %w", s.ID, err)
-		}
-
-		// Combine old prompt prefix/suffix into single prompt
-		prompt := ""
-		if s.PromptPrefix.Valid && s.PromptPrefix.String != "" {
-			prompt = s.PromptPrefix.String + "\n\n{{task_prompt}}"
-			if s.PromptSuffix.Valid && s.PromptSuffix.String != "" {
-				prompt += "\n\n" + s.PromptSuffix.String
-			}
-		} else if s.PromptSuffix.Valid && s.PromptSuffix.String != "" {
-			prompt = "{{task_prompt}}\n\n" + s.PromptSuffix.String
-		}
-
-		color := ""
-		if s.Color.Valid {
-			color = s.Color.String
-		}
-
-		if _, err := tx.Exec(`
-			INSERT INTO workflow_steps (id, workflow_id, name, position, color, prompt, events, allow_manual_move, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, s.ID, s.WorkflowID, s.Name, s.Position, color, prompt, string(eventsJSON), s.AllowManualMove, s.CreatedAt, s.UpdatedAt); err != nil {
-			return fmt.Errorf("failed to insert migrated step %s: %w", s.ID, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit migration transaction: %w", err)
-	}
-
-	return nil
-}
-
-// addIsStartStepColumn adds the is_start_step column to workflow_steps if it doesn't exist.
-func (r *Repository) addIsStartStepColumn() error {
-	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var hasColumn bool
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "is_start_step" {
-			hasColumn = true
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if hasColumn {
-		return nil
-	}
-
-	_, err = r.db.Exec("ALTER TABLE workflow_steps ADD COLUMN is_start_step INTEGER DEFAULT 0")
-	return err
-}
-
-// addAutoArchiveColumn adds the auto_archive_after_hours column to workflow_steps if it doesn't exist.
-func (r *Repository) addAutoArchiveColumn() error {
-	rows, err := r.db.Query("PRAGMA table_info(workflow_steps)")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var hasColumn bool
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "auto_archive_after_hours" {
-			hasColumn = true
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if hasColumn {
-		return nil
-	}
-
-	_, err = r.db.Exec("ALTER TABLE workflow_steps ADD COLUMN auto_archive_after_hours INTEGER DEFAULT 0")
-	return err
-}
-
-// convertOldStepToEvents converts old boolean/pointer fields to new event-driven model.
-func convertOldStepToEvents(autoStart, planMode, requireApproval bool, onCompleteStepID, onApprovalStepID sql.NullString) models.StepEvents {
-	events := models.StepEvents{}
-
-	// On Enter actions
-	if planMode {
-		events.OnEnter = append(events.OnEnter, models.OnEnterAction{Type: models.OnEnterEnablePlanMode})
-	}
-	if autoStart {
-		events.OnEnter = append(events.OnEnter, models.OnEnterAction{Type: models.OnEnterAutoStartAgent})
-	}
-
-	// On Turn Complete actions
-	if planMode {
-		events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{Type: models.OnTurnCompleteDisablePlanMode})
-	}
-
-	if !requireApproval {
-		// If not requiring approval and has on_complete, add move transition
-		if onCompleteStepID.Valid && onCompleteStepID.String != "" {
-			events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{
-				Type:   models.OnTurnCompleteMoveToStep,
-				Config: map[string]interface{}{"step_id": onCompleteStepID.String},
-			})
-		}
-	} else if onApprovalStepID.Valid && onApprovalStepID.String != "" {
-		// Require approval before transitioning to the approval step
-		events.OnTurnComplete = append(events.OnTurnComplete, models.OnTurnCompleteAction{
-			Type: models.OnTurnCompleteMoveToStep,
-			Config: map[string]interface{}{
-				"step_id":           onApprovalStepID.String,
-				"requires_approval": true,
-			},
-		})
-	}
-
-	return events
-}
 
 // seedDefaultWorkflowSteps creates default workflow steps for workflows that don't have any.
 // Uses the simple template as the default workflow.
@@ -419,15 +153,15 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 				return fmt.Errorf("failed to marshal events: %w", err)
 			}
 
-			if _, err := r.db.Exec(`
+			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
 					prompt, events, allow_manual_move, is_start_step, created_at, updated_at
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`,
+			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
-				stepDef.Prompt, string(eventsJSON), sqlite.BoolToInt(stepDef.AllowManualMove),
-				sqlite.BoolToInt(stepDef.IsStartStep), now, now,
+				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
+				dialect.BoolToInt(stepDef.IsStartStep), now, now,
 			); err != nil {
 				return err
 			}
@@ -448,7 +182,7 @@ func (r *Repository) seedSystemTemplates() error {
 			return fmt.Errorf("failed to marshal steps for template %s: %w", tmpl.ID, err)
 		}
 
-		_, err = r.db.Exec(`
+		_, err = r.db.Exec(r.db.Rebind(`
 			INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
@@ -456,7 +190,7 @@ func (r *Repository) seedSystemTemplates() error {
 				description = excluded.description,
 				steps = excluded.steps,
 				updated_at = excluded.updated_at
-		`, tmpl.ID, tmpl.Name, tmpl.Description, sqlite.BoolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
+		`), tmpl.ID, tmpl.Name, tmpl.Description, dialect.BoolToInt(tmpl.IsSystem), string(stepsJSON), tmpl.CreatedAt, tmpl.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to upsert template %s: %w", tmpl.ID, err)
 		}
@@ -745,10 +479,10 @@ func (r *Repository) CreateTemplate(ctx context.Context, template *models.Workfl
 		return fmt.Errorf("failed to marshal steps: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, template.ID, template.Name, template.Description, sqlite.BoolToInt(template.IsSystem), string(stepsJSON), template.CreatedAt, template.UpdatedAt)
+	`), template.ID, template.Name, template.Description, dialect.BoolToInt(template.IsSystem), string(stepsJSON), template.CreatedAt, template.UpdatedAt)
 
 	return err
 }
@@ -759,10 +493,10 @@ func (r *Repository) GetTemplate(ctx context.Context, id string) (*models.Workfl
 	var stepsJSON string
 	var isSystem int
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, description, is_system, steps, created_at, updated_at
 		FROM workflow_templates WHERE id = ?
-	`, id).Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
+	`), id).Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("workflow template not found: %s", id)
@@ -788,10 +522,10 @@ func (r *Repository) UpdateTemplate(ctx context.Context, template *models.Workfl
 		return fmt.Errorf("failed to marshal steps: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_templates SET name = ?, description = ?, steps = ?, updated_at = ?
 		WHERE id = ? AND is_system = 0
-	`, template.Name, template.Description, string(stepsJSON), template.UpdatedAt, template.ID)
+	`), template.Name, template.Description, string(stepsJSON), template.UpdatedAt, template.ID)
 	if err != nil {
 		return err
 	}
@@ -805,7 +539,7 @@ func (r *Repository) UpdateTemplate(ctx context.Context, template *models.Workfl
 
 // DeleteTemplate deletes a workflow template by ID.
 func (r *Repository) DeleteTemplate(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM workflow_templates WHERE id = ? AND is_system = 0`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflow_templates WHERE id = ? AND is_system = 0`), id)
 	if err != nil {
 		return err
 	}
@@ -907,14 +641,14 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 		return fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
 			prompt, events, allow_manual_move, is_start_step, auto_archive_after_hours, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
-		step.Prompt, string(eventsJSON), sqlite.BoolToInt(step.AllowManualMove),
-		sqlite.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
+	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
+		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
+		dialect.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -959,10 +693,10 @@ const stepSelectColumns = `id, workflow_id, name, position, color, prompt, event
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE id = ?
-	`, id)
+	`), id)
 
 	step, err := r.scanStep(row)
 	if err == sql.ErrNoRows {
@@ -983,15 +717,15 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		return fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
 			allow_manual_move = ?, is_start_step = ?, auto_archive_after_hours = ?, updated_at = ?
 		WHERE id = ?
-	`, step.Name, step.Position, step.Color,
+	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		sqlite.BoolToInt(step.AllowManualMove), sqlite.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -1005,21 +739,21 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_steps SET is_start_step = 0
 		WHERE workflow_id = ? AND id != ?
-	`, workflowID, exceptStepID)
+	`), workflowID, exceptStepID)
 	return err
 }
 
 // GetStartStep returns the step marked as is_start_step for a workflow.
 // Returns nil if no step is marked.
 func (r *Repository) GetStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE workflow_id = ? AND is_start_step = 1
 		LIMIT 1
-	`, workflowID)
+	`), workflowID)
 
 	step, err := r.scanStep(row)
 	if err == sql.ErrNoRows {
@@ -1064,7 +798,7 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM workflow_steps WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflow_steps WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -1078,10 +812,10 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 
 // ListStepsByWorkflow returns all workflow steps for a workflow.
 func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*models.WorkflowStep, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE workflow_id = ? ORDER BY position
-	`, workflowID)
+	`), workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -1122,16 +856,10 @@ func (r *Repository) CreateHistory(ctx context.Context, history *models.SessionS
 		metadataJSON = &s
 	}
 
-	result, err := r.db.ExecContext(ctx, `
-		INSERT INTO session_step_history (session_id, from_step_id, to_step_id, trigger, actor_id, metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, history.SessionID, history.FromStepID, history.ToStepID, history.Trigger, history.ActorID, metadataJSON, history.CreatedAt)
-	if err != nil {
-		return err
-	}
-
-	// Get the auto-incremented ID
-	id, err := result.LastInsertId()
+	id, err := dialect.InsertReturningID(ctx, r.db,
+		`INSERT INTO session_step_history (session_id, from_step_id, to_step_id, trigger, actor_id, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		history.SessionID, history.FromStepID, history.ToStepID, history.Trigger, history.ActorID, metadataJSON, history.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -1142,10 +870,10 @@ func (r *Repository) CreateHistory(ctx context.Context, history *models.SessionS
 
 // ListHistoryBySession returns all step history entries for a session.
 func (r *Repository) ListHistoryBySession(ctx context.Context, sessionID string) ([]*models.SessionStepHistory, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, from_step_id, to_step_id, trigger, actor_id, metadata, created_at
 		FROM session_step_history WHERE session_id = ? ORDER BY created_at
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,14 +1,14 @@
 package worktree
 
 import (
-	"database/sql"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // Provide creates the worktree manager using the shared database connection.
-func Provide(db *sql.DB, cfg *config.Config, log *logger.Logger) (*Manager, func() error, error) {
+func Provide(db *sqlx.DB, cfg *config.Config, log *logger.Logger) (*Manager, func() error, error) {
 	store, err := NewSQLiteStore(db)
 	if err != nil {
 		return nil, nil, err

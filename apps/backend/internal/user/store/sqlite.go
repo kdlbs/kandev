@@ -2,10 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
@@ -16,17 +17,17 @@ const (
 )
 
 type sqliteRepository struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -45,8 +46,8 @@ func (r *sqliteRepository) initSchema() error {
 		id TEXT PRIMARY KEY,
 		email TEXT NOT NULL,
 		settings TEXT NOT NULL DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`
 	if _, err := r.db.Exec(schema); err != nil {
@@ -59,15 +60,15 @@ func (r *sqliteRepository) initSchema() error {
 func (r *sqliteRepository) ensureDefaultUser() error {
 	ctx := context.Background()
 	var count int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE id = ?", DefaultUserID).Scan(&count); err != nil {
+	if err := r.db.QueryRowContext(ctx, r.db.Rebind("SELECT COUNT(1) FROM users WHERE id = ?"), DefaultUserID).Scan(&count); err != nil {
 		return err
 	}
 	if count == 0 {
 		now := time.Now().UTC()
-		_, err := r.db.ExecContext(ctx, `
+		_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO users (id, email, settings, created_at, updated_at)
 			VALUES (?, ?, '{}', ?, ?)
-		`, DefaultUserID, DefaultUserEmail, now, now)
+		`), DefaultUserID, DefaultUserEmail, now, now)
 		if err != nil {
 			return err
 		}
@@ -83,10 +84,10 @@ func (r *sqliteRepository) Close() error {
 }
 
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, email, created_at, updated_at
 		FROM users WHERE id = ?
-	`, id)
+	`), id)
 	return scanUser(row)
 }
 
@@ -95,10 +96,10 @@ func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, er
 }
 
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT settings, updated_at
 		FROM users WHERE id = ?
-	`, userID)
+	`), userID)
 	settings, err := scanUserSettings(row, userID)
 	if err != nil {
 		return nil, err
@@ -141,11 +142,11 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE users
 		SET settings = ?, updated_at = ?
 		WHERE id = ?
-	`, string(settingsPayload), settings.UpdatedAt, settings.UserID)
+	`), string(settingsPayload), settings.UpdatedAt, settings.UserID)
 	if err != nil {
 		return err
 	}

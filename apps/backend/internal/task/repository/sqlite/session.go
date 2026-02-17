@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -40,10 +40,10 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
+	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
 
 	return err
 }
@@ -53,10 +53,10 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
-	`, id).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	`), id).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +76,12 @@ func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID str
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns
 		WHERE task_session_id = ? AND completed_at IS NULL
 		ORDER BY started_at DESC LIMIT 1
-	`, sessionID).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	`), sessionID).Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -109,11 +109,11 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET completed_at = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`, turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
+	`), turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
 
 	return err
 }
@@ -121,20 +121,20 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 // CompleteTurn marks a turn as completed with the current time
 func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET completed_at = ?, updated_at = ?
 		WHERE id = ?
-	`, now, now, id)
+	`), now, now, id)
 	return err
 }
 
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	if err != nil {
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
 			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 			repository_id, base_branch,
@@ -207,13 +207,13 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, workflow_step_id, review_status, is_passthrough
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
+	`), session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
 		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
-		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
-		commonsqlite.BoolToInt(session.IsPassthrough))
+		dialect.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		dialect.BoolToInt(session.IsPassthrough))
 
 	return err
 }
@@ -233,14 +233,14 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE id = ?
-	`, id).Scan(
+	`), id).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
@@ -318,14 +318,14 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1
-	`, taskID).Scan(
+	`), taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
@@ -403,7 +403,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -412,7 +412,7 @@ func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID st
 		FROM task_sessions
 		WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		ORDER BY started_at DESC LIMIT 1
-	`, taskID).Scan(
+	`), taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
@@ -500,7 +500,7 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?,
@@ -508,12 +508,12 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, workflow_step_id = ?, review_status = ?, is_passthrough = ?
 		WHERE id = ?
-	`, session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
+	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
-		commonsqlite.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
-		commonsqlite.BoolToInt(session.IsPassthrough),
+		dialect.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
+		dialect.BoolToInt(session.IsPassthrough),
 		session.ID)
 	if err != nil {
 		return err
@@ -535,9 +535,9 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 		completedAt = &now
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
-	`, string(status), errorMessage, completedAt, now, id)
+	`), string(status), errorMessage, completedAt, now, id)
 	if err != nil {
 		return err
 	}
@@ -553,9 +553,9 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 // This is used when a stale execution ID needs to be removed (e.g., after a failed resume on startup).
 func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET agent_execution_id = '', container_id = '', updated_at = ? WHERE id = ?
-	`, now, id)
+	`), now, id)
 	if err != nil {
 		return err
 	}
@@ -568,14 +568,14 @@ func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) err
 
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? ORDER BY started_at DESC
-	`, taskID)
+	`), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -626,14 +626,14 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') ORDER BY started_at DESC
-	`, taskID)
+	`), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -655,11 +655,11 @@ func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID 
 
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE agent_profile_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
-	`, agentProfileID).Scan(&exists)
+	`), agentProfileID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -668,11 +668,11 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 
 func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE environment_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
-	`, environmentID).Scan(&exists)
+	`), environmentID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -681,14 +681,14 @@ func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, env
 
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT 1
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
 		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND tr.repository_id = ?
 		LIMIT 1
-	`, repositoryID).Scan(&exists)
+	`), repositoryID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -769,7 +769,7 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 
 // DeleteTaskSession deletes an agent session by ID
 func (r *Repository) DeleteTaskSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_sessions WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -791,7 +791,7 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 	sessionWorktree.CreatedAt = now
 	updatedAt := now
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_worktrees (
 			id, session_id, worktree_id, repository_id, position,
 			worktree_path, worktree_branch, created_at, updated_at
@@ -802,7 +802,7 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
 			updated_at = excluded.updated_at
-	`,
+	`),
 		sessionWorktree.ID,
 		sessionWorktree.SessionID,
 		sessionWorktree.WorktreeID,
@@ -817,14 +817,14 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 }
 
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT
 			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
 			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
 		WHERE tsw.session_id = ?
 		ORDER BY tsw.position ASC, tsw.created_at ASC
-	`, sessionID)
+	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -852,7 +852,7 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 }
 
 func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_worktrees WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -865,7 +865,7 @@ func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) e
 }
 
 func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM task_session_worktrees WHERE session_id = ?`, sessionID)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_worktrees WHERE session_id = ?`), sessionID)
 	return err
 }
 
@@ -884,14 +884,14 @@ func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID strin
 	var workflowStepID sql.NullString
 	var reviewStatus sql.NullString
 
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
 		FROM task_sessions WHERE task_id = ? AND is_primary = 1 LIMIT 1
-	`, taskID).Scan(
+	`), taskID).Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
@@ -974,7 +974,7 @@ func (r *Repository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs 
 		WHERE task_id IN (%s) AND is_primary = 1
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1011,7 +1011,7 @@ func (r *Repository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []st
 		GROUP BY task_id
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1049,7 +1049,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		WHERE task_id IN (%s) AND is_primary = 1
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,7 +1079,7 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 
 	// First, get the task_id for this session
 	var taskID string
-	err := r.db.QueryRowContext(ctx, `SELECT task_id FROM task_sessions WHERE id = ?`, sessionID).Scan(&taskID)
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -1088,17 +1088,17 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 	}
 
 	// Clear primary flag on all sessions for this task
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
-	`, now, taskID)
+	`), now, taskID)
 	if err != nil {
 		return err
 	}
 
 	// Set primary flag on the specified session
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
-	`, now, sessionID)
+	`), now, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1114,9 +1114,9 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 func (r *Repository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
 	now := time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET workflow_step_id = ?, updated_at = ? WHERE id = ?
-	`, stepID, now, sessionID)
+	`), stepID, now, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1132,9 +1132,9 @@ func (r *Repository) UpdateSessionWorkflowStep(ctx context.Context, sessionID st
 func (r *Repository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
 	now := time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET review_status = ?, updated_at = ? WHERE id = ?
-	`, status, now, sessionID)
+	`), status, now, sessionID)
 	if err != nil {
 		return err
 	}

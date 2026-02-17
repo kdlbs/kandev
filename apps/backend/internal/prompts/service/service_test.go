@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
@@ -16,12 +17,13 @@ func createService(t *testing.T) (*Service, func()) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	repoImpl, repoCleanup, err := promptstore.Provide(dbConn)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repoImpl, repoCleanup, err := promptstore.Provide(sqlxDB)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
 	cleanup := func() {
-		if err := dbConn.Close(); err != nil {
+		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("close sqlite: %v", err)
 		}
 		if err := repoCleanup(); err != nil {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
@@ -132,9 +133,10 @@ func setupTestRepo(t *testing.T) repository.Repository {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	t.Cleanup(func() { _ = dbConn.Close() })
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	repo, cleanup, err := repository.Provide(dbConn)
+	repo, cleanup, err := repository.Provide(sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}

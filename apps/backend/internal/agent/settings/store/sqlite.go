@@ -8,23 +8,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
-	"github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 type sqliteRepository struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sql.DB) (*sqliteRepository, error) {
+func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(dbConn, false)
 }
 
-func newSQLiteRepository(dbConn *sql.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
@@ -45,8 +46,8 @@ func (r *sqliteRepository) initSchema() error {
 		workspace_id TEXT DEFAULT NULL,
 		supports_mcp INTEGER NOT NULL DEFAULT 0,
 		mcp_config_path TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS agent_profiles (
@@ -61,9 +62,9 @@ func (r *sqliteRepository) initSchema() error {
 		cli_passthrough INTEGER NOT NULL DEFAULT 0,
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		deleted_at DATETIME,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		deleted_at TIMESTAMP,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -72,8 +73,8 @@ func (r *sqliteRepository) initSchema() error {
 		enabled INTEGER NOT NULL DEFAULT 0,
 		servers_json TEXT NOT NULL DEFAULT '{}',
 		meta_json TEXT NOT NULL DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
@@ -85,10 +86,6 @@ func (r *sqliteRepository) initSchema() error {
 	if err != nil {
 		return err
 	}
-
-	// Migration: add user_modified column to existing databases.
-	// Error is intentionally ignored: ALTER TABLE fails with "duplicate column" if it already exists.
-	_, _ = r.db.Exec(`ALTER TABLE agent_profiles ADD COLUMN user_modified INTEGER NOT NULL DEFAULT 0`)
 
 	return nil
 }
@@ -107,35 +104,35 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	now := time.Now().UTC()
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, agent.ID, agent.Name, agent.WorkspaceID, sqlite.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.CreatedAt, agent.UpdatedAt)
+	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.CreatedAt, agent.UpdatedAt)
 	return err
 }
 
 func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Agent, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE id = ?
-	`, id)
+	`), id)
 	return scanAgent(row)
 }
 
 func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*models.Agent, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE name = ?
-	`, name)
+	`), name)
 	return scanAgent(row)
 }
 
 func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
 	agent.UpdatedAt = time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
 		WHERE id = ?
-	`, agent.WorkspaceID, sqlite.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
+	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
 	if err != nil {
 		return err
 	}
@@ -147,7 +144,7 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent)
 }
 
 func (r *sqliteRepository) DeleteAgent(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM agents WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -182,11 +179,11 @@ func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 }
 
 func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT profile_id, enabled, servers_json, meta_json, created_at, updated_at
 		FROM agent_profile_mcp_configs
 		WHERE profile_id = ?
-	`, profileID)
+	`), profileID)
 
 	var config models.AgentProfileMcpConfig
 	var enabled int
@@ -230,7 +227,7 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 		return fmt.Errorf("failed to serialize MCP meta: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, `
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
@@ -238,7 +235,7 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 			servers_json = excluded.servers_json,
 			meta_json = excluded.meta_json,
 			updated_at = excluded.updated_at
-	`, config.ProfileID, sqlite.BoolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
+	`), config.ProfileID, dialect.BoolToInt(config.Enabled), string(serversJSON), string(metaJSON), config.CreatedAt, config.UpdatedAt)
 	return err
 }
 
@@ -249,22 +246,22 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	now := time.Now().UTC()
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
-	`, profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), sqlite.BoolToInt(profile.UserModified), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
+	`), profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model, dialect.BoolToInt(profile.AutoApprove),
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt)
 	return err
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
 		SET name = ?, agent_display_name = ?, model = ?, auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?, cli_passthrough = ?, user_modified = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`, profile.Name, profile.AgentDisplayName, profile.Model, sqlite.BoolToInt(profile.AutoApprove),
-		sqlite.BoolToInt(profile.DangerouslySkipPermissions), sqlite.BoolToInt(profile.AllowIndexing), sqlite.BoolToInt(profile.CLIPassthrough), sqlite.BoolToInt(profile.UserModified), profile.UpdatedAt, profile.ID)
+	`), profile.Name, profile.AgentDisplayName, profile.Model, dialect.BoolToInt(profile.AutoApprove),
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -277,9 +274,9 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 
 func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
-	`, now, now, id)
+	`), now, now, id)
 	if err != nil {
 		return err
 	}
@@ -291,18 +288,18 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 }
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
-	`, id)
+	`), id)
 	return scanAgentProfile(row)
 }
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
-	`, agentID)
+	`), agentID)
 	if err != nil {
 		return nil, err
 	}

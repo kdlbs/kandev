@@ -2,7 +2,7 @@
 package workflow
 
 import (
-	"database/sql"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/workflow/repository"
@@ -10,7 +10,7 @@ import (
 )
 
 // Provide creates the workflow repository and service using the shared database connection.
-func Provide(db *sql.DB, log *logger.Logger) (*repository.Repository, *service.Service, func() error, error) {
+func Provide(db *sqlx.DB, log *logger.Logger) (*repository.Repository, *service.Service, func() error, error) {
 	repo, err := repository.NewWithDB(db)
 	if err != nil {
 		return nil, nil, nil, err
@@ -18,4 +18,3 @@ func Provide(db *sql.DB, log *logger.Logger) (*repository.Repository, *service.S
 	svc := service.NewService(repo, log)
 	return repo, svc, func() error { return nil }, nil
 }
-

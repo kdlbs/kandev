@@ -36,6 +36,8 @@ type ServerConfig struct {
 
 // DatabaseConfig holds database connection configuration.
 type DatabaseConfig struct {
+	Driver   string `mapstructure:"driver"`
+	Path     string `mapstructure:"path"`
 	Host     string `mapstructure:"host"`
 	Port     int    `mapstructure:"port"`
 	User     string `mapstructure:"user"`
@@ -161,6 +163,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 
 	// Database defaults
+	v.SetDefault("database.driver", "sqlite")
+	v.SetDefault("database.path", "./kandev.db")
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.user", "kandev")
@@ -302,16 +306,16 @@ func validate(cfg *Config) error {
 		errs = append(errs, "server.port must be between 1 and 65535")
 	}
 
-	// Database validation - only if host is set (optional for in-memory mode)
-	if cfg.Database.Host != "" {
+	// Database validation
+	if cfg.Database.Driver == "postgres" {
 		if cfg.Database.Port <= 0 || cfg.Database.Port > 65535 {
 			errs = append(errs, "database.port must be between 1 and 65535")
 		}
 		if cfg.Database.User == "" {
-			errs = append(errs, "database.user is required when database.host is set")
+			errs = append(errs, "database.user is required for postgres driver")
 		}
 		if cfg.Database.DBName == "" {
-			errs = append(errs, "database.dbName is required when database.host is set")
+			errs = append(errs, "database.dbName is required for postgres driver")
 		}
 	}
 

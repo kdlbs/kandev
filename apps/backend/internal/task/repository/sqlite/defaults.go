@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/common/config"
-	commonsqlite "github.com/kandev/kandev/internal/common/sqlite"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -39,7 +39,7 @@ func (r *Repository) ensureDefaultWorkspace() error {
 			workspaceName = "Migrated Workspace"
 			workspaceDescription = ""
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO workspaces (
 				id,
 				name,
@@ -52,16 +52,16 @@ func (r *Repository) ensureDefaultWorkspace() error {
 				updated_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, defaultID, workspaceName, workspaceDescription, "", nil, nil, nil, now, now); err != nil {
+		`), defaultID, workspaceName, workspaceDescription, "", nil, nil, nil, now, now); err != nil {
 			return err
 		}
 
 		if workflowCount == 0 && taskCount == 0 {
 			workflowID := uuid.New().String()
-			if _, err := r.db.ExecContext(ctx, `
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 				INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`, workflowID, defaultID, "Development", "Default development workflow", "simple", now, now); err != nil {
+			`), workflowID, defaultID, "Development", "Default development workflow", "simple", now, now); err != nil {
 				return err
 			}
 			// Note: Workflow steps will be created by the workflow repository after it initializes
@@ -73,9 +73,9 @@ func (r *Repository) ensureDefaultWorkspace() error {
 		return err
 	}
 
-	if _, err := r.db.ExecContext(ctx, `
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET workspace_id = ? WHERE workspace_id = '' OR workspace_id IS NULL
-	`, defaultWorkspaceID); err != nil {
+	`), defaultWorkspaceID); err != nil {
 		return err
 	}
 
@@ -148,19 +148,19 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 			if err != nil {
 				return fmt.Errorf("failed to serialize executor config: %w", err)
 			}
-			if _, err := r.db.ExecContext(ctx, `
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 				INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, executor.id, executor.name, executor.execType, executor.status, commonsqlite.BoolToInt(executor.isSystem), commonsqlite.BoolToInt(executor.resumable), string(configJSON), now, now); err != nil {
+			`), executor.id, executor.name, executor.execType, executor.status, dialect.BoolToInt(executor.isSystem), dialect.BoolToInt(executor.resumable), string(configJSON), now, now); err != nil {
 				return err
 			}
 		}
 	} else {
 		// Ensure system executors have is_system flag set
 		for _, systemID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree} {
-			if _, err := r.db.ExecContext(ctx, `
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 				UPDATE executors SET is_system = 1 WHERE id = ?
-			`, systemID); err != nil {
+			`), systemID); err != nil {
 				return err
 			}
 		}
@@ -172,41 +172,41 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 	}
 	if envCount == 0 {
 		now := time.Now().UTC()
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, commonsqlite.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+		`), models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, dialect.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
 			return err
 		}
 	} else {
 		var localCount int
-		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM environments WHERE id = ?", models.EnvironmentIDLocal).Scan(&localCount); err != nil {
+		if err := r.db.QueryRowContext(ctx, r.db.Rebind("SELECT COUNT(1) FROM environments WHERE id = ?"), models.EnvironmentIDLocal).Scan(&localCount); err != nil {
 			return err
 		}
 		if localCount == 0 {
 			now := time.Now().UTC()
-			if _, err := r.db.ExecContext(ctx, `
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 				INSERT INTO environments (id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, commonsqlite.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
+			`), models.EnvironmentIDLocal, "Local", models.EnvironmentKindLocalPC, dialect.BoolToInt(true), "~/kandev", "", "", "{}", now, now); err != nil {
 				return err
 			}
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			UPDATE environments
 			SET is_system = 1,
 				image_tag = '',
 				dockerfile = '',
 				build_config = '{}'
 			WHERE id = ?
-		`, models.EnvironmentIDLocal); err != nil {
+		`), models.EnvironmentIDLocal); err != nil {
 			return err
 		}
-		if _, err := r.db.ExecContext(ctx, `
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			UPDATE environments
 			SET worktree_root = ?
 			WHERE id = ? AND (worktree_root IS NULL OR worktree_root = '')
-		`, "~/kandev", models.EnvironmentIDLocal); err != nil {
+		`), "~/kandev", models.EnvironmentIDLocal); err != nil {
 			return err
 		}
 	}
