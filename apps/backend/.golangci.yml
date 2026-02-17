@@ -1,2 +1,50 @@
 version: "2"
-# Default golangci-lint configuration (uses built-in defaults).
+
+linters:
+  enable:
+    - funlen
+    - cyclop
+    - gocognit
+    - nestif
+    - dupl
+    - goconst
+    - gocritic
+    - misspell
+    - nakedret
+    - unconvert
+    - dupword
+    - maintidx
+
+  settings:
+    funlen:
+      lines: 80
+      statements: 50
+    cyclop:
+      max-complexity: 15
+    gocognit:
+      min-complexity: 30
+    nestif:
+      min-complexity: 5
+    dupl:
+      threshold: 150
+    goconst:
+      min-occurrences: 3
+      min-len: 3
+    nakedret:
+      max-func-lines: 30
+    maintidx:
+      under: 15
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - dupl
+          - goconst
+          - maintidx
+
+issues:
+  new: true
