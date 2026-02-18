@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/httpmw"
@@ -23,48 +22,17 @@ import (
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 
-	// Agent Manager packages
-	"github.com/kandev/kandev/internal/agent/docker"
-	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
-	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
-
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
-	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
-	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
-	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
-
-	"github.com/kandev/kandev/internal/clarification"
-
-	// Debug handlers
-	debughandlers "github.com/kandev/kandev/internal/debug"
-
-	// MCP handlers
-	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
-
-	// Task Service packages
-	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
-	taskcontroller "github.com/kandev/kandev/internal/task/controller"
-	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
-	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
-	userhandlers "github.com/kandev/kandev/internal/user/handlers"
-
-	// Workflow packages
-	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
-	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 
 	// Worktree package
 	"github.com/kandev/kandev/internal/worktree"
-
-	// API types
-	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // Command-line flags
@@ -150,7 +118,7 @@ func main() {
 
 	// 3. Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	cleanups = append(cleanups, func() error { cancel(); return nil })
 
 	// 4. Initialize event bus (in-memory for unified mode, or NATS if configured)
 	eventBusProvider, cleanup, err := events.Provide(cfg, log)
@@ -161,21 +129,9 @@ func main() {
 	eventBus := eventBusProvider.Bus
 
 	// 5. Initialize Docker client
-	dockerClient, err := docker.NewClient(cfg.Docker, log)
-	if err != nil {
-		log.Warn("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
-		dockerClient = nil
-	} else {
-		if err := dockerClient.Ping(ctx); err != nil {
-			log.Warn("Docker daemon not available - agent features will be disabled", zap.Error(err))
-			_ = dockerClient.Close()
-			dockerClient = nil
-		} else {
-			defer func() {
-				_ = dockerClient.Close()
-			}()
-			log.Info("Connected to Docker daemon")
-		}
+	dockerClient := initDockerClient(ctx, cfg, log)
+	if dockerClient != nil {
+		defer func() { _ = dockerClient.Close() }()
 	}
 
 	// ============================================
@@ -307,82 +263,7 @@ func main() {
 
 	// Set up session data provider for session subscriptions
 	// Sends initial git status when a client subscribes to a session
-	gateway.Hub.SetSessionDataProvider(func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
-		session, err := taskRepo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return nil, nil // Session not found, no data to send
-		}
-
-		var result []*ws.Message
-
-		// Send git status from latest snapshot
-		latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
-		if err == nil && latestSnapshot != nil {
-			// Extract file lists from snapshot metadata
-			metadata := latestSnapshot.Metadata
-			modified, _ := metadata["modified"].([]interface{})
-			added, _ := metadata["added"].([]interface{})
-			deleted, _ := metadata["deleted"].([]interface{})
-			untracked, _ := metadata["untracked"].([]interface{})
-			renamed, _ := metadata["renamed"].([]interface{})
-			timestamp, _ := metadata["timestamp"].(string)
-
-			gitStatusData := map[string]interface{}{
-				"session_id":    sessionID,
-				"task_id":       session.TaskID,
-				"branch":        latestSnapshot.Branch,
-				"remote_branch": latestSnapshot.RemoteBranch,
-				"ahead":         latestSnapshot.Ahead,
-				"behind":        latestSnapshot.Behind,
-				"files":         latestSnapshot.Files,
-				"modified":      modified,
-				"added":         added,
-				"deleted":       deleted,
-				"untracked":     untracked,
-				"renamed":       renamed,
-				"timestamp":     timestamp,
-			}
-
-			gitStatusNotification, err := ws.NewNotification("session.git.status", gitStatusData)
-			if err == nil {
-				result = append(result, gitStatusNotification)
-			}
-		}
-
-		// Send context window if available in session metadata
-		if session.Metadata != nil {
-			if contextWindow, ok := session.Metadata["context_window"]; ok {
-				notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
-					"session_id": sessionID,
-					"task_id":    session.TaskID,
-					"new_state":  string(session.State),
-					"metadata": map[string]interface{}{
-						"context_window": contextWindow,
-					},
-				})
-				if err == nil {
-					result = append(result, notification)
-				}
-			}
-		}
-
-		// Send available commands from the execution (for slash command menu after page refresh)
-		if lifecycleMgr != nil {
-			commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
-			if len(commands) > 0 {
-				notification, err := ws.NewNotification(ws.ActionSessionAvailableCommands, map[string]interface{}{
-					"session_id":         sessionID,
-					"task_id":            session.TaskID,
-					"available_commands": commands,
-				})
-				if err == nil {
-					result = append(result, notification)
-				}
-			}
-		}
-
-		return result, nil
-	})
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(taskRepo, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
@@ -394,105 +275,18 @@ func main() {
 	// Start auto-archive background loop
 	taskSvc.StartAutoArchiveLoop(ctx)
 
-	// Subscribe to message.added events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
-		data, ok := event.Data.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		taskSessionID, _ := data["session_id"].(string)
-		taskID, _ := data["task_id"].(string)
-		if taskSessionID == "" {
-			return nil
-		}
-
-		payload := map[string]interface{}{
-			"task_id":        taskID,
-			"session_id":     taskSessionID,
-			"message_id":     data["message_id"],
-			"author_type":    data["author_type"],
-			"author_id":      data["author_id"],
-			"content":        data["content"],
-			"type":           data["type"],
-			"requests_input": data["requests_input"],
-			"created_at":     data["created_at"],
-		}
-		if metadata, ok := data["metadata"]; ok && metadata != nil {
-			payload["metadata"] = metadata
-		}
-		notification, err := ws.NewNotification(ws.ActionSessionMessageAdded, payload)
-		if err != nil {
-			log.Error("Failed to create message.added notification", zap.Error(err))
-			return nil
-		}
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
+	// Subscribe to message and session events and broadcast to WebSocket subscribers
+	if _, err = eventBus.Subscribe(events.MessageAdded, newMessageAddedHandler(gateway, log)); err != nil {
 		log.Error("Failed to subscribe to message.added events", zap.Error(err))
 	} else {
 		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
 	}
-
-	// Subscribe to message.updated events and broadcast to WebSocket subscribers
-	_, err = eventBus.Subscribe(events.MessageUpdated, func(ctx context.Context, event *bus.Event) error {
-		data, ok := event.Data.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		taskSessionID, _ := data["session_id"].(string)
-		taskID, _ := data["task_id"].(string)
-		if taskSessionID == "" {
-			log.Warn("message.updated event has no session_id, skipping")
-			return nil
-		}
-		payload := map[string]interface{}{
-			"message_id":     data["message_id"],
-			"session_id":     taskSessionID,
-			"task_id":        taskID,
-			"author_type":    data["author_type"],
-			"author_id":      data["author_id"],
-			"content":        data["content"],
-			"type":           data["type"],
-			"requests_input": data["requests_input"],
-			"created_at":     data["created_at"],
-		}
-		if metadata, ok := data["metadata"]; ok && metadata != nil {
-			payload["metadata"] = metadata
-		}
-		notification, err := ws.NewNotification(ws.ActionSessionMessageUpdated, payload)
-		if err != nil {
-			log.Error("Failed to create message.updated notification", zap.Error(err))
-			return nil
-		}
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
+	if _, err = eventBus.Subscribe(events.MessageUpdated, newMessageUpdatedHandler(gateway, log)); err != nil {
 		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
 	} else {
 		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
 	}
-
-	// Subscribe to task_session.state_changed events and broadcast to task subscribers
-	_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
-		data, ok := event.Data.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		taskSessionID, _ := data["session_id"].(string)
-		if taskSessionID == "" {
-			return nil
-		}
-		notification, err := ws.NewNotification(ws.ActionSessionStateChanged, data)
-		if err != nil {
-			log.Error("Failed to create task_session.state_changed notification", zap.Error(err))
-			return nil
-		}
-		gateway.Hub.BroadcastToSession(taskSessionID, notification)
-		return nil
-	})
-	if err != nil {
+	if _, err = eventBus.Subscribe(events.TaskSessionStateChanged, newSessionStateChangedHandler(gateway, log)); err != nil {
 		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
 	} else {
 		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
@@ -509,95 +303,23 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
-	workspaceController := taskcontroller.NewWorkspaceController(taskSvc)
-	taskWorkflowController := taskcontroller.NewWorkflowController(taskSvc)
-	taskWorkflowController.SetWorkflowStepLister(services.Workflow)
-	taskController := taskcontroller.NewTaskController(taskSvc)
-	messageController := taskcontroller.NewMessageController(taskSvc)
-	repositoryController := taskcontroller.NewRepositoryController(taskSvc)
-	executorController := taskcontroller.NewExecutorController(taskSvc)
-	environmentController := taskcontroller.NewEnvironmentController(taskSvc)
-	workflowCtrl := workflowcontroller.NewController(services.Workflow)
-
-	// WebSocket endpoint - primary realtime transport
-	gateway.SetupRoutes(router)
-
-	// Task Service handlers (HTTP + WebSocket)
-	taskhandlers.RegisterWorkspaceRoutes(router, gateway.Dispatcher, workspaceController, log)
-	taskhandlers.RegisterWorkflowRoutes(router, gateway.Dispatcher, taskWorkflowController, log)
-	planService := taskservice.NewPlanService(taskRepo, eventBus, log)
-	taskhandlers.RegisterTaskRoutes(router, gateway.Dispatcher, taskController, orchestratorSvc, taskRepo, planService, log)
-	taskhandlers.RegisterRepositoryRoutes(router, gateway.Dispatcher, repositoryController, log)
-	taskhandlers.RegisterExecutorRoutes(router, gateway.Dispatcher, executorController, log)
-	taskhandlers.RegisterEnvironmentRoutes(router, gateway.Dispatcher, environmentController, log)
-	taskhandlers.RegisterMessageRoutes(
-		router,
-		gateway.Dispatcher,
-		messageController,
-		taskController,
-		&orchestratorWrapper{svc: orchestratorSvc},
-		log,
-	)
-	taskhandlers.RegisterProcessRoutes(router, taskSvc, lifecycleMgr, log)
-	analyticshandlers.RegisterStatsRoutes(router, analyticsRepo, log)
-	agenthandlers.RegisterShellRoutes(router, lifecycleMgr, log)
-	log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
-
-	workflowhandlers.RegisterRoutes(router, gateway.Dispatcher, workflowCtrl, log)
-	log.Info("Registered Workflow handlers (HTTP + WebSocket)")
-
-	agentsettingshandlers.RegisterRoutes(router, agentSettingsController, gateway.Hub, log)
-	log.Debug("Registered Agent Settings handlers (HTTP)")
-
-	userhandlers.RegisterRoutes(router, gateway.Dispatcher, userCtrl, log)
-	log.Debug("Registered User handlers (HTTP + WebSocket)")
-
-	notificationhandlers.RegisterRoutes(router, notificationCtrl, log)
-	log.Debug("Registered Notification handlers (HTTP)")
-
-	editorhandlers.RegisterRoutes(router, editorCtrl, log)
-	log.Debug("Registered Editors handlers (HTTP)")
-
-	prompthandlers.RegisterRoutes(router, promptCtrl, log)
-	log.Debug("Registered Prompts handlers (HTTP)")
-
-	// Clarification routes for agent questions
-	clarificationStore := clarification.NewStore(10 * time.Minute)
-	clarification.RegisterRoutes(router, clarificationStore, gateway.Hub, msgCreator, taskRepo, log)
-	log.Debug("Registered Clarification handlers (HTTP)")
-
-	// MCP handlers for agentctl WS tunnel (agentctl -> backend)
-	mcpHandlers := mcphandlers.NewHandlers(
-		workspaceController,
-		taskWorkflowController,
-		taskController,
-		workflowCtrl,
-		clarificationStore,
-		msgCreator,
-		taskRepo, // SessionRepository
-		taskRepo, // TaskRepository (same instance)
-		eventBus, // EventBus
-		planService,
-		log,
-	)
-	mcpHandlers.RegisterHandlers(gateway.Dispatcher)
-	log.Debug("Registered MCP handlers (WebSocket)")
-
-	// Set MCP handler for lifecycle manager to dispatch MCP requests from agents
-	// MCP requests flow: agent -> agentctl -> agent stream (WS) -> backend -> dispatcher
-	lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
-	log.Debug("MCP handler configured for agent lifecycle manager")
-
-	debughandlers.RegisterRoutes(router, log)
-	log.Debug("Registered Debug handlers (HTTP)")
-
-	// Health check (simple HTTP for load balancers/monitoring)
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"service": "kandev",
-			"mode":    "websocket+http",
-		})
+	registerRoutes(routeParams{
+		router:                  router,
+		gateway:                 gateway,
+		taskSvc:                 taskSvc,
+		taskRepo:                taskRepo,
+		analyticsRepo:           analyticsRepo,
+		orchestratorSvc:         orchestratorSvc,
+		lifecycleMgr:            lifecycleMgr,
+		eventBus:                eventBus,
+		services:                services,
+		agentSettingsController: agentSettingsController,
+		userCtrl:                userCtrl,
+		notificationCtrl:        notificationCtrl,
+		editorCtrl:              editorCtrl,
+		promptCtrl:              promptCtrl,
+		msgCreator:              msgCreator,
+		log:                     log,
 	})
 
 	// Create HTTP server
@@ -643,37 +365,6 @@ func main() {
 	}()
 
 	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
-
-	log.Info("Shutting down Kandev...")
 	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Error("HTTP server shutdown error", zap.Error(err))
-	}
-
-	if err := orchestratorSvc.Stop(); err != nil {
-		log.Error("Orchestrator stop error", zap.Error(err))
-	}
-
-	if lifecycleMgr != nil {
-		log.Info("Stopping agents gracefully...")
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := lifecycleMgr.StopAllAgents(stopCtx); err != nil {
-			log.Error("Graceful agent stop error", zap.Error(err))
-		}
-		stopCancel()
-
-		if err := lifecycleMgr.Stop(); err != nil {
-			log.Error("Lifecycle manager stop error", zap.Error(err))
-		}
-	}
-
-	// Run all cleanups before exiting so logs appear before the shell prompt
-	runCleanups()
-
-	log.Info("Kandev stopped")
-	_ = log.Sync()
+	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

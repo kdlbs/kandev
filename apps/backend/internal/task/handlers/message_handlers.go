@@ -239,93 +239,122 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		agentProfileID := sessionResp.Session.AgentProfileID
 		go func() {
 			promptCtx := context.WithoutCancel(ctx)
-
-			// For CREATED sessions, start the agent with this message as the initial prompt
-			if startCreated {
-				if err := h.orchestrator.StartCreatedSession(promptCtx, taskID, sessionID, agentProfileID, content); err != nil {
-					h.logger.Warn("failed to start created session from message",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-
-					errorMsg := "Failed to start agent"
-					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
-						TaskSessionID: sessionID,
-						TaskID:        taskID,
-						Content:       errorMsg,
-						AuthorType:    "agent",
-						Type:          string(v1.MessageTypeError),
-						Metadata: map[string]interface{}{
-							"error": err.Error(),
-						},
-					}); createErr != nil {
-						h.logger.Error("failed to create error message",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(createErr))
-					}
-				}
-				return
-			}
-
-			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
-			if err != nil {
-				if errors.Is(err, executor.ErrExecutionNotFound) {
-					if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, taskID, sessionID); resumeErr != nil {
-						h.logger.Warn("failed to resume task session for prompt",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(resumeErr))
-					} else {
-						// Wait for the agent to become ready after resume.
-						// ResumeTaskSession starts the agent asynchronously, so we poll
-						// the session state until it transitions to a promptable state.
-						if waitErr := h.waitForSessionReady(promptCtx, sessionID); waitErr != nil {
-							h.logger.Warn("session did not become ready after resume",
-								zap.String("task_id", taskID),
-								zap.String("session_id", sessionID),
-								zap.Error(waitErr))
-							err = waitErr
-						} else {
-							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
-						}
-					}
-				}
-				// If prompt still failed after retries, create an error message for the user
-				if err != nil {
-					h.logger.Warn("failed to forward message as prompt to agent",
-						zap.String("task_id", taskID),
-						zap.Error(err))
-
-					// Create an error message so the user sees feedback
-					errorMsg := "Failed to send message to agent"
-					if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
-						errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
-					} else if errors.Is(err, executor.ErrExecutionNotFound) {
-						errorMsg = "Agent is not running. Please restart the session."
-					}
-
-					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
-						TaskSessionID: sessionID,
-						TaskID:        taskID,
-						Content:       errorMsg,
-						AuthorType:    "agent",
-						Type:          string(v1.MessageTypeError),
-						Metadata: map[string]interface{}{
-							"error": err.Error(),
-						},
-					}); createErr != nil {
-						h.logger.Error("failed to create error message for prompt failure",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(createErr))
-					}
-				}
-			}
+			h.forwardMessageAsPrompt(promptCtx, taskID, sessionID, agentProfileID, content, model, planMode, attachments, startCreated)
 		}()
 	}
 
 	return response, nil
+}
+
+// forwardMessageAsPrompt sends a user message to the agent as a prompt.
+// For CREATED sessions, it starts the agent; otherwise it prompts the running agent,
+// with automatic resume handling if the agent is not found.
+func (h *MessageHandlers) forwardMessageAsPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	startCreated bool,
+) {
+	// For CREATED sessions, start the agent with this message as the initial prompt
+	if startCreated {
+		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content); err != nil {
+			h.logger.Warn("failed to start created session from message",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+
+			errorMsg := "Failed to start agent"
+			if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+				TaskSessionID: sessionID,
+				TaskID:        taskID,
+				Content:       errorMsg,
+				AuthorType:    "agent",
+				Type:          string(v1.MessageTypeError),
+				Metadata: map[string]interface{}{
+					"error": err.Error(),
+				},
+			}); createErr != nil {
+				h.logger.Error("failed to create error message",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(createErr))
+			}
+		}
+		return
+	}
+
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	if err != nil {
+		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
+	}
+	if err != nil {
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+	}
+}
+
+// handlePromptWithResume attempts to resume a session and retry a prompt when the
+// initial prompt fails with ErrExecutionNotFound.
+func (h *MessageHandlers) handlePromptWithResume(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origErr error,
+) error {
+	if !errors.Is(origErr, executor.ErrExecutionNotFound) {
+		return origErr
+	}
+	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
+		h.logger.Warn("failed to resume task session for prompt",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(resumeErr))
+		return origErr
+	}
+	// Wait for the agent to become ready after resume.
+	// ResumeTaskSession starts the agent asynchronously, so we poll
+	// the session state until it transitions to a promptable state.
+	if waitErr := h.waitForSessionReady(ctx, sessionID); waitErr != nil {
+		h.logger.Warn("session did not become ready after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(waitErr))
+		return waitErr
+	}
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	return err
+}
+
+// createPromptErrorMessage creates an agent error message visible to the user when
+// forwarding a prompt to the agent fails.
+func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error) {
+	h.logger.Warn("failed to forward message as prompt to agent",
+		zap.String("task_id", taskID),
+		zap.Error(promptErr))
+
+	errorMsg := "Failed to send message to agent"
+	if strings.Contains(promptErr.Error(), "context deadline exceeded") || strings.Contains(promptErr.Error(), "timeout") {
+		errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
+	} else if errors.Is(promptErr, executor.ErrExecutionNotFound) {
+		errorMsg = "Agent is not running. Please restart the session."
+	}
+
+	if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       errorMsg,
+		AuthorType:    "agent",
+		Type:          string(v1.MessageTypeError),
+		Metadata: map[string]interface{}{
+			"error": promptErr.Error(),
+		},
+	}); createErr != nil {
+		h.logger.Error("failed to create error message for prompt failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(createErr))
+	}
 }
 
 // waitForSessionReady polls the session state after a resume operation until the agent

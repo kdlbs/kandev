@@ -358,26 +358,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 
 	// Resolve agent profile to get model and other settings for snapshot
-	var agentProfileSnapshot map[string]interface{}
-	var isPassthrough bool
-	if profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID); err == nil && profileInfo != nil {
-		agentProfileSnapshot = map[string]interface{}{
-			"id":                           profileInfo.ProfileID,
-			"name":                         profileInfo.ProfileName,
-			"agent_id":                     profileInfo.AgentID,
-			"agent_name":                   profileInfo.AgentName,
-			"model":                        profileInfo.Model,
-			"auto_approve":                 profileInfo.AutoApprove,
-			"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
-			"cli_passthrough":              profileInfo.CLIPassthrough,
-		}
-		isPassthrough = profileInfo.CLIPassthrough
-	} else {
-		agentProfileSnapshot = map[string]interface{}{
-			"id":    agentProfileID,
-			"model": "",
-		}
-	}
+	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
 	// Create agent session in database
 	sessionID := uuid.New().String()
@@ -427,6 +408,27 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	return sessionID, nil
 }
 
+// resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
+func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
+	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
+	if err != nil || profileInfo == nil {
+		return map[string]interface{}{
+			"id":    agentProfileID,
+			"model": "",
+		}, false
+	}
+	return map[string]interface{}{
+		"id":                           profileInfo.ProfileID,
+		"name":                         profileInfo.ProfileName,
+		"agent_id":                     profileInfo.AgentID,
+		"agent_name":                   profileInfo.AgentName,
+		"model":                        profileInfo.Model,
+		"auto_approve":                 profileInfo.AutoApprove,
+		"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
+		"cli_passthrough":              profileInfo.CLIPassthrough,
+	}, profileInfo.CLIPassthrough
+}
+
 // LaunchPreparedSession launches the workspace (and optionally the agent) for a pre-created session.
 // The session must have been created using PrepareSession.
 // When startAgent is false, only the workspace infrastructure (agentctl) is launched; the agent
@@ -454,41 +456,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	metadata := cloneMetadata(task.Metadata)
-	var repositoryPath string
-	var repositoryID string
-	var baseBranch string
-	var worktreeBranchPrefix string
-	var pullBeforeWorktree bool
-	var repository *models.Repository
-
-	// Get the primary repository for this task
-	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
 	if err != nil {
-		e.logger.Error("failed to get primary task repository",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
 		return nil, err
-	}
-
-	if primaryTaskRepo != nil {
-		repositoryID = primaryTaskRepo.RepositoryID
-		baseBranch = primaryTaskRepo.BaseBranch
-
-		if repositoryID != "" {
-			repository, err = e.repo.GetRepository(ctx, repositoryID)
-			if err != nil {
-				e.logger.Error("failed to get repository",
-					zap.String("repository_id", repositoryID),
-					zap.Error(err))
-				return nil, err
-			}
-			repositoryPath = repository.LocalPath
-			worktreeBranchPrefix = repository.WorktreeBranchPrefix
-			pullBeforeWorktree = repository.PullBeforeWorktree
-			if baseBranch == "" && repository.DefaultBranch != "" {
-				baseBranch = repository.DefaultBranch
-			}
-		}
 	}
 
 	req := &LaunchAgentRequest{
@@ -508,17 +478,17 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.ExecutorConfig = execConfig.ExecutorCfg
 	}
 
-	if repositoryPath != "" {
+	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
-		req.RepositoryPath = repositoryPath
-		req.BaseBranch = baseBranch
-		req.WorktreeBranchPrefix = worktreeBranchPrefix
-		req.PullBeforeWorktree = pullBeforeWorktree
+		req.RepositoryPath = repoInfo.RepositoryPath
+		req.BaseBranch = repoInfo.BaseBranch
+		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
+		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 	}
 
 	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
-	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repository != nil {
-		cloneURL := repositoryCloneURL(repository)
+	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repoInfo.Repository != nil {
+		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
 			return nil, ErrRemoteDockerNoRepoURL
 		}
@@ -558,64 +528,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	now := time.Now().UTC()
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
-	if startAgent {
-		session.State = models.TaskSessionStateStarting
-	}
-	session.ErrorMessage = ""
-	session.UpdatedAt = now
-
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to update agent session after launch",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	resumable := true
-	if session.ExecutorID != "" {
-		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
-			resumable = executor.Resumable
-		}
-	}
-	running := &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           task.ID,
-		ExecutorID:       session.ExecutorID,
-		Status:           "starting",
-		Resumable:        resumable,
-		AgentExecutionID: resp.AgentExecutionID,
-		ContainerID:      resp.ContainerID,
-		WorktreeID:       resp.WorktreeID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-	}
-	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
-		e.logger.Warn("failed to persist executor runtime after launch",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	if resp.WorktreeID != "" {
-		sessionWorktree := &models.TaskSessionWorktree{
-			SessionID:      session.ID,
-			WorktreeID:     resp.WorktreeID,
-			RepositoryID:   repositoryID,
-			Position:       0,
-			WorktreePath:   resp.WorktreePath,
-			WorktreeBranch: resp.WorktreeBranch,
-		}
-		if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
-			e.logger.Error("failed to persist session worktree association",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID),
-				zap.String("worktree_id", resp.WorktreeID),
-				zap.Error(err))
-		}
-	}
+	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
+	e.persistWorktreeAssociation(ctx, task.ID, session.ID, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
@@ -643,6 +557,117 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return execution, nil
+}
+
+// repoInfo holds resolved repository details for agent launch.
+type repoInfo struct {
+	RepositoryID         string
+	RepositoryPath       string
+	BaseBranch           string
+	WorktreeBranchPrefix string
+	PullBeforeWorktree   bool
+	Repository           *models.Repository
+}
+
+// resolvePrimaryRepoInfo fetches and resolves the primary repository info for a task.
+func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*repoInfo, error) {
+	info := &repoInfo{}
+	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, taskID)
+	if err != nil {
+		e.logger.Error("failed to get primary task repository",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, err
+	}
+	if primaryTaskRepo == nil {
+		return info, nil
+	}
+	info.RepositoryID = primaryTaskRepo.RepositoryID
+	info.BaseBranch = primaryTaskRepo.BaseBranch
+	if info.RepositoryID == "" {
+		return info, nil
+	}
+	repo, err := e.repo.GetRepository(ctx, info.RepositoryID)
+	if err != nil {
+		e.logger.Error("failed to get repository",
+			zap.String("repository_id", info.RepositoryID),
+			zap.Error(err))
+		return nil, err
+	}
+	info.Repository = repo
+	info.RepositoryPath = repo.LocalPath
+	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
+	info.PullBeforeWorktree = repo.PullBeforeWorktree
+	if info.BaseBranch == "" && repo.DefaultBranch != "" {
+		info.BaseBranch = repo.DefaultBranch
+	}
+	return info, nil
+}
+
+// persistLaunchState updates the session and executor running records after a successful agent launch.
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+	}
+	session.ErrorMessage = ""
+	session.UpdatedAt = now
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update agent session after launch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	resumable := true
+	if session.ExecutorID != "" {
+		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
+			resumable = executor.Resumable
+		}
+	}
+	running := &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           taskID,
+		ExecutorID:       session.ExecutorID,
+		Status:           "starting",
+		Resumable:        resumable,
+		AgentExecutionID: resp.AgentExecutionID,
+		ContainerID:      resp.ContainerID,
+		WorktreeID:       resp.WorktreeID,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+		e.logger.Warn("failed to persist executor runtime after launch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains a worktree.
+func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID, sessionID, repositoryID string, resp *LaunchAgentResponse) {
+	if resp.WorktreeID == "" {
+		return
+	}
+	sessionWorktree := &models.TaskSessionWorktree{
+		SessionID:      sessionID,
+		WorktreeID:     resp.WorktreeID,
+		RepositoryID:   repositoryID,
+		Position:       0,
+		WorktreePath:   resp.WorktreePath,
+		WorktreeBranch: resp.WorktreeBranch,
+	}
+	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
+		e.logger.Error("failed to persist session worktree association",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("worktree_id", resp.WorktreeID),
+			zap.Error(err))
+	}
 }
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
@@ -744,112 +769,9 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, ErrExecutionAlreadyRunning
 	}
 
-	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		SessionID:       session.ID,
-		TaskTitle:       task.Title,
-		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: task.Description,
-		Priority:        task.Priority,
-	}
-
-	metadata := map[string]interface{}{}
-	if session.Metadata != nil {
-		for key, value := range session.Metadata {
-			metadata[key] = value
-		}
-	}
-	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
-		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
-	}
-	// Resolve executor configuration
-	executorWasEmpty := session.ExecutorID == ""
-	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
-	session.ExecutorID = execConfig.ExecutorID
-	metadata = execConfig.Metadata
-	req.ExecutorType = execConfig.ExecutorType
-
-	// Persist executor assignment if it was resolved from workspace default
-	if executorWasEmpty && session.ExecutorID != "" {
-		session.UpdatedAt = time.Now().UTC()
-		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-			e.logger.Warn("failed to persist executor assignment for session",
-				zap.String("session_id", session.ID),
-				zap.String("executor_id", session.ExecutorID),
-				zap.Error(err))
-			// Continue anyway - this is not fatal
-		}
-	}
-	if len(metadata) > 0 {
-		req.Metadata = metadata
-	}
-
-	repositoryID := session.RepositoryID
-	var repositoryPath string
-	var worktreeBranchPrefix string
-	var pullBeforeWorktree bool
-	var repository *models.Repository
-	if repositoryID == "" && len(task.Repositories) > 0 {
-		repositoryID = task.Repositories[0].RepositoryID
-	}
-	if repositoryID != "" {
-		repository, err = e.repo.GetRepository(ctx, repositoryID)
-		if err != nil {
-			e.logger.Error("failed to load repository for task session resume",
-				zap.String("task_id", task.ID),
-				zap.String("repository_id", repositoryID),
-				zap.Error(err))
-			return nil, err
-		}
-		repositoryPath = repository.LocalPath
-		worktreeBranchPrefix = repository.WorktreeBranchPrefix
-		pullBeforeWorktree = repository.PullBeforeWorktree
-		if repositoryPath != "" {
-			req.RepositoryURL = repositoryPath
-		}
-	}
-
-	baseBranch := session.BaseBranch
-	if baseBranch == "" && len(task.Repositories) > 0 && task.Repositories[0].BaseBranch != "" {
-		baseBranch = task.Repositories[0].BaseBranch
-	}
-	if baseBranch != "" {
-		req.Branch = baseBranch
-	}
-
-	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
-	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker && repository != nil {
-		cloneURL := repositoryCloneURL(repository)
-		if cloneURL == "" {
-			return nil, ErrRemoteDockerNoRepoURL
-		}
-		req.RepositoryURL = cloneURL
-	}
-
-	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
-		req.UseWorktree = true
-		req.RepositoryPath = repositoryPath
-		req.RepositoryID = repositoryID
-		if baseBranch != "" {
-			req.BaseBranch = baseBranch
-		} else {
-			req.BaseBranch = "main"
-		}
-		req.WorktreeBranchPrefix = worktreeBranchPrefix
-		req.PullBeforeWorktree = pullBeforeWorktree
-	}
-
-	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && running != nil {
-		if running.ResumeToken != "" && startAgent {
-			req.ACPSessionID = running.ResumeToken
-			// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
-			// The session context is restored via ACP session/load; sending a prompt here would
-			// cause the agent to start working immediately instead of waiting for user input.
-			req.TaskDescription = ""
-			e.logger.Info("found resume token for session resumption",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID))
-		}
+	req, repositoryID, err := e.buildResumeRequest(ctx, task, session, startAgent)
+	if err != nil {
+		return nil, err
 	}
 
 	e.logger.Debug("resuming agent session",
@@ -871,73 +793,8 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
-	session.ErrorMessage = ""
-	if startAgent {
-		session.State = models.TaskSessionStateStarting
-		session.CompletedAt = nil
-	}
-
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to update task session for resume",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-
-	resumable := true
-	if session.ExecutorID != "" {
-		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
-			resumable = executor.Resumable
-		}
-	}
-	running := &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           task.ID,
-		ExecutorID:       session.ExecutorID,
-		Status:           "starting",
-		Resumable:        resumable,
-		AgentExecutionID: resp.AgentExecutionID,
-		ContainerID:      resp.ContainerID,
-		WorktreeID:       resp.WorktreeID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-	}
-	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
-		e.logger.Warn("failed to persist executor runtime after resume",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-
-	if resp.WorktreeID != "" {
-		hasWorktree := false
-		for _, wt := range session.Worktrees {
-			if wt.WorktreeID == resp.WorktreeID {
-				hasWorktree = true
-				break
-			}
-		}
-		if !hasWorktree {
-			sessionWorktree := &models.TaskSessionWorktree{
-				SessionID:      session.ID,
-				WorktreeID:     resp.WorktreeID,
-				RepositoryID:   repositoryID,
-				Position:       0,
-				WorktreePath:   resp.WorktreePath,
-				WorktreeBranch: resp.WorktreeBranch,
-			}
-			if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
-				e.logger.Error("failed to persist session worktree association on resume",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", session.ID),
-					zap.String("worktree_id", resp.WorktreeID),
-					zap.Error(err))
-			}
-		}
-	}
+	e.persistResumeState(ctx, task.ID, session, resp, startAgent)
+	e.persistResumeWorktree(ctx, task.ID, session, repositoryID, resp)
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch
@@ -960,55 +817,248 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if startAgent {
-		// Start the agent process asynchronously
-		go func() {
-			startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			if err := e.agentManager.StartAgentProcess(startCtx, resp.AgentExecutionID); err != nil {
-				e.logger.Error("failed to start agent process on resume",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", session.ID),
-					zap.String("agent_execution_id", resp.AgentExecutionID),
-					zap.Error(err))
-				// Update session state to failed
-				if updateErr := e.repo.UpdateTaskSessionState(context.Background(), session.ID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
-					e.logger.Warn("failed to mark session as failed after start error on resume",
-						zap.String("task_id", task.ID),
-						zap.String("session_id", session.ID),
-						zap.Error(updateErr))
-				}
-				if updateErr := e.updateTaskState(context.Background(), task.ID, v1.TaskStateFailed); updateErr != nil {
-					e.logger.Warn("failed to mark task as failed after start error on resume",
-						zap.String("task_id", task.ID),
-						zap.Error(updateErr))
-				}
-				return
-			}
-
-			// Agent resumed successfully - sync task state with session state.
-			// If the session is waiting for input, the task should be in REVIEW state.
-			// This ensures the task state reflects the actual agent status.
-			if session.State == models.TaskSessionStateWaitingForInput {
-				if updateErr := e.updateTaskState(context.Background(), task.ID, v1.TaskStateReview); updateErr != nil {
-					e.logger.Warn("failed to update task state to REVIEW after resume",
-						zap.String("task_id", task.ID),
-						zap.Error(updateErr))
-				} else {
-					e.logger.Debug("task state synced to REVIEW after resume (session waiting for input)",
-						zap.String("task_id", task.ID),
-						zap.String("session_id", session.ID))
-				}
-			} else {
-				e.logger.Debug("agent resumed successfully, task state unchanged",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", session.ID),
-					zap.String("session_state", string(session.State)))
-			}
-		}()
+		e.startAgentProcessOnResume(task.ID, session, resp.AgentExecutionID)
 	}
 
 	return execution, nil
+}
+
+// buildResumeRequest constructs the LaunchAgentRequest for a session resume, resolving executor config,
+// repository details, worktree settings, and ACP resume token.
+func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, error) {
+	req := &LaunchAgentRequest{
+		TaskID:          task.ID,
+		SessionID:       session.ID,
+		TaskTitle:       task.Title,
+		AgentProfileID:  session.AgentProfileID,
+		TaskDescription: task.Description,
+		Priority:        task.Priority,
+	}
+
+	metadata := map[string]interface{}{}
+	if session.Metadata != nil {
+		for key, value := range session.Metadata {
+			metadata[key] = value
+		}
+	}
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
+		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
+	}
+
+	executorWasEmpty := session.ExecutorID == ""
+	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	session.ExecutorID = execConfig.ExecutorID
+	metadata = execConfig.Metadata
+	req.ExecutorType = execConfig.ExecutorType
+
+	if executorWasEmpty && session.ExecutorID != "" {
+		session.UpdatedAt = time.Now().UTC()
+		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+			e.logger.Warn("failed to persist executor assignment for session",
+				zap.String("session_id", session.ID),
+				zap.String("executor_id", session.ExecutorID),
+				zap.Error(err))
+			// Continue anyway - this is not fatal
+		}
+	}
+	if len(metadata) > 0 {
+		req.Metadata = metadata
+	}
+
+	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); runErr == nil && running != nil {
+		if running.ResumeToken != "" && startAgent {
+			req.ACPSessionID = running.ResumeToken
+			// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
+			// The session context is restored via ACP session/load; sending a prompt here would
+			// cause the agent to start working immediately instead of waiting for user input.
+			req.TaskDescription = ""
+			e.logger.Info("found resume token for session resumption",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID))
+		}
+	}
+
+	return req, repositoryID, nil
+}
+
+// applyResumeRepoConfig resolves repository details and applies them to req.
+// Returns the resolved repositoryID.
+func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, session *models.TaskSession, req *LaunchAgentRequest) (string, error) {
+	repositoryID := session.RepositoryID
+	if repositoryID == "" && len(task.Repositories) > 0 {
+		repositoryID = task.Repositories[0].RepositoryID
+	}
+
+	baseBranch := session.BaseBranch
+	if baseBranch == "" && len(task.Repositories) > 0 && task.Repositories[0].BaseBranch != "" {
+		baseBranch = task.Repositories[0].BaseBranch
+	}
+	if baseBranch != "" {
+		req.Branch = baseBranch
+	}
+
+	if repositoryID == "" {
+		return "", nil
+	}
+
+	repository, err := e.repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		e.logger.Error("failed to load repository for task session resume",
+			zap.String("task_id", task.ID),
+			zap.String("repository_id", repositoryID),
+			zap.Error(err))
+		return "", err
+	}
+
+	repositoryPath := repository.LocalPath
+	if repositoryPath != "" {
+		req.RepositoryURL = repositoryPath
+	}
+
+	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker {
+		cloneURL := repositoryCloneURL(repository)
+		if cloneURL == "" {
+			return "", ErrRemoteDockerNoRepoURL
+		}
+		req.RepositoryURL = cloneURL
+	}
+
+	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
+		req.UseWorktree = true
+		req.RepositoryPath = repositoryPath
+		req.RepositoryID = repositoryID
+		if baseBranch != "" {
+			req.BaseBranch = baseBranch
+		} else {
+			req.BaseBranch = "main"
+		}
+		req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
+		req.PullBeforeWorktree = repository.PullBeforeWorktree
+	}
+
+	return repositoryID, nil
+}
+
+// persistResumeState updates session and executor running records after a successful resume launch.
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool) {
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	session.ErrorMessage = ""
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+		session.CompletedAt = nil
+	}
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update task session for resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+
+	resumable := true
+	if session.ExecutorID != "" {
+		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
+			resumable = executor.Resumable
+		}
+	}
+	running := &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           taskID,
+		ExecutorID:       session.ExecutorID,
+		Status:           "starting",
+		Resumable:        resumable,
+		AgentExecutionID: resp.AgentExecutionID,
+		ContainerID:      resp.ContainerID,
+		WorktreeID:       resp.WorktreeID,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+		e.logger.Warn("failed to persist executor runtime after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+}
+
+// persistResumeWorktree creates a worktree association if a new worktree was allocated during resume.
+func (e *Executor) persistResumeWorktree(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
+	if resp.WorktreeID == "" {
+		return
+	}
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeID == resp.WorktreeID {
+			return
+		}
+	}
+	sessionWorktree := &models.TaskSessionWorktree{
+		SessionID:      session.ID,
+		WorktreeID:     resp.WorktreeID,
+		RepositoryID:   repositoryID,
+		Position:       0,
+		WorktreePath:   resp.WorktreePath,
+		WorktreeBranch: resp.WorktreeBranch,
+	}
+	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
+		e.logger.Error("failed to persist session worktree association on resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("worktree_id", resp.WorktreeID),
+			zap.Error(err))
+	}
+}
+
+// startAgentProcessOnResume starts the agent process asynchronously after a session resume.
+func (e *Executor) startAgentProcessOnResume(taskID string, session *models.TaskSession, agentExecutionID string) {
+	go func() {
+		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			e.logger.Error("failed to start agent process on resume",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", agentExecutionID),
+				zap.Error(err))
+			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), session.ID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+				e.logger.Warn("failed to mark session as failed after start error on resume",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(updateErr))
+			}
+			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateFailed); updateErr != nil {
+				e.logger.Warn("failed to mark task as failed after start error on resume",
+					zap.String("task_id", taskID),
+					zap.Error(updateErr))
+			}
+			return
+		}
+
+		// Agent resumed successfully - sync task state with session state.
+		if session.State == models.TaskSessionStateWaitingForInput {
+			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateReview); updateErr != nil {
+				e.logger.Warn("failed to update task state to REVIEW after resume",
+					zap.String("task_id", taskID),
+					zap.Error(updateErr))
+			} else {
+				e.logger.Debug("task state synced to REVIEW after resume (session waiting for input)",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID))
+			}
+		} else {
+			e.logger.Debug("agent resumed successfully, task state unchanged",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("session_state", string(session.State)))
+		}
+	}()
 }
 
 // Stop stops an active execution by session ID
@@ -1160,66 +1210,11 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 			zap.String("agent_execution_id", oldAgentExecutionID))
 	}
 
-	// Resolve executor configuration
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil)
 
-	// Build a new launch request with the model override
-	req := &LaunchAgentRequest{
-		TaskID:          task.ID,
-		SessionID:       sessionID, // Reuse the existing session ID
-		TaskTitle:       task.Title,
-		AgentProfileID:  session.AgentProfileID,
-		TaskDescription: prompt,
-		ModelOverride:   newModel, // This is the key - use the new model
-		ACPSessionID:    acpSessionID,
-		ExecutorType:    execConfig.ExecutorType,
-		Metadata:        execConfig.Metadata,
-	}
-
-	// Get repository info if available
-	var repositoryPath string
-	if session.RepositoryID != "" {
-		repository, repoErr := e.repo.GetRepository(ctx, session.RepositoryID)
-		if repoErr == nil && repository != nil {
-			repositoryPath = repository.LocalPath
-			req.RepositoryURL = repository.LocalPath
-			req.Branch = session.BaseBranch
-
-			// Remote Docker needs a clone URL instead of a local path.
-			if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker {
-				cloneURL := repositoryCloneURL(repository)
-				if cloneURL == "" {
-					return nil, ErrRemoteDockerNoRepoURL
-				}
-				req.RepositoryURL = cloneURL
-			}
-		}
-	}
-
-	// Configure worktree if executor type requires it - reuse existing worktree from session
-	if shouldUseWorktree(execConfig.ExecutorType) && repositoryPath != "" {
-		req.UseWorktree = true
-		req.RepositoryPath = repositoryPath
-		req.RepositoryID = session.RepositoryID
-		if session.BaseBranch != "" {
-			req.BaseBranch = session.BaseBranch
-		} else {
-			req.BaseBranch = "main"
-		}
-		// Pass existing worktree ID in metadata for reuse
-		if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
-			if req.Metadata == nil {
-				req.Metadata = make(map[string]interface{})
-			}
-			req.Metadata["worktree_id"] = session.Worktrees[0].WorktreeID
-		}
-	}
-
-	// Get worktree info from running state (for workspace path)
-	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
-		if running.WorktreePath != "" {
-			req.RepositoryURL = running.WorktreePath
-		}
+	req, err := e.buildSwitchModelRequest(ctx, task, session, sessionID, newModel, prompt, acpSessionID, execConfig)
+	if err != nil {
+		return nil, err
 	}
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
@@ -1243,37 +1238,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		return nil, fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
 
-	// Update the session with the new execution ID
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
-	session.State = models.TaskSessionStateStarting
-	session.UpdatedAt = time.Now().UTC()
-
-	// Update the agent profile snapshot with the new model
-	if session.AgentProfileSnapshot == nil {
-		session.AgentProfileSnapshot = make(map[string]interface{})
-	}
-	session.AgentProfileSnapshot["model"] = newModel
-
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to update session after model switch",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	// Update executor running state
-	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
-		running.AgentExecutionID = resp.AgentExecutionID
-		running.ContainerID = resp.ContainerID
-		running.Status = "starting"
-		if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
-			e.logger.Warn("failed to update executor running after model switch",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}
+	e.persistModelSwitchState(ctx, task.ID, sessionID, session, resp, newModel)
 
 	// Start the agent process (this also handles initialization and prompting)
 	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
@@ -1296,6 +1261,112 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		StopReason:   "model_switched",
 		AgentMessage: "",
 	}, nil
+}
+
+// buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying
+// repository and worktree config from the existing session.
+func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig) (*LaunchAgentRequest, error) {
+	req := &LaunchAgentRequest{
+		TaskID:          task.ID,
+		SessionID:       sessionID,
+		TaskTitle:       task.Title,
+		AgentProfileID:  session.AgentProfileID,
+		TaskDescription: prompt,
+		ModelOverride:   newModel,
+		ACPSessionID:    acpSessionID,
+		ExecutorType:    execConfig.ExecutorType,
+		Metadata:        execConfig.Metadata,
+	}
+
+	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
+	if err != nil {
+		return nil, err
+	}
+	e.applyWorktreeToSwitchRequest(req, session, execConfig, repositoryPath)
+
+	// Override repository URL with the running worktree path if available
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		if running.WorktreePath != "" {
+			req.RepositoryURL = running.WorktreePath
+		}
+	}
+
+	return req, nil
+}
+
+// applyRepositoryToSwitchRequest resolves the repository for a model switch and sets
+// the URL and branch on the request. Returns the local repository path.
+func (e *Executor) applyRepositoryToSwitchRequest(ctx context.Context, req *LaunchAgentRequest, session *models.TaskSession, execConfig executorConfig) (string, error) {
+	if session.RepositoryID == "" {
+		return "", nil
+	}
+	repository, repoErr := e.repo.GetRepository(ctx, session.RepositoryID)
+	if repoErr != nil || repository == nil {
+		return "", nil
+	}
+	req.RepositoryURL = repository.LocalPath
+	req.Branch = session.BaseBranch
+	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker {
+		cloneURL := repositoryCloneURL(repository)
+		if cloneURL == "" {
+			return "", ErrRemoteDockerNoRepoURL
+		}
+		req.RepositoryURL = cloneURL
+	}
+	return repository.LocalPath, nil
+}
+
+// applyWorktreeToSwitchRequest configures worktree fields on the request when applicable.
+func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session *models.TaskSession, execConfig executorConfig, repositoryPath string) {
+	if !shouldUseWorktree(execConfig.ExecutorType) || repositoryPath == "" {
+		return
+	}
+	req.UseWorktree = true
+	req.RepositoryPath = repositoryPath
+	req.RepositoryID = session.RepositoryID
+	if session.BaseBranch != "" {
+		req.BaseBranch = session.BaseBranch
+	} else {
+		req.BaseBranch = "main"
+	}
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata["worktree_id"] = session.Worktrees[0].WorktreeID
+	}
+}
+
+// persistModelSwitchState updates session and executor running records after a model switch launch.
+func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, newModel string) {
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	session.State = models.TaskSessionStateStarting
+	session.UpdatedAt = time.Now().UTC()
+
+	if session.AgentProfileSnapshot == nil {
+		session.AgentProfileSnapshot = make(map[string]interface{})
+	}
+	session.AgentProfileSnapshot["model"] = newModel
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update session after model switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
+		running.AgentExecutionID = resp.AgentExecutionID
+		running.ContainerID = resp.ContainerID
+		running.Status = "starting"
+		if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+			e.logger.Warn("failed to update executor running after model switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 }
 
 // RespondToPermission sends a response to a permission request for a session

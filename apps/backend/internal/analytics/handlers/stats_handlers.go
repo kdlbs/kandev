@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/analytics/dto"
+	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -37,6 +40,17 @@ func (h *StatsHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/stats", h.httpGetStats)
 }
 
+// rawStats holds all raw stats fetched from the repository before DTO conversion.
+type rawStats struct {
+	globalStats       *models.GlobalStats
+	taskStats         []*models.TaskStats
+	dailyActivity     []*models.DailyActivity
+	completedActivity []*models.CompletedTaskActivity
+	agentUsage        []*models.AgentUsage
+	repoStats         []*models.RepositoryStats
+	gitStats          *models.GitStats
+}
+
 func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
@@ -47,38 +61,86 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 	rangeKey := c.Query("range")
 	start, days := parseStatsRange(rangeKey)
 
-	globalStats, err := h.repo.GetGlobalStats(c.Request.Context(), workspaceID, start)
+	raw, err := h.fetchStats(c.Request.Context(), workspaceID, start, days)
 	if err != nil {
-		h.logger.Error("failed to get global stats", zap.String("workspace_id", workspaceID), zap.Error(err))
+		h.logger.Error("failed to get stats", zap.String("workspace_id", workspaceID), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
 		return
 	}
 
-	taskStats, err := h.repo.GetTaskStats(c.Request.Context(), workspaceID, start)
-	if err != nil {
-		h.logger.Error("failed to get task stats", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
+	response := dto.StatsResponse{
+		Global: dto.GlobalStatsDTO{
+			TotalTasks:           raw.globalStats.TotalTasks,
+			CompletedTasks:       raw.globalStats.CompletedTasks,
+			InProgressTasks:      raw.globalStats.InProgressTasks,
+			TotalSessions:        raw.globalStats.TotalSessions,
+			TotalTurns:           raw.globalStats.TotalTurns,
+			TotalMessages:        raw.globalStats.TotalMessages,
+			TotalUserMessages:    raw.globalStats.TotalUserMessages,
+			TotalToolCalls:       raw.globalStats.TotalToolCalls,
+			TotalDurationMs:      raw.globalStats.TotalDurationMs,
+			AvgTurnsPerTask:      raw.globalStats.AvgTurnsPerTask,
+			AvgMessagesPerTask:   raw.globalStats.AvgMessagesPerTask,
+			AvgDurationMsPerTask: raw.globalStats.AvgDurationMsPerTask,
+		},
+		TaskStats:         taskStatsToDTOs(raw.taskStats),
+		DailyActivity:     dailyActivityToDTOs(raw.dailyActivity),
+		CompletedActivity: completedActivityToDTOs(raw.completedActivity),
+		AgentUsage:        agentUsageToDTOs(raw.agentUsage),
+		RepositoryStats:   repositoryStatsToDTOs(raw.repoStats),
+		GitStats: dto.GitStatsDTO{
+			TotalCommits:      raw.gitStats.TotalCommits,
+			TotalFilesChanged: raw.gitStats.TotalFilesChanged,
+			TotalInsertions:   raw.gitStats.TotalInsertions,
+			TotalDeletions:    raw.gitStats.TotalDeletions,
+		},
 	}
 
-	// Get daily activity for the selected range
-	dailyActivity, err := h.repo.GetDailyActivity(c.Request.Context(), workspaceID, days)
-	if err != nil {
-		h.logger.Error("failed to get daily activity", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
-	}
+	c.JSON(http.StatusOK, response)
+}
 
-	// Get completed task activity for the selected range
-	completedActivity, err := h.repo.GetCompletedTaskActivity(c.Request.Context(), workspaceID, days)
+func (h *StatsHandlers) fetchStats(ctx context.Context, workspaceID string, start *time.Time, days int) (*rawStats, error) {
+	globalStats, err := h.repo.GetGlobalStats(ctx, workspaceID, start)
 	if err != nil {
-		h.logger.Error("failed to get completed task activity", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
+		return nil, fmt.Errorf("global stats: %w", err)
 	}
+	taskStats, err := h.repo.GetTaskStats(ctx, workspaceID, start)
+	if err != nil {
+		return nil, fmt.Errorf("task stats: %w", err)
+	}
+	dailyActivity, err := h.repo.GetDailyActivity(ctx, workspaceID, days)
+	if err != nil {
+		return nil, fmt.Errorf("daily activity: %w", err)
+	}
+	completedActivity, err := h.repo.GetCompletedTaskActivity(ctx, workspaceID, days)
+	if err != nil {
+		return nil, fmt.Errorf("completed activity: %w", err)
+	}
+	agentUsage, err := h.repo.GetAgentUsage(ctx, workspaceID, 5, start)
+	if err != nil {
+		return nil, fmt.Errorf("agent usage: %w", err)
+	}
+	repoStats, err := h.repo.GetRepositoryStats(ctx, workspaceID, start)
+	if err != nil {
+		return nil, fmt.Errorf("repository stats: %w", err)
+	}
+	gitStats, err := h.repo.GetGitStats(ctx, workspaceID, start)
+	if err != nil {
+		return nil, fmt.Errorf("git stats: %w", err)
+	}
+	return &rawStats{
+		globalStats:       globalStats,
+		taskStats:         taskStats,
+		dailyActivity:     dailyActivity,
+		completedActivity: completedActivity,
+		agentUsage:        agentUsage,
+		repoStats:         repoStats,
+		gitStats:          gitStats,
+	}, nil
+}
 
-	// Convert to DTOs
-	taskStatsDTOs := make([]dto.TaskStatsDTO, 0, len(taskStats))
+func taskStatsToDTOs(taskStats []*models.TaskStats) []dto.TaskStatsDTO {
+	result := make([]dto.TaskStatsDTO, 0, len(taskStats))
 	for _, ts := range taskStats {
 		taskDTO := dto.TaskStatsDTO{
 			TaskID:           ts.TaskID,
@@ -98,38 +160,39 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			formatted := ts.CompletedAt.UTC().Format(time.RFC3339)
 			taskDTO.CompletedAt = &formatted
 		}
-		taskStatsDTOs = append(taskStatsDTOs, taskDTO)
+		result = append(result, taskDTO)
 	}
+	return result
+}
 
-	dailyActivityDTOs := make([]dto.DailyActivityDTO, 0, len(dailyActivity))
-	for _, da := range dailyActivity {
-		dailyActivityDTOs = append(dailyActivityDTOs, dto.DailyActivityDTO{
+func dailyActivityToDTOs(items []*models.DailyActivity) []dto.DailyActivityDTO {
+	result := make([]dto.DailyActivityDTO, 0, len(items))
+	for _, da := range items {
+		result = append(result, dto.DailyActivityDTO{
 			Date:         da.Date,
 			TurnCount:    da.TurnCount,
 			MessageCount: da.MessageCount,
 			TaskCount:    da.TaskCount,
 		})
 	}
+	return result
+}
 
-	completedActivityDTOs := make([]dto.CompletedTaskActivityDTO, 0, len(completedActivity))
-	for _, ca := range completedActivity {
-		completedActivityDTOs = append(completedActivityDTOs, dto.CompletedTaskActivityDTO{
+func completedActivityToDTOs(items []*models.CompletedTaskActivity) []dto.CompletedTaskActivityDTO {
+	result := make([]dto.CompletedTaskActivityDTO, 0, len(items))
+	for _, ca := range items {
+		result = append(result, dto.CompletedTaskActivityDTO{
 			Date:           ca.Date,
 			CompletedTasks: ca.CompletedTasks,
 		})
 	}
+	return result
+}
 
-	// Get agent usage (top 5)
-	agentUsage, err := h.repo.GetAgentUsage(c.Request.Context(), workspaceID, 5, start)
-	if err != nil {
-		h.logger.Error("failed to get agent usage", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
-	}
-
-	agentUsageDTOs := make([]dto.AgentUsageDTO, 0, len(agentUsage))
-	for _, au := range agentUsage {
-		agentUsageDTOs = append(agentUsageDTOs, dto.AgentUsageDTO{
+func agentUsageToDTOs(items []*models.AgentUsage) []dto.AgentUsageDTO {
+	result := make([]dto.AgentUsageDTO, 0, len(items))
+	for _, au := range items {
+		result = append(result, dto.AgentUsageDTO{
 			AgentProfileID:   au.AgentProfileID,
 			AgentProfileName: au.AgentProfileName,
 			AgentModel:       au.AgentModel,
@@ -138,18 +201,13 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			TotalDurationMs:  au.TotalDurationMs,
 		})
 	}
+	return result
+}
 
-	// Get repository stats
-	repoStats, err := h.repo.GetRepositoryStats(c.Request.Context(), workspaceID, start)
-	if err != nil {
-		h.logger.Error("failed to get repository stats", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
-	}
-
-	repoStatsDTOs := make([]dto.RepositoryStatsDTO, 0, len(repoStats))
-	for _, rs := range repoStats {
-		repoStatsDTOs = append(repoStatsDTOs, dto.RepositoryStatsDTO{
+func repositoryStatsToDTOs(items []*models.RepositoryStats) []dto.RepositoryStatsDTO {
+	result := make([]dto.RepositoryStatsDTO, 0, len(items))
+	for _, rs := range items {
+		result = append(result, dto.RepositoryStatsDTO{
 			RepositoryID:      rs.RepositoryID,
 			RepositoryName:    rs.RepositoryName,
 			TotalTasks:        rs.TotalTasks,
@@ -167,44 +225,7 @@ func (h *StatsHandlers) httpGetStats(c *gin.Context) {
 			TotalDeletions:    rs.TotalDeletions,
 		})
 	}
-
-	// Get git stats
-	gitStats, err := h.repo.GetGitStats(c.Request.Context(), workspaceID, start)
-	if err != nil {
-		h.logger.Error("failed to get git stats", zap.String("workspace_id", workspaceID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		return
-	}
-
-	response := dto.StatsResponse{
-		Global: dto.GlobalStatsDTO{
-			TotalTasks:           globalStats.TotalTasks,
-			CompletedTasks:       globalStats.CompletedTasks,
-			InProgressTasks:      globalStats.InProgressTasks,
-			TotalSessions:        globalStats.TotalSessions,
-			TotalTurns:           globalStats.TotalTurns,
-			TotalMessages:        globalStats.TotalMessages,
-			TotalUserMessages:    globalStats.TotalUserMessages,
-			TotalToolCalls:       globalStats.TotalToolCalls,
-			TotalDurationMs:      globalStats.TotalDurationMs,
-			AvgTurnsPerTask:      globalStats.AvgTurnsPerTask,
-			AvgMessagesPerTask:   globalStats.AvgMessagesPerTask,
-			AvgDurationMsPerTask: globalStats.AvgDurationMsPerTask,
-		},
-		TaskStats:         taskStatsDTOs,
-		DailyActivity:     dailyActivityDTOs,
-		CompletedActivity: completedActivityDTOs,
-		AgentUsage:        agentUsageDTOs,
-		RepositoryStats:   repoStatsDTOs,
-		GitStats: dto.GitStatsDTO{
-			TotalCommits:      gitStats.TotalCommits,
-			TotalFilesChanged: gitStats.TotalFilesChanged,
-			TotalInsertions:   gitStats.TotalInsertions,
-			TotalDeletions:    gitStats.TotalDeletions,
-		},
-	}
-
-	c.JSON(http.StatusOK, response)
+	return result
 }
 
 func parseStatsRange(rangeKey string) (*time.Time, int) {

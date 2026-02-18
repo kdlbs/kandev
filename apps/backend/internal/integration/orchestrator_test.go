@@ -641,7 +641,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB)
 	require.NoError(t, err)
-	taskRepo := repository.Repository(taskRepoImpl)
+	taskRepo := taskRepoImpl
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)

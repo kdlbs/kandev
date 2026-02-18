@@ -551,25 +551,7 @@ func (r *Repository) DeleteTemplate(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListTemplates returns all workflow templates.
-func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, description, is_system, steps, created_at, updated_at
-		FROM workflow_templates
-		ORDER BY is_system DESC,
-		CASE
-			WHEN id = 'simple' THEN 1
-			WHEN id = 'standard' THEN 2
-			WHEN id = 'architecture' THEN 3
-			ELSE 999
-		END,
-		name ASC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
+func scanTemplateRows(rows *sql.Rows) ([]*models.WorkflowTemplate, error) {
 	var result []*models.WorkflowTemplate
 	for rows.Next() {
 		template := &models.WorkflowTemplate{}
@@ -591,6 +573,27 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTempl
 	return result, rows.Err()
 }
 
+// ListTemplates returns all workflow templates.
+func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, description, is_system, steps, created_at, updated_at
+		FROM workflow_templates
+		ORDER BY is_system DESC,
+		CASE
+			WHEN id = 'simple' THEN 1
+			WHEN id = 'standard' THEN 2
+			WHEN id = 'architecture' THEN 3
+			ELSE 999
+		END,
+		name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanTemplateRows(rows)
+}
+
 // GetSystemTemplates returns only system workflow templates.
 func (r *Repository) GetSystemTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `
@@ -601,26 +604,7 @@ func (r *Repository) GetSystemTemplates(ctx context.Context) ([]*models.Workflow
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-
-	var result []*models.WorkflowTemplate
-	for rows.Next() {
-		template := &models.WorkflowTemplate{}
-		var stepsJSON string
-		var isSystem int
-
-		err := rows.Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-
-		template.IsSystem = isSystem == 1
-		if err := json.Unmarshal([]byte(stepsJSON), &template.Steps); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal steps for template %s: %w", template.ID, err)
-		}
-
-		result = append(result, template)
-	}
-	return result, rows.Err()
+	return scanTemplateRows(rows)
 }
 
 // ============================================================================

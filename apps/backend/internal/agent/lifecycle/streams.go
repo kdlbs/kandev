@@ -124,6 +124,62 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
+// buildWorkspaceCallbacks creates the WorkspaceStreamCallbacks for a given execution,
+// wiring each callback to the StreamManager's registered handlers.
+func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agentctl.WorkspaceStreamCallbacks {
+	return agentctl.WorkspaceStreamCallbacks{
+		OnShellOutput: func(data string) {
+			if sm.callbacks.OnShellOutput != nil {
+				sm.callbacks.OnShellOutput(execution, data)
+			}
+		},
+		OnShellExit: func(code int) {
+			if sm.callbacks.OnShellExit != nil {
+				sm.callbacks.OnShellExit(execution, code)
+			}
+		},
+		OnGitStatus: func(update *agentctl.GitStatusUpdate) {
+			if sm.callbacks.OnGitStatus != nil {
+				sm.callbacks.OnGitStatus(execution, update)
+			}
+		},
+		OnGitCommit: func(commit *agentctl.GitCommitNotification) {
+			if sm.callbacks.OnGitCommit != nil {
+				sm.callbacks.OnGitCommit(execution, commit)
+			}
+		},
+		OnGitReset: func(reset *agentctl.GitResetNotification) {
+			if sm.callbacks.OnGitReset != nil {
+				sm.callbacks.OnGitReset(execution, reset)
+			}
+		},
+		OnFileChange: func(notification *agentctl.FileChangeNotification) {
+			if sm.callbacks.OnFileChange != nil {
+				sm.callbacks.OnFileChange(execution, notification)
+			}
+		},
+		OnProcessOutput: func(output *agentctl.ProcessOutput) {
+			if sm.callbacks.OnProcessOutput != nil {
+				sm.callbacks.OnProcessOutput(execution, output)
+			}
+		},
+		OnProcessStatus: func(status *agentctl.ProcessStatusUpdate) {
+			if sm.callbacks.OnProcessStatus != nil {
+				sm.callbacks.OnProcessStatus(execution, status)
+			}
+		},
+		OnConnected: func() {
+			sm.logger.Debug("workspace stream connected",
+				zap.String("instance_id", execution.ID))
+		},
+		OnError: func(err string) {
+			sm.logger.Debug("workspace stream error",
+				zap.String("instance_id", execution.ID),
+				zap.String("error", err))
+		},
+	}
+}
+
 // connectWorkspaceStream handles the unified workspace stream with retry logic
 func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := context.Background()
@@ -145,57 +201,7 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 	defer signalReady()
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		callbacks := agentctl.WorkspaceStreamCallbacks{
-			OnShellOutput: func(data string) {
-				if sm.callbacks.OnShellOutput != nil {
-					sm.callbacks.OnShellOutput(execution, data)
-				}
-			},
-			OnShellExit: func(code int) {
-				if sm.callbacks.OnShellExit != nil {
-					sm.callbacks.OnShellExit(execution, code)
-				}
-			},
-			OnGitStatus: func(update *agentctl.GitStatusUpdate) {
-				if sm.callbacks.OnGitStatus != nil {
-					sm.callbacks.OnGitStatus(execution, update)
-				}
-			},
-			OnGitCommit: func(commit *agentctl.GitCommitNotification) {
-				if sm.callbacks.OnGitCommit != nil {
-					sm.callbacks.OnGitCommit(execution, commit)
-				}
-			},
-			OnGitReset: func(reset *agentctl.GitResetNotification) {
-				if sm.callbacks.OnGitReset != nil {
-					sm.callbacks.OnGitReset(execution, reset)
-				}
-			},
-			OnFileChange: func(notification *agentctl.FileChangeNotification) {
-				if sm.callbacks.OnFileChange != nil {
-					sm.callbacks.OnFileChange(execution, notification)
-				}
-			},
-			OnProcessOutput: func(output *agentctl.ProcessOutput) {
-				if sm.callbacks.OnProcessOutput != nil {
-					sm.callbacks.OnProcessOutput(execution, output)
-				}
-			},
-			OnProcessStatus: func(status *agentctl.ProcessStatusUpdate) {
-				if sm.callbacks.OnProcessStatus != nil {
-					sm.callbacks.OnProcessStatus(execution, status)
-				}
-			},
-			OnConnected: func() {
-				sm.logger.Debug("workspace stream connected",
-					zap.String("instance_id", execution.ID))
-			},
-			OnError: func(err string) {
-				sm.logger.Debug("workspace stream error",
-					zap.String("instance_id", execution.ID),
-					zap.String("error", err))
-			},
-		}
+		callbacks := sm.buildWorkspaceCallbacks(execution)
 
 		ws, err := execution.agentctl.StreamWorkspace(ctx, callbacks)
 		if err != nil {

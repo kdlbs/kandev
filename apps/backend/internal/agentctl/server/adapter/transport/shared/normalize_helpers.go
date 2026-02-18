@@ -85,6 +85,9 @@ const MaxContentLength = 50000
 // MaxFileCount is the maximum number of files to include in code search results.
 const MaxFileCount = 500
 
+// langPlaintext is the fallback language identifier for files without a known extension.
+const langPlaintext = "plaintext"
+
 // TruncateIfNeeded truncates a string if it exceeds maxLen.
 func TruncateIfNeeded(s string, maxLen int) (string, bool) {
 	if len(s) <= maxLen {
@@ -149,7 +152,7 @@ func NormalizeModifyResult(payload *streams.ModifyFilePayload, result string) {
 // Used for syntax highlighting in diffs.
 func DetectLanguage(path string) string {
 	if path == "" {
-		return "plaintext"
+		return langPlaintext
 	}
 
 	// Find last dot
@@ -165,7 +168,7 @@ func DetectLanguage(path string) string {
 	}
 
 	if lastDot == -1 || lastDot == len(path)-1 {
-		return "plaintext"
+		return langPlaintext
 	}
 
 	ext := path[lastDot+1:]
@@ -196,5 +199,5 @@ func DetectLanguage(path string) string {
 	if lang, ok := langMap[ext]; ok {
 		return lang
 	}
-	return "plaintext"
+	return langPlaintext
 }

@@ -19,6 +19,9 @@ var (
 	ErrContentRequired  = errors.New("content is required")
 )
 
+// createdByAgent is the default creator for agent-created plans.
+const createdByAgent = "agent"
+
 // PlanService provides task plan business logic.
 type PlanService struct {
 	repo     repository.Repository
@@ -55,7 +58,7 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*m
 	}
 	createdBy := req.CreatedBy
 	if createdBy == "" {
-		createdBy = "agent"
+		createdBy = createdByAgent
 	}
 
 	plan := &models.TaskPlan{

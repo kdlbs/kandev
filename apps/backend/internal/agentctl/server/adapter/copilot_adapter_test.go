@@ -110,14 +110,14 @@ func TestMcpServersToCopilotConfig_HTTPServer(t *testing.T) {
 	servers := []types.McpServer{
 		{
 			Name: "my-http-server",
-			Type: "http",
+			Type: mcpServerTypeHTTP,
 			URL:  "http://localhost:9090/mcp",
 		},
 	}
 
 	result := mcpServersToCopilotConfig(servers)
 	cfg := result["my-http-server"]
-	assertConfigValue(t, cfg, "type", "http")
+	assertConfigValue(t, cfg, "type", mcpServerTypeHTTP)
 	assertConfigValue(t, cfg, "url", "http://localhost:9090/mcp")
 }
 
@@ -136,7 +136,7 @@ func TestMcpServersToCopilotConfig_MultipleServers(t *testing.T) {
 		},
 		{
 			Name: "http-server",
-			Type: "http",
+			Type: mcpServerTypeHTTP,
 			URL:  "http://localhost:9090/mcp",
 		},
 	}
@@ -154,7 +154,7 @@ func TestMcpServersToCopilotConfig_MultipleServers(t *testing.T) {
 	assertConfigValue(t, result["sse-server"], "type", "sse")
 	assertConfigValue(t, result["sse-server"], "url", "http://localhost:8080/sse")
 
-	assertConfigValue(t, result["http-server"], "type", "http")
+	assertConfigValue(t, result["http-server"], "type", mcpServerTypeHTTP)
 	assertConfigValue(t, result["http-server"], "url", "http://localhost:9090/mcp")
 }
 
@@ -180,7 +180,7 @@ func TestMcpServersToCopilotConfig_AllHaveWildcardTools(t *testing.T) {
 	servers := []types.McpServer{
 		{Name: "a", Type: "stdio", Command: "cmd-a"},
 		{Name: "b", Type: "sse", URL: "http://b"},
-		{Name: "c", Type: "http", URL: "http://c"},
+		{Name: "c", Type: mcpServerTypeHTTP, URL: "http://c"},
 	}
 
 	result := mcpServersToCopilotConfig(servers)

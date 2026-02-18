@@ -60,7 +60,7 @@ func LogRawEvent(protocol, agentID, eventType string, rawData json.RawMessage) {
 		"protocol": protocol,
 		"agent":    agentID,
 		"event":    eventType,
-		"data":     json.RawMessage(rawData),
+		"data":     rawData,
 	}
 
 	logFile := filepath.Join(debugLogDir, fmt.Sprintf("raw-%s-%s.jsonl", protocol, agentID))

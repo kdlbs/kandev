@@ -58,7 +58,42 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 
 // initSchema creates the database tables if they don't exist
 func (r *Repository) initSchema() error {
-	schema := `
+	if err := r.initCoreSchema(); err != nil {
+		return err
+	}
+	if err := r.initPlansSchema(); err != nil {
+		return err
+	}
+	if err := r.initSessionSchema(); err != nil {
+		return err
+	}
+	if err := r.initGitSchema(); err != nil {
+		return err
+	}
+	if err := r.initReviewSchema(); err != nil {
+		return err
+	}
+	if err := r.ensureDefaultWorkspace(); err != nil {
+		return err
+	}
+	if err := r.ensureDefaultExecutorsAndEnvironments(); err != nil {
+		return err
+	}
+	return r.ensureWorkspaceIndexes()
+}
+
+func (r *Repository) initCoreSchema() error {
+	if err := r.initInfraSchema(); err != nil {
+		return err
+	}
+	if err := r.initTaskSchema(); err != nil {
+		return err
+	}
+	return r.initCoreIndexes()
+}
+
+func (r *Repository) initInfraSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -130,7 +165,12 @@ func (r *Repository) initSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+	`)
+	return err
+}
 
+func (r *Repository) initTaskSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
@@ -194,7 +234,12 @@ func (r *Repository) initSchema() error {
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
 	);
+	`)
+	return err
+}
 
+func (r *Repository) initCoreIndexes() error {
+	_, err := r.db.Exec(`
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
@@ -202,14 +247,12 @@ func (r *Repository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_repositories_workspace_id ON repositories(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_repository_scripts_repo_id ON repository_scripts(repository_id);
-	`
+	`)
+	return err
+}
 
-	if _, err := r.db.Exec(schema); err != nil {
-		return err
-	}
-
-	// Task plans table
-	plansSchema := `
+func (r *Repository) initPlansSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_plans (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL UNIQUE,
@@ -221,13 +264,19 @@ func (r *Repository) initSchema() error {
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
-	`
-	if _, err := r.db.Exec(plansSchema); err != nil {
+	`)
+	return err
+}
+
+func (r *Repository) initSessionSchema() error {
+	if err := r.initMessageTurnSchema(); err != nil {
 		return err
 	}
+	return r.initSessionWorktreeSchema()
+}
 
-	// Session and message tables
-	sessionSchema := `
+func (r *Repository) initMessageTurnSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_messages (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
@@ -264,7 +313,12 @@ func (r *Repository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_turns_session_id ON task_session_turns(task_session_id);
 	CREATE INDEX IF NOT EXISTS idx_turns_session_started ON task_session_turns(task_session_id, started_at);
 	CREATE INDEX IF NOT EXISTS idx_turns_task_id ON task_session_turns(task_id);
+	`)
+	return err
+}
 
+func (r *Repository) initSessionWorktreeSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -317,14 +371,12 @@ func (r *Repository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_worktree_id ON task_session_worktrees(worktree_id);
 	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_repository_id ON task_session_worktrees(repository_id);
 	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
-	`
+	`)
+	return err
+}
 
-	if _, err := r.db.Exec(sessionSchema); err != nil {
-		return err
-	}
-
-	// Git tracking tables
-	gitSchema := `
+func (r *Repository) initGitSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
@@ -365,13 +417,12 @@ func (r *Repository) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_session_commits_session ON task_session_commits(session_id, committed_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_session_commits_sha ON task_session_commits(commit_sha);
-	`
+	`)
+	return err
+}
 
-	if _, err := r.db.Exec(gitSchema); err != nil {
-		return err
-	}
-
-	reviewSchema := `
+func (r *Repository) initReviewSchema() error {
+	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS session_file_reviews (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
@@ -385,24 +436,7 @@ func (r *Repository) initSchema() error {
 		UNIQUE(session_id, file_path)
 	);
 	CREATE INDEX IF NOT EXISTS idx_session_file_reviews_session ON session_file_reviews(session_id);
-	`
-
-	if _, err := r.db.Exec(reviewSchema); err != nil {
-		return err
-	}
-
-	if err := r.ensureDefaultWorkspace(); err != nil {
-		return err
-	}
-
-	if err := r.ensureDefaultExecutorsAndEnvironments(); err != nil {
-		return err
-	}
-
-	if err := r.ensureWorkspaceIndexes(); err != nil {
-		return err
-	}
-
-	return nil
+	`)
+	return err
 }
 

@@ -200,13 +200,20 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 	now := time.Now().UTC()
 	return []*models.Prompt{
-		{
-			ID:        "builtin-code-review",
-			Name:      "code-review",
-			Builtin:   true,
-			CreatedAt: now,
-			UpdatedAt: now,
-			Content: `Please review the changed files in the current git worktree.
+		r.builtinCodeReviewPrompt(now),
+		r.builtinOpenPRPrompt(now),
+		r.builtinMergeBasePrompt(now),
+	}
+}
+
+func (r *sqliteRepository) builtinCodeReviewPrompt(now time.Time) *models.Prompt {
+	return &models.Prompt{
+		ID:        "builtin-code-review",
+		Name:      "code-review",
+		Builtin:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Content: `Please review the changed files in the current git worktree.
 
 STEP 1: Determine what to review
 - First, check if there are any uncommitted changes (dirty working directory)
@@ -262,14 +269,17 @@ Example format:
 - db/queries.go:34 - N+1 query pattern, fetch all related records in single query with join
 
 Now review the changes.`,
-		},
-		{
-			ID:        "builtin-open-pr",
-			Name:      "open-pr",
-			Builtin:   true,
-			CreatedAt: now,
-			UpdatedAt: now,
-			Content: `Please create and open a Pull Request for the current branch using the GitHub CLI (gh).
+	}
+}
+
+func (r *sqliteRepository) builtinOpenPRPrompt(now time.Time) *models.Prompt {
+	return &models.Prompt{
+		ID:        "builtin-open-pr",
+		Name:      "open-pr",
+		Builtin:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Content: `Please create and open a Pull Request for the current branch using the GitHub CLI (gh).
 
 **PR Creation Steps:**
 1. **Analyze the branch:**
@@ -319,14 +329,17 @@ Now review the changes.`,
 - Make sure all commits are pushed to the remote
 - Verify the base branch is correct (usually 'main' or 'develop')
 - Check that CI/CD checks are configured to run`,
-		},
-		{
-			ID:        "builtin-merge-base",
-			Name:      "merge-base",
-			Builtin:   true,
-			CreatedAt: now,
-			UpdatedAt: now,
-			Content: `Please merge the base branch into the current branch and resolve any conflicts that arise.
+	}
+}
+
+func (r *sqliteRepository) builtinMergeBasePrompt(now time.Time) *models.Prompt {
+	return &models.Prompt{
+		ID:        "builtin-merge-base",
+		Name:      "merge-base",
+		Builtin:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Content: `Please merge the base branch into the current branch and resolve any conflicts that arise.
 
 **Merge Process:**
 
@@ -384,6 +397,5 @@ Now review the changes.`,
 - Never blindly accept one side without understanding both changes
 - Ensure code quality and functionality are maintained
 - If tests fail after merge, fix the issues before completing the merge`,
-		},
 	}
 }

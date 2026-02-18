@@ -23,6 +23,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Codex decision constants for approval responses.
+const (
+	decisionAccept         = "accept"
+	decisionAcceptSession  = "acceptForSession"
+	decisionDecline        = "decline"
+	decisionCancel         = "cancel"
+)
+
 // Re-export types needed by external packages
 type (
 	PermissionRequest  = types.PermissionRequest
@@ -401,6 +409,26 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		return fmt.Errorf("adapter not initialized")
 	}
 
+	inputs, err := a.buildPromptInputs(message, attachments)
+	if err != nil {
+		return err
+	}
+
+	a.logger.Info("sending prompt",
+		zap.String("thread_id", threadID),
+		zap.Int("inputs", len(inputs)),
+		zap.Int("image_attachments", len(attachments)))
+
+	turnID, completeCh, err := a.startTurn(ctx, client, threadID, inputs)
+	if err != nil {
+		return err
+	}
+
+	return a.waitForTurnCompletion(ctx, threadID, turnID, completeCh)
+}
+
+// buildPromptInputs constructs the list of UserInput items from message text and attachments.
+func (a *Adapter) buildPromptInputs(message string, attachments []v1.MessageAttachment) ([]codex.UserInput, error) {
 	inputs := make([]codex.UserInput, 0, 1+len(attachments))
 	if strings.TrimSpace(message) != "" {
 		inputs = append(inputs, codex.UserInput{Type: "text", Text: message})
@@ -418,14 +446,13 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	}
 
 	if len(inputs) == 0 {
-		return fmt.Errorf("prompt requires message text or attachments")
+		return nil, fmt.Errorf("prompt requires message text or attachments")
 	}
+	return inputs, nil
+}
 
-	a.logger.Info("sending prompt",
-		zap.String("thread_id", threadID),
-		zap.Int("inputs", len(inputs)),
-		zap.Int("image_attachments", len(attachments)))
-
+// startTurn calls turn/start and returns the turn ID and completion channel.
+func (a *Adapter) startTurn(ctx context.Context, client *codex.Client, threadID string, inputs []codex.UserInput) (string, chan turnCompleteResult, error) {
 	params := &codex.TurnStartParams{
 		ThreadID: threadID,
 		Input:    inputs,
@@ -436,14 +463,14 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		a.mu.Lock()
 		a.turnCompleteCh = nil
 		a.mu.Unlock()
-		return fmt.Errorf("failed to start turn: %w", err)
+		return "", nil, fmt.Errorf("failed to start turn: %w", err)
 	}
 
 	if resp.Error != nil {
 		a.mu.Lock()
 		a.turnCompleteCh = nil
 		a.mu.Unlock()
-		return fmt.Errorf("turn start error: %s", resp.Error.Message)
+		return "", nil, fmt.Errorf("turn start error: %s", resp.Error.Message)
 	}
 
 	var result codex.TurnStartResult
@@ -467,7 +494,11 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		a.logger.Info("started turn, waiting for completion", zap.String("turn_id", turnID))
 	}
 
-	// Wait for turn completion or context cancellation
+	return turnID, completeCh, nil
+}
+
+// waitForTurnCompletion blocks until the turn completes or context is cancelled.
+func (a *Adapter) waitForTurnCompletion(ctx context.Context, threadID, turnID string, completeCh chan turnCompleteResult) error {
 	select {
 	case <-ctx.Done():
 		a.mu.Lock()
@@ -659,439 +690,451 @@ func (a *Adapter) handleNotification(method string, params json.RawMessage) {
 	a.mu.RUnlock()
 
 	switch method {
-	// Standard notifications
 	case codex.NotifyItemAgentMessageDelta:
-		var p codex.AgentMessageDeltaParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse agent message delta", zap.Error(err))
-			return
-		}
-		a.mu.Lock()
-		a.messageBuffer += p.Delta
-		a.mu.Unlock()
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypeMessageChunk,
-			SessionID:   threadID,
-			OperationID: turnID,
-			Text:        p.Delta,
-		})
-
+		a.handleAgentMessageDelta(params, threadID, turnID)
 	case codex.NotifyItemReasoningTextDelta:
-		var p codex.ReasoningDeltaParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse reasoning text delta", zap.Error(err))
-			return
-		}
-		a.mu.Lock()
-		// Add separator when switching to a new reasoning item
-		if p.ItemID != a.currentReasoningItemID && a.reasoningBuffer != "" {
-			a.reasoningBuffer += "\n\n"
-		}
-		a.currentReasoningItemID = p.ItemID
-		a.reasoningBuffer += p.Delta
-		a.mu.Unlock()
-		a.sendUpdate(AgentEvent{
-			Type:          streams.EventTypeReasoning,
-			SessionID:     threadID,
-			OperationID:   turnID,
-			ReasoningText: p.Delta,
-		})
-
+		a.handleReasoningDelta(params, threadID, turnID, "reasoning text delta")
 	case codex.NotifyItemReasoningSummaryDelta:
-		// Codex sends reasoning via summaryTextDelta - normalize to ReasoningText
-		// so the lifecycle manager doesn't need to know about protocol differences
-		var p codex.ReasoningDeltaParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse reasoning summary delta", zap.Error(err))
-			return
-		}
-		a.mu.Lock()
-		// Add separator when switching to a new reasoning item
-		if p.ItemID != a.currentReasoningItemID && a.reasoningBuffer != "" {
-			a.reasoningBuffer += "\n\n"
-		}
-		a.currentReasoningItemID = p.ItemID
-		a.reasoningBuffer += p.Delta
-		a.mu.Unlock()
-		a.sendUpdate(AgentEvent{
-			Type:          streams.EventTypeReasoning,
-			SessionID:     threadID,
-			OperationID:   turnID,
-			ReasoningText: p.Delta,
-		})
-
+		a.handleReasoningDelta(params, threadID, turnID, "reasoning summary delta")
 	case codex.NotifyTurnCompleted:
-		var p codex.TurnCompletedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse turn completed", zap.Error(err))
-			return
-		}
-
-		// Signal turn completion to the waiting Prompt() call
-		a.mu.RLock()
-		completeCh := a.turnCompleteCh
-		a.mu.RUnlock()
-
-		if completeCh != nil {
-			select {
-			case completeCh <- turnCompleteResult{success: p.Success, err: p.Error}:
-				a.logger.Debug("signaled turn completion", zap.String("turn_id", p.TurnID), zap.Bool("success", p.Success))
-			default:
-				a.logger.Warn("turn complete channel full, dropping signal")
-			}
-		}
-
-		// Send error event if the turn failed WITH an explicit error message.
-		// Note: We don't send error events here based on stderr alone, because
-		// NotifyError will handle error notifications (prevents duplicate messages).
-		if !p.Success {
-			a.logger.Debug("turn completed with failure",
-				zap.String("thread_id", threadID),
-				zap.String("turn_id", p.TurnID),
-				zap.Bool("success", p.Success),
-				zap.String("error", p.Error))
-
-			// Only send error event if there's an explicit error message
-			// (NotifyError handles the case when error details come separately)
-			if p.Error != "" {
-				a.sendUpdate(AgentEvent{
-					Type:        streams.EventTypeError,
-					SessionID:   threadID,
-					OperationID: p.TurnID,
-					Error:       p.Error,
-				})
-			}
-		}
-
+		a.handleTurnCompleted(params, threadID)
 	case codex.NotifyTurnDiffUpdated:
-		var p codex.TurnDiffUpdatedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse turn diff updated", zap.Error(err))
-			return
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypeMessageChunk,
-			SessionID:   threadID,
-			OperationID: p.TurnID,
-			Diff:        p.Diff,
-		})
-
+		a.handleTurnDiffUpdated(params, threadID)
 	case codex.NotifyTurnPlanUpdated:
-		var p codex.TurnPlanUpdatedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse turn plan updated", zap.Error(err))
-			return
-		}
-		entries := make([]PlanEntry, len(p.Plan))
-		for i, e := range p.Plan {
-			entries[i] = PlanEntry{
-				Description: e.Description,
-				Status:      e.Status,
-			}
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   threadID,
-			OperationID: p.TurnID,
-			PlanEntries: entries,
-		})
-
+		a.handleTurnPlanUpdated(params, threadID)
 	case codex.NotifyError:
-		var p codex.ErrorParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse error notification", zap.Error(err))
-			return
-		}
-
-		// Get recent stderr for error context
-		var stderrLines []string
-		a.mu.RLock()
-		if a.stderrProvider != nil {
-			stderrLines = a.stderrProvider.GetRecentStderr()
-		}
-		a.mu.RUnlock()
-
-		// Try to parse stderr into structured error info
-		// This handles Codex-specific error formats (e.g., rate limits)
-		parsedError := ParseCodexStderrLines(stderrLines)
-
-		var parsedMsg string
-		if parsedError != nil {
-			parsedMsg = parsedError.Message
-		}
-
-		a.logger.Debug("received error notification from agent",
-			zap.String("thread_id", threadID),
-			zap.Int("code", p.Code),
-			zap.String("message", p.Message),
-			zap.String("parsed_message", parsedMsg),
-			zap.Any("data", p.Data),
-			zap.Int("stderr_lines", len(stderrLines)))
-
-		// Build error data with all available context
-		errorData := map[string]any{
-			"code":   p.Code,
-			"data":   p.Data,
-			"stderr": stderrLines,
-		}
-
-		// Include parsed error details if available
-		if parsedError != nil {
-			parsed := map[string]any{
-				"http_error": parsedError.HTTPError,
-			}
-			// Include the full raw JSON (captures all fields from any error type)
-			if parsedError.RawJSON != nil {
-				parsed["error_json"] = parsedError.RawJSON
-			}
-			errorData["parsed"] = parsed
-		}
-
-		a.sendUpdate(AgentEvent{
-			Type:      streams.EventTypeError,
-			SessionID: threadID,
-			Error:     p.Message,
-			Text:      parsedMsg, // User-friendly parsed message
-			Data:      errorData,
-		})
-
+		a.handleErrorNotification(params, threadID)
 	case codex.NotifyItemStarted:
-		var p codex.ItemStartedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse item started", zap.Error(err))
-			return
-		}
-		if p.Item == nil {
-			return
-		}
-		// Map Codex item types to tool call updates
-		// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning", "mcpToolCall"
-		switch p.Item.Type {
-		case CodexItemCommandExecution:
-			args := map[string]any{
-				"command": p.Item.Command,
-				"cwd":     p.Item.Cwd,
-			}
-			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolCall,
-				SessionID:         threadID,
-				OperationID:       turnID,
-				ToolCallID:        p.Item.ID,
-				ToolName:          CodexItemCommandExecution,
-				ToolTitle:         p.Item.Command,
-				ToolStatus:        "running",
-				NormalizedPayload: normalizedPayload,
-			})
-		case CodexItemFileChange:
-			// Build title from file paths
-			var title string
-			if len(p.Item.Changes) > 0 {
-				title = p.Item.Changes[0].Path
-				if len(p.Item.Changes) > 1 {
-					title += fmt.Sprintf(" (+%d more)", len(p.Item.Changes)-1)
-				}
-			}
-			// Build args with changes info
-			changesArgs := make([]any, 0, len(p.Item.Changes))
-			for _, c := range p.Item.Changes {
-				changesArgs = append(changesArgs, map[string]any{
-					"path": c.Path,
-					"diff": c.Diff,
-				})
-			}
-			args := map[string]any{
-				"changes": changesArgs,
-			}
-			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolCall,
-				SessionID:         threadID,
-				OperationID:       turnID,
-				ToolCallID:        p.Item.ID,
-				ToolName:          CodexItemFileChange,
-				ToolTitle:         title,
-				ToolStatus:        "running",
-				NormalizedPayload: normalizedPayload,
-			})
-		case CodexItemMcpToolCall:
-			// Handle MCP tool calls (e.g., create_task_plan_kandev)
-			// Build title from server/tool
-			title := p.Item.Tool
-			if p.Item.Server != "" {
-				title = p.Item.Server + "/" + p.Item.Tool
-			}
-			// Parse arguments as map for normalization
-			var argsMap map[string]any
-			if len(p.Item.Arguments) > 0 {
-				_ = json.Unmarshal(p.Item.Arguments, &argsMap)
-			}
-			args := map[string]any{
-				"server":    p.Item.Server,
-				"tool":      p.Item.Tool,
-				"arguments": argsMap,
-			}
-			normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolCall,
-				SessionID:         threadID,
-				OperationID:       turnID,
-				ToolCallID:        p.Item.ID,
-				ToolName:          p.Item.Tool, // Use the actual MCP tool name for frontend display
-				ToolTitle:         title,
-				ToolStatus:        "running",
-				NormalizedPayload: normalizedPayload,
-			})
-		}
-
+		a.handleItemStarted(params, threadID, turnID)
 	case codex.NotifyItemCompleted:
-		var p codex.ItemCompletedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse item completed", zap.Error(err))
-			return
-		}
-		if p.Item == nil {
-			return
-		}
-		// Only send updates for tool-like items
-		if p.Item.Type == CodexItemCommandExecution || p.Item.Type == CodexItemFileChange || p.Item.Type == CodexItemMcpToolCall {
-			status := "complete"
-			if p.Item.Status == "failed" {
-				status = "error"
-			}
-			update := AgentEvent{
-				Type:        streams.EventTypeToolUpdate,
-				SessionID:   threadID,
-				OperationID: turnID,
-				ToolCallID:  p.Item.ID,
-				ToolStatus:  status,
-			}
-
-			// Include normalized payload for fallback message creation
-			// This ensures the correct message type is used if the message doesn't exist yet
-			switch p.Item.Type {
-			case CodexItemCommandExecution:
-				args := map[string]any{
-					"command": p.Item.Command,
-					"cwd":     p.Item.Cwd,
-				}
-				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
-			case CodexItemFileChange:
-				changesArgs := make([]any, 0, len(p.Item.Changes))
-				for _, c := range p.Item.Changes {
-					changesArgs = append(changesArgs, map[string]any{
-						"path": c.Path,
-						"diff": c.Diff,
-					})
-				}
-				args := map[string]any{
-					"changes": changesArgs,
-				}
-				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
-			case CodexItemMcpToolCall:
-				// Parse arguments and result for normalization
-				var argsMap map[string]any
-				if len(p.Item.Arguments) > 0 {
-					_ = json.Unmarshal(p.Item.Arguments, &argsMap)
-				}
-				var resultMap any
-				if len(p.Item.Result) > 0 {
-					_ = json.Unmarshal(p.Item.Result, &resultMap)
-				}
-				args := map[string]any{
-					"server":    p.Item.Server,
-					"tool":      p.Item.Tool,
-					"arguments": argsMap,
-					"result":    resultMap,
-				}
-				if p.Item.ToolError != "" {
-					args["error"] = p.Item.ToolError
-				}
-				update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
-				update.ToolName = p.Item.Tool // Use the actual MCP tool name
-			}
-
-			// Include diff for file changes
-			if p.Item.Type == CodexItemFileChange && len(p.Item.Changes) > 0 {
-				var diffs []string
-				for _, c := range p.Item.Changes {
-					if c.Diff != "" {
-						diffs = append(diffs, c.Diff)
-					}
-				}
-				if len(diffs) > 0 {
-					update.Diff = strings.Join(diffs, "\n")
-				}
-			}
-			a.sendUpdate(update)
-		}
-
+		a.handleItemCompleted(params, threadID, turnID)
 	case codex.NotifyItemCmdExecOutputDelta:
-		var p codex.CommandOutputDeltaParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse command output delta", zap.Error(err))
-			return
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypeToolUpdate,
-			SessionID:   threadID,
-			OperationID: turnID,
-			ToolCallID:  p.ItemID,
-		})
-
+		a.handleCmdExecOutputDelta(params, threadID, turnID)
 	case codex.NotifyThreadTokenUsageUpdated:
-		var p codex.ThreadTokenUsageUpdatedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse thread token usage updated notification", zap.Error(err))
-			return
-		}
-		// Extract context window information from the token usage update
-		if p.TokenUsage != nil && p.TokenUsage.ModelContextWindow > 0 {
-			contextWindowSize := p.TokenUsage.ModelContextWindow
-			contextWindowUsed := int64(p.TokenUsage.Last.TotalTokens)
-
-			remaining := contextWindowSize - contextWindowUsed
-			if remaining < 0 {
-				remaining = 0
-			}
-			efficiency := float64(contextWindowUsed) / float64(contextWindowSize) * 100
-
-			a.logger.Debug("emitting context window event",
-				zap.Int64("size", contextWindowSize),
-				zap.Int64("used", contextWindowUsed),
-				zap.Int64("remaining", remaining),
-				zap.Float64("efficiency", efficiency))
-
-			a.sendUpdate(AgentEvent{
-				Type:                   streams.EventTypeContextWindow,
-				SessionID:              threadID,
-				OperationID:            turnID,
-				ContextWindowSize:      contextWindowSize,
-				ContextWindowUsed:      contextWindowUsed,
-				ContextWindowRemaining: remaining,
-				ContextEfficiency:      efficiency,
-			})
-		}
-
+		a.handleTokenUsageUpdated(params, threadID, turnID)
 	case codex.NotifyTokenCount:
 		// Legacy token_count notification - ignore as we now use thread/tokenUsage/updated
 		a.logger.Debug("ignoring legacy token_count notification")
-
 	case codex.NotifyContextCompacted:
-		var p codex.ContextCompactedParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			a.logger.Warn("failed to parse context compacted notification", zap.Error(err))
-			return
-		}
-		a.logger.Info("context compacted",
-			zap.String("thread_id", p.ThreadID),
-			zap.String("turn_id", p.TurnID))
-		// We could emit an event here if we want to notify the frontend about compaction
-
+		a.handleContextCompacted(params)
 	default:
 		// Log unhandled notifications at debug level
 		a.logger.Debug("unhandled notification", zap.String("method", method))
 	}
+}
+
+// handleAgentMessageDelta handles item/agentMessage/delta notifications.
+func (a *Adapter) handleAgentMessageDelta(params json.RawMessage, threadID, turnID string) {
+	var p codex.AgentMessageDeltaParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse agent message delta", zap.Error(err))
+		return
+	}
+	a.mu.Lock()
+	a.messageBuffer += p.Delta
+	a.mu.Unlock()
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeMessageChunk,
+		SessionID:   threadID,
+		OperationID: turnID,
+		Text:        p.Delta,
+	})
+}
+
+// handleReasoningDelta handles reasoning text and summary delta notifications.
+func (a *Adapter) handleReasoningDelta(params json.RawMessage, threadID, turnID, logLabel string) {
+	var p codex.ReasoningDeltaParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse "+logLabel, zap.Error(err))
+		return
+	}
+	a.mu.Lock()
+	// Add separator when switching to a new reasoning item
+	if p.ItemID != a.currentReasoningItemID && a.reasoningBuffer != "" {
+		a.reasoningBuffer += "\n\n"
+	}
+	a.currentReasoningItemID = p.ItemID
+	a.reasoningBuffer += p.Delta
+	a.mu.Unlock()
+	a.sendUpdate(AgentEvent{
+		Type:          streams.EventTypeReasoning,
+		SessionID:     threadID,
+		OperationID:   turnID,
+		ReasoningText: p.Delta,
+	})
+}
+
+// handleTurnCompleted handles turn/completed notifications.
+func (a *Adapter) handleTurnCompleted(params json.RawMessage, threadID string) {
+	var p codex.TurnCompletedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse turn completed", zap.Error(err))
+		return
+	}
+
+	// Signal turn completion to the waiting Prompt() call
+	a.mu.RLock()
+	completeCh := a.turnCompleteCh
+	a.mu.RUnlock()
+
+	if completeCh != nil {
+		select {
+		case completeCh <- turnCompleteResult{success: p.Success, err: p.Error}:
+			a.logger.Debug("signaled turn completion", zap.String("turn_id", p.TurnID), zap.Bool("success", p.Success))
+		default:
+			a.logger.Warn("turn complete channel full, dropping signal")
+		}
+	}
+
+	// Send error event if the turn failed WITH an explicit error message.
+	// Note: We don't send error events here based on stderr alone, because
+	// NotifyError will handle error notifications (prevents duplicate messages).
+	if !p.Success {
+		a.logger.Debug("turn completed with failure",
+			zap.String("thread_id", threadID),
+			zap.String("turn_id", p.TurnID),
+			zap.Bool("success", p.Success),
+			zap.String("error", p.Error))
+
+		// Only send error event if there's an explicit error message
+		// (NotifyError handles the case when error details come separately)
+		if p.Error != "" {
+			a.sendUpdate(AgentEvent{
+				Type:        streams.EventTypeError,
+				SessionID:   threadID,
+				OperationID: p.TurnID,
+				Error:       p.Error,
+			})
+		}
+	}
+}
+
+// handleTurnDiffUpdated handles turn/diffUpdated notifications.
+func (a *Adapter) handleTurnDiffUpdated(params json.RawMessage, threadID string) {
+	var p codex.TurnDiffUpdatedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse turn diff updated", zap.Error(err))
+		return
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeMessageChunk,
+		SessionID:   threadID,
+		OperationID: p.TurnID,
+		Diff:        p.Diff,
+	})
+}
+
+// handleTurnPlanUpdated handles turn/planUpdated notifications.
+func (a *Adapter) handleTurnPlanUpdated(params json.RawMessage, threadID string) {
+	var p codex.TurnPlanUpdatedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse turn plan updated", zap.Error(err))
+		return
+	}
+	entries := make([]PlanEntry, len(p.Plan))
+	for i, e := range p.Plan {
+		entries[i] = PlanEntry{
+			Description: e.Description,
+			Status:      e.Status,
+		}
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypePlan,
+		SessionID:   threadID,
+		OperationID: p.TurnID,
+		PlanEntries: entries,
+	})
+}
+
+// handleErrorNotification handles error notifications from the agent.
+func (a *Adapter) handleErrorNotification(params json.RawMessage, threadID string) {
+	var p codex.ErrorParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse error notification", zap.Error(err))
+		return
+	}
+
+	// Get recent stderr for error context
+	var stderrLines []string
+	a.mu.RLock()
+	if a.stderrProvider != nil {
+		stderrLines = a.stderrProvider.GetRecentStderr()
+	}
+	a.mu.RUnlock()
+
+	// Try to parse stderr into structured error info
+	// This handles Codex-specific error formats (e.g., rate limits)
+	parsedError := ParseCodexStderrLines(stderrLines)
+
+	var parsedMsg string
+	if parsedError != nil {
+		parsedMsg = parsedError.Message
+	}
+
+	a.logger.Debug("received error notification from agent",
+		zap.String("thread_id", threadID),
+		zap.Int("code", p.Code),
+		zap.String("message", p.Message),
+		zap.String("parsed_message", parsedMsg),
+		zap.Any("data", p.Data),
+		zap.Int("stderr_lines", len(stderrLines)))
+
+	// Build error data with all available context
+	errorData := map[string]any{
+		"code":   p.Code,
+		"data":   p.Data,
+		"stderr": stderrLines,
+	}
+
+	// Include parsed error details if available
+	if parsedError != nil {
+		parsed := map[string]any{
+			"http_error": parsedError.HTTPError,
+		}
+		// Include the full raw JSON (captures all fields from any error type)
+		if parsedError.RawJSON != nil {
+			parsed["error_json"] = parsedError.RawJSON
+		}
+		errorData["parsed"] = parsed
+	}
+
+	a.sendUpdate(AgentEvent{
+		Type:      streams.EventTypeError,
+		SessionID: threadID,
+		Error:     p.Message,
+		Text:      parsedMsg, // User-friendly parsed message
+		Data:      errorData,
+	})
+}
+
+// handleItemStarted handles item/started notifications.
+func (a *Adapter) handleItemStarted(params json.RawMessage, threadID, turnID string) {
+	var p codex.ItemStartedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse item started", zap.Error(err))
+		return
+	}
+	if p.Item == nil {
+		return
+	}
+	// Map Codex item types to tool call updates
+	// Item types: "userMessage", "agentMessage", "commandExecution", "fileChange", "reasoning", "mcpToolCall"
+	switch p.Item.Type {
+	case CodexItemCommandExecution:
+		args := map[string]any{"command": p.Item.Command, "cwd": p.Item.Cwd}
+		normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeToolCall,
+			SessionID:         threadID,
+			OperationID:       turnID,
+			ToolCallID:        p.Item.ID,
+			ToolName:          CodexItemCommandExecution,
+			ToolTitle:         p.Item.Command,
+			ToolStatus:        "running",
+			NormalizedPayload: normalizedPayload,
+		})
+	case CodexItemFileChange:
+		a.sendFileChangeStarted(p.Item, threadID, turnID)
+	case CodexItemMcpToolCall:
+		a.sendMcpToolCallStarted(p.Item, threadID, turnID)
+	}
+}
+
+// sendFileChangeStarted emits a tool_call event for a file change item.
+func (a *Adapter) sendFileChangeStarted(item *codex.Item, threadID, turnID string) {
+	var title string
+	if len(item.Changes) > 0 {
+		title = item.Changes[0].Path
+		if len(item.Changes) > 1 {
+			title += fmt.Sprintf(" (+%d more)", len(item.Changes)-1)
+		}
+	}
+	changesArgs := make([]any, 0, len(item.Changes))
+	for _, c := range item.Changes {
+		changesArgs = append(changesArgs, map[string]any{"path": c.Path, "diff": c.Diff})
+	}
+	args := map[string]any{"changes": changesArgs}
+	normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		SessionID:         threadID,
+		OperationID:       turnID,
+		ToolCallID:        item.ID,
+		ToolName:          CodexItemFileChange,
+		ToolTitle:         title,
+		ToolStatus:        "running",
+		NormalizedPayload: normalizedPayload,
+	})
+}
+
+// sendMcpToolCallStarted emits a tool_call event for an MCP tool call item.
+func (a *Adapter) sendMcpToolCallStarted(item *codex.Item, threadID, turnID string) {
+	title := item.Tool
+	if item.Server != "" {
+		title = item.Server + "/" + item.Tool
+	}
+	var argsMap map[string]any
+	if len(item.Arguments) > 0 {
+		_ = json.Unmarshal(item.Arguments, &argsMap)
+	}
+	args := map[string]any{"server": item.Server, "tool": item.Tool, "arguments": argsMap}
+	normalizedPayload := a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		SessionID:         threadID,
+		OperationID:       turnID,
+		ToolCallID:        item.ID,
+		ToolName:          item.Tool, // Use the actual MCP tool name for frontend display
+		ToolTitle:         title,
+		ToolStatus:        "running",
+		NormalizedPayload: normalizedPayload,
+	})
+}
+
+// handleItemCompleted handles item/completed notifications.
+func (a *Adapter) handleItemCompleted(params json.RawMessage, threadID, turnID string) {
+	var p codex.ItemCompletedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse item completed", zap.Error(err))
+		return
+	}
+	if p.Item == nil {
+		return
+	}
+	// Only send updates for tool-like items
+	if p.Item.Type != CodexItemCommandExecution && p.Item.Type != CodexItemFileChange && p.Item.Type != CodexItemMcpToolCall {
+		return
+	}
+
+	status := "complete"
+	if p.Item.Status == "failed" {
+		status = "error"
+	}
+	update := AgentEvent{
+		Type:        streams.EventTypeToolUpdate,
+		SessionID:   threadID,
+		OperationID: turnID,
+		ToolCallID:  p.Item.ID,
+		ToolStatus:  status,
+	}
+
+	// Include normalized payload for fallback message creation
+	// This ensures the correct message type is used if the message doesn't exist yet
+	a.attachCompletedItemPayload(&update, p.Item)
+	a.sendUpdate(update)
+}
+
+// attachCompletedItemPayload sets the NormalizedPayload and Diff fields on a completed item event.
+func (a *Adapter) attachCompletedItemPayload(update *AgentEvent, item *codex.Item) {
+	switch item.Type {
+	case CodexItemCommandExecution:
+		args := map[string]any{"command": item.Command, "cwd": item.Cwd}
+		update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemCommandExecution, args)
+	case CodexItemFileChange:
+		changesArgs := make([]any, 0, len(item.Changes))
+		for _, c := range item.Changes {
+			changesArgs = append(changesArgs, map[string]any{"path": c.Path, "diff": c.Diff})
+		}
+		args := map[string]any{"changes": changesArgs}
+		update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemFileChange, args)
+		// Include diff for file changes
+		if len(item.Changes) > 0 {
+			var diffs []string
+			for _, c := range item.Changes {
+				if c.Diff != "" {
+					diffs = append(diffs, c.Diff)
+				}
+			}
+			if len(diffs) > 0 {
+				update.Diff = strings.Join(diffs, "\n")
+			}
+		}
+	case CodexItemMcpToolCall:
+		var argsMap map[string]any
+		if len(item.Arguments) > 0 {
+			_ = json.Unmarshal(item.Arguments, &argsMap)
+		}
+		var resultMap any
+		if len(item.Result) > 0 {
+			_ = json.Unmarshal(item.Result, &resultMap)
+		}
+		args := map[string]any{
+			"server":    item.Server,
+			"tool":      item.Tool,
+			"arguments": argsMap,
+			"result":    resultMap,
+		}
+		if item.ToolError != "" {
+			args["error"] = item.ToolError
+		}
+		update.NormalizedPayload = a.normalizer.NormalizeToolCall(CodexItemMcpToolCall, args)
+		update.ToolName = item.Tool // Use the actual MCP tool name
+	}
+}
+
+// handleCmdExecOutputDelta handles item/cmdExec/outputDelta notifications.
+func (a *Adapter) handleCmdExecOutputDelta(params json.RawMessage, threadID, turnID string) {
+	var p codex.CommandOutputDeltaParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse command output delta", zap.Error(err))
+		return
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeToolUpdate,
+		SessionID:   threadID,
+		OperationID: turnID,
+		ToolCallID:  p.ItemID,
+	})
+}
+
+// handleTokenUsageUpdated handles thread/tokenUsage/updated notifications.
+func (a *Adapter) handleTokenUsageUpdated(params json.RawMessage, threadID, turnID string) {
+	var p codex.ThreadTokenUsageUpdatedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse thread token usage updated notification", zap.Error(err))
+		return
+	}
+	// Extract context window information from the token usage update
+	if p.TokenUsage == nil || p.TokenUsage.ModelContextWindow <= 0 {
+		return
+	}
+	contextWindowSize := p.TokenUsage.ModelContextWindow
+	contextWindowUsed := int64(p.TokenUsage.Last.TotalTokens)
+
+	remaining := contextWindowSize - contextWindowUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	efficiency := float64(contextWindowUsed) / float64(contextWindowSize) * 100
+
+	a.logger.Debug("emitting context window event",
+		zap.Int64("size", contextWindowSize),
+		zap.Int64("used", contextWindowUsed),
+		zap.Int64("remaining", remaining),
+		zap.Float64("efficiency", efficiency))
+
+	a.sendUpdate(AgentEvent{
+		Type:                   streams.EventTypeContextWindow,
+		SessionID:              threadID,
+		OperationID:            turnID,
+		ContextWindowSize:      contextWindowSize,
+		ContextWindowUsed:      contextWindowUsed,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      efficiency,
+	})
+}
+
+// handleContextCompacted handles context/compacted notifications.
+func (a *Adapter) handleContextCompacted(params json.RawMessage) {
+	var p codex.ContextCompactedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		a.logger.Warn("failed to parse context compacted notification", zap.Error(err))
+		return
+	}
+	a.logger.Info("context compacted",
+		zap.String("thread_id", p.ThreadID),
+		zap.String("turn_id", p.TurnID))
+	// We could emit an event here if we want to notify the frontend about compaction
 }
 
 // handleRequest processes Codex requests (approval requests) and calls permissionHandler.
@@ -1154,36 +1197,11 @@ func (a *Adapter) handleApprovalRequest(
 	details map[string]any,
 	optionStrings []string,
 ) {
-	// Build permission options from Codex options
-	options := make([]PermissionOption, len(optionStrings))
-	for i, opt := range optionStrings {
-		kind := "allow_once"
-		switch opt {
-		case "approveAlways":
-			kind = "allow_always"
-		case "reject":
-			kind = "reject_once"
-		}
-		options[i] = PermissionOption{
-			OptionID: opt,
-			Name:     opt,
-			Kind:     kind,
-		}
-	}
-
-	// If no options provided, use defaults
-	if len(options) == 0 {
-		options = []PermissionOption{
-			{OptionID: "approve", Name: "Approve", Kind: "allow_once"},
-			{OptionID: "reject", Name: "Reject", Kind: "reject_once"},
-		}
-	}
-
 	req := &PermissionRequest{
 		SessionID:     threadID,
 		ToolCallID:    itemID,
 		Title:         title,
-		Options:       options,
+		Options:       buildPermissionOptions(optionStrings),
 		ActionType:    actionType,
 		ActionDetails: details,
 	}
@@ -1191,7 +1209,7 @@ func (a *Adapter) handleApprovalRequest(
 	if handler == nil {
 		// Auto-approve if no handler
 		if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
-			Decision: "accept",
+			Decision: decisionAccept,
 		}, nil); err != nil {
 			a.logger.Warn("failed to send approval response", zap.Error(err))
 		}
@@ -1203,38 +1221,63 @@ func (a *Adapter) handleApprovalRequest(
 	if err != nil {
 		a.logger.Error("permission handler error", zap.Error(err))
 		if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
-			Decision: "decline",
+			Decision: decisionDecline,
 		}, nil); err != nil {
 			a.logger.Warn("failed to send decline response", zap.Error(err))
 		}
 		return
 	}
 
-	// Map frontend option to Codex decision
-	// Codex accepts: "accept", "acceptForSession", "decline", "cancel"
-	decision := "accept"
-	if resp.Cancelled {
-		decision = "cancel"
-	} else {
-		switch resp.OptionID {
-		case "approve", "allow", "accept":
-			decision = "accept"
-		case "approveAlways", "allowAlways", "acceptForSession":
-			decision = "acceptForSession"
-		case "reject", "deny", "decline":
-			decision = "decline"
-		case "cancel":
-			decision = "cancel"
-		default:
-			if resp.OptionID != "" {
-				decision = resp.OptionID
-			}
-		}
-	}
-
+	decision := mapResponseToDecision(resp)
 	if err := a.client.SendResponse(id, &codex.CommandApprovalResponse{
 		Decision: decision,
 	}, nil); err != nil {
 		a.logger.Warn("failed to send approval response", zap.Error(err))
+	}
+}
+
+// buildPermissionOptions converts Codex option strings to PermissionOption slice.
+// Falls back to default approve/reject options when no options are provided.
+func buildPermissionOptions(optionStrings []string) []PermissionOption {
+	if len(optionStrings) == 0 {
+		return []PermissionOption{
+			{OptionID: "approve", Name: "Approve", Kind: "allow_once"},
+			{OptionID: "reject", Name: "Reject", Kind: "reject_once"},
+		}
+	}
+	options := make([]PermissionOption, len(optionStrings))
+	for i, opt := range optionStrings {
+		kind := "allow_once"
+		switch opt {
+		case "approveAlways":
+			kind = "allow_always"
+		case "reject":
+			kind = "reject_once"
+		}
+		options[i] = PermissionOption{OptionID: opt, Name: opt, Kind: kind}
+	}
+	return options
+}
+
+// mapResponseToDecision maps a PermissionResponse to a Codex decision string.
+// Codex accepts: "accept", "acceptForSession", "decline", "cancel".
+func mapResponseToDecision(resp *PermissionResponse) string {
+	if resp.Cancelled {
+		return decisionCancel
+	}
+	switch resp.OptionID {
+	case "approve", "allow", decisionAccept:
+		return decisionAccept
+	case "approveAlways", "allowAlways", decisionAcceptSession:
+		return decisionAcceptSession
+	case "reject", "deny", decisionDecline:
+		return decisionDecline
+	case decisionCancel:
+		return decisionCancel
+	default:
+		if resp.OptionID != "" {
+			return resp.OptionID
+		}
+		return decisionAccept
 	}
 }

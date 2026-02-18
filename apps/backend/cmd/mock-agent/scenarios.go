@@ -241,6 +241,28 @@ func scenarioAllTools(enc *json.Encoder, scanner *bufio.Scanner) {
 	fixedDelay(50)
 	emitThinkingBlock(enc, "Running all tools...", "")
 
+	scenarioAllToolsReadGrep(enc, readFile, grepFile)
+	scenarioAllToolsEditBash(enc, scanner, editFile)
+
+	// WebFetch
+	fixedDelay(50)
+	webID := nextToolID()
+	_ = enc.Encode(AssistantMsg{
+		Type: TypeAssistant,
+		Message: AssistantBody{
+			Role:    "assistant",
+			Content: []ContentBlock{{Type: BlockToolUse, ID: webID, Name: ToolWebFetch, Input: map[string]any{"url": "https://example.com", "prompt": "Summarize"}}},
+			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
+		},
+	})
+	fixedDelay(50)
+	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: webID, Content: "Example page content"}}}})
+
+	fixedDelay(50)
+	emitTextBlock(enc, "All tools scenario complete.", "")
+}
+
+func scenarioAllToolsReadGrep(enc *json.Encoder, readFile, grepFile fileInfo) {
 	// Read
 	fixedDelay(50)
 	readID := nextToolID()
@@ -274,7 +296,9 @@ func scenarioAllTools(enc *json.Encoder, scanner *bufio.Scanner) {
 		grepResults = append(grepResults, fmt.Sprintf("%s:%d: func found here", p, (i+1)*10))
 	}
 	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: grepID, Content: strings.Join(grepResults, "\n")}}}})
+}
 
+func scenarioAllToolsEditBash(enc *json.Encoder, scanner *bufio.Scanner, editFile fileInfo) {
 	// Edit (with permission)
 	fixedDelay(50)
 	editID := nextToolID()
@@ -315,23 +339,6 @@ func scenarioAllTools(enc *json.Encoder, scanner *bufio.Scanner) {
 	} else {
 		emitTextBlock(enc, "Bash denied.", "")
 	}
-
-	// WebFetch
-	fixedDelay(50)
-	webID := nextToolID()
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: webID, Name: ToolWebFetch, Input: map[string]any{"url": "https://example.com", "prompt": "Summarize"}}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
-	fixedDelay(50)
-	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: webID, Content: "Example page content"}}}})
-
-	fixedDelay(50)
-	emitTextBlock(enc, "All tools scenario complete.", "")
 }
 
 // scenarioMultiTurn: minimal response for multi-turn test.

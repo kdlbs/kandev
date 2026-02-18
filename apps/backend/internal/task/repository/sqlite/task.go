@@ -175,67 +175,14 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		archiveFilter = " AND archived_at IS NULL"
 	}
 
-	var total int
 	var rows *sql.Rows
+	var total int
 	var err error
 
 	if query == "" {
-		// No search query - use simple query
-		err = r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+archiveFilter), workspaceID).Scan(&total)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		rows, err = r.db.QueryContext(ctx, r.db.Rebind(`
-			SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
-			FROM tasks
-			WHERE workspace_id = ?`+archiveFilter+`
-			ORDER BY updated_at DESC
-			LIMIT ? OFFSET ?
-		`), workspaceID, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, archiveFilter, pageSize, offset)
 	} else {
-		// Search query - use JOIN with repositories
-		searchPattern := "%" + query + "%"
-		like := dialect.Like(r.db.DriverName())
-
-		tFilter := ""
-		if !includeArchived {
-			tFilter = " AND t.archived_at IS NULL"
-		}
-
-		countQuery := fmt.Sprintf(`
-			SELECT COUNT(DISTINCT t.id) FROM tasks t
-			LEFT JOIN task_repositories tr ON t.id = tr.task_id
-			LEFT JOIN repositories r ON tr.repository_id = r.id
-			WHERE t.workspace_id = ?%s
-			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
-			)
-		`, tFilter, like, like, like, like)
-		err = r.db.QueryRowContext(ctx, r.db.Rebind(countQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		selectQuery := fmt.Sprintf(`
-			SELECT DISTINCT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.archived_at, t.created_at, t.updated_at
-			FROM tasks t
-			LEFT JOIN task_repositories tr ON t.id = tr.task_id
-			LEFT JOIN repositories r ON tr.repository_id = r.id
-			WHERE t.workspace_id = ?%s
-			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
-			)
-			ORDER BY t.updated_at DESC
-			LIMIT ? OFFSET ?
-		`, tFilter, like, like, like, like)
-		rows, err = r.db.QueryContext(ctx, r.db.Rebind(selectQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, archiveFilter, pageSize, offset, includeArchived)
 	}
 
 	if err != nil {
@@ -249,6 +196,69 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 	}
 
 	return tasks, total, nil
+}
+
+// queryAllTasks fetches all tasks (no search) for a workspace with pagination.
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilter string, pageSize, offset int) (*sql.Rows, int, error) {
+	var total int
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+archiveFilter), workspaceID).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
+		FROM tasks
+		WHERE workspace_id = ?`+archiveFilter+`
+		ORDER BY updated_at DESC
+		LIMIT ? OFFSET ?
+	`), workspaceID, pageSize, offset)
+	return rows, total, err
+}
+
+// searchTasks fetches tasks matching a search query for a workspace with pagination.
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiveFilter string, pageSize, offset int, includeArchived bool) (*sql.Rows, int, error) {
+	searchPattern := "%" + query + "%"
+	like := dialect.Like(r.db.DriverName())
+
+	tFilter := ""
+	if !includeArchived {
+		tFilter = " AND t.archived_at IS NULL"
+	}
+
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT t.id) FROM tasks t
+		LEFT JOIN task_repositories tr ON t.id = tr.task_id
+		LEFT JOIN repositories r ON tr.repository_id = r.id
+		WHERE t.workspace_id = ?%s
+		AND (
+			t.title %s ? OR
+			t.description %s ? OR
+			r.name %s ? OR
+			r.local_path %s ?
+		)
+	`, tFilter, like, like, like, like)
+	var total int
+	if err := r.db.QueryRowContext(ctx, r.db.Rebind(countQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	selectQuery := fmt.Sprintf(`
+		SELECT DISTINCT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.archived_at, t.created_at, t.updated_at
+		FROM tasks t
+		LEFT JOIN task_repositories tr ON t.id = tr.task_id
+		LEFT JOIN repositories r ON tr.repository_id = r.id
+		WHERE t.workspace_id = ?%s
+		AND (
+			t.title %s ? OR
+			t.description %s ? OR
+			r.name %s ? OR
+			r.local_path %s ?
+		)
+		ORDER BY t.updated_at DESC
+		LIMIT ? OFFSET ?
+	`, tFilter, like, like, like, like)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(selectQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
+	return rows, total, err
 }
 
 // scanTasks is a helper to scan task rows

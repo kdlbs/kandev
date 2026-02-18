@@ -166,95 +166,88 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 	for _, ag := range enabled {
 		availability, ok := availabilityByName[ag.ID()]
 		if !ok {
-			availability = discovery.Availability{
-				Name:      ag.ID(),
-				Available: false,
-			}
+			availability = discovery.Availability{Name: ag.ID(), Available: false}
 		}
-
-		displayName := ag.DisplayName()
-		if displayName == "" {
-			displayName = ag.Name()
-		}
-
-		// Get models from the agent
-		var modelEntries []dto.ModelEntryDTO
-		var supportsDynamic bool
-		modelList, err := ag.ListModels(ctx)
-		if err == nil && modelList != nil {
-			supportsDynamic = modelList.SupportsDynamic
-			modelEntries = make([]dto.ModelEntryDTO, 0, len(modelList.Models))
-			for _, model := range modelList.Models {
-				modelEntries = append(modelEntries, dto.ModelEntryDTO{
-					ID:            model.ID,
-					Name:          model.Name,
-					Provider:      model.Provider,
-					ContextWindow: model.ContextWindow,
-					IsDefault:     model.IsDefault,
-				})
-			}
-		}
-
-		// Get discovery result for capabilities
-		disc, discErr := ag.IsInstalled(ctx)
-		var capabilities dto.AgentCapabilitiesDTO
-		if discErr == nil && disc != nil {
-			capabilities = dto.AgentCapabilitiesDTO{
-				SupportsSessionResume: disc.Capabilities.SupportsSessionResume,
-				SupportsShell:         disc.Capabilities.SupportsShell,
-				SupportsWorkspaceOnly: disc.Capabilities.SupportsWorkspaceOnly,
-			}
-		}
-
-		// Convert permission settings
-		var permissionSettings map[string]dto.PermissionSettingDTO
-		permSettings := ag.PermissionSettings()
-		if permSettings != nil {
-			permissionSettings = make(map[string]dto.PermissionSettingDTO, len(permSettings))
-			for key, setting := range permSettings {
-				permissionSettings[key] = dto.PermissionSettingDTO{
-					Supported:    setting.Supported,
-					Default:      setting.Default,
-					Label:        setting.Label,
-					Description:  setting.Description,
-					ApplyMethod:  setting.ApplyMethod,
-					CLIFlag:      setting.CLIFlag,
-					CLIFlagValue: setting.CLIFlagValue,
-				}
-			}
-		}
-
-		// Convert passthrough config
-		var passthroughConfig *dto.PassthroughConfigDTO
-		if ptAgent, ok := ag.(agents.PassthroughAgent); ok {
-			pt := ptAgent.PassthroughConfig()
-			passthroughConfig = &dto.PassthroughConfigDTO{
-				Supported:   pt.Supported,
-				Label:       pt.Label,
-				Description: pt.Description,
-			}
-		}
-
-		payload = append(payload, dto.AvailableAgentDTO{
-			Name:              ag.ID(),
-			DisplayName:       displayName,
-			SupportsMCP:       availability.SupportsMCP,
-			MCPConfigPath:     availability.MCPConfigPath,
-			InstallationPaths: availability.InstallationPaths,
-			Available:         availability.Available,
-			MatchedPath:       availability.MatchedPath,
-			Capabilities:      capabilities,
-			ModelConfig: dto.ModelConfigDTO{
-				DefaultModel:          ag.DefaultModel(),
-				AvailableModels:       modelEntries,
-				SupportsDynamicModels: supportsDynamic,
-			},
-			PermissionSettings: permissionSettings,
-			PassthroughConfig:  passthroughConfig,
-			UpdatedAt:          now,
-		})
+		payload = append(payload, c.buildAvailableAgentDTO(ctx, ag, availability, now))
 	}
 	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
+}
+
+func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent, availability discovery.Availability, now time.Time) dto.AvailableAgentDTO {
+	displayName := ag.DisplayName()
+	if displayName == "" {
+		displayName = ag.Name()
+	}
+
+	var modelEntries []dto.ModelEntryDTO
+	var supportsDynamic bool
+	if modelList, err := ag.ListModels(ctx); err == nil && modelList != nil {
+		supportsDynamic = modelList.SupportsDynamic
+		modelEntries = make([]dto.ModelEntryDTO, 0, len(modelList.Models))
+		for _, model := range modelList.Models {
+			modelEntries = append(modelEntries, dto.ModelEntryDTO{
+				ID:            model.ID,
+				Name:          model.Name,
+				Provider:      model.Provider,
+				ContextWindow: model.ContextWindow,
+				IsDefault:     model.IsDefault,
+			})
+		}
+	}
+
+	var capabilities dto.AgentCapabilitiesDTO
+	if disc, discErr := ag.IsInstalled(ctx); discErr == nil && disc != nil {
+		capabilities = dto.AgentCapabilitiesDTO{
+			SupportsSessionResume: disc.Capabilities.SupportsSessionResume,
+			SupportsShell:         disc.Capabilities.SupportsShell,
+			SupportsWorkspaceOnly: disc.Capabilities.SupportsWorkspaceOnly,
+		}
+	}
+
+	var permissionSettings map[string]dto.PermissionSettingDTO
+	if permSettings := ag.PermissionSettings(); permSettings != nil {
+		permissionSettings = make(map[string]dto.PermissionSettingDTO, len(permSettings))
+		for key, setting := range permSettings {
+			permissionSettings[key] = dto.PermissionSettingDTO{
+				Supported:    setting.Supported,
+				Default:      setting.Default,
+				Label:        setting.Label,
+				Description:  setting.Description,
+				ApplyMethod:  setting.ApplyMethod,
+				CLIFlag:      setting.CLIFlag,
+				CLIFlagValue: setting.CLIFlagValue,
+			}
+		}
+	}
+
+	var passthroughConfig *dto.PassthroughConfigDTO
+	if ptAgent, ok := ag.(agents.PassthroughAgent); ok {
+		pt := ptAgent.PassthroughConfig()
+		passthroughConfig = &dto.PassthroughConfigDTO{
+			Supported:   pt.Supported,
+			Label:       pt.Label,
+			Description: pt.Description,
+		}
+	}
+
+	return dto.AvailableAgentDTO{
+		Name:              ag.ID(),
+		DisplayName:       displayName,
+		SupportsMCP:       availability.SupportsMCP,
+		MCPConfigPath:     availability.MCPConfigPath,
+		InstallationPaths: availability.InstallationPaths,
+		Available:         availability.Available,
+		MatchedPath:       availability.MatchedPath,
+		Capabilities:      capabilities,
+		ModelConfig: dto.ModelConfigDTO{
+			DefaultModel:          ag.DefaultModel(),
+			AvailableModels:       modelEntries,
+			SupportsDynamicModels: supportsDynamic,
+		},
+		PermissionSettings: permissionSettings,
+		PassthroughConfig:  passthroughConfig,
+		UpdatedAt:          now,
+	}
 }
 
 func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, error) {
@@ -282,140 +275,199 @@ func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {
 		if !result.Available {
 			continue
 		}
-		agentConfig, ok := c.agentRegistry.Get(result.Name)
-		if !ok {
-			return fmt.Errorf("unknown agent: %s", result.Name)
-		}
-		displayName := agentConfig.DisplayName()
-		if displayName == "" {
-			displayName = agentConfig.Name()
-		}
-		if displayName == "" {
-			return fmt.Errorf("unknown agent display name: %s", result.Name)
-		}
-		defaultModel := agentConfig.DefaultModel()
-		isPassthroughOnly := false
-		if defaultModel == "" {
-			if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && ptAgent.PassthroughConfig().Supported {
-				isPassthroughOnly = true
-				defaultModel = "passthrough"
-			} else {
-				return fmt.Errorf("unknown agent default model: %s", result.Name)
-			}
-		}
-		agent, err := c.repo.GetAgentByName(ctx, result.Name)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if errors.Is(err, sql.ErrNoRows) || agent == nil {
-			agent = &models.Agent{
-				Name:          result.Name,
-				SupportsMCP:   result.SupportsMCP,
-				MCPConfigPath: result.MCPConfigPath,
-			}
-			if err := c.repo.CreateAgent(ctx, agent); err != nil {
-				return err
-			}
-		} else {
-			updated := false
-			if agent.SupportsMCP != result.SupportsMCP {
-				agent.SupportsMCP = result.SupportsMCP
-				updated = true
-			}
-			if agent.MCPConfigPath != result.MCPConfigPath {
-				agent.MCPConfigPath = result.MCPConfigPath
-				updated = true
-			}
-			if updated {
-				if err := c.repo.UpdateAgent(ctx, agent); err != nil {
-					return err
-				}
-			}
-		}
-		profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
-		if err != nil {
-			return err
-		}
-		autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
-
-		// Fetch model list once per agent (not per profile) to resolve display names
-		modelList, listErr := agentConfig.ListModels(ctx)
-		if listErr != nil {
-			c.logger.Warn("failed to list models during profile sync, using model ID as name",
-				zap.String("agent", result.Name), zap.Error(listErr))
-		}
-
-		if len(profiles) > 0 {
-			for _, profile := range profiles {
-				if profile.UserModified {
-					continue
-				}
-				updated := false
-
-				if profile.AgentDisplayName != displayName {
-					profile.AgentDisplayName = displayName
-					updated = true
-				}
-				if profile.Model != defaultModel {
-					profile.Model = defaultModel
-					updated = true
-				}
-
-				// Re-resolve profile name from model display name
-				resolvedName := resolveModelDisplayName(modelList, profile.Model)
-				if isPassthroughOnly {
-					resolvedName = displayName
-				}
-				if profile.Name != resolvedName {
-					profile.Name = resolvedName
-					updated = true
-				}
-
-				if profile.AutoApprove != autoApprove {
-					profile.AutoApprove = autoApprove
-					updated = true
-				}
-				if profile.AllowIndexing != allowIndexing {
-					profile.AllowIndexing = allowIndexing
-					updated = true
-				}
-				if profile.DangerouslySkipPermissions != skipPermissions {
-					profile.DangerouslySkipPermissions = skipPermissions
-					updated = true
-				}
-				if isPassthroughOnly && !profile.CLIPassthrough {
-					profile.CLIPassthrough = true
-					updated = true
-				}
-
-				if updated {
-					if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
-						return err
-					}
-				}
-			}
-			continue
-		}
-
-		profileName := resolveModelDisplayName(modelList, defaultModel)
-		if isPassthroughOnly {
-			profileName = displayName
-		}
-		defaultProfile := &models.AgentProfile{
-			AgentID:                    agent.ID,
-			Name:                       profileName,
-			Model:                      defaultModel,
-			AgentDisplayName:           displayName,
-			AutoApprove:                autoApprove,
-			AllowIndexing:              allowIndexing,
-			DangerouslySkipPermissions: skipPermissions,
-			CLIPassthrough:             isPassthroughOnly,
-		}
-		if err := c.repo.CreateAgentProfile(ctx, defaultProfile); err != nil {
+		if err := c.syncAgentFromDiscovery(ctx, result); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// profileSyncParams holds resolved parameters used when syncing agent profiles.
+type profileSyncParams struct {
+	displayName      string
+	defaultModel     string
+	isPassthrough    bool
+	autoApprove      bool
+	allowIndexing    bool
+	skipPermissions  bool
+	modelList        *agents.ModelList
+}
+
+// updateExistingProfiles syncs non-user-modified profiles with current agent defaults.
+func (c *Controller) updateExistingProfiles(ctx context.Context, profiles []*models.AgentProfile, p profileSyncParams) error {
+	for _, profile := range profiles {
+		if profile.UserModified {
+			continue
+		}
+		updated := false
+		if profile.AgentDisplayName != p.displayName {
+			profile.AgentDisplayName = p.displayName
+			updated = true
+		}
+		if profile.Model != p.defaultModel {
+			profile.Model = p.defaultModel
+			updated = true
+		}
+		resolvedName := resolveModelDisplayName(p.modelList, profile.Model)
+		if p.isPassthrough {
+			resolvedName = p.displayName
+		}
+		if profile.Name != resolvedName {
+			profile.Name = resolvedName
+			updated = true
+		}
+		if profile.AutoApprove != p.autoApprove {
+			profile.AutoApprove = p.autoApprove
+			updated = true
+		}
+		if profile.AllowIndexing != p.allowIndexing {
+			profile.AllowIndexing = p.allowIndexing
+			updated = true
+		}
+		if profile.DangerouslySkipPermissions != p.skipPermissions {
+			profile.DangerouslySkipPermissions = p.skipPermissions
+			updated = true
+		}
+		if p.isPassthrough && !profile.CLIPassthrough {
+			profile.CLIPassthrough = true
+			updated = true
+		}
+		if updated {
+			if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discovery.Availability) error {
+	agentConfig, ok := c.agentRegistry.Get(result.Name)
+	if !ok {
+		return fmt.Errorf("unknown agent: %s", result.Name)
+	}
+	displayName, err := c.resolveDisplayName(agentConfig, result.Name)
+	if err != nil {
+		return err
+	}
+	defaultModel, isPassthroughOnly, err := resolveDefaultModel(agentConfig, result.Name)
+	if err != nil {
+		return err
+	}
+	agent, err := c.upsertAgent(ctx, result)
+	if err != nil {
+		return err
+	}
+	profiles, err := c.repo.ListAgentProfiles(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	p := c.buildProfileSyncParams(ctx, agentConfig, result.Name, displayName, defaultModel, isPassthroughOnly)
+
+	if len(profiles) > 0 {
+		return c.updateExistingProfiles(ctx, profiles, p)
+	}
+	return c.createDefaultProfile(ctx, agent.ID, p)
+}
+
+// resolveDisplayName returns the display name for an agent config, falling back to its
+// internal name, and returns an error if no name can be determined.
+func (c *Controller) resolveDisplayName(agentConfig agents.Agent, agentName string) (string, error) {
+	displayName := agentConfig.DisplayName()
+	if displayName == "" {
+		displayName = agentConfig.Name()
+	}
+	if displayName == "" {
+		return "", fmt.Errorf("unknown agent display name: %s", agentName)
+	}
+	return displayName, nil
+}
+
+// buildProfileSyncParams assembles the parameters needed to create or update agent profiles.
+func (c *Controller) buildProfileSyncParams(
+	ctx context.Context,
+	agentConfig agents.Agent,
+	agentName, displayName, defaultModel string,
+	isPassthroughOnly bool,
+) profileSyncParams {
+	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
+	modelList, listErr := agentConfig.ListModels(ctx)
+	if listErr != nil {
+		c.logger.Warn("failed to list models during profile sync, using model ID as name",
+			zap.String("agent", agentName), zap.Error(listErr))
+	}
+	return profileSyncParams{
+		displayName:     displayName,
+		defaultModel:    defaultModel,
+		isPassthrough:   isPassthroughOnly,
+		autoApprove:     autoApprove,
+		allowIndexing:   allowIndexing,
+		skipPermissions: skipPermissions,
+		modelList:       modelList,
+	}
+}
+
+// createDefaultProfile creates the initial agent profile when none exist for an agent.
+func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p profileSyncParams) error {
+	profileName := resolveModelDisplayName(p.modelList, p.defaultModel)
+	if p.isPassthrough {
+		profileName = p.displayName
+	}
+	defaultProfile := &models.AgentProfile{
+		AgentID:                    agentID,
+		Name:                       profileName,
+		Model:                      p.defaultModel,
+		AgentDisplayName:           p.displayName,
+		AutoApprove:                p.autoApprove,
+		AllowIndexing:              p.allowIndexing,
+		DangerouslySkipPermissions: p.skipPermissions,
+		CLIPassthrough:             p.isPassthrough,
+	}
+	return c.repo.CreateAgentProfile(ctx, defaultProfile)
+}
+
+func resolveDefaultModel(agentConfig agents.Agent, name string) (string, bool, error) {
+	defaultModel := agentConfig.DefaultModel()
+	if defaultModel != "" {
+		return defaultModel, false, nil
+	}
+	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && ptAgent.PassthroughConfig().Supported {
+		return "passthrough", true, nil
+	}
+	return "", false, fmt.Errorf("unknown agent default model: %s", name)
+}
+
+func (c *Controller) upsertAgent(ctx context.Context, result discovery.Availability) (*models.Agent, error) {
+	agent, err := c.repo.GetAgentByName(ctx, result.Name)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if errors.Is(err, sql.ErrNoRows) || agent == nil {
+		agent = &models.Agent{
+			Name:          result.Name,
+			SupportsMCP:   result.SupportsMCP,
+			MCPConfigPath: result.MCPConfigPath,
+		}
+		if err := c.repo.CreateAgent(ctx, agent); err != nil {
+			return nil, err
+		}
+		return agent, nil
+	}
+	updated := false
+	if agent.SupportsMCP != result.SupportsMCP {
+		agent.SupportsMCP = result.SupportsMCP
+		updated = true
+	}
+	if agent.MCPConfigPath != result.MCPConfigPath {
+		agent.MCPConfigPath = result.MCPConfigPath
+		updated = true
+	}
+	if updated {
+		if err := c.repo.UpdateAgent(ctx, agent); err != nil {
+			return nil, err
+		}
+	}
+	return agent, nil
 }
 
 func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, error) {

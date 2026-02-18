@@ -22,6 +22,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
+
+// queryValueTrue is the string "true" used in query parameter comparisons.
+const queryValueTrue = "true"
+
 type ProcessHandlers struct {
 	service      *service.Service
 	lifecycleMgr *lifecycle.Manager
@@ -58,6 +62,22 @@ func RegisterProcessRoutes(
 	processes.GET("/:processId", handlers.httpGetProcess)
 }
 
+// resolveExecutorID returns the executor ID for a session. If the session has no
+// executor ID set, it falls back to the workspace default, then to the local executor.
+func (h *ProcessHandlers) resolveExecutorID(ctx context.Context, session *models.TaskSession) string {
+	if session.ExecutorID != "" {
+		return session.ExecutorID
+	}
+	if task, err := h.service.GetTask(ctx, session.TaskID); err == nil {
+		if workspace, err := h.service.GetWorkspace(ctx, task.WorkspaceID); err == nil {
+			if workspace.DefaultExecutorID != nil {
+				return *workspace.DefaultExecutorID
+			}
+		}
+	}
+	return models.ExecutorIDLocal
+}
+
 type httpStartProcessRequest struct {
 	Kind         string `json:"kind"`
 	ScriptName   string `json:"script_name,omitempty"`
@@ -92,20 +112,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		h.logger.Warn("start process executor not found",
@@ -117,33 +124,8 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	repoID := body.RepositoryID
-	if repoID == "" {
-		repoID = session.RepositoryID
-	}
-	if repoID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if len(task.Repositories) > 0 {
-				repoID = task.Repositories[0].RepositoryID
-			}
-		}
-	}
-	if repoID == "" {
-		h.logger.Warn("start process missing repository",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", session.TaskID),
-		)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session has no repository"})
-		return
-	}
-	repo, err := h.service.GetRepository(c.Request.Context(), repoID)
-	if err != nil {
-		h.logger.Warn("start process repository not found",
-			zap.String("session_id", sessionID),
-			zap.String("repo_id", repoID),
-			zap.Error(err),
-		)
-		handleNotFound(c, h.logger, err, "repository not found")
+	repoID, repo, ok := h.resolveProcessRepository(c, session, body.RepositoryID, sessionID)
+	if !ok {
 		return
 	}
 
@@ -211,50 +193,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 
 	switch executor.Type {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
-		if streams.ProcessKind(kind) == streams.ProcessKindDev {
-			if existing, err := h.lifecycleMgr.ListProcesses(c.Request.Context(), sessionID); err == nil {
-				for _, proc := range existing {
-					if proc.Kind != streams.ProcessKindDev {
-						continue
-					}
-					if proc.Status == agentctltypes.ProcessStatusRunning || proc.Status == agentctltypes.ProcessStatusStarting {
-						c.JSON(http.StatusOK, gin.H{"process": proc})
-						return
-					}
-				}
-			} else {
-				h.logger.Warn("failed to list processes for dev check",
-					zap.String("session_id", sessionID),
-					zap.Error(err),
-				)
-			}
-		}
-		proc, err := h.lifecycleMgr.StartProcess(c.Request.Context(), lifecycle.StartProcessRequest{
-			SessionID:  sessionID,
-			Kind:       kind,
-			ScriptName: scriptName,
-			Command:    command,
-			WorkingDir: workingDir,
-			Env:        portEnv,
-		})
-		if err != nil {
-			h.logger.Error("failed to start process",
-				zap.String("session_id", sessionID),
-				zap.String("repo_id", repoID),
-				zap.String("kind", kind),
-				zap.String("script_name", scriptName),
-				zap.Error(err),
-			)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		h.logger.Info("process started",
-			zap.String("session_id", sessionID),
-			zap.String("process_id", proc.ID),
-			zap.String("kind", kind),
-			zap.String("script_name", scriptName),
-		)
-		c.JSON(http.StatusOK, gin.H{"process": proc})
+		h.startLocalProcess(c, sessionID, repoID, kind, scriptName, command, workingDir, portEnv)
 	default:
 		h.logger.Warn("start process unsupported executor type",
 			zap.String("session_id", sessionID),
@@ -263,6 +202,108 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "executor type not supported for process runner"})
 	}
+}
+
+// resolveProcessRepository resolves the repository ID and fetches the repository for a
+// start-process request. Returns the repo ID, repo model, and false (writing the HTTP
+// error itself) when the repository cannot be determined.
+func (h *ProcessHandlers) resolveProcessRepository(
+	c *gin.Context,
+	session *models.TaskSession,
+	requestedRepoID, sessionID string,
+) (string, *models.Repository, bool) {
+	repoID := requestedRepoID
+	if repoID == "" {
+		repoID = session.RepositoryID
+	}
+	if repoID == "" {
+		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
+			if len(task.Repositories) > 0 {
+				repoID = task.Repositories[0].RepositoryID
+			}
+		}
+	}
+	if repoID == "" {
+		h.logger.Warn("start process missing repository",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", session.TaskID),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session has no repository"})
+		return "", nil, false
+	}
+	repo, err := h.service.GetRepository(c.Request.Context(), repoID)
+	if err != nil {
+		h.logger.Warn("start process repository not found",
+			zap.String("session_id", sessionID),
+			zap.String("repo_id", repoID),
+			zap.Error(err),
+		)
+		handleNotFound(c, h.logger, err, "repository not found")
+		return "", nil, false
+	}
+	return repoID, repo, true
+}
+
+// getRunningDevProcess returns an already-running dev process for the session, or nil.
+func (h *ProcessHandlers) getRunningDevProcess(ctx context.Context, sessionID string) *agentctlclient.ProcessInfo {
+	existing, err := h.lifecycleMgr.ListProcesses(ctx, sessionID)
+	if err != nil {
+		h.logger.Warn("failed to list processes for dev check",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+	for i := range existing {
+		proc := &existing[i]
+		if proc.Kind != streams.ProcessKindDev {
+			continue
+		}
+		if proc.Status == agentctltypes.ProcessStatusRunning || proc.Status == agentctltypes.ProcessStatusStarting {
+			return proc
+		}
+	}
+	return nil
+}
+
+// startLocalProcess handles starting a process on a local/worktree/docker executor.
+// It deduplicates running dev processes and starts the new process via the lifecycle manager.
+func (h *ProcessHandlers) startLocalProcess(
+	c *gin.Context,
+	sessionID, repoID, kind, scriptName, command, workingDir string,
+	portEnv map[string]string,
+) {
+	if streams.ProcessKind(kind) == streams.ProcessKindDev {
+		if proc := h.getRunningDevProcess(c.Request.Context(), sessionID); proc != nil {
+			c.JSON(http.StatusOK, gin.H{"process": proc})
+			return
+		}
+	}
+	proc, err := h.lifecycleMgr.StartProcess(c.Request.Context(), lifecycle.StartProcessRequest{
+		SessionID:  sessionID,
+		Kind:       kind,
+		ScriptName: scriptName,
+		Command:    command,
+		WorkingDir: workingDir,
+		Env:        portEnv,
+	})
+	if err != nil {
+		h.logger.Error("failed to start process",
+			zap.String("session_id", sessionID),
+			zap.String("repo_id", repoID),
+			zap.String("kind", kind),
+			zap.String("script_name", scriptName),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.logger.Info("process started",
+		zap.String("session_id", sessionID),
+		zap.String("process_id", proc.ID),
+		zap.String("kind", kind),
+		zap.String("script_name", scriptName),
+	)
+	c.JSON(http.StatusOK, gin.H{"process": proc})
 }
 
 func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
@@ -283,19 +324,7 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
@@ -338,20 +367,7 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
@@ -399,26 +415,13 @@ func (h *ProcessHandlers) httpGetProcess(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
 		return
 	}
-	includeOutput := c.Query("include_output") == "true"
+	includeOutput := c.Query("include_output") == queryValueTrue
 	switch executor.Type {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		proc, err := h.lifecycleMgr.GetProcess(c.Request.Context(), processID, includeOutput)

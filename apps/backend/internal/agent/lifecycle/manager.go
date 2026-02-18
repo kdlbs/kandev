@@ -644,56 +644,72 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// Launch launches a new agent for a task
-func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
-	m.logger.Debug("launching agent",
-		zap.String("task_id", req.TaskID),
-		zap.String("agent_profile_id", req.AgentProfileID),
-		zap.Bool("use_worktree", req.UseWorktree))
-
-	// 1. Resolve the agent profile to get agent type info
-	var agentTypeName string
-	var profileInfo *AgentProfileInfo
-	var err error
-	if m.profileResolver != nil {
-		profileInfo, err = m.profileResolver.ResolveProfile(ctx, req.AgentProfileID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve agent profile: %w", err)
-		}
-		agentTypeName = profileInfo.AgentName
-		m.logger.Debug("resolved agent profile",
-			zap.String("profile_id", req.AgentProfileID),
-			zap.String("agent_name", profileInfo.AgentName),
-			zap.String("agent_type", agentTypeName))
-	} else {
+// resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
+func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
+	if m.profileResolver == nil {
 		// Fallback: treat AgentProfileID as agent type directly (for backward compat)
-		agentTypeName = req.AgentProfileID
 		m.logger.Warn("no profile resolver configured, using profile ID as agent type",
-			zap.String("agent_type", agentTypeName))
+			zap.String("agent_type", req.AgentProfileID))
+		return req.AgentProfileID, nil, nil
 	}
-
-	// 2. Get agent config from registry
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, req.AgentProfileID)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 	}
+	m.logger.Debug("resolved agent profile",
+		zap.String("profile_id", req.AgentProfileID),
+		zap.String("agent_name", profileInfo.AgentName),
+		zap.String("agent_type", profileInfo.AgentName))
+	return profileInfo.AgentName, profileInfo, nil
+}
 
-	if !agentConfig.Enabled() {
-		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+// buildLaunchMetadata builds runtime metadata for the Launch request.
+func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktreeBranch string) map[string]interface{} {
+	metadata := make(map[string]interface{})
+	for k, v := range req.Metadata {
+		metadata[k] = v
 	}
-
-	// 3. Check if session already has an agent running
-	if req.SessionID != "" {
-		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
-			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, existingExecution.ID)
-		}
+	if mainRepoGitDir != "" {
+		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
 	}
+	if worktreeID != "" {
+		metadata[MetadataKeyWorktreeID] = worktreeID
+	}
+	if worktreeBranch != "" {
+		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
+	}
+	return metadata
+}
 
-	// 4. Handle worktree creation/reuse if enabled
-	workspacePath := req.WorkspacePath
-	var mainRepoGitDir string // Path to main repo's .git directory for container mount
-	var worktreeID string     // Store worktree ID for session resumption
-	var worktreeBranch string // Store worktree branch for API responses
+// buildAgentCommand builds the agent command string for the execution.
+func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent) string {
+	model := ""
+	autoApprove := false
+	permissionValues := make(map[string]bool)
+	if profileInfo != nil {
+		model = profileInfo.Model
+		autoApprove = profileInfo.AutoApprove
+		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
+		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
+	}
+	// Allow model override from request (for dynamic model switching)
+	if req.ModelOverride != "" {
+		model = req.ModelOverride
+	}
+	cmdOpts := agents.CommandOptions{
+		Model:            model,
+		SessionID:        req.ACPSessionID,
+		AutoApprove:      autoApprove,
+		PermissionValues: permissionValues,
+	}
+	return m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
+}
+
+// launchResolveWorkspacePath resolves the effective workspace path, handling worktree
+// creation if requested. Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
+func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	workspacePath = req.WorkspacePath
 	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
 		wt, err := m.getOrCreateWorktree(ctx, req)
 		if err != nil {
@@ -701,31 +717,28 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 				zap.String("task_id", req.TaskID),
 				zap.Error(err))
 			// Fall back to direct mount if worktree creation fails
-			// Use RepositoryPath as the workspace
 			workspacePath = req.RepositoryPath
 		} else {
 			workspacePath = wt.Path
 			worktreeID = wt.ID
 			worktreeBranch = wt.Branch
-			// Git worktrees reference the main repo's .git directory via a .git file
-			// The worktree metadata in .git/worktrees/{name} contains a 'commondir' file
-			// that points back to the main .git directory (usually '../..')
-			// We need to mount the entire .git directory for git commands to work
+			// Git worktrees reference the main repo's .git directory via a .git file.
+			// We need to mount the entire .git directory for git commands to work.
 			mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
 		}
 	} else if req.RepositoryPath != "" && workspacePath == "" {
-		// No worktree, but we have a repository path - use it as workspace
 		workspacePath = req.RepositoryPath
 	}
+	return
+}
 
-	// 5. Generate a new execution ID
+// launchPrepareRequest copies the launch request, sets the resolved workspace path,
+// populates metadata from the request fields, and injects profile environment variables.
+func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string) {
 	executionID := uuid.New().String()
-
-	// 6. Prepare request with worktree path
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
 
-	// Store task description in metadata for StartAgentProcess
 	if reqWithWorktree.Metadata == nil {
 		reqWithWorktree.Metadata = make(map[string]interface{})
 	}
@@ -736,7 +749,6 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
 
-	// 6b. Add profile settings to environment
 	if profileInfo != nil {
 		if reqWithWorktree.Env == nil {
 			reqWithWorktree.Env = make(map[string]string)
@@ -748,26 +760,24 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
 	}
+	return reqWithWorktree, executionID
+}
 
-	// 7. Launch via runtime - creates agentctl instance with workspace access only
-	// Agent subprocess is NOT started - call StartAgentProcess() explicitly
-	// Select runtime based on executor type from request
-	rt, err := m.getRuntimeForExecutorType(req.ExecutorType)
+// launchBuildRuntimeRequest resolves MCP servers, builds the RuntimeCreateRequest,
+// and creates the runtime instance.
+func (m *Manager) launchBuildRuntimeRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, mainRepoGitDir, worktreeID, worktreeBranch string) (*RuntimeCreateRequest, *RuntimeInstance, Runtime, error) {
+	rt, err := m.getRuntimeForExecutorType(reqWithWorktree.ExecutorType)
 	if err != nil {
-		return nil, fmt.Errorf("no runtime configured: %w", err)
+		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
-	// Build environment variables
-	env := m.buildEnvForRuntime(executionID, &reqWithWorktree, agentConfig)
+	env := m.buildEnvForRuntime(executionID, reqWithWorktree, agentConfig)
 
-	// Resolve MCP servers early so they're available for protocols that need them at startup (e.g., Codex)
 	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, reqWithWorktree.AgentProfileID, reqWithWorktree.Metadata, agentConfig)
 	if err != nil {
 		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
-		// Continue without MCP servers - not a fatal error
 	}
 
-	// Convert ACP MCP servers to runtime config format
 	var mcpServers []McpServerConfig
 	for _, srv := range acpMcpServers {
 		mcpServers = append(mcpServers, McpServerConfig{
@@ -779,24 +789,8 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		})
 	}
 
-	// Build metadata with runtime-specific fields
-	metadata := make(map[string]interface{})
-	if reqWithWorktree.Metadata != nil {
-		for k, v := range reqWithWorktree.Metadata {
-			metadata[k] = v
-		}
-	}
-	if mainRepoGitDir != "" {
-		metadata[MetadataKeyMainRepoGitDir] = mainRepoGitDir
-	}
-	if worktreeID != "" {
-		metadata[MetadataKeyWorktreeID] = worktreeID
-	}
-	if worktreeBranch != "" {
-		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
-	}
+	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 
-	// Create runtime request (agent command not included - started explicitly later)
 	runtimeReq := &RuntimeCreateRequest{
 		InstanceID:     executionID,
 		TaskID:         reqWithWorktree.TaskID,
@@ -812,41 +806,60 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	runtimeInstance, err := rt.CreateInstance(ctx, runtimeReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create execution: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	return runtimeReq, runtimeInstance, rt, nil
+}
+
+// Launch launches a new agent for a task
+func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	m.logger.Debug("launching agent",
+		zap.String("task_id", req.TaskID),
+		zap.String("agent_profile_id", req.AgentProfileID),
+		zap.Bool("use_worktree", req.UseWorktree))
+
+	// 1. Resolve the agent profile to get agent type info
+	agentTypeName, profileInfo, err := m.resolveAgentProfile(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Get agent config from registry
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+	}
+	if !agentConfig.Enabled() {
+		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+	}
+
+	// 3. Check if session already has an agent running
+	if req.SessionID != "" {
+		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
+			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, existingExecution.ID)
+		}
+	}
+
+	// 4. Resolve workspace path (with optional worktree creation)
+	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+
+	// 5 & 6. Prepare the request copy with metadata and profile env
+	reqWithWorktree, executionID := m.launchPrepareRequest(req, profileInfo, workspacePath)
+
+	// 7. Build runtime request and create instance (agent not started yet)
+	runtimeReq, runtimeInstance, rt, err := m.launchBuildRuntimeRequest(ctx, executionID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch)
+	if err != nil {
+		return nil, err
 	}
 
 	// Convert to AgentExecution and set the runtime name
 	execution := runtimeInstance.ToAgentExecution(runtimeReq)
 	execution.RuntimeName = string(rt.Name())
 
-	// Set ACP session ID for session resumption (used by InitializeSession)
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
-
-	// Build agent command string for later use with StartAgentProcess
-	model := ""
-	autoApprove := false
-	permissionValues := make(map[string]bool)
-	if profileInfo != nil {
-		model = profileInfo.Model
-		autoApprove = profileInfo.AutoApprove
-		// Build permission values map from profile info
-		permissionValues["auto_approve"] = profileInfo.AutoApprove
-		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
-		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
-	}
-	// Allow model override from request (for dynamic model switching)
-	if req.ModelOverride != "" {
-		model = req.ModelOverride
-	}
-	cmdOpts := agents.CommandOptions{
-		Model:            model,
-		SessionID:        req.ACPSessionID,
-		AutoApprove:      autoApprove,
-		PermissionValues: permissionValues,
-	}
-	execution.AgentCommand = m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
+	execution.AgentCommand = m.buildAgentCommand(req, profileInfo, agentConfig)
 
 	// 8. Track the execution
 	m.executionStore.Add(execution)
@@ -881,6 +894,131 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 	return nil
 }
 
+// resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name
+// from the execution's agent profile and registry.
+func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execution *AgentExecution) (string, string) {
+	approvalPolicy := ""
+	agentDisplayName := ""
+	if execution.AgentProfileID == "" || m.profileResolver == nil {
+		return approvalPolicy, agentDisplayName
+	}
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	if err != nil {
+		return approvalPolicy, agentDisplayName
+	}
+	if profileInfo.AutoApprove {
+		approvalPolicy = "never"
+	} else {
+		approvalPolicy = "untrusted"
+	}
+	// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
+	if agentCfg, ok := m.registry.Get(profileInfo.AgentName); ok && agentCfg.DisplayName() != "" {
+		agentDisplayName = agentCfg.DisplayName()
+	} else {
+		agentDisplayName = profileInfo.AgentName
+	}
+	return approvalPolicy, agentDisplayName
+}
+
+// createBootMessage creates a boot message and starts the stderr polling goroutine.
+// Returns the message and stop channel (both nil if bootMessageService is not configured).
+func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
+	if m.bootMessageService == nil {
+		return nil, nil
+	}
+	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{
+		TaskSessionID: execution.SessionID,
+		TaskID:        execution.TaskID,
+		Content:       "",
+		AuthorType:    "agent",
+		Type:          "script_execution",
+		Metadata: map[string]interface{}{
+			"script_type": "agent_boot",
+			"agent_name":  agentDisplayName,
+			"command":     bootCommand,
+			"status":      "running",
+			"is_resuming": execution.ACPSessionID != "",
+			"started_at":  time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	})
+	if bootErr != nil {
+		m.logger.Warn("failed to create boot message, continuing without boot output",
+			zap.String("execution_id", execution.ID),
+			zap.Error(bootErr))
+		return nil, nil
+	}
+	bootStopCh := make(chan struct{})
+	go m.pollAgentStderr(execution.agentctl, bootMsg, bootStopCh)
+	return bootMsg, bootStopCh
+}
+
+// getTaskDescriptionFromMetadata extracts the task description string from execution metadata.
+func getTaskDescriptionFromMetadata(execution *AgentExecution) string {
+	if execution.Metadata == nil {
+		return ""
+	}
+	if desc, ok := execution.Metadata["task_description"].(string); ok {
+		return desc
+	}
+	return ""
+}
+
+// configureAndStartAgent configures the agent command and starts the agent subprocess.
+// Returns the effective boot command (full command with adapter args, or base command).
+func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution, taskDescription, approvalPolicy string) (string, error) {
+	env := map[string]string{}
+	if taskDescription != "" {
+		env["TASK_DESCRIPTION"] = taskDescription
+	}
+
+	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy); err != nil {
+		return "", fmt.Errorf("failed to configure agent: %w", err)
+	}
+
+	fullCommand, err := execution.agentctl.Start(ctx)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
+		return "", fmt.Errorf("failed to start agent: %w", err)
+	}
+
+	bootCommand := fullCommand
+	if bootCommand == "" {
+		bootCommand = execution.AgentCommand
+	}
+	return bootCommand, nil
+}
+
+// initializeAgentSession handles post-startup initialization: boot message, ACP session,
+// MCP servers. It finalizes the boot message on success or failure.
+func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName, taskDescription string) error {
+	bootMsg, bootStopCh := m.createBootMessage(ctx, execution, bootCommand, agentDisplayName)
+
+	// Give the agent process a moment to initialize
+	time.Sleep(500 * time.Millisecond)
+
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		return fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	if err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		m.updateExecutionError(execution.ID, "failed to resolve MCP config: "+err.Error())
+		return fmt.Errorf("failed to resolve MCP config: %w", err)
+	}
+
+	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
+		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
+		return fmt.Errorf("failed to initialize ACP: %w", err)
+	}
+
+	m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "exited")
+	return nil
+}
+
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
@@ -901,7 +1039,6 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-
 	if execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
 	}
@@ -912,13 +1049,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
 
-	// Get task description from metadata
-	taskDescription := ""
-	if execution.Metadata != nil {
-		if desc, ok := execution.Metadata["task_description"].(string); ok {
-			taskDescription = desc
-		}
-	}
+	taskDescription := getTaskDescriptionFromMetadata(execution)
 
 	m.logger.Warn("StartAgentProcess: task description resolved",
 		zap.String("execution_id", executionID),
@@ -927,47 +1058,11 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		zap.String("agent_command", execution.AgentCommand),
 		zap.String("acp_session_id", execution.ACPSessionID))
 
-	// Build environment for the agent process
-	env := map[string]string{}
-	if taskDescription != "" {
-		env["TASK_DESCRIPTION"] = taskDescription
-	}
+	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
 
-	// Determine approval policy and resolve agent display name from profile + registry
-	approvalPolicy := ""
-	agentDisplayName := ""
-	if execution.AgentProfileID != "" && m.profileResolver != nil {
-		if profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID); err == nil {
-			if profileInfo.AutoApprove {
-				approvalPolicy = "never"
-			} else {
-				approvalPolicy = "untrusted"
-			}
-			// Look up display name from registry (e.g. "Claude", "Auggie", "Codex")
-			if agentConfig, ok := m.registry.Get(profileInfo.AgentName); ok && agentConfig.DisplayName() != "" {
-				agentDisplayName = agentConfig.DisplayName()
-			} else {
-				agentDisplayName = profileInfo.AgentName
-			}
-		}
-	}
-
-	// Configure the agent command
-	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy); err != nil {
-		return fmt.Errorf("failed to configure agent: %w", err)
-	}
-
-	// Start the agent process
-	fullCommand, err := execution.agentctl.Start(ctx)
+	bootCommand, err := m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy)
 	if err != nil {
-		m.updateExecutionError(executionID, "failed to start agent: "+err.Error())
-		return fmt.Errorf("failed to start agent: %w", err)
-	}
-
-	// Use the full command (with adapter args) if available, otherwise fall back to the base command
-	bootCommand := fullCommand
-	if bootCommand == "" {
-		bootCommand = execution.AgentCommand
+		return err
 	}
 
 	m.logger.Info("agent process started",
@@ -975,66 +1070,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 		zap.String("task_id", execution.TaskID),
 		zap.String("command", bootCommand))
 
-	// Create boot message to show agent boot progress in chat
-	var bootMsg *models.Message
-	var bootStopCh chan struct{}
-	if m.bootMessageService != nil {
-		var bootErr error
-		bootMsg, bootErr = m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{
-			TaskSessionID: execution.SessionID,
-			TaskID:        execution.TaskID,
-			Content:       "",
-			AuthorType:    "agent",
-			Type:          "script_execution",
-			Metadata: map[string]interface{}{
-				"script_type":  "agent_boot",
-				"agent_name":   agentDisplayName,
-				"command":      bootCommand,
-				"status":       "running",
-				"is_resuming":  execution.ACPSessionID != "",
-				"started_at":   time.Now().UTC().Format(time.RFC3339Nano),
-			},
-		})
-		if bootErr != nil {
-			m.logger.Warn("failed to create boot message, continuing without boot output",
-				zap.String("execution_id", executionID),
-				zap.Error(bootErr))
-		} else {
-			// Start polling goroutine for stderr
-			bootStopCh = make(chan struct{})
-			go m.pollAgentStderr(execution.agentctl, bootMsg, bootStopCh)
-		}
-	}
-
-	// Give the agent process a moment to initialize
-	time.Sleep(500 * time.Millisecond)
-
-	// Get agent config for ACP session initialization
-	agentConfig, err := m.getAgentConfigForExecution(execution)
-	if err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
-		return fmt.Errorf("failed to get agent config: %w", err)
-	}
-
-	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
-	if err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
-		m.updateExecutionError(executionID, "failed to resolve MCP config: "+err.Error())
-		return fmt.Errorf("failed to resolve MCP config: %w", err)
-	}
-
-	// Initialize ACP session.
-	// Session status events are now emitted by all adapters via the stream.
-	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
-		m.updateExecutionError(executionID, "failed to initialize ACP: "+err.Error())
-		return fmt.Errorf("failed to initialize ACP: %w", err)
-	}
-
-	// Finalize boot message as successful
-	m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "exited")
-
-	return nil
+	return m.initializeAgentSession(ctx, execution, bootCommand, agentDisplayName, taskDescription)
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
@@ -1342,6 +1378,219 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady)
 }
 
+// handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
+func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.Text == "" {
+		return
+	}
+	execution.messageMu.Lock()
+	execution.messageBuffer.WriteString(event.Text)
+	bufferLenAfterWrite := execution.messageBuffer.Len()
+	m.logger.Debug("message_chunk written to buffer",
+		zap.String("execution_id", execution.ID),
+		zap.String("operation_id", event.OperationID),
+		zap.Int("text_length", len(event.Text)),
+		zap.Int("buffer_length_after", bufferLenAfterWrite))
+
+	bufContent := execution.messageBuffer.String()
+	lastNewline := strings.LastIndex(bufContent, "\n")
+	if lastNewline == -1 {
+		execution.messageMu.Unlock()
+		return
+	}
+	toFlush := bufContent[:lastNewline+1]
+	remainder := bufContent[lastNewline+1:]
+	execution.messageBuffer.Reset()
+	execution.messageBuffer.WriteString(remainder)
+	execution.messageMu.Unlock()
+
+	if strings.TrimSpace(toFlush) != "" {
+		m.publishStreamingMessage(execution, toFlush)
+	}
+}
+
+// handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
+func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.ReasoningText == "" {
+		return
+	}
+	execution.messageMu.Lock()
+	execution.thinkingBuffer.WriteString(event.ReasoningText)
+
+	bufContent := execution.thinkingBuffer.String()
+	lastNewline := strings.LastIndex(bufContent, "\n")
+	if lastNewline == -1 {
+		execution.messageMu.Unlock()
+		return
+	}
+	toFlush := bufContent[:lastNewline+1]
+	remainder := bufContent[lastNewline+1:]
+	execution.thinkingBuffer.Reset()
+	execution.thinkingBuffer.WriteString(remainder)
+	execution.messageMu.Unlock()
+
+	if strings.TrimSpace(toFlush) != "" {
+		m.publishStreamingThinking(execution, toFlush)
+	}
+}
+
+// handleCompleteEventMarkState marks the execution state after a complete event:
+// failed+removed on error, ready on success.
+func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
+	if isError {
+		errorMsg := "agent error completion"
+		if event.Error != "" {
+			errorMsg = event.Error
+		}
+		m.logger.Warn("error completion received, marking execution as failed",
+			zap.String("execution_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("error", errorMsg),
+			zap.String("event_error", event.Error),
+			zap.String("event_text", event.Text),
+			zap.Any("event_data", event.Data),
+			zap.String("agent_command", execution.AgentCommand),
+			zap.String("acp_session_id", execution.ACPSessionID))
+		if err := m.MarkCompleted(execution.ID, 1, errorMsg); err != nil {
+			m.logger.Error("failed to mark execution as failed after error completion",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+		m.RemoveExecution(execution.ID)
+		return
+	}
+	if err := m.MarkReady(execution.ID); err != nil {
+		m.logger.Error("failed to mark execution as ready after complete",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
+// handleCompleteEventSignal sends the completion signal on the promptDoneCh channel.
+func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
+	stopReason := "end_turn"
+	errorMsg := ""
+	if isError {
+		stopReason = "error"
+		errorMsg = "agent error completion"
+		if event.Error != "" {
+			errorMsg = event.Error
+		}
+	}
+	select {
+	case execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason: stopReason,
+		IsError:    isError,
+		Error:      errorMsg,
+	}:
+	default:
+		// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
+	}
+}
+
+// handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
+func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) {
+	// Check buffer content BEFORE any processing
+	execution.messageMu.Lock()
+	bufferContentBeforeFlush := execution.messageBuffer.String()
+	currentMsgID := execution.currentMessageID
+	execution.messageMu.Unlock()
+
+	bufferPreview := bufferContentBeforeFlush
+	if len(bufferPreview) > 100 {
+		bufferPreview = bufferPreview[:100] + "..."
+	}
+
+	// Check if this is an error completion (agent failed to process the prompt)
+	isError := false
+	if event.Data != nil {
+		if v, ok := event.Data["is_error"].(bool); ok {
+			isError = v
+		}
+	}
+
+	m.logger.Info("agent turn complete",
+		zap.String("execution_id", execution.ID),
+		zap.String("operation_id", event.OperationID),
+		zap.String("session_id", event.SessionID),
+		zap.String("current_msg_id", currentMsgID),
+		zap.Int("buffer_length", len(bufferContentBeforeFlush)),
+		zap.String("buffer_preview", bufferPreview),
+		zap.Bool("is_error", isError))
+
+	// Flush the message buffer to publish any remaining content as a streaming message.
+	flushedText := m.flushMessageBuffer(execution)
+	if flushedText != "" {
+		event.Text = flushedText
+		if m.historyManager != nil && execution.SessionID != "" {
+			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+				m.logger.Warn("failed to store final agent message to history", zap.Error(err))
+			}
+		}
+	}
+
+	m.logger.Info("complete event processed",
+		zap.String("execution_id", execution.ID),
+		zap.String("operation_id", event.OperationID))
+
+	m.handleCompleteEventMarkState(execution, event, isError)
+	handleCompleteEventSignal(execution, event, isError)
+}
+
+// handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
+// and stores the tool call in session history.
+// Returns the (possibly updated) event.
+func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
+	if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
+		event.Text = flushedText
+		if m.historyManager != nil && execution.SessionID != "" {
+			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
+				m.logger.Warn("failed to store agent message to history", zap.Error(err))
+			}
+		}
+	}
+	if m.historyManager != nil && execution.SessionID != "" {
+		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
+			m.logger.Warn("failed to store tool call to history", zap.Error(err))
+		}
+	}
+	m.logger.Debug("tool call started",
+		zap.String("execution_id", execution.ID),
+		zap.String("tool_call_id", event.ToolCallID),
+		zap.String("tool_name", event.ToolName))
+	return event
+}
+
+// handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
+// Returns true because no further stream publishing is needed.
+func (m *Manager) handleContextWindowEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	m.logger.Debug("context window update received",
+		zap.String("execution_id", execution.ID),
+		zap.Int64("size", event.ContextWindowSize),
+		zap.Int64("used", event.ContextWindowUsed),
+		zap.Float64("efficiency", event.ContextEfficiency))
+	m.eventPublisher.PublishContextWindow(
+		execution,
+		event.ContextWindowSize,
+		event.ContextWindowUsed,
+		event.ContextWindowRemaining,
+		event.ContextEfficiency,
+	)
+}
+
+// handleAvailableCommandsEvent processes the "available_commands" agent event.
+func (m *Manager) handleAvailableCommandsEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if len(event.AvailableCommands) == 0 {
+		return
+	}
+	execution.SetAvailableCommands(event.AvailableCommands)
+	m.logger.Debug("stored available commands",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.Int("command_count", len(event.AvailableCommands)))
+	m.eventPublisher.PublishAvailableCommands(execution, event.AvailableCommands)
+}
+
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	// Update last activity timestamp for stall detection
@@ -1349,127 +1598,37 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
 
-	// Log all incoming events for debugging
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
 		zap.String("event_type", event.Type),
 		zap.String("operation_id", event.OperationID),
 		zap.Int("text_length", len(event.Text)))
 
-	// Handle different event types based on the Type field
 	switch event.Type {
 	case "message_chunk":
-		// Accumulate message content and stream on newline boundaries for real-time feedback
-		if event.Text != "" {
-			execution.messageMu.Lock()
-			execution.messageBuffer.WriteString(event.Text)
-			bufferLenAfterWrite := execution.messageBuffer.Len()
-			m.logger.Debug("message_chunk written to buffer",
-				zap.String("execution_id", execution.ID),
-				zap.String("operation_id", event.OperationID),
-				zap.Int("text_length", len(event.Text)),
-				zap.Int("buffer_length_after", bufferLenAfterWrite))
-
-			// Check if buffer contains newlines - if so, flush up to the last newline
-			bufContent := execution.messageBuffer.String()
-			lastNewline := strings.LastIndex(bufContent, "\n")
-			if lastNewline != -1 {
-				// Extract content up to and including the last newline
-				toFlush := bufContent[:lastNewline+1]
-				remainder := bufContent[lastNewline+1:]
-
-				// Reset buffer with remainder
-				execution.messageBuffer.Reset()
-				execution.messageBuffer.WriteString(remainder)
-				execution.messageMu.Unlock()
-
-				// Publish streaming message event if there's content to flush
-				if strings.TrimSpace(toFlush) != "" {
-					m.publishStreamingMessage(execution, toFlush)
-				}
-			} else {
-				execution.messageMu.Unlock()
-			}
-		}
-		// Return early - message_chunk is transformed to message_streaming, no need to publish raw event
+		m.handleMessageChunkEvent(execution, event)
 		return
 
 	case "reasoning":
-		// Stream thinking content like message chunks for real-time feedback
-		// All adapters normalize reasoning to ReasoningText field
-		if event.ReasoningText != "" {
-			execution.messageMu.Lock()
-			execution.thinkingBuffer.WriteString(event.ReasoningText)
-
-			// Check if buffer contains newlines - if so, flush up to the last newline
-			bufContent := execution.thinkingBuffer.String()
-			lastNewline := strings.LastIndex(bufContent, "\n")
-			if lastNewline != -1 {
-				// Extract content up to and including the last newline
-				toFlush := bufContent[:lastNewline+1]
-				remainder := bufContent[lastNewline+1:]
-
-				// Reset buffer with remainder
-				execution.thinkingBuffer.Reset()
-				execution.thinkingBuffer.WriteString(remainder)
-				execution.messageMu.Unlock()
-
-				// Publish streaming thinking event if there's content to flush
-				if strings.TrimSpace(toFlush) != "" {
-					m.publishStreamingThinking(execution, toFlush)
-				}
-			} else {
-				execution.messageMu.Unlock()
-			}
-		}
-		// Return early - reasoning is transformed to thinking_streaming, no need to publish raw event
+		m.handleReasoningEvent(execution, event)
 		return
 
 	case "tool_call":
-		// Tool call starting marks a step boundary - flush the accumulated message
-		// This way, each agent response before a tool use becomes a separate comment
-		// Include the flushed text in the event for the orchestrator to save
-		if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
-			event.Text = flushedText
-			// Store flushed agent message to session history for context injection
-			if m.historyManager != nil && execution.SessionID != "" {
-				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-					m.logger.Warn("failed to store agent message to history", zap.Error(err))
-				}
-			}
-		}
-
-		// Store tool call to session history for context injection
-		if m.historyManager != nil && execution.SessionID != "" {
-			if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
-				m.logger.Warn("failed to store tool call to history", zap.Error(err))
-			}
-		}
-
-		m.logger.Debug("tool call started",
-			zap.String("execution_id", execution.ID),
-			zap.String("tool_call_id", event.ToolCallID),
-			zap.String("tool_name", event.ToolName))
-		// Tool call message creation is handled by orchestrator via AgentStreamEvent
+		event = m.handleToolCallEvent(execution, event)
 
 	case "tool_update":
-		// Store tool result to session history when complete
 		if m.historyManager != nil && execution.SessionID != "" && event.ToolStatus == "complete" {
 			if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
 				m.logger.Warn("failed to store tool result to history", zap.Error(err))
 			}
 		}
-		// Tool update handled by orchestrator via AgentStreamEvent
 
 	case "plan":
 		m.logger.Debug("agent plan update",
 			zap.String("execution_id", execution.ID))
 
 	case "error":
-		// Flush any accumulated content and clear streaming state on error
 		m.flushMessageBuffer(execution)
-
-		// Log all available error information for debugging
 		m.logger.Error("agent error",
 			zap.String("execution_id", execution.ID),
 			zap.String("error", event.Error),
@@ -1477,153 +1636,25 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.Any("data", event.Data))
 
 	case "complete":
-		// Check buffer content BEFORE any processing
-		execution.messageMu.Lock()
-		bufferContentBeforeFlush := execution.messageBuffer.String()
-		currentMsgID := execution.currentMessageID
-		execution.messageMu.Unlock()
-
-		// Log preview of buffer content for debugging (first 100 chars)
-		bufferPreview := bufferContentBeforeFlush
-		if len(bufferPreview) > 100 {
-			bufferPreview = bufferPreview[:100] + "..."
-		}
-
-		// Check if this is an error completion (agent failed to process the prompt)
-		isError := false
-		if event.Data != nil {
-			if v, ok := event.Data["is_error"].(bool); ok {
-				isError = v
-			}
-		}
-
-		m.logger.Info("agent turn complete",
-			zap.String("execution_id", execution.ID),
-			zap.String("operation_id", event.OperationID),
-			zap.String("session_id", event.SessionID),
-			zap.String("current_msg_id", currentMsgID),
-			zap.Int("buffer_length", len(bufferContentBeforeFlush)),
-			zap.String("buffer_preview", bufferPreview),
-			zap.Bool("is_error", isError))
-
-		// Flush the message buffer to publish any remaining content as a streaming message.
-		// If the buffer never triggered streaming (no newlines), we emit the text on the
-		// complete event so the orchestrator can persist the final message.
-		flushedText := m.flushMessageBuffer(execution)
-		if flushedText != "" {
-			event.Text = flushedText
-			if m.historyManager != nil && execution.SessionID != "" {
-				if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-					m.logger.Warn("failed to store final agent message to history", zap.Error(err))
-				}
-			}
-		}
-
-		m.logger.Info("complete event processed",
-			zap.String("execution_id", execution.ID),
-			zap.String("operation_id", event.OperationID))
-
-		// If this was an error completion, mark the execution as failed
-		// The agent process will likely exit soon after sending an error result
-		if isError {
-			errorMsg := "agent error completion"
-			if event.Error != "" {
-				errorMsg = event.Error
-			}
-			m.logger.Warn("error completion received, marking execution as failed",
-				zap.String("execution_id", execution.ID),
-				zap.String("task_id", execution.TaskID),
-				zap.String("error", errorMsg),
-				zap.String("event_error", event.Error),
-				zap.String("event_text", event.Text),
-				zap.Any("event_data", event.Data),
-				zap.String("agent_command", execution.AgentCommand),
-				zap.String("acp_session_id", execution.ACPSessionID))
-
-			if err := m.MarkCompleted(execution.ID, 1, errorMsg); err != nil {
-				m.logger.Error("failed to mark execution as failed after error completion",
-					zap.String("execution_id", execution.ID),
-					zap.Error(err))
-			}
-
-			// Remove the execution from the store so a new one can be created
-			// The AgentFailed event has already been published by MarkCompleted
-			m.RemoveExecution(execution.ID)
-		} else {
-			// Mark agent as READY for follow-up prompts
-			if err := m.MarkReady(execution.ID); err != nil {
-				m.logger.Error("failed to mark execution as ready after complete",
-					zap.String("execution_id", execution.ID),
-					zap.Error(err))
-			}
-		}
-
-		// Signal the completion channel so SendPrompt unblocks
-		stopReason := "end_turn"
-		errorMsg := ""
-		if isError {
-			stopReason = "error"
-			errorMsg = "agent error completion"
-			if event.Error != "" {
-				errorMsg = event.Error
-			}
-		}
-		select {
-		case execution.promptDoneCh <- PromptCompletionSignal{
-			StopReason: stopReason,
-			IsError:    isError,
-			Error:      errorMsg,
-		}:
-		default:
-			// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
-		}
+		m.handleCompleteEvent(execution, &event)
 
 	case "permission_request":
 		m.logger.Debug("permission request received",
 			zap.String("execution_id", execution.ID),
 			zap.String("pending_id", event.PendingID),
 			zap.String("title", event.PermissionTitle))
-
-		// Publish permission request to dedicated subject for orchestrator to handle
 		m.eventPublisher.PublishPermissionRequest(execution, event)
-		// Return early - permission requests don't need to be published as stream events
 		return
 
 	case "context_window":
-		m.logger.Debug("context window update received",
-			zap.String("execution_id", execution.ID),
-			zap.Int64("size", event.ContextWindowSize),
-			zap.Int64("used", event.ContextWindowUsed),
-			zap.Float64("efficiency", event.ContextEfficiency))
-
-		// Publish context window event to event bus for orchestrator to persist
-		m.eventPublisher.PublishContextWindow(
-			execution,
-			event.ContextWindowSize,
-			event.ContextWindowUsed,
-			event.ContextWindowRemaining,
-			event.ContextEfficiency,
-		)
-		// Return early - context window events don't need to be published as stream events
+		m.handleContextWindowEvent(execution, event)
 		return
 
 	case "available_commands":
-		// Store available commands in the execution for later retrieval (e.g., after page refresh)
-		if len(event.AvailableCommands) > 0 {
-			execution.SetAvailableCommands(event.AvailableCommands)
-			m.logger.Debug("stored available commands",
-				zap.String("execution_id", execution.ID),
-				zap.String("session_id", execution.SessionID),
-				zap.Int("command_count", len(event.AvailableCommands)))
-
-			// Also publish to event bus for WebSocket broadcast
-			m.eventPublisher.PublishAvailableCommands(execution, event.AvailableCommands)
-		}
-		// Return early - we handle broadcasting ourselves
+		m.handleAvailableCommandsEvent(execution, event)
 		return
 	}
 
-	// Publish agent stream event to event bus for WebSocket streaming
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
 }
 
@@ -2549,33 +2580,56 @@ func (m *Manager) GetPassthroughBuffer(ctx context.Context, sessionID string) (s
 	return buffer.String(), nil
 }
 
-// startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
-// Instead of using ACP protocol, the agent's stdin/stdout is passed through directly.
-func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
-	// Get agent config for passthrough command
+// buildPassthroughEnv builds the environment map for a passthrough session,
+// including Kandev metadata and required credentials from the agent runtime config.
+func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecution, requiredEnv []string) map[string]string {
+	env := make(map[string]string)
+	env["KANDEV_TASK_ID"] = execution.TaskID
+	env["KANDEV_SESSION_ID"] = execution.SessionID
+	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+	if m.credsMgr != nil {
+		for _, credKey := range requiredEnv {
+			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
+				env[credKey] = value
+			}
+		}
+	}
+	return env
+}
+
+// startPassthroughShell starts the shell session for a passthrough execution.
+// Non-fatal errors are logged with the provided warning message.
+func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExecution, shellWarnMsg string) {
+	if execution.agentctl == nil {
+		return
+	}
+	if err := execution.agentctl.StartShell(ctx); err != nil {
+		m.logger.Warn(shellWarnMsg,
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("shell session started for passthrough mode",
+			zap.String("execution_id", execution.ID))
+	}
+}
+
+// passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
+// Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
+func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
-		return fmt.Errorf("failed to get agent config: %w", err)
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("failed to get agent config: %w", err)
 	}
 
-	// Validate passthrough support
 	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
 	if !ok {
-		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
 	}
 
 	pt := ptAgent.PassthroughConfig()
 	rt := agentConfig.Runtime()
+	taskDescription := getTaskDescriptionFromMetadata(execution)
 
-	// Get task description from metadata for initial prompt
-	taskDescription := ""
-	if execution.Metadata != nil {
-		if desc, ok := execution.Metadata["task_description"].(string); ok {
-			taskDescription = desc
-		}
-	}
-
-	// Build passthrough command with initial prompt and profile settings
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(profileInfo),
 		SessionID:        execution.ACPSessionID,
@@ -2583,38 +2637,21 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		PermissionValues: profilePermissionValues(profileInfo),
 	})
 	if cmd.IsEmpty() {
-		return fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
+	return ptAgent, pt, rt, cmd, nil
+}
 
-	m.logger.Info("passthrough command built",
-		zap.String("session_id", execution.SessionID),
-		zap.Strings("full_command", cmd.Args()))
-
-	// Get the interactive runner from runtime
+// startInteractiveProcess launches the interactive PTY process for a passthrough session.
+// Returns the process info on success.
+func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command) (*process.InteractiveProcessInfo, error) {
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
-		return fmt.Errorf("interactive runner not available for passthrough mode")
+		return nil, fmt.Errorf("interactive runner not available for passthrough mode")
 	}
 
-	// Build environment variables
-	env := make(map[string]string)
-	env["KANDEV_TASK_ID"] = execution.TaskID
-	env["KANDEV_SESSION_ID"] = execution.SessionID
-	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
-
-	// Add required credentials from agent config
-	if m.credsMgr != nil {
-		for _, credKey := range rt.RequiredEnv {
-			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
-				env[credKey] = value
-			}
-		}
-	}
-
-	// Start the interactive process immediately with default dimensions
-	// Start process - either immediately (default) or wait for terminal connection
 	// Some agents (like Codex) require the terminal to be connected first because
-	// they query the terminal for cursor position on startup
+	// they query the terminal for cursor position on startup.
 	startReq := process.InteractiveStartRequest{
 		SessionID:       execution.SessionID,
 		Command:         cmd.Args(),
@@ -2634,10 +2671,30 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start passthrough session: "+err.Error())
-		return fmt.Errorf("failed to start passthrough session: %w", err)
+		return nil, fmt.Errorf("failed to start passthrough session: %w", err)
+	}
+	return processInfo, nil
+}
+
+// startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
+// Instead of using ACP protocol, the agent's stdin/stdout is passed through directly.
+func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
+	_, pt, rt, cmd, err := m.passthroughAgentCommand(execution, profileInfo)
+	if err != nil {
+		return err
 	}
 
-	// Store the passthrough process ID
+	m.logger.Info("passthrough command built",
+		zap.String("session_id", execution.SessionID),
+		zap.Strings("full_command", cmd.Args()))
+
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+
+	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd)
+	if err != nil {
+		return err
+	}
+
 	execution.PassthroughProcessID = processInfo.ID
 
 	m.logger.Info("passthrough session started",
@@ -2647,28 +2704,9 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		zap.String("process_id", processInfo.ID),
 		zap.Strings("command", cmd.Args()))
 
-	// Emit agentctl ready event to indicate session is available
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
+	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
 
-	// Start shell session for workspace shell access.
-	// In passthrough mode, the agent runs via InteractiveRunner, so the agentctl
-	// process manager never starts and the shell isn't auto-created.
-	// We need to start it explicitly so the right panel terminal works.
-	if execution.agentctl != nil {
-		if err := execution.agentctl.StartShell(ctx); err != nil {
-			m.logger.Warn("failed to start shell for passthrough session",
-				zap.String("execution_id", execution.ID),
-				zap.Error(err))
-			// Non-fatal: continue without shell
-		} else {
-			m.logger.Info("shell session started for passthrough mode",
-				zap.String("execution_id", execution.ID))
-		}
-	}
-
-	// Connect to workspace stream for shell/git/file features even in passthrough mode.
-	// The passthrough terminal handles agent interaction (center panel), while the
-	// workspace stream provides shell I/O (right panel) - they work independently.
 	if m.streamManager != nil && execution.agentctl != nil {
 		go m.streamManager.connectWorkspaceStream(execution, nil)
 	}
@@ -2747,20 +2785,8 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		return fmt.Errorf("interactive runner not available")
 	}
 
-	// Build environment variables
-	env := make(map[string]string)
-	env["KANDEV_TASK_ID"] = execution.TaskID
-	env["KANDEV_SESSION_ID"] = execution.SessionID
-	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
-
-	// Add required credentials
-	if m.credsMgr != nil {
-		for _, credKey := range rt.RequiredEnv {
-			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
-				env[credKey] = value
-			}
-		}
-	}
+	// Build environment variables including required credentials
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 
 	// Start the interactive process.
 	// Always use immediate start on resume — the terminal WebSocket is already connected,
@@ -2798,17 +2824,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 
 	// Start shell session for workspace shell access (right panel terminal).
 	// This needs to be done after resume since the shell process was killed on backend restart.
-	if execution.agentctl != nil {
-		if err := execution.agentctl.StartShell(ctx); err != nil {
-			m.logger.Warn("failed to start shell for resumed passthrough session",
-				zap.String("execution_id", execution.ID),
-				zap.Error(err))
-			// Non-fatal: continue without shell
-		} else {
-			m.logger.Info("shell session started for resumed passthrough session",
-				zap.String("execution_id", execution.ID))
-		}
-	}
+	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
 
 	// Connect to workspace stream for shell/git/file features.
 	// Only connect if not already connected (process restart reuses the same agentctl).
@@ -2860,7 +2876,7 @@ func (m *Manager) handlePassthroughOutput(output *agentctltypes.ProcessOutput) {
 	clientOutput := &agentctl.ProcessOutput{
 		SessionID: output.SessionID,
 		ProcessID: output.ProcessID,
-		Kind:      streams.ProcessKind(output.Kind),
+		Kind:      output.Kind,
 		Stream:    output.Stream,
 		Data:      output.Data,
 		Timestamp: output.Timestamp,
@@ -2888,11 +2904,11 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 	clientStatus := &agentctl.ProcessStatusUpdate{
 		SessionID:  status.SessionID,
 		ProcessID:  status.ProcessID,
-		Kind:       streams.ProcessKind(status.Kind),
+		Kind:       status.Kind,
 		Command:    status.Command,
 		ScriptName: status.ScriptName,
 		WorkingDir: status.WorkingDir,
-		Status:     streams.ProcessStatus(status.Status),
+		Status:     status.Status,
 		ExitCode:   status.ExitCode,
 		Timestamp:  status.Timestamp,
 	}

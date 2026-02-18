@@ -134,7 +134,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
-	includeArchived := c.Query("include_archived") == "true"
+	includeArchived := c.Query("include_archived") == queryValueTrue
 
 	resp, err := h.controller.ListTasksByWorkspace(c.Request.Context(), dto.ListTasksByWorkspaceRequest{
 		WorkspaceID:     c.Param("id"),
@@ -361,39 +361,52 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			response.TaskSessionID = sessionID
 		}
 	} else if body.StartAgent && body.AgentProfileID != "" && h.orchestrator != nil {
-		// Create session entry synchronously so we can return the session ID immediately
-		sessionID, err := h.orchestrator.PrepareTaskSession(reqCtx, resp.ID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
-		if err != nil {
-			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", resp.ID))
-			// Continue without session - task was created successfully
-		} else {
-			response.TaskSessionID = sessionID
-
-			// Launch agent asynchronously so the HTTP request can return immediately.
-			// The frontend will receive WebSocket updates when the agent actually starts.
-			executorID := body.ExecutorID  // Capture for goroutine
-			stepID := resolvedStepID       // Capture for goroutine
-			go func() {
-				// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
-				startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
-				defer cancel()
-				// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-				execution, err := h.orchestrator.StartTaskWithSession(startCtx, resp.ID, sessionID, body.AgentProfileID, executorID, body.Priority, resp.Description, stepID, body.PlanMode)
-				if err != nil {
-					h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", resp.ID), zap.String("session_id", sessionID))
-					return
-				}
-				h.logger.Info("agent started for task (async)",
-					zap.String("task_id", resp.ID),
-					zap.String("session_id", execution.SessionID),
-					zap.String("executor_id", executorID),
-					zap.String("workflow_step_id", stepID),
-					zap.String("execution_id", execution.AgentExecutionID))
-			}()
-		}
+		h.startAgentForNewTask(reqCtx, &response, resp.ID, resp.Description, body, resolvedStepID)
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// startAgentForNewTask prepares a session and launches the agent asynchronously for a
+// newly created task when start_agent is requested. It populates response.TaskSessionID
+// on success.
+func (h *TaskHandlers) startAgentForNewTask(
+	ctx context.Context,
+	response *createTaskResponse,
+	taskID, description string,
+	body httpCreateTaskRequest,
+	resolvedStepID string,
+) {
+	// Create session entry synchronously so we can return the session ID immediately
+	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
+	if err != nil {
+		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
+		// Continue without session - task was created successfully
+		return
+	}
+	response.TaskSessionID = sessionID
+
+	// Launch agent asynchronously so the HTTP request can return immediately.
+	// The frontend will receive WebSocket updates when the agent actually starts.
+	executorID := body.ExecutorID // Capture for goroutine
+	stepID := resolvedStepID     // Capture for goroutine
+	go func() {
+		// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
+		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
+		defer cancel()
+		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
+		execution, err := h.orchestrator.StartTaskWithSession(startCtx, taskID, sessionID, body.AgentProfileID, executorID, body.Priority, description, stepID, body.PlanMode)
+		if err != nil {
+			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
+		h.logger.Info("agent started for task (async)",
+			zap.String("task_id", taskID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("executor_id", executorID),
+			zap.String("workflow_step_id", stepID),
+			zap.String("execution_id", execution.AgentExecutionID))
+	}()
 }
 
 type httpUpdateTaskRequest struct {
@@ -504,11 +517,14 @@ func (h *TaskHandlers) wsListTaskSessions(ctx context.Context, msg *ws.Message) 
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.TaskID == "" {
+	return h.doListTaskSessions(ctx, msg, req.TaskID)
+}
+
+func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, taskID string) (*ws.Message, error) {
+	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-
-	resp, err := h.controller.ListTaskSessions(ctx, dto.ListTaskSessionsRequest{TaskID: req.TaskID})
+	resp, err := h.controller.ListTaskSessions(ctx, dto.ListTaskSessionsRequest{TaskID: taskID})
 	if err != nil {
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
@@ -695,46 +711,18 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsDeleteTaskRequest struct {
-	ID string `json:"id"`
-}
-
 func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDeleteTaskRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-
-	resp, err := h.controller.DeleteTask(ctx, dto.DeleteTaskRequest{ID: req.ID})
-	if err != nil {
-		h.logger.Error("failed to delete task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsArchiveTaskRequest struct {
-	ID string `json:"id"`
+	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete task",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.DeleteTask(ctx, dto.DeleteTaskRequest{ID: id})
+		})
 }
 
 func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsArchiveTaskRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-
-	resp, err := h.controller.ArchiveTask(ctx, dto.ArchiveTaskRequest{ID: req.ID})
-	if err != nil {
-		h.logger.Error("failed to archive task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return wsHandleIDRequest(ctx, msg, h.logger, "failed to archive task",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.ArchiveTask(ctx, dto.ArchiveTaskRequest{ID: id})
+		})
 }
 
 type wsMoveTaskRequest struct {
@@ -828,29 +816,37 @@ func (h *TaskHandlers) wsGetGitSnapshots(ctx context.Context, msg *ws.Message) (
 	})
 }
 
-type wsGetSessionCommitsRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetSessionCommitsRequest
+func (h *TaskHandlers) wsGetSessionData(
+	ctx context.Context, msg *ws.Message,
+	logErrMsg, clientErrMsg, resultKey string,
+	fn func(ctx context.Context, sessionID string) (any, error),
+) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-
-	commits, err := h.controller.GetSessionCommits(ctx, req.SessionID)
+	result, err := fn(ctx, req.SessionID)
 	if err != nil {
-		h.logger.Error("failed to get session commits", zap.Error(err), zap.String("session_id", req.SessionID))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session commits", nil)
+		h.logger.Error(logErrMsg, zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
-
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"session_id": req.SessionID,
-		"commits":    commits,
+		resultKey:    result,
 	})
+}
+
+func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.wsGetSessionData(ctx, msg,
+		"failed to get session commits", "Failed to get session commits", "commits",
+		func(ctx context.Context, sessionID string) (any, error) {
+			return h.controller.GetSessionCommits(ctx, sessionID)
+		})
 }
 
 type wsGetCumulativeDiffRequest struct {
@@ -880,29 +876,12 @@ func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message)
 
 // Session File Review Handlers
 
-type wsGetSessionFileReviewsRequest struct {
-	SessionID string `json:"session_id"`
-}
-
 func (h *TaskHandlers) wsGetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetSessionFileReviewsRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-
-	reviews, err := h.repo.GetSessionFileReviews(ctx, req.SessionID)
-	if err != nil {
-		h.logger.Error("failed to get session file reviews", zap.Error(err), zap.String("session_id", req.SessionID))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get session file reviews", nil)
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"session_id": req.SessionID,
-		"reviews":    reviews,
-	})
+	return h.wsGetSessionData(ctx, msg,
+		"failed to get session file reviews", "Failed to get session file reviews", "reviews",
+		func(ctx context.Context, sessionID string) (any, error) {
+			return h.repo.GetSessionFileReviews(ctx, sessionID)
+		})
 }
 
 type wsUpdateSessionFileReviewRequest struct {

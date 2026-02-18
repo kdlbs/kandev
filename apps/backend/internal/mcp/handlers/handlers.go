@@ -120,67 +120,58 @@ func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-// handleListWorkflows lists workflows for a workspace.
-func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		WorkspaceID string `json:"workspace_id"`
+// unmarshalStringField unmarshals a JSON payload and returns the value of a single string field.
+func unmarshalStringField(payload json.RawMessage, fieldName string) (string, error) {
+	var m map[string]string
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return "", err
 	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+	return m[fieldName], nil
+}
+
+// handleListByField is a generic handler for listing resources identified by a single string field.
+func (h *Handlers) handleListByField(
+	ctx context.Context, msg *ws.Message,
+	fieldName, logErrMsg, clientErrMsg string,
+	fn func(context.Context, string) (any, error),
+) (*ws.Message, error) {
+	value, err := unmarshalStringField(msg.Payload, fieldName)
+	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.WorkspaceID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	if value == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldName+" is required", nil)
 	}
-
-	resp, err := h.taskWorkflowCtrl.ListWorkflows(ctx, dto.ListWorkflowsRequest{WorkspaceID: req.WorkspaceID})
+	resp, err := fn(ctx, value)
 	if err != nil {
-		h.logger.Error("failed to list workflows", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)
+		h.logger.Error(logErrMsg, zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
-
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// handleListWorkflows lists workflows for a workspace.
+func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.handleListByField(ctx, msg, "workspace_id", "failed to list workflows", "Failed to list workflows",
+		func(ctx context.Context, workspaceID string) (any, error) {
+			return h.taskWorkflowCtrl.ListWorkflows(ctx, dto.ListWorkflowsRequest{WorkspaceID: workspaceID})
+		})
 }
 
 // handleListWorkflowSteps lists workflow steps for a workflow.
 func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		WorkflowID string `json:"workflow_id"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.WorkflowID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
-	}
-
-	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: req.WorkflowID})
-	if err != nil {
-		h.logger.Error("failed to list workflow steps", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflow steps", nil)
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return h.handleListByField(ctx, msg, "workflow_id", "failed to list workflow steps", "Failed to list workflow steps",
+		func(ctx context.Context, workflowID string) (any, error) {
+			return h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+		})
 }
 
 // handleListTasks lists tasks for a workflow.
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		WorkflowID string `json:"workflow_id"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.WorkflowID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
-	}
-
-	resp, err := h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: req.WorkflowID})
-	if err != nil {
-		h.logger.Error("failed to list tasks", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
+		func(ctx context.Context, workflowID string) (any, error) {
+			return h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: workflowID})
+		})
 }
 
 // handleCreateTask creates a new task.

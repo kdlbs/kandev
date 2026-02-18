@@ -28,6 +28,13 @@ var (
 	ErrWorkspaceNotFound   = errors.New("workspace path not found")
 )
 
+// Editor kind constants for custom editor types.
+const (
+	editorKindCustomRemoteSSH  = "custom_remote_ssh"
+	editorKindCustomHostedURL  = "custom_hosted_url"
+	editorKindCustomCommand    = "custom_command"
+)
+
 type UserSettingsProvider interface {
 	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 	ClearDefaultEditorID(ctx context.Context, editorID string) error
@@ -92,7 +99,7 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	}
 
 	switch editor.Kind {
-	case "custom_remote_ssh":
+	case editorKindCustomRemoteSSH:
 		cfg, err := parseRemoteSSHConfig(editor.Config)
 		if err != nil {
 			return "", err
@@ -102,13 +109,13 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 			scheme = editor.Scheme
 		}
 		return buildRemoteSSHURL(scheme, cfg.User, cfg.Host, absPath, input.Line, input.Column), nil
-	case "custom_hosted_url":
+	case editorKindCustomHostedURL:
 		cfg, err := parseHostedURLConfig(editor.Config)
 		if err != nil {
 			return "", err
 		}
 		return buildHostedURL(cfg.URL, absPath, input.Line, input.Column)
-	case "custom_command":
+	case editorKindCustomCommand:
 		cfg, err := parseCommandConfig(editor.Config)
 		if err != nil {
 			return "", err
@@ -488,7 +495,7 @@ func expandCommandPlaceholders(template, worktreePath, absPath string, line, col
 
 func isCustomKind(kind string) bool {
 	switch kind {
-	case "custom_command", "custom_remote_ssh", "custom_hosted_url":
+	case editorKindCustomCommand, editorKindCustomRemoteSSH, editorKindCustomHostedURL:
 		return true
 	default:
 		return false
@@ -500,13 +507,13 @@ func validateEditorConfig(editor *models.Editor) error {
 		return ErrEditorConfigInvalid
 	}
 	switch editor.Kind {
-	case "custom_command":
+	case editorKindCustomCommand:
 		_, err := parseCommandConfig(editor.Config)
 		return err
-	case "custom_remote_ssh":
+	case editorKindCustomRemoteSSH:
 		_, err := parseRemoteSSHConfig(editor.Config)
 		return err
-	case "custom_hosted_url":
+	case editorKindCustomHostedURL:
 		_, err := parseHostedURLConfig(editor.Config)
 		return err
 	default:

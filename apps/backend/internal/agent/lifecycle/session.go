@@ -314,16 +314,20 @@ func (sm *SessionManager) InitializeAndPrompt(
 		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
 	}
 
-	// Send the task prompt if provided - run asynchronously so orchestrator.start returns quickly.
-	// The agent will process the prompt and emit events via the WebSocket stream.
-	//
-	// For resumed sessions (fork_session pattern): If we have session history but no new task description,
-	// we still need to send a resume context prompt so the agent knows about the prior conversation.
-	if taskDescription != "" {
-		// Inject Kandev system prompt and session context
-		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
+	// Send the task prompt if provided, or mark the execution as ready.
+	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, markReady)
 
-		// Check if we need to inject resume context (fork_session pattern for ACP agents)
+	return nil
+}
+
+// dispatchInitialPrompt sends the initial task prompt or marks the execution as ready.
+// For sessions with a task description, sends the prompt asynchronously.
+// For resumed sessions (fork_session pattern), defers context injection to the first user message.
+// For all other cases, marks the execution ready immediately.
+func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, markReady func(executionID string) error) {
+	switch {
+	case taskDescription != "":
+		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, taskDescription)
 		effectivePrompt := sm.getResumeContextPrompt(agentConfig, execution.SessionID, promptWithContext)
 		if effectivePrompt != taskDescription {
 			sm.logger.Info("injecting resume context into initial prompt",
@@ -332,14 +336,9 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.Int("original_length", len(taskDescription)),
 				zap.Int("effective_length", len(effectivePrompt)))
 		}
-
 		go func() {
-			// Use detached context that respects stopCh for graceful shutdown
-			// Use PromptTimeout (60 min) to match the HTTP client/server timeouts
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, constants.PromptTimeout)
 			defer cancel()
-
-			// Initial prompt has no attachments
 			_, err := sm.SendPrompt(promptCtx, execution, effectivePrompt, false, nil)
 			if err != nil {
 				sm.logger.Error("initial prompt failed",
@@ -347,10 +346,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 					zap.Error(err))
 			}
 		}()
-	} else if sm.shouldInjectResumeContext(agentConfig, execution.SessionID) {
-		// No task description, but we have session history (resumed session)
-		// Don't send a prompt now - we'll inject context when the user sends their first message.
-		// This avoids triggering IN_PROGRESS state until the user actually interacts.
+	case sm.shouldInjectResumeContext(agentConfig, execution.SessionID):
 		execution.needsResumeContext = true
 		sm.logger.Info("session has history for context injection, will inject on first user prompt",
 			zap.String("execution_id", execution.ID),
@@ -360,7 +356,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
 		}
-	} else {
+	default:
 		sm.logger.Debug("no task description and no resume context needed, marking as ready",
 			zap.String("execution_id", execution.ID))
 		if err := markReady(execution.ID); err != nil {
@@ -369,112 +365,41 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.Error(err))
 		}
 	}
-
-	return nil
 }
 
-// SendPrompt sends a prompt to an agent execution and waits for completion.
-// For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
-// Attachments (images) are passed to the agent if provided.
-// Returns the prompt result containing the stop reason and agent message.
-// Note: MarkReady is handled by handleAgentEvent(complete), not by this method.
-func (sm *SessionManager) SendPrompt(
-	ctx context.Context,
-	execution *AgentExecution,
-	prompt string,
-	validateStatus bool,
-	attachments []v1.MessageAttachment,
-) (*PromptResult, error) {
-	if execution.agentctl == nil {
-		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+// buildEffectivePrompt applies resume context injection if needed, returning the effective prompt to send.
+func (sm *SessionManager) buildEffectivePrompt(execution *AgentExecution, prompt string) string {
+	if !execution.needsResumeContext || execution.resumeContextInjected {
+		return prompt
 	}
-
-	// For follow-up prompts, validate status and update to RUNNING
-	if validateStatus {
-		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
-			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
-		}
-		if sm.executionStore != nil {
-			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
-		}
-	}
-
-	// Clear buffers and streaming state before starting prompt
-	// This ensures each prompt starts fresh and doesn't append to previous message
-	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""  // Clear streaming message ID for new turn
-	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
-	execution.messageMu.Unlock()
-
-	// Check if we need to inject resume context (fork_session pattern)
-	// This happens on the first user prompt after resuming a session
-	// For resumed sessions, we also inject the Kandev context since it's the first prompt in this execution
-	effectivePrompt := prompt
-	if execution.needsResumeContext && !execution.resumeContextInjected {
-		// Inject Kandev context for resumed sessions (first prompt in this execution)
-		promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, prompt)
-		if sm.historyManager != nil {
-			resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, promptWithContext)
-			if err != nil {
-				sm.logger.Warn("failed to generate resume context for follow-up prompt",
-					zap.String("execution_id", execution.ID),
-					zap.Error(err))
-				effectivePrompt = promptWithContext
-			} else if resumePrompt != promptWithContext {
-				effectivePrompt = resumePrompt
-				sm.logger.Info("injecting resume context into follow-up prompt",
-					zap.String("execution_id", execution.ID),
-					zap.String("session_id", execution.SessionID),
-					zap.Int("original_length", len(prompt)),
-					zap.Int("effective_length", len(effectivePrompt)))
-				// Log the full resume context for debugging (use Info for now so user can inspect)
-				sm.logger.Info("resume context prompt content",
-					zap.String("execution_id", execution.ID),
-					zap.String("resume_prompt", effectivePrompt))
-			} else {
-				effectivePrompt = promptWithContext
-			}
-		} else {
-			effectivePrompt = promptWithContext
-		}
-		execution.resumeContextInjected = true
-	}
-
-	sm.logger.Info("sending prompt to agent",
-		zap.String("execution_id", execution.ID),
-		zap.Int("prompt_length", len(effectivePrompt)),
-		zap.Int("attachments_count", len(attachments)))
-
-	// Store user prompt to session history for context injection (store original, not with injected context)
-	if sm.historyManager != nil && execution.SessionID != "" {
-		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
-			sm.logger.Warn("failed to store user message to history", zap.Error(err))
+	// Inject Kandev context for resumed sessions (first prompt in this execution)
+	promptWithContext := sm.injectKandevContext(execution.TaskID, execution.SessionID, prompt)
+	effectivePrompt := promptWithContext
+	if sm.historyManager != nil {
+		resumePrompt, err := sm.historyManager.GenerateResumeContext(execution.SessionID, promptWithContext)
+		switch {
+		case err != nil:
+			sm.logger.Warn("failed to generate resume context for follow-up prompt",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		case resumePrompt != promptWithContext:
+			effectivePrompt = resumePrompt
+			sm.logger.Info("injecting resume context into follow-up prompt",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Int("original_length", len(prompt)),
+				zap.Int("effective_length", len(effectivePrompt)))
+			sm.logger.Info("resume context prompt content",
+				zap.String("execution_id", execution.ID),
+				zap.String("resume_prompt", effectivePrompt))
 		}
 	}
+	execution.resumeContextInjected = true
+	return effectivePrompt
+}
 
-	// Initialize activity timestamp for stall detection
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
-	execution.lastActivityAtMu.Unlock()
-
-	// Drain any stale signal from a previous prompt cycle
-	select {
-	case <-execution.promptDoneCh:
-	default:
-	}
-
-	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
-	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
-		sm.logger.Error("failed to trigger prompt",
-			zap.String("execution_id", execution.ID),
-			zap.Error(err))
-		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
-	}
-
-	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
-	// Periodically check for stall conditions (no events for an extended period).
+// waitForPromptDone waits for the prompt to complete, checking for stalls periodically.
+func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *AgentExecution) (*PromptResult, error) {
 	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
 
@@ -521,4 +446,77 @@ func (sm *SessionManager) SendPrompt(
 			}
 		}
 	}
+}
+
+// SendPrompt sends a prompt to an agent execution and waits for completion.
+// For initial prompts, pass validateStatus=false. For follow-up prompts, pass validateStatus=true.
+// Attachments (images) are passed to the agent if provided.
+// Returns the prompt result containing the stop reason and agent message.
+// Note: MarkReady is handled by handleAgentEvent(complete), not by this method.
+func (sm *SessionManager) SendPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+) (*PromptResult, error) {
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+
+	// For follow-up prompts, validate status and update to RUNNING
+	if validateStatus {
+		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
+			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+		}
+		if sm.executionStore != nil {
+			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+		}
+	}
+
+	// Clear buffers and streaming state before starting prompt
+	// This ensures each prompt starts fresh and doesn't append to previous message
+	execution.messageMu.Lock()
+	execution.messageBuffer.Reset()
+	execution.thinkingBuffer.Reset()
+	execution.currentMessageID = ""  // Clear streaming message ID for new turn
+	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
+	execution.messageMu.Unlock()
+
+	// Apply resume context injection if needed (first prompt after resume)
+	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
+
+	sm.logger.Info("sending prompt to agent",
+		zap.String("execution_id", execution.ID),
+		zap.Int("prompt_length", len(effectivePrompt)),
+		zap.Int("attachments_count", len(attachments)))
+
+	// Store user prompt to session history for context injection (store original, not with injected context)
+	if sm.historyManager != nil && execution.SessionID != "" {
+		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
+			sm.logger.Warn("failed to store user message to history", zap.Error(err))
+		}
+	}
+
+	// Initialize activity timestamp for stall detection
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = time.Now()
+	execution.lastActivityAtMu.Unlock()
+
+	// Drain any stale signal from a previous prompt cycle
+	select {
+	case <-execution.promptDoneCh:
+	default:
+	}
+
+	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
+	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
+		sm.logger.Error("failed to trigger prompt",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
+	}
+
+	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
+	return sm.waitForPromptDone(ctx, execution)
 }

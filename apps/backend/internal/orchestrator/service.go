@@ -481,169 +481,182 @@ func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
 	s.logger.Info("resuming executors on startup", zap.Int("count", len(runningExecutors)))
 
 	for _, running := range runningExecutors {
-		sessionID := running.SessionID
-		if sessionID == "" {
-			continue
-		}
-
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			s.logger.Warn("failed to load session for resume",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			continue
-		}
-
-		previousState := session.State
-
-		// Handle sessions in terminal states - clean up executor record and fix task state
-		switch previousState {
-		case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
-			s.logger.Info("session in terminal state; cleaning up executor record",
-				zap.String("session_id", sessionID),
-				zap.String("task_id", session.TaskID),
-				zap.String("state", string(previousState)))
-			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-				s.logger.Warn("failed to remove executor record for terminal session",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-			continue
-		case models.TaskSessionStateFailed:
-			// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-			if session.TaskID != "" {
-				task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-				if taskErr == nil && task.State == v1.TaskStateInProgress {
-					s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
-						zap.String("task_id", session.TaskID),
-						zap.String("session_id", sessionID))
-					if updateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview); updateErr != nil {
-						s.logger.Warn("failed to update task state to REVIEW",
-							zap.String("task_id", session.TaskID),
-							zap.Error(updateErr))
-					}
-				}
-			}
-			// Preserve ExecutorRunning for resumable failed sessions so the user
-			// can resume them later. Only clean up non-resumable failures.
-			if running.ResumeToken != "" && running.Resumable {
-				s.logger.Info("preserving executor record for resumable failed session",
-					zap.String("session_id", sessionID),
-					zap.String("task_id", session.TaskID))
-			} else {
-				s.logger.Info("cleaning up executor record for non-resumable failed session",
-					zap.String("session_id", sessionID),
-					zap.String("task_id", session.TaskID))
-				if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-					s.logger.Warn("failed to remove executor record for failed session",
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-				}
-			}
-			continue
-		}
-
-		// Handle sessions that never started - skip without failure
-		if previousState == models.TaskSessionStateCreated {
-			s.logger.Info("session was never started; skipping recovery",
-				zap.String("session_id", sessionID))
-			if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-				s.logger.Warn("failed to remove executor record for unstarted session",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-			continue
-		}
-
-		startAgent := running.ResumeToken != "" && running.Resumable
-		if !startAgent {
-			s.logger.Debug("resuming workspace without agent session",
-				zap.String("session_id", sessionID),
-				zap.String("previous_state", string(previousState)),
-				zap.Bool("has_resume_token", running.ResumeToken != ""),
-				zap.Bool("resumable", running.Resumable))
-		}
-
-		// Validate worktree exists before resuming
-		if err := validateSessionWorktrees(session); err != nil {
-			s.logger.Info("worktree not found, attempting recreation",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-
-			// Try to recreate the worktree
-			if s.tryRecreateWorktree(ctx, session) {
-				s.logger.Info("worktree recreated successfully, continuing with resume",
-					zap.String("session_id", sessionID))
-				// Re-validate after recreation to ensure it worked
-				if err := validateSessionWorktrees(session); err != nil {
-					s.logger.Warn("worktree validation still failed after recreation",
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-					_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace recreation failed: "+err.Error())
-					_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-					continue
-				}
-			} else {
-				// Recreation failed or not available
-				s.logger.Warn("worktree recreation failed; marking session as failed",
-					zap.String("session_id", sessionID))
-				_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace not found and could not be restored")
-				_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-				continue
-			}
-		}
-
-		s.logger.Debug("resuming session on startup",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID),
-			zap.String("previous_state", string(previousState)),
-			zap.String("resume_token", running.ResumeToken),
-			zap.Bool("start_agent", startAgent))
-
-		// Resume the session - this will:
-		// 1. Create a new agentctl instance
-		// 2. Start the agent process
-		// 3. Initialize and load the session via ACP/Codex protocol
-		//
-		// ResumeSession will temporarily set state to STARTING during launch.
-		// After resume, the agent is immediately ready for input (session is loaded,
-		// no prompt is being processed). We set WAITING_FOR_INPUT directly because:
-		// - Session resume just loads conversation history, doesn't process a prompt
-		// - Agents don't send a "complete" event after session load (only after prompt completion)
-		// - The agent is ready for the next user prompt immediately after session loads
-		if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
-			s.logger.Warn("failed to resume executor on startup",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
-			// Clear the stale execution ID to prevent "execution not found" errors
-			// when the user tries to prompt after the failed resume
-			_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
-			_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-			continue
-		}
-
-		if startAgent {
-			// Set state to WAITING_FOR_INPUT - agent is ready for the next prompt
-			if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-				s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-			// Also update task state to REVIEW since we're waiting for user input
-			if err := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); err != nil {
-				s.logger.Warn("failed to set task state to REVIEW after resume",
-					zap.String("task_id", running.TaskID),
-					zap.Error(err))
-			}
-		}
-
-		s.logger.Debug("session resumed successfully",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", running.TaskID),
-			zap.Bool("start_agent", startAgent),
-			zap.String("state", string(models.TaskSessionStateWaitingForInput)))
+		s.resumeOneExecutorOnStartup(ctx, running)
 	}
+}
+
+// resumeOneExecutorOnStartup handles startup recovery for a single executor/session.
+func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+	sessionID := running.SessionID
+	if sessionID == "" {
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for resume",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	previousState := session.State
+
+	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState); skip {
+		return
+	}
+
+	// Handle sessions that never started - skip without failure
+	if previousState == models.TaskSessionStateCreated {
+		s.logger.Info("session was never started; skipping recovery",
+			zap.String("session_id", sessionID))
+		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to remove executor record for unstarted session",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+
+	startAgent := running.ResumeToken != "" && running.Resumable
+	if !startAgent {
+		s.logger.Debug("resuming workspace without agent session",
+			zap.String("session_id", sessionID),
+			zap.String("previous_state", string(previousState)),
+			zap.Bool("has_resume_token", running.ResumeToken != ""),
+			zap.Bool("resumable", running.Resumable))
+	}
+
+	// Validate worktree exists before resuming
+	if err := validateSessionWorktrees(session); err != nil {
+		if !s.handleWorktreeValidationFailure(ctx, session, sessionID, err) {
+			return
+		}
+	}
+
+	s.logger.Debug("resuming session on startup",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", running.TaskID),
+		zap.String("previous_state", string(previousState)),
+		zap.String("resume_token", running.ResumeToken),
+		zap.Bool("start_agent", startAgent))
+
+	// Resume the session - this will:
+	// 1. Create a new agentctl instance
+	// 2. Start the agent process
+	// 3. Initialize and load the session via ACP/Codex protocol
+	if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
+		s.logger.Warn("failed to resume executor on startup",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
+		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+		return
+	}
+
+	if startAgent {
+		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+			s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		if err := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Warn("failed to set task state to REVIEW after resume",
+				zap.String("task_id", running.TaskID),
+				zap.Error(err))
+		}
+	}
+
+	s.logger.Debug("session resumed successfully",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", running.TaskID),
+		zap.Bool("start_agent", startAgent),
+		zap.String("state", string(models.TaskSessionStateWaitingForInput)))
+}
+
+// handleTerminalSessionOnStartup processes sessions in terminal states during startup.
+// Returns true if the session should be skipped (no further processing needed).
+func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
+	sessionID := session.ID
+	switch previousState {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
+		s.logger.Info("session in terminal state; cleaning up executor record",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", session.TaskID),
+			zap.String("state", string(previousState)))
+		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to remove executor record for terminal session",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return true
+	case models.TaskSessionStateFailed:
+		s.handleFailedSessionOnStartup(ctx, session, running)
+		return true
+	}
+	return false
+}
+
+// handleFailedSessionOnStartup handles a failed session during startup recovery.
+func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning) {
+	sessionID := session.ID
+	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
+	if session.TaskID != "" {
+		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
+		if taskErr == nil && task.State == v1.TaskStateInProgress {
+			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
+				zap.String("task_id", session.TaskID),
+				zap.String("session_id", sessionID))
+			if updateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview); updateErr != nil {
+				s.logger.Warn("failed to update task state to REVIEW",
+					zap.String("task_id", session.TaskID),
+					zap.Error(updateErr))
+			}
+		}
+	}
+	if running.ResumeToken != "" && running.Resumable {
+		s.logger.Info("preserving executor record for resumable failed session",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", session.TaskID))
+	} else {
+		s.logger.Info("cleaning up executor record for non-resumable failed session",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", session.TaskID))
+		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to remove executor record for failed session",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+}
+
+// handleWorktreeValidationFailure attempts to recreate a missing worktree.
+// Returns true if recovery succeeded and resume should continue; false if the session should be skipped.
+func (s *Service) handleWorktreeValidationFailure(ctx context.Context, session *models.TaskSession, sessionID string, validationErr error) bool {
+	s.logger.Info("worktree not found, attempting recreation",
+		zap.String("session_id", sessionID),
+		zap.Error(validationErr))
+
+	if !s.tryRecreateWorktree(ctx, session) {
+		s.logger.Warn("worktree recreation failed; marking session as failed",
+			zap.String("session_id", sessionID))
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace not found and could not be restored")
+		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+		return false
+	}
+
+	s.logger.Info("worktree recreated successfully, continuing with resume",
+		zap.String("session_id", sessionID))
+	if err := validateSessionWorktrees(session); err != nil {
+		s.logger.Warn("worktree validation still failed after recreation",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace recreation failed: "+err.Error())
+		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+		return false
+	}
+	return true
 }
 
 // tryRecreateWorktree attempts to recreate a missing worktree for a session.
@@ -693,22 +706,8 @@ func (s *Service) tryRecreateWorktree(ctx context.Context, session *models.TaskS
 			zap.String("worktree_id", wt.WorktreeID),
 			zap.Error(err))
 
-		// Create error message in chat
-		if s.messageCreator != nil {
-			metadata := map[string]interface{}{
-				"variant": "error",
-			}
-			_ = s.messageCreator.CreateSessionMessage(
-				ctx,
-				session.TaskID,
-				"Workspace could not be restored. The workspace directory was deleted and recreation failed: "+err.Error(),
-				session.ID,
-				string(v1.MessageTypeStatus),
-				"", // no turn ID during startup
-				metadata,
-				false,
-			)
-		}
+		s.sendWorktreeStatusMessage(ctx, session.TaskID, session.ID, "error",
+			"Workspace could not be restored. The workspace directory was deleted and recreation failed: "+err.Error())
 		return false
 	}
 
@@ -721,24 +720,30 @@ func (s *Service) tryRecreateWorktree(ctx context.Context, session *models.TaskS
 		zap.String("worktree_id", wt.WorktreeID),
 		zap.String("new_path", result.WorktreePath))
 
-	// Create info message in chat
-	if s.messageCreator != nil {
-		metadata := map[string]interface{}{
-			"variant": "info",
-		}
-		_ = s.messageCreator.CreateSessionMessage(
-			ctx,
-			session.TaskID,
-			"Workspace was automatically restored after server restart",
-			session.ID,
-			string(v1.MessageTypeStatus),
-			"", // no turn ID during startup
-			metadata,
-			false,
-		)
-	}
+	s.sendWorktreeStatusMessage(ctx, session.TaskID, session.ID, "info",
+		"Workspace was automatically restored after server restart")
 
 	return true
+}
+
+// sendWorktreeStatusMessage creates a status message in the session chat if messageCreator is available.
+func (s *Service) sendWorktreeStatusMessage(ctx context.Context, taskID, sessionID, variant, content string) {
+	if s.messageCreator == nil {
+		return
+	}
+	metadata := map[string]interface{}{
+		"variant": variant,
+	}
+	_ = s.messageCreator.CreateSessionMessage(
+		ctx,
+		taskID,
+		content,
+		sessionID,
+		string(v1.MessageTypeStatus),
+		"", // no turn ID during startup
+		metadata,
+		false,
+	)
 }
 
 // IsRunning returns true if the service is running

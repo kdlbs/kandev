@@ -69,6 +69,7 @@ func (n *Normalizer) NormalizeToolCall(toolName string, state *ToolState) *strea
 }
 
 // NormalizeToolResult updates the payload with tool result data.
+//
 // Deprecated: Result data is now handled in NormalizeToolCall via ToolState
 func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, result any) {
 	// Keep for backwards compatibility but normalization now happens in NormalizeToolCall
@@ -301,6 +302,7 @@ func (n *Normalizer) normalizeGeneric(toolName string, state *ToolState) *stream
 }
 
 // normalizeBashResult updates bash payload with result data.
+//
 // Deprecated: Use ToolState in NormalizeToolCall instead
 func (n *Normalizer) normalizeBashResult(payload *streams.ShellExecPayload, result any) {
 	if payload.Output == nil {

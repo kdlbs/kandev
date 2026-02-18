@@ -217,110 +217,27 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.exitCode.Store(-1)
 	m.exitErr.Store(errorWrapper{err: nil})
 
-	// Validate command
 	if len(m.cfg.AgentArgs) == 0 {
 		m.status.Store(StatusError)
 		return fmt.Errorf("no agent command configured")
 	}
 
-	// Build adapter config
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-		}
-	}
-	m.adapterCfg = &adapter.Config{
-		WorkDir:        m.cfg.WorkDir,
-		AutoApprove:    m.cfg.AutoApprovePermissions,
-		ApprovalPolicy: m.cfg.ApprovalPolicy,
-		McpServers:     mcpServers,
-		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-	}
-
-	// Log MCP server details for debugging
-	for i, srv := range mcpServers {
-		m.logger.Debug("MCP server config",
-			zap.Int("index", i),
-			zap.String("name", srv.Name),
-			zap.String("url", srv.URL),
-			zap.String("type", srv.Type),
-			zap.String("command", srv.Command))
-	}
-
-	// Create adapter before starting the process so we can call PrepareEnvironment and PrepareCommandArgs
-	if err := m.createAdapter(); err != nil {
+	// Build adapter config and create protocol adapter
+	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create adapter: %w", err)
+		return err
 	}
 
-	// Prepare protocol-specific environment before starting the process
-	// This may return additional environment variables that need to be passed to the subprocess
-	adapterEnv, err := m.adapter.PrepareEnvironment()
-	if err != nil {
-		m.logger.Warn("failed to prepare protocol environment", zap.Error(err))
-	}
-	// Merge adapter-provided env vars into the subprocess environment
-	for k, v := range adapterEnv {
-		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Get extra command args from the adapter (e.g., -c flags for Codex MCP config)
-	extraArgs := m.adapter.PrepareCommandArgs()
-
-	// Build final command args
-	cmdArgs := append(m.cfg.AgentArgs[1:], extraArgs...)
-
-	// Store the full command string (binary + all args including adapter extras)
-	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
-
-	m.logger.Debug("final agent command",
-		zap.String("binary", m.cfg.AgentArgs[0]),
-		zap.Strings("args", cmdArgs),
-		zap.Int("extra_args_count", len(extraArgs)))
-
-	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
-	// the HTTP request context to kill the agent process when the request completes.
-	m.cmd = exec.Command(m.cfg.AgentArgs[0], cmdArgs...)
-	m.cmd.Dir = m.cfg.WorkDir
-	m.cmd.Env = m.cfg.AgentEnv
-	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
-	// (npx -> sh -> node -> opencode binary).
-	setProcGroup(m.cmd)
-
-	// Set up pipes
-	m.stdin, err = m.cmd.StdinPipe()
-	if err != nil {
+	// Assemble final command and start the subprocess
+	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
+		return err
 	}
 
-	m.stdout, err = m.cmd.StdoutPipe()
-	if err != nil {
+	// Set up stdin/stdout/stderr pipes
+	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	m.stderr, err = m.cmd.StderrPipe()
-	if err != nil {
-		m.status.Store(StatusError)
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the process
-	m.logger.Info("starting agent process",
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.Strings("extra_args", extraArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("env_count", len(m.cfg.AgentEnv)))
-	if err := m.cmd.Start(); err != nil {
-		m.status.Store(StatusError)
-		return fmt.Errorf("failed to start agent: %w", err)
+		return err
 	}
 
 	m.stopCh = make(chan struct{})
@@ -345,23 +262,131 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.workspaceTracker.Start(context.Background())
 
 	// Auto-create shell session if enabled
-	if m.cfg.ShellEnabled {
-		shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
-		shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
-		shellSession, err := shell.NewSession(shellCfg, m.logger)
-		if err != nil {
-			m.logger.Warn("failed to create shell session", zap.Error(err))
-			// Non-fatal: agent can still work without shell
-		} else {
-			m.shell = shellSession
-			m.logger.Info("shell session auto-created")
-		}
-	}
+	m.startAgentShell()
 
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
 	return nil
+}
+
+// buildAdapterConfig constructs the adapter configuration and initialises the
+// protocol adapter, including merging any adapter-provided environment variables.
+func (m *Manager) buildAdapterConfig() error {
+	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
+	for i, mcp := range m.cfg.McpServers {
+		mcpServers[i] = adapter.McpServerConfig{
+			Name:    mcp.Name,
+			URL:     mcp.URL,
+			Type:    mcp.Type,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+		}
+	}
+	m.adapterCfg = &adapter.Config{
+		WorkDir:        m.cfg.WorkDir,
+		AutoApprove:    m.cfg.AutoApprovePermissions,
+		ApprovalPolicy: m.cfg.ApprovalPolicy,
+		McpServers:     mcpServers,
+		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+	}
+
+	for i, srv := range mcpServers {
+		m.logger.Debug("MCP server config",
+			zap.Int("index", i),
+			zap.String("name", srv.Name),
+			zap.String("url", srv.URL),
+			zap.String("type", srv.Type),
+			zap.String("command", srv.Command))
+	}
+
+	if err := m.createAdapter(); err != nil {
+		return fmt.Errorf("failed to create adapter: %w", err)
+	}
+
+	// Merge adapter-provided environment variables into the subprocess environment
+	adapterEnv, err := m.adapter.PrepareEnvironment()
+	if err != nil {
+		m.logger.Warn("failed to prepare protocol environment", zap.Error(err))
+	}
+	for k, v := range adapterEnv {
+		m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+	return nil
+}
+
+// buildFinalCommand assembles the full command args, creates the exec.Cmd, and
+// starts the subprocess. The process group is set so child processes can be killed together.
+func (m *Manager) buildFinalCommand() error {
+	extraArgs := m.adapter.PrepareCommandArgs()
+
+	cmdArgs := make([]string, 0, len(m.cfg.AgentArgs)-1+len(extraArgs))
+	cmdArgs = append(cmdArgs, m.cfg.AgentArgs[1:]...)
+	cmdArgs = append(cmdArgs, extraArgs...)
+
+	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
+
+	m.logger.Debug("final agent command",
+		zap.String("binary", m.cfg.AgentArgs[0]),
+		zap.Strings("args", cmdArgs),
+		zap.Int("extra_args_count", len(extraArgs)))
+
+	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
+	// the HTTP request context to kill the agent process when the request completes.
+	m.cmd = exec.Command(m.cfg.AgentArgs[0], cmdArgs...)
+	m.cmd.Dir = m.cfg.WorkDir
+	m.cmd.Env = m.cfg.AgentEnv
+	// Create a new process group so we can kill all child processes together.
+	// This is important for adapters like OpenCode that spawn child processes
+	// (npx -> sh -> node -> opencode binary).
+	setProcGroup(m.cmd)
+
+	m.logger.Info("starting agent process",
+		zap.Strings("args", m.cfg.AgentArgs),
+		zap.Strings("extra_args", extraArgs),
+		zap.String("workdir", m.cfg.WorkDir),
+		zap.Int("env_count", len(m.cfg.AgentEnv)))
+
+	if err := m.cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start agent: %w", err)
+	}
+	return nil
+}
+
+// startProcessPipes creates stdin, stdout, and stderr pipes for the agent subprocess.
+// The pipes must be created before the process starts.
+func (m *Manager) startProcessPipes() error {
+	var err error
+	m.stdin, err = m.cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+	m.stdout, err = m.cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	m.stderr, err = m.cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+	return nil
+}
+
+// startAgentShell auto-creates a shell session when ShellEnabled is configured.
+// Failure is non-fatal: the agent can still work without a shell session.
+func (m *Manager) startAgentShell() {
+	if !m.cfg.ShellEnabled {
+		return
+	}
+	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
+	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellSession, err := shell.NewSession(shellCfg, m.logger)
+	if err != nil {
+		m.logger.Warn("failed to create shell session", zap.Error(err))
+		return
+	}
+	m.shell = shellSession
+	m.logger.Info("shell session auto-created")
 }
 
 func preferredShellCommand(env []string) string {
@@ -512,7 +537,18 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.logger.Info("stopping agent process - START")
 	m.status.Store(StatusStopping)
 
-	// Stop shell session
+	m.stopShellAndProcesses(ctx)
+	m.closeAdapterAndStdin()
+	m.killProcessGroupIfRequired()
+	m.waitForProcessExit(ctx)
+
+	m.status.Store(StatusStopped)
+	m.logger.Info("stopping agent process - COMPLETE")
+	return nil
+}
+
+// stopShellAndProcesses stops the shell session, workspace processes, and workspace tracker.
+func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	m.logger.Debug("stopping shell session")
 	if m.shell != nil {
 		if err := m.shell.Stop(); err != nil {
@@ -531,14 +567,15 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 	m.logger.Debug("workspace processes stopped")
 
-	// Stop workspace tracker
 	m.logger.Debug("stopping workspace tracker")
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
 	}
 	m.logger.Debug("workspace tracker stopped")
+}
 
-	// Close the adapter
+// closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
+func (m *Manager) closeAdapterAndStdin() {
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {
@@ -547,7 +584,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 	m.logger.Debug("adapter closed")
 
-	// Close stop channel to signal readers
 	m.logger.Debug("closing stop channel")
 	if m.stopCh != nil {
 		close(m.stopCh)
@@ -562,27 +598,31 @@ func (m *Manager) Stop(ctx context.Context) error {
 		}
 	}
 	m.logger.Debug("stdin closed")
+}
 
-	// Some adapters (like OpenCode) run as HTTP servers and don't exit on stdin close.
-	// For these, we need to kill the process group immediately.
+// killProcessGroupIfRequired kills the entire process group for adapters (such as
+// OpenCode) that run as HTTP servers and do not exit when stdin is closed.
+func (m *Manager) killProcessGroupIfRequired() {
+	if m.adapter == nil || !m.adapter.RequiresProcessKill() {
+		return
+	}
+	if m.cmd == nil || m.cmd.Process == nil {
+		return
+	}
 	// We kill the process group to ensure all child processes are killed too.
 	// This is important because OpenCode spawns: npx -> sh -> node -> opencode binary
-	if m.adapter != nil && m.adapter.RequiresProcessKill() {
-		if m.cmd != nil && m.cmd.Process != nil {
-			pid := m.cmd.Process.Pid
-			m.logger.Debug("killing process group", zap.Int("pgid", pid))
-			// Kill the entire process group (platform-specific implementation)
-			if err := killProcessGroup(pid); err != nil {
-				m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
-				// Fallback to killing just the process
-				if err := m.cmd.Process.Kill(); err != nil {
-					m.logger.Warn("failed to kill process", zap.Error(err))
-				}
-			}
+	pid := m.cmd.Process.Pid
+	m.logger.Debug("killing process group", zap.Int("pgid", pid))
+	if err := killProcessGroup(pid); err != nil {
+		m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
+		if err := m.cmd.Process.Kill(); err != nil {
+			m.logger.Warn("failed to kill process", zap.Error(err))
 		}
 	}
+}
 
-	// Wait for process to exit with timeout
+// waitForProcessExit waits for all goroutines to finish, force-killing on context timeout.
+func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
 	go func() {
@@ -594,7 +634,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 	case <-done:
 		m.logger.Info("agent process stopped gracefully")
 	case <-ctx.Done():
-		// Force kill
 		if m.cmd != nil && m.cmd.Process != nil {
 			m.logger.Warn("force killing agent process")
 			if err := m.cmd.Process.Kill(); err != nil {
@@ -602,10 +641,6 @@ func (m *Manager) Stop(ctx context.Context) error {
 			}
 		}
 	}
-
-	m.status.Store(StatusStopped)
-	m.logger.Info("stopping agent process - COMPLETE")
-	return nil
 }
 
 // readStderr reads and logs stderr from the agent
@@ -837,9 +872,7 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
 	options := make([]streams.PermissionOption, len(pending.Request.Options))
-	for i, opt := range pending.Request.Options {
-		options[i] = streams.PermissionOption(opt)
-	}
+	copy(options, pending.Request.Options)
 
 	event := adapter.AgentEvent{
 		Type:              adapter.EventTypePermissionRequest,

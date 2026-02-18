@@ -64,78 +64,117 @@ func (n *AmpNormalizer) NormalizeToolCall(toolName string, args map[string]any) 
 // Amp's tool results are JSON-wrapped strings like "{\"output\":\"...\",\"exitCode\":0}".
 func (n *AmpNormalizer) NormalizeToolResult(cachedPayload *streams.NormalizedPayload, content any, isError bool) *streams.NormalizedPayload {
 	if cachedPayload == nil {
-		// No cached payload, create a generic one with the result
-		output, _ := n.parseToolResultContent(content)
-		payload := streams.NewGeneric("unknown", nil)
-		if payload.Generic() != nil {
-			payload.Generic().Output = output
-		}
-		return payload
+		return n.normalizeResultNoCached(content)
 	}
 
-	// Update the cached payload with the result
 	switch cachedPayload.Kind() {
 	case streams.ToolKindShellExec:
-		if cachedPayload.ShellExec() != nil {
-			output, exitCode := n.parseToolResultContent(content)
-			cachedPayload.ShellExec().Output = &streams.ShellExecOutput{
-				Stdout:   output,
-				ExitCode: exitCode,
-			}
-			if isError {
-				cachedPayload.ShellExec().Output.Stderr = output
-				cachedPayload.ShellExec().Output.Stdout = ""
-			}
-		}
+		n.normalizeShellExecResult(cachedPayload, content, isError)
 	case streams.ToolKindHttpRequest:
-		if cachedPayload.HttpRequest() != nil {
-			output, _ := n.parseToolResultContent(content)
-			cachedPayload.HttpRequest().Response = output
-		}
+		n.normalizeHttpRequestResult(cachedPayload, content)
 	case streams.ToolKindGeneric:
-		if cachedPayload.Generic() != nil {
-			output, _ := n.parseToolResultContent(content)
-			cachedPayload.Generic().Output = output
-		}
+		n.normalizeGenericResult(cachedPayload, content)
 	case streams.ToolKindReadFile:
-		// Parse Amp's read result format: {absolutePath, content, isDirectory, directoryEntries}
-		if cachedPayload.ReadFile() != nil {
-			result := n.parseAmpReadResult(content)
-			if result != nil {
-				// If it's a directory, convert to code_search
-				if result.IsDirectory {
-					codeSearch := streams.NewCodeSearch(
-						"",                  // query
-						"",                  // pattern
-						result.AbsolutePath, // path
-						"*",                 // glob - all entries
-					)
-					if codeSearch.CodeSearch() != nil {
-						codeSearch.CodeSearch().Output = &streams.CodeSearchOutput{
-							Files:     result.DirectoryEntries,
-							FileCount: len(result.DirectoryEntries),
-						}
-					}
-					return codeSearch
-				}
-				// Regular file read
-				output := &streams.ReadFileOutput{
-					Content: result.Content,
-				}
-				if result.Content != "" {
-					output.LineCount = strings.Count(result.Content, "\n") + 1
-				}
-				cachedPayload.ReadFile().Output = output
-			}
-		}
+		return n.normalizeReadFileResult(cachedPayload, content)
 	case streams.ToolKindCodeSearch:
-		if cachedPayload.CodeSearch() != nil {
-			output, _ := n.parseToolResultContent(content)
-			shared.NormalizeCodeSearchResult(cachedPayload.CodeSearch(), output)
-		}
+		n.normalizeCodeSearchResult(cachedPayload, content)
 	}
 
 	return cachedPayload
+}
+
+// normalizeResultNoCached creates a generic payload when no cached payload exists.
+func (n *AmpNormalizer) normalizeResultNoCached(content any) *streams.NormalizedPayload {
+	output, _ := n.parseToolResultContent(content)
+	payload := streams.NewGeneric("unknown", nil)
+	if payload.Generic() != nil {
+		payload.Generic().Output = output
+	}
+	return payload
+}
+
+// normalizeShellExecResult populates the ShellExec output from tool result content.
+func (n *AmpNormalizer) normalizeShellExecResult(payload *streams.NormalizedPayload, content any, isError bool) {
+	if payload.ShellExec() == nil {
+		return
+	}
+	output, exitCode := n.parseToolResultContent(content)
+	payload.ShellExec().Output = &streams.ShellExecOutput{
+		Stdout:   output,
+		ExitCode: exitCode,
+	}
+	if isError {
+		payload.ShellExec().Output.Stderr = output
+		payload.ShellExec().Output.Stdout = ""
+	}
+}
+
+// normalizeHttpRequestResult populates the HttpRequest response from tool result content.
+func (n *AmpNormalizer) normalizeHttpRequestResult(payload *streams.NormalizedPayload, content any) {
+	if payload.HttpRequest() == nil {
+		return
+	}
+	output, _ := n.parseToolResultContent(content)
+	payload.HttpRequest().Response = output
+}
+
+// normalizeGenericResult populates the Generic output from tool result content.
+func (n *AmpNormalizer) normalizeGenericResult(payload *streams.NormalizedPayload, content any) {
+	if payload.Generic() == nil {
+		return
+	}
+	output, _ := n.parseToolResultContent(content)
+	payload.Generic().Output = output
+}
+
+// normalizeReadFileResult populates ReadFile output, converting to CodeSearch for directories.
+func (n *AmpNormalizer) normalizeReadFileResult(payload *streams.NormalizedPayload, content any) *streams.NormalizedPayload {
+	if payload.ReadFile() == nil {
+		return payload
+	}
+	result := n.parseAmpReadResult(content)
+	if result == nil {
+		return payload
+	}
+	// If it's a directory, convert to code_search
+	if result.IsDirectory {
+		return n.buildDirectoryPayload(result)
+	}
+	// Regular file read
+	output := &streams.ReadFileOutput{
+		Content: result.Content,
+	}
+	if result.Content != "" {
+		output.LineCount = strings.Count(result.Content, "\n") + 1
+	}
+	payload.ReadFile().Output = output
+	return payload
+}
+
+// buildDirectoryPayload creates a CodeSearch payload for directory listings.
+func (n *AmpNormalizer) buildDirectoryPayload(result *ampReadResult) *streams.NormalizedPayload {
+	codeSearch := streams.NewCodeSearch(
+		"",                  // query
+		"",                  // pattern
+		result.AbsolutePath, // path
+		"*",                 // glob - all entries
+	)
+	if codeSearch.CodeSearch() != nil {
+		codeSearch.CodeSearch().Output = &streams.CodeSearchOutput{
+			Files:     result.DirectoryEntries,
+			FileCount: len(result.DirectoryEntries),
+		}
+	}
+	return codeSearch
+}
+
+// normalizeCodeSearchResult populates CodeSearch output from tool result content.
+func (n *AmpNormalizer) normalizeCodeSearchResult(payload *streams.NormalizedPayload, content any) {
+	if payload.CodeSearch() == nil {
+		return
+	}
+	output, _ := n.parseToolResultContent(content)
+	shared.NormalizeCodeSearchResult(payload.CodeSearch(), output)
 }
 
 // ampReadResult holds parsed read result data from Amp.
@@ -158,30 +197,34 @@ func (n *AmpNormalizer) parseAmpReadResult(content any) *ampReadResult {
 		return &ampReadResult{Content: c}
 
 	case map[string]any:
-		result := &ampReadResult{}
-		if v, ok := c["absolutePath"].(string); ok {
-			result.AbsolutePath = v
-		}
-		if v, ok := c["content"].(string); ok {
-			result.Content = v
-		}
-		if v, ok := c["isDirectory"].(bool); ok {
-			result.IsDirectory = v
-		}
-		if v, ok := c["directoryEntries"].([]any); ok {
-			for _, entry := range v {
-				if s, ok := entry.(string); ok {
-					result.DirectoryEntries = append(result.DirectoryEntries, s)
-				}
-			}
-		}
-		return result
+		return n.parseAmpReadResultFromMap(c)
 
 	default:
 		return &ampReadResult{}
 	}
 }
 
+// parseAmpReadResultFromMap parses an Amp read result from a map.
+func (n *AmpNormalizer) parseAmpReadResultFromMap(c map[string]any) *ampReadResult {
+	result := &ampReadResult{}
+	if v, ok := c["absolutePath"].(string); ok {
+		result.AbsolutePath = v
+	}
+	if v, ok := c["content"].(string); ok {
+		result.Content = v
+	}
+	if v, ok := c["isDirectory"].(bool); ok {
+		result.IsDirectory = v
+	}
+	if v, ok := c["directoryEntries"].([]any); ok {
+		for _, entry := range v {
+			if s, ok := entry.(string); ok {
+				result.DirectoryEntries = append(result.DirectoryEntries, s)
+			}
+		}
+	}
+	return result
+}
 
 // parseToolResultContent extracts the output string and exit code from Amp's JSON-wrapped content.
 // Amp sends tool results in formats like:
@@ -192,55 +235,69 @@ func (n *AmpNormalizer) parseAmpReadResult(content any) *ampReadResult {
 func (n *AmpNormalizer) parseToolResultContent(content any) (string, int) {
 	switch c := content.(type) {
 	case string:
-		// Try to parse as JSON-wrapped content with {output, exitCode} structure
-		var wrapped struct {
-			Output   string `json:"output"`
-			ExitCode int    `json:"exitCode"`
-		}
-		if err := json.Unmarshal([]byte(c), &wrapped); err == nil && wrapped.Output != "" {
-			// Successfully parsed AND has output field
-			return wrapped.Output, wrapped.ExitCode
-		}
-		// Either not JSON, or JSON without "output" field - use as-is
-		return c, 0
-
+		return n.parseStringContent(c)
 	case map[string]any:
-		// Handle map format (already parsed JSON)
-		output := shared.GetString(c, "output")
-		exitCode := shared.GetInt(c, "exitCode")
-		if output == "" {
-			// Try alternative field names
-			output = shared.GetString(c, "stdout")
-			if stderr := shared.GetString(c, "stderr"); stderr != "" && output == "" {
-				output = stderr
-			}
-			if ec := shared.GetInt(c, "exit_code"); ec != 0 {
-				exitCode = ec
-			}
-		}
-		return output, exitCode
-
+		return n.parseMapContent(c)
 	case []any:
-		// Handle array of content blocks (some tools return multiple blocks)
-		var sb strings.Builder
-		for _, item := range c {
-			if str, ok := item.(string); ok {
-				sb.WriteString(str)
-			} else if m, ok := item.(map[string]any); ok {
-				if text := shared.GetString(m, "text"); text != "" {
-					sb.WriteString(text)
-				}
+		return n.parseArrayContent(c), 0
+	default:
+		return n.parseFallbackContent(content), 0
+	}
+}
+
+// parseStringContent handles string tool result content.
+func (n *AmpNormalizer) parseStringContent(c string) (string, int) {
+	// Try to parse as JSON-wrapped content with {output, exitCode} structure
+	var wrapped struct {
+		Output   string `json:"output"`
+		ExitCode int    `json:"exitCode"`
+	}
+	if err := json.Unmarshal([]byte(c), &wrapped); err == nil && wrapped.Output != "" {
+		// Successfully parsed AND has output field
+		return wrapped.Output, wrapped.ExitCode
+	}
+	// Either not JSON, or JSON without "output" field - use as-is
+	return c, 0
+}
+
+// parseMapContent handles map tool result content.
+func (n *AmpNormalizer) parseMapContent(c map[string]any) (string, int) {
+	output := shared.GetString(c, "output")
+	exitCode := shared.GetInt(c, "exitCode")
+	if output == "" {
+		// Try alternative field names
+		output = shared.GetString(c, "stdout")
+		if output == "" {
+			output = shared.GetString(c, "stderr")
+		}
+		if ec := shared.GetInt(c, "exit_code"); ec != 0 {
+			exitCode = ec
+		}
+	}
+	return output, exitCode
+}
+
+// parseArrayContent handles array tool result content (multiple content blocks).
+func (n *AmpNormalizer) parseArrayContent(c []any) string {
+	var sb strings.Builder
+	for _, item := range c {
+		if str, ok := item.(string); ok {
+			sb.WriteString(str)
+		} else if m, ok := item.(map[string]any); ok {
+			if text := shared.GetString(m, "text"); text != "" {
+				sb.WriteString(text)
 			}
 		}
-		return sb.String(), 0
-
-	default:
-		// Unknown format, try JSON marshaling for debugging
-		if data, err := json.Marshal(content); err == nil {
-			return string(data), 0
-		}
-		return "", 0
 	}
+	return sb.String()
+}
+
+// parseFallbackContent handles unknown content types via JSON marshaling.
+func (n *AmpNormalizer) parseFallbackContent(content any) string {
+	if data, err := json.Marshal(content); err == nil {
+		return string(data)
+	}
+	return ""
 }
 
 // normalizeEdit converts Amp Edit/Write tool data.

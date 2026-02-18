@@ -458,15 +458,15 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 // convertNotification converts an ACP SessionNotification to an AgentEvent.
 func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	u := n.Update
+	sessionID := string(n.SessionId)
 
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
-			text := u.AgentMessageChunk.Content.Text.Text
 			return &AgentEvent{
 				Type:      streams.EventTypeMessageChunk,
-				SessionID: string(n.SessionId),
-				Text:      text,
+				SessionID: sessionID,
+				Text:      u.AgentMessageChunk.Content.Text.Text,
 			}
 		}
 
@@ -474,114 +474,18 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		// Agent thinking/reasoning - map to the reasoning type
 		// Note: Only models with extended thinking (e.g., Opus 4.5) send agent_thought_chunk
 		if u.AgentThoughtChunk.Content.Text != nil {
-			text := u.AgentThoughtChunk.Content.Text.Text
 			return &AgentEvent{
 				Type:          streams.EventTypeReasoning,
-				SessionID:     string(n.SessionId),
-				ReasoningText: text,
+				SessionID:     sessionID,
+				ReasoningText: u.AgentThoughtChunk.Content.Text.Text,
 			}
 		}
 
 	case u.ToolCall != nil:
-		// Extract rich tool call information
-		args := map[string]any{}
-
-		// Add tool kind
-		if u.ToolCall.Kind != "" {
-			args["kind"] = string(u.ToolCall.Kind)
-		}
-
-		// Add locations (file paths with line numbers)
-		if len(u.ToolCall.Locations) > 0 {
-			locations := make([]map[string]any, len(u.ToolCall.Locations))
-			for i, loc := range u.ToolCall.Locations {
-				locMap := map[string]any{"path": loc.Path}
-				if loc.Line != nil {
-					locMap["line"] = *loc.Line
-				}
-				locations[i] = locMap
-			}
-			args["locations"] = locations
-
-			// Also set primary path for convenience
-			args["path"] = u.ToolCall.Locations[0].Path
-		}
-
-		// Add raw input if available
-		if u.ToolCall.RawInput != nil {
-			args["raw_input"] = u.ToolCall.RawInput
-		}
-
-		// Generate normalized payload using the normalizer
-		toolKind := string(u.ToolCall.Kind)
-		normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
-
-		// Store the payload for later result updates
-		toolCallID := string(u.ToolCall.ToolCallId)
-		a.mu.Lock()
-		a.activeToolCalls[toolCallID] = normalizedPayload
-		a.mu.Unlock()
-
-		// Detect tool type for logging
-		toolType := DetectToolOperationType(toolKind, args)
-		_ = toolType // Used for normalization
-
-		// Normalize status - if empty, default to "running" for tool_call start
-		status := string(u.ToolCall.Status)
-		if status == "" {
-			status = "running"
-		}
-
-		return &AgentEvent{
-			Type:              streams.EventTypeToolCall,
-			SessionID:         string(n.SessionId),
-			ToolCallID:        toolCallID,
-			ToolName:          string(u.ToolCall.Kind), // Kind is effectively the tool name
-			ToolTitle:         u.ToolCall.Title,
-			ToolStatus:        status,
-			NormalizedPayload: normalizedPayload,
-		}
+		return a.convertToolCallUpdate(sessionID, u.ToolCall)
 
 	case u.ToolCallUpdate != nil:
-		toolCallID := string(u.ToolCallUpdate.ToolCallId)
-		status := ""
-		if u.ToolCallUpdate.Status != nil {
-			status = string(*u.ToolCallUpdate.Status)
-		}
-		// Normalize status - "completed" -> "complete" for frontend consistency
-		if status == "completed" {
-			status = "complete"
-		}
-
-		// Look up the stored payload and update with result if we have rawOutput
-		var normalizedPayload *streams.NormalizedPayload
-		if u.ToolCallUpdate.RawOutput != nil {
-			a.mu.Lock()
-			if payload, ok := a.activeToolCalls[toolCallID]; ok {
-				// Update the payload with the result
-				a.normalizer.NormalizeToolResult(payload, u.ToolCallUpdate.RawOutput)
-				normalizedPayload = payload
-				// Clean up if completed
-				if status == "complete" || status == "error" {
-					delete(a.activeToolCalls, toolCallID)
-				}
-			}
-			a.mu.Unlock()
-		} else if status == "complete" || status == "error" {
-			// Clean up even without output
-			a.mu.Lock()
-			normalizedPayload = a.activeToolCalls[toolCallID]
-			delete(a.activeToolCalls, toolCallID)
-			a.mu.Unlock()
-		}
-
-		return &AgentEvent{
-			Type:              streams.EventTypeToolUpdate,
-			SessionID:         string(n.SessionId),
-			ToolCallID:        toolCallID,
-			ToolStatus:        status,
-			NormalizedPayload: normalizedPayload,
-		}
+		return a.convertToolCallResultUpdate(sessionID, u.ToolCallUpdate)
 
 	case u.Plan != nil:
 		entries := make([]PlanEntry, len(u.Plan.Entries))
@@ -594,7 +498,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		}
 		return &AgentEvent{
 			Type:        streams.EventTypePlan,
-			SessionID:   string(n.SessionId),
+			SessionID:   sessionID,
 			PlanEntries: entries,
 		}
 
@@ -608,12 +512,106 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		}
 		return &AgentEvent{
 			Type:              streams.EventTypeAvailableCommands,
-			SessionID:         string(n.SessionId),
+			SessionID:         sessionID,
 			AvailableCommands: commands,
 		}
 	}
 
 	return nil
+}
+
+// convertToolCallUpdate converts a ToolCall notification to an AgentEvent.
+func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateToolCall) *AgentEvent {
+	args := map[string]any{}
+
+	if tc.Kind != "" {
+		args["kind"] = string(tc.Kind)
+	}
+
+	if len(tc.Locations) > 0 {
+		locations := make([]map[string]any, len(tc.Locations))
+		for i, loc := range tc.Locations {
+			locMap := map[string]any{"path": loc.Path}
+			if loc.Line != nil {
+				locMap["line"] = *loc.Line
+			}
+			locations[i] = locMap
+		}
+		args["locations"] = locations
+		args["path"] = tc.Locations[0].Path
+	}
+
+	if tc.RawInput != nil {
+		args["raw_input"] = tc.RawInput
+	}
+
+	toolKind := string(tc.Kind)
+	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
+
+	toolCallID := string(tc.ToolCallId)
+	a.mu.Lock()
+	a.activeToolCalls[toolCallID] = normalizedPayload
+	a.mu.Unlock()
+
+	// Detect tool type for logging
+	toolType := DetectToolOperationType(toolKind, args)
+	_ = toolType // Used for normalization
+
+	status := string(tc.Status)
+	if status == "" {
+		status = "running"
+	}
+
+	return &AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		SessionID:         sessionID,
+		ToolCallID:        toolCallID,
+		ToolName:          toolKind, // Kind is effectively the tool name
+		ToolTitle:         tc.Title,
+		ToolStatus:        status,
+		NormalizedPayload: normalizedPayload,
+	}
+}
+
+// convertToolCallResultUpdate converts a ToolCallUpdate notification to an AgentEvent.
+func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.SessionToolCallUpdate) *AgentEvent {
+	toolCallID := string(tcu.ToolCallId)
+	status := ""
+	if tcu.Status != nil {
+		status = string(*tcu.Status)
+	}
+	// Normalize status - "completed" -> "complete" for frontend consistency
+	if status == "completed" {
+		status = toolStatusComplete
+	}
+
+	// Look up the stored payload and update with result if we have rawOutput
+	var normalizedPayload *streams.NormalizedPayload
+	if tcu.RawOutput != nil {
+		a.mu.Lock()
+		if payload, ok := a.activeToolCalls[toolCallID]; ok {
+			a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+			normalizedPayload = payload
+			if status == toolStatusComplete || status == toolStatusError {
+				delete(a.activeToolCalls, toolCallID)
+			}
+		}
+		a.mu.Unlock()
+	} else if status == toolStatusComplete || status == toolStatusError {
+		// Clean up even without output
+		a.mu.Lock()
+		normalizedPayload = a.activeToolCalls[toolCallID]
+		delete(a.activeToolCalls, toolCallID)
+		a.mu.Unlock()
+	}
+
+	return &AgentEvent{
+		Type:              streams.EventTypeToolUpdate,
+		SessionID:         sessionID,
+		ToolCallID:        toolCallID,
+		ToolStatus:        status,
+		NormalizedPayload: normalizedPayload,
+	}
 }
 
 // handlePermissionRequest handles permission requests from the agent.

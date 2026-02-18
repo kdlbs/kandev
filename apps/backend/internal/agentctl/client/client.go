@@ -822,7 +822,7 @@ func (c *Client) ListProcesses(ctx context.Context, sessionID string) ([]Process
 func (c *Client) GetProcess(ctx context.Context, id string, includeOutput bool) (*ProcessInfo, error) {
 	url := c.baseURL + "/api/v1/processes/" + id
 	if includeOutput {
-		url = url + "?include_output=true"
+		url += "?include_output=true"
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -889,95 +889,128 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 
 	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
 
-	ws := &WorkspaceStream{
+	stream := &WorkspaceStream{
 		conn:    conn,
 		inputCh: make(chan types.WorkspaceStreamMessage, 64),
 		closeCh: make(chan struct{}),
 		logger:  c.logger,
 	}
 
-	// Read goroutine - dispatches to callbacks
-	go func() {
-		defer func() {
-			c.mu.Lock()
-			c.workspaceStreamConn = nil
-			c.mu.Unlock()
-			ws.Close()
-		}()
+	go c.readWorkspaceStream(conn, stream, callbacks)
+	go stream.writeLoop(conn)
 
-		for {
-			var msg types.WorkspaceStreamMessage
-			if err := conn.ReadJSON(&msg); err != nil {
-				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Debug("workspace stream read error", zap.Error(err))
-				}
-				return
-			}
+	return stream, nil
+}
 
-			switch msg.Type {
-			case types.WorkspaceMessageTypeShellOutput:
-				if callbacks.OnShellOutput != nil {
-					callbacks.OnShellOutput(msg.Data)
-				}
-			case types.WorkspaceMessageTypeShellExit:
-				if callbacks.OnShellExit != nil {
-					callbacks.OnShellExit(msg.Code)
-				}
-			case types.WorkspaceMessageTypeGitStatus:
-				if callbacks.OnGitStatus != nil && msg.GitStatus != nil {
-					callbacks.OnGitStatus(msg.GitStatus)
-				}
-			case types.WorkspaceMessageTypeGitCommit:
-				if callbacks.OnGitCommit != nil && msg.GitCommit != nil {
-					callbacks.OnGitCommit(msg.GitCommit)
-				}
-			case types.WorkspaceMessageTypeGitReset:
-				if callbacks.OnGitReset != nil && msg.GitReset != nil {
-					callbacks.OnGitReset(msg.GitReset)
-				}
-			case types.WorkspaceMessageTypeFileChange:
-				if callbacks.OnFileChange != nil && msg.FileChange != nil {
-					callbacks.OnFileChange(msg.FileChange)
-				}
-			case types.WorkspaceMessageTypeProcessOutput:
-				if callbacks.OnProcessOutput != nil && msg.ProcessOutput != nil {
-					callbacks.OnProcessOutput(msg.ProcessOutput)
-				}
-			case types.WorkspaceMessageTypeProcessStatus:
-				if callbacks.OnProcessStatus != nil && msg.ProcessStatus != nil {
-					callbacks.OnProcessStatus(msg.ProcessStatus)
-				}
-			case types.WorkspaceMessageTypeConnected:
-				if callbacks.OnConnected != nil {
-					callbacks.OnConnected()
-				}
-			case types.WorkspaceMessageTypeError:
-				if callbacks.OnError != nil {
-					callbacks.OnError(msg.Error)
-				}
-			}
-		}
+// readWorkspaceStream is the read loop for the workspace WebSocket stream.
+func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStream, callbacks WorkspaceStreamCallbacks) {
+	defer func() {
+		c.mu.Lock()
+		c.workspaceStreamConn = nil
+		c.mu.Unlock()
+		stream.Close()
 	}()
 
-	// Write goroutine - sends from inputCh
-	go func() {
-		for {
-			select {
-			case <-ws.closeCh:
+	for {
+		var msg types.WorkspaceStreamMessage
+		if err := conn.ReadJSON(&msg); err != nil {
+			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				c.logger.Debug("workspace stream read error", zap.Error(err))
+			}
+			return
+		}
+		dispatchWorkspaceMessage(msg, callbacks)
+	}
+}
+
+func dispatchWorkspaceShellMessages(msg types.WorkspaceStreamMessage, callbacks WorkspaceStreamCallbacks) bool {
+	switch msg.Type {
+	case types.WorkspaceMessageTypeShellOutput:
+		if callbacks.OnShellOutput != nil {
+			callbacks.OnShellOutput(msg.Data)
+		}
+	case types.WorkspaceMessageTypeShellExit:
+		if callbacks.OnShellExit != nil {
+			callbacks.OnShellExit(msg.Code)
+		}
+	case types.WorkspaceMessageTypeConnected:
+		if callbacks.OnConnected != nil {
+			callbacks.OnConnected()
+		}
+	case types.WorkspaceMessageTypeError:
+		if callbacks.OnError != nil {
+			callbacks.OnError(msg.Error)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchWorkspaceGitMessages(msg types.WorkspaceStreamMessage, callbacks WorkspaceStreamCallbacks) bool {
+	switch msg.Type {
+	case types.WorkspaceMessageTypeGitStatus:
+		if callbacks.OnGitStatus != nil && msg.GitStatus != nil {
+			callbacks.OnGitStatus(msg.GitStatus)
+		}
+	case types.WorkspaceMessageTypeGitCommit:
+		if callbacks.OnGitCommit != nil && msg.GitCommit != nil {
+			callbacks.OnGitCommit(msg.GitCommit)
+		}
+	case types.WorkspaceMessageTypeGitReset:
+		if callbacks.OnGitReset != nil && msg.GitReset != nil {
+			callbacks.OnGitReset(msg.GitReset)
+		}
+	case types.WorkspaceMessageTypeFileChange:
+		if callbacks.OnFileChange != nil && msg.FileChange != nil {
+			callbacks.OnFileChange(msg.FileChange)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchWorkspaceProcessMessages(msg types.WorkspaceStreamMessage, callbacks WorkspaceStreamCallbacks) {
+	switch msg.Type {
+	case types.WorkspaceMessageTypeProcessOutput:
+		if callbacks.OnProcessOutput != nil && msg.ProcessOutput != nil {
+			callbacks.OnProcessOutput(msg.ProcessOutput)
+		}
+	case types.WorkspaceMessageTypeProcessStatus:
+		if callbacks.OnProcessStatus != nil && msg.ProcessStatus != nil {
+			callbacks.OnProcessStatus(msg.ProcessStatus)
+		}
+	}
+}
+
+// dispatchWorkspaceMessage routes a workspace stream message to the appropriate callback.
+func dispatchWorkspaceMessage(msg types.WorkspaceStreamMessage, callbacks WorkspaceStreamCallbacks) {
+	if dispatchWorkspaceShellMessages(msg, callbacks) {
+		return
+	}
+	if dispatchWorkspaceGitMessages(msg, callbacks) {
+		return
+	}
+	dispatchWorkspaceProcessMessages(msg, callbacks)
+}
+
+// writeLoop reads from the inputCh and writes messages to the WebSocket connection.
+func (ws *WorkspaceStream) writeLoop(conn *websocket.Conn) {
+	for {
+		select {
+		case <-ws.closeCh:
+			return
+		case msg, ok := <-ws.inputCh:
+			if !ok {
 				return
-			case msg, ok := <-ws.inputCh:
-				if !ok {
-					return
-				}
-				if err := conn.WriteJSON(msg); err != nil {
-					ws.logger.Debug("workspace stream write error", zap.Error(err))
-					return
-				}
+			}
+			if err := conn.WriteJSON(msg); err != nil {
+				ws.logger.Debug("workspace stream write error", zap.Error(err))
+				return
 			}
 		}
-	}()
-
-	return ws, nil
+	}
 }
 
 // WriteShellInput sends input to the shell through the workspace stream

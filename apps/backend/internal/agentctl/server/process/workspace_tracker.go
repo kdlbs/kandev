@@ -27,6 +27,12 @@ import (
 // DefaultGitPollInterval is the default interval for polling git status
 const DefaultGitPollInterval = 3 * time.Second
 
+// fileStatus constants for FileInfo.Status values.
+const (
+	fileStatusDeleted  = "deleted"
+	fileStatusModified = "modified"
+)
+
 // WorkspaceTracker monitors workspace changes and provides real-time updates
 type WorkspaceTracker struct {
 	workDir string
@@ -298,7 +304,8 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 	// 2. History rewritten: previousHead is NOT reachable from currentHead (e.g., git rebase -i, git commit --amend)
 	// 3. HEAD moved forward: previousHead IS an ancestor of currentHead (normal commits)
 	if previousHead != "" {
-		if wt.isAncestor(ctx, currentHead, previousHead) {
+		switch {
+		case wt.isAncestor(ctx, currentHead, previousHead):
 			// Case 1: HEAD moved backward - emit reset notification
 			wt.logger.Info("detected git reset (HEAD moved backward)",
 				zap.String("previous", previousHead),
@@ -308,7 +315,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 				PreviousHead: previousHead,
 				CurrentHead:  currentHead,
 			})
-		} else if !wt.isAncestor(ctx, previousHead, currentHead) {
+		case !wt.isAncestor(ctx, previousHead, currentHead):
 			// Case 2: History was rewritten - previousHead is not reachable from currentHead
 			// This happens with interactive rebase, commit amend, etc.
 			wt.logger.Info("detected git history rewrite (previous HEAD not reachable)",
@@ -319,7 +326,7 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 				PreviousHead: previousHead,
 				CurrentHead:  currentHead,
 			})
-		} else {
+		default:
 			// Case 3: HEAD moved forward normally - get new commits
 			commits := wt.getCommitsSince(ctx, previousHead)
 
@@ -531,12 +538,30 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		Files:     make(map[string]types.FileInfo),
 	}
 
+	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
+		return update, err
+	}
+
+	wt.getAheadBehindCounts(ctx, &update)
+
+	if err := wt.parseGitStatusOutput(ctx, &update); err != nil {
+		return update, err
+	}
+
+	// Enrich file info with diff data (additions, deletions, and actual diff content)
+	wt.enrichWithDiffData(ctx, &update)
+
+	return update, nil
+}
+
+// getGitBranchInfo populates branch, remote branch, head commit, and base commit fields.
+func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.GitStatusUpdate) error {
 	// Get current branch
 	branchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	branchCmd.Dir = wt.workDir
 	branchOut, err := branchCmd.Output()
 	if err != nil {
-		return update, err
+		return err
 	}
 	update.Branch = strings.TrimSpace(string(branchOut))
 
@@ -572,7 +597,12 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		update.BaseCommit = strings.TrimSpace(string(baseOut))
 	}
 
-	// Get ahead/behind counts
+	return nil
+}
+
+// getAheadBehindCounts populates the Ahead/Behind fields relative to the tracking or
+// origin branch. Falls back to origin/main then origin/master when no upstream is set.
+func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate) {
 	// Use remote branch if available, otherwise fall back to origin/main or origin/master
 	// This handles worktree branches that don't have an upstream tracking branch set
 	compareRef := update.RemoteBranch
@@ -590,28 +620,30 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 			}
 		}
 	}
-	if compareRef != "" {
-		countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
-		countCmd.Dir = wt.workDir
-		if countOut, err := countCmd.Output(); err == nil {
-			parts := strings.Fields(string(countOut))
-			if len(parts) == 2 {
-				update.Ahead, _ = strconv.Atoi(parts[0])
-				update.Behind, _ = strconv.Atoi(parts[1])
-			}
+	if compareRef == "" {
+		return
+	}
+	countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
+	countCmd.Dir = wt.workDir
+	if countOut, err := countCmd.Output(); err == nil {
+		parts := strings.Fields(string(countOut))
+		if len(parts) == 2 {
+			update.Ahead, _ = strconv.Atoi(parts[0])
+			update.Behind, _ = strconv.Atoi(parts[1])
 		}
 	}
+}
 
-	// Get file status using git status --porcelain --untracked-files=all
+// parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
+func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
 	// --untracked-files=all shows all files in untracked directories, not just the directory name
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
 	statusCmd.Dir = wt.workDir
 	statusOut, err := statusCmd.Output()
 	if err != nil {
-		return update, err
+		return err
 	}
 
-	// Parse porcelain output
 	// Git status --porcelain format: XY filename
 	// X = index (staged) status, Y = working tree (unstaged) status
 	// ' ' = unmodified, M = modified, A = added, D = deleted, R = renamed, ? = untracked
@@ -620,90 +652,81 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		if len(line) < 3 {
 			continue
 		}
+		wt.applyPorcelainLine(line, update)
+	}
+	return nil
+}
 
-		indexStatus := line[0]    // Staged status (X)
-		workTreeStatus := line[1] // Unstaged status (Y)
-		filePath := strings.TrimSpace(line[3:])
+// applyPorcelainLine parses a single git status --porcelain line and updates the status update.
+func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitStatusUpdate) {
+	indexStatus := line[0]    // Staged status (X)
+	workTreeStatus := line[1] // Unstaged status (Y)
+	filePath := strings.TrimSpace(line[3:])
 
-		fileInfo := types.FileInfo{
-			Path: filePath,
+	fileInfo := types.FileInfo{Path: filePath}
+
+	// Determine staged status based on index and worktree status.
+	// Prioritize worktree changes as they represent the current state.
+	switch {
+	case indexStatus == '?' && workTreeStatus == '?':
+		fileInfo.Status = "untracked"
+		fileInfo.Staged = false
+		update.Untracked = append(update.Untracked, filePath)
+	case workTreeStatus == 'D':
+		// File deleted in worktree - this is an unstaged deletion
+		fileInfo.Status = fileStatusDeleted
+		fileInfo.Staged = false
+		update.Deleted = append(update.Deleted, filePath)
+	case indexStatus == 'D':
+		// File deleted and staged
+		fileInfo.Status = fileStatusDeleted
+		fileInfo.Staged = true
+		update.Deleted = append(update.Deleted, filePath)
+	case workTreeStatus == 'M':
+		// Modified in worktree - unstaged modification
+		fileInfo.Status = fileStatusModified
+		fileInfo.Staged = false
+		update.Modified = append(update.Modified, filePath)
+	case indexStatus == 'M':
+		// Modified and staged (no worktree changes)
+		fileInfo.Status = fileStatusModified
+		fileInfo.Staged = true
+		update.Modified = append(update.Modified, filePath)
+	case indexStatus == 'A':
+		// Added and staged
+		fileInfo.Status = "added"
+		fileInfo.Staged = true
+		update.Added = append(update.Added, filePath)
+	case indexStatus == 'R':
+		fileInfo.Status = "renamed"
+		fileInfo.Staged = true
+		// Renamed files have format "old -> new"
+		if idx := strings.Index(filePath, " -> "); idx != -1 {
+			fileInfo.OldPath = filePath[:idx]
+			fileInfo.Path = filePath[idx+4:]
 		}
-
-		// Determine staged status based on index and worktree status.
-		// A file's change is "staged" if the relevant change is in the index.
-		// If there's a worktree change (like deletion), that change is unstaged.
-		//
-		// Examples:
-		// "M " = modified and staged (Staged=true)
-		// " M" = modified but unstaged (Staged=false)
-		// "MM" = modified staged + more unstaged modifications (Staged=false for the current state)
-		// "A " = added and staged (Staged=true)
-		// "AD" = added to index but deleted in worktree - deletion is unstaged (Staged=false)
-		// "D " = deleted and staged (Staged=true)
-		// " D" = deleted but unstaged (Staged=false)
-
-		// Parse status - prioritize worktree changes as they represent the current state
-		switch {
-		case indexStatus == '?' && workTreeStatus == '?':
-			fileInfo.Status = "untracked"
-			fileInfo.Staged = false
-			update.Untracked = append(update.Untracked, filePath)
-		case workTreeStatus == 'D':
-			// File deleted in worktree - this is an unstaged deletion
-			// Even if there were staged changes before (A, M), the deletion is unstaged
-			fileInfo.Status = "deleted"
-			fileInfo.Staged = false
-			update.Deleted = append(update.Deleted, filePath)
-		case indexStatus == 'D':
-			// File deleted and staged (no worktree status means deletion is complete)
-			fileInfo.Status = "deleted"
-			fileInfo.Staged = true
-			update.Deleted = append(update.Deleted, filePath)
-		case workTreeStatus == 'M':
-			// Modified in worktree - unstaged modification
-			fileInfo.Status = "modified"
-			fileInfo.Staged = false
-			update.Modified = append(update.Modified, filePath)
-		case indexStatus == 'M':
-			// Modified and staged (no worktree changes)
-			fileInfo.Status = "modified"
-			fileInfo.Staged = true
-			update.Modified = append(update.Modified, filePath)
-		case indexStatus == 'A':
-			// Added and staged
-			fileInfo.Status = "added"
-			fileInfo.Staged = true
-			update.Added = append(update.Added, filePath)
-		case indexStatus == 'R':
-			fileInfo.Status = "renamed"
-			fileInfo.Staged = true
-			// Renamed files have format "old -> new"
-			if idx := strings.Index(filePath, " -> "); idx != -1 {
-				fileInfo.OldPath = filePath[:idx]
-				fileInfo.Path = filePath[idx+4:]
-			}
-			update.Renamed = append(update.Renamed, filePath)
-		}
-
-		update.Files[filePath] = fileInfo
+		update.Renamed = append(update.Renamed, filePath)
 	}
 
-	// Enrich file info with diff data (additions, deletions, and actual diff content)
-	wt.enrichWithDiffData(ctx, &update)
-
-	return update, nil
+	update.Files[filePath] = fileInfo
 }
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
 func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *types.GitStatusUpdate) {
-	// Determine the base ref to compare against
 	// Use remote branch if available, otherwise use HEAD
 	baseRef := "HEAD"
 	if update.RemoteBranch != "" {
 		baseRef = update.RemoteBranch
 	}
 
-	// Get numstat for additions/deletions count (compare against base branch)
+	wt.enrichWithUnstagedDiff(ctx, update, baseRef)
+	wt.enrichWithStagedDiff(ctx, update, baseRef)
+	wt.enrichUntrackedFileDiffs(ctx, update)
+}
+
+// enrichWithUnstagedDiff populates additions/deletions and diff content for files
+// with unstaged changes by comparing the worktree against baseRef.
+func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
 	numstatCmd.Dir = wt.workDir
 	numstatOut, err := numstatCmd.Output()
@@ -712,19 +735,16 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 		return
 	}
 
-	// Parse numstat output and update file info
 	lines := strings.Split(string(numstatOut), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-
 		parts := strings.Fields(line)
 		if len(parts) < 3 {
 			continue
 		}
-
 		additions, _ := strconv.Atoi(parts[0])
 		deletions, _ := strconv.Atoi(parts[1])
 		filePath := parts[2]
@@ -732,29 +752,30 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 		// Only update file info if it exists in status (uncommitted changes).
 		// Files that appear in diff but not in status are committed changes - we don't
 		// add them to the Files map as that would make git status show already-committed files.
-		if fileInfo, exists := update.Files[filePath]; exists {
-			fileInfo.Additions = additions
-			fileInfo.Deletions = deletions
-
-			// Get the actual diff content for this file (compare against base branch)
-			diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
-			diffCmd.Dir = wt.workDir
-			if diffOut, err := diffCmd.Output(); err == nil {
-				fileInfo.Diff = string(diffOut)
-			}
-
-			update.Files[filePath] = fileInfo
+		fileInfo, exists := update.Files[filePath]
+		if !exists {
+			continue
 		}
-		// NOTE: We intentionally do NOT add files that are in the diff but not in git status.
-		// Those are committed changes, not uncommitted changes. The UI should only show
-		// uncommitted changes in the "files changed" count.
-	}
+		fileInfo.Additions = additions
+		fileInfo.Deletions = deletions
 
+		// Get the actual diff content for this file (compare against base branch)
+		diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
+		diffCmd.Dir = wt.workDir
+		if diffOut, err := diffCmd.Output(); err == nil {
+			fileInfo.Diff = string(diffOut)
+		}
+
+		update.Files[filePath] = fileInfo
+	}
+}
+
+// enrichWithStagedDiff populates additions/deletions and diff content for staged files
+// that have no additional unstaged changes, using git diff --cached.
+func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
 	// For staged files that don't have unstaged changes, we need to get the diff from the index.
 	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
 	// and has no additional unstaged changes, its diff won't appear there.
-	// We use git diff --cached baseRef to get the staged diff content for such files,
-	// using the same baseRef for consistency.
 	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat", baseRef)
 	stagedCmd.Dir = wt.workDir
 	stagedOut, err := stagedCmd.Output()
@@ -762,74 +783,74 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 		return
 	}
 
-	lines = strings.Split(string(stagedOut), "\n")
+	lines := strings.Split(string(stagedOut), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-
 		parts := strings.Fields(line)
 		if len(parts) < 3 {
 			continue
 		}
-
 		additions, _ := strconv.Atoi(parts[0])
 		deletions, _ := strconv.Atoi(parts[1])
 		filePath := parts[2]
 
-		// Update existing file info if it exists
-		if fileInfo, exists := update.Files[filePath]; exists {
-			// Only set additions/deletions if they weren't already set by the first diff.
-			// This prevents double-counting when changes appear in both diffs.
-			if fileInfo.Additions == 0 && fileInfo.Deletions == 0 {
-				fileInfo.Additions = additions
-				fileInfo.Deletions = deletions
-			}
-
-			// Get the staged diff content if we don't have diff content yet
-			// Use the same baseRef for consistency with unstaged files
-			if fileInfo.Diff == "" {
-				diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", baseRef, "--", filePath)
-				diffCmd.Dir = wt.workDir
-				if diffOut, err := diffCmd.Output(); err == nil {
-					fileInfo.Diff = string(diffOut)
-				}
-			}
-
-			update.Files[filePath] = fileInfo
+		fileInfo, exists := update.Files[filePath]
+		if !exists {
+			continue
 		}
+		// Only set additions/deletions if they weren't already set by the unstaged diff.
+		// This prevents double-counting when changes appear in both diffs.
+		if fileInfo.Additions == 0 && fileInfo.Deletions == 0 {
+			fileInfo.Additions = additions
+			fileInfo.Deletions = deletions
+		}
+		// Get the staged diff content if we don't have diff content yet
+		if fileInfo.Diff == "" {
+			diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", baseRef, "--", filePath)
+			diffCmd.Dir = wt.workDir
+			if diffOut, err := diffCmd.Output(); err == nil {
+				fileInfo.Diff = string(diffOut)
+			}
+		}
+		update.Files[filePath] = fileInfo
 	}
+}
 
-	// For untracked files, show the entire file content as "added"
+// enrichUntrackedFileDiffs builds a synthetic git diff for untracked files showing all
+// lines as additions, so the diff viewer can display their full content.
+func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update *types.GitStatusUpdate) {
 	for filePath, fileInfo := range update.Files {
-		if fileInfo.Status == "untracked" {
-			// Show file content as diff (all additions)
-			catCmd := exec.CommandContext(ctx, "cat", filePath)
-			catCmd.Dir = wt.workDir
-			if catOut, err := catCmd.Output(); err == nil {
-				content := string(catOut)
-				lines := strings.Split(content, "\n")
-				fileInfo.Additions = len(lines)
-				fileInfo.Deletions = 0
-
-				// Format as a proper git diff with all required headers
-				// The @git-diff-view/react library requires the full git diff format
-				var diffBuilder strings.Builder
-				diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
-				diffBuilder.WriteString("new file mode 100644\n")
-				diffBuilder.WriteString("index 0000000..0000000\n")
-				diffBuilder.WriteString("--- /dev/null\n")
-				diffBuilder.WriteString("+++ b/" + filePath + "\n")
-				diffBuilder.WriteString("@@ -0,0 +1," + strconv.Itoa(len(lines)) + " @@\n")
-				for _, line := range lines {
-					diffBuilder.WriteString("+" + line + "\n")
-				}
-				fileInfo.Diff = diffBuilder.String()
-
-				update.Files[filePath] = fileInfo
-			}
+		if fileInfo.Status != "untracked" {
+			continue
 		}
+		catCmd := exec.CommandContext(ctx, "cat", filePath)
+		catCmd.Dir = wt.workDir
+		catOut, err := catCmd.Output()
+		if err != nil {
+			continue
+		}
+		content := string(catOut)
+		lines := strings.Split(content, "\n")
+		fileInfo.Additions = len(lines)
+		fileInfo.Deletions = 0
+
+		// Format as a proper git diff with all required headers.
+		// The @git-diff-view/react library requires the full git diff format.
+		var diffBuilder strings.Builder
+		diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
+		diffBuilder.WriteString("new file mode 100644\n")
+		diffBuilder.WriteString("index 0000000..0000000\n")
+		diffBuilder.WriteString("--- /dev/null\n")
+		diffBuilder.WriteString("+++ b/" + filePath + "\n")
+		diffBuilder.WriteString("@@ -0,0 +1," + strconv.Itoa(len(lines)) + " @@\n")
+		for _, line := range lines {
+			diffBuilder.WriteString("+" + line + "\n")
+		}
+		fileInfo.Diff = diffBuilder.String()
+		update.Files[filePath] = fileInfo
 	}
 }
 
@@ -1456,13 +1477,14 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 		name := filepath.Base(lowerPath)
 
 		score := 0
-		if name == query {
+		switch {
+		case name == query:
 			score = 100 // Exact filename match
-		} else if strings.HasPrefix(name, query) {
+		case strings.HasPrefix(name, query):
 			score = 75 // Filename starts with query
-		} else if strings.Contains(name, query) {
+		case strings.Contains(name, query):
 			score = 50 // Filename contains query
-		} else if strings.Contains(lowerPath, query) {
+		case strings.Contains(lowerPath, query):
 			score = 25 // Path contains query
 		}
 

@@ -287,81 +287,142 @@ func (h *TerminalHandler) runTerminalBridge(
 			continue
 		}
 
-		// Check for resize command (first byte 0x01)
 		if data[0] == resizeCommandByte {
-			// Set up PTY access BEFORE handling resize if not already done.
-			// This ensures buffered output is sent to the terminal before the resize
-			// triggers a TUI redraw (which would overwrite the scrollback).
-			if !directOutputSet {
-				if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
-					directOutputSet = true
-				}
-			}
-
-			// Handle resize — may return updated processID if process was restarted.
-			// Falls back to session-level resize when the old process is gone.
-			newProcessID := h.handleResize(data[1:], sessionID, processID, interactiveRunner)
-			if newProcessID != processID {
-				processID = newProcessID
-				directOutputSet = false
-				ptyWriter = nil
-			}
-
-			// Retry setupPtyAccess after resize — process may have been lazily started
-			// by the resize (deferred-start), so the PTY is now available.
-			if !directOutputSet {
-				if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
-					directOutputSet = true
-				}
-			}
+			newID, newDirect := h.handleResizeCommand(data[1:], sessionID, processID, interactiveRunner, wsw, directOutputSet, &ptyWriter)
+			processID = newID
+			directOutputSet = newDirect
 			continue
 		}
 
-		// Regular input - write to PTY if available
-		if ptyWriter != nil {
-			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error",
-					zap.String("session_id", sessionID),
-					zap.String("process_id", processID),
-					zap.Error(err))
+		newID, newDirect := h.handleTerminalInput(data, sessionID, processID, interactiveRunner, wsw, &ptyWriter, directOutputSet)
+		processID = newID
+		directOutputSet = newDirect
+	}
+}
 
-				// Reset state and discover the new process immediately.
-				// Without this, the bridge would be stuck with the old processID
-				// until a resize message arrives (which may never come after restart).
-				ptyWriter = nil
-				directOutputSet = false
-				processID = h.discoverProcessBySession(sessionID, processID, interactiveRunner)
-				continue
-			}
-			// Detect Enter key (user submitted input) - notify lifecycle manager
-			h.detectInputSubmission(sessionID, data)
-		} else {
-			// PTY not ready — try setup. If it fails, processID may be stale
-			// (process was restarted with a new ID). Discover the current process
-			// by session before giving up.
-			if !h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter) {
-				newID := h.discoverProcessBySession(sessionID, processID, interactiveRunner)
-				if newID != processID {
-					processID = newID
-					h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, &ptyWriter)
-				}
-			}
-			if ptyWriter == nil {
-				h.logger.Debug("PTY not ready, dropping input",
-					zap.String("session_id", sessionID),
-					zap.Int("bytes", len(data)))
-				continue
-			}
+// handleResizeCommand processes a resize message in the terminal bridge loop.
+// Returns the (possibly updated) processID and directOutputSet flag.
+func (h *TerminalHandler) handleResizeCommand(
+	payload []byte,
+	sessionID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	directOutputSet bool,
+	ptyWriter *io.Writer,
+) (string, bool) {
+	// Set up PTY access BEFORE handling resize if not already done.
+	// This ensures buffered output is sent to the terminal before the resize
+	// triggers a TUI redraw (which would overwrite the scrollback).
+	if !directOutputSet {
+		if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, ptyWriter) {
 			directOutputSet = true
-			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error after setup",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-				continue
-			}
-			h.detectInputSubmission(sessionID, data)
 		}
 	}
+
+	// Handle resize — may return updated processID if process was restarted.
+	// Falls back to session-level resize when the old process is gone.
+	newProcessID := h.handleResize(payload, sessionID, processID, interactiveRunner)
+	if newProcessID != processID {
+		processID = newProcessID
+		directOutputSet = false
+		*ptyWriter = nil
+	}
+
+	// Retry setupPtyAccess after resize — process may have been lazily started
+	// by the resize (deferred-start), so the PTY is now available.
+	if !directOutputSet {
+		if h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, ptyWriter) {
+			directOutputSet = true
+		}
+	}
+
+	return processID, directOutputSet
+}
+
+// handleTerminalInput processes regular (non-resize) input in the terminal bridge loop.
+// Returns the (possibly updated) processID and directOutputSet flag.
+func (h *TerminalHandler) handleTerminalInput(
+	data []byte,
+	sessionID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) (string, bool) {
+	if *ptyWriter != nil {
+		return h.writeToReadyPty(data, sessionID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+	}
+	return h.writeToUnreadyPty(data, sessionID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+}
+
+// writeToReadyPty writes input to an already-established PTY writer.
+// If writing fails it resets state and discovers the new process.
+func (h *TerminalHandler) writeToReadyPty(
+	data []byte,
+	sessionID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) (string, bool) {
+	if _, err := (*ptyWriter).Write(data); err != nil {
+		h.logger.Debug("PTY write error",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", processID),
+			zap.Error(err))
+
+		// Reset state and discover the new process immediately.
+		// Without this, the bridge would be stuck with the old processID
+		// until a resize message arrives (which may never come after restart).
+		*ptyWriter = nil
+		directOutputSet = false
+		processID = h.discoverProcessBySession(sessionID, processID, interactiveRunner)
+		return processID, directOutputSet
+	}
+	// Detect Enter key (user submitted input) - notify lifecycle manager
+	h.detectInputSubmission(sessionID, data)
+	return processID, directOutputSet
+}
+
+// writeToUnreadyPty attempts to set up PTY access and then write input.
+// If setup fails it tries to discover the current process by session.
+func (h *TerminalHandler) writeToUnreadyPty(
+	data []byte,
+	sessionID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) (string, bool) {
+	// PTY not ready — try setup. If it fails, processID may be stale
+	// (process was restarted with a new ID). Discover the current process
+	// by session before giving up.
+	if !h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, ptyWriter) {
+		newID := h.discoverProcessBySession(sessionID, processID, interactiveRunner)
+		if newID != processID {
+			processID = newID
+			h.setupPtyAccess(sessionID, processID, interactiveRunner, wsw, ptyWriter)
+		}
+	}
+	if *ptyWriter == nil {
+		h.logger.Debug("PTY not ready, dropping input",
+			zap.String("session_id", sessionID),
+			zap.Int("bytes", len(data)))
+		return processID, directOutputSet
+	}
+	directOutputSet = true
+	if _, err := (*ptyWriter).Write(data); err != nil {
+		h.logger.Debug("PTY write error after setup",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return processID, directOutputSet
+	}
+	h.detectInputSubmission(sessionID, data)
+	return processID, directOutputSet
 }
 
 // detectInputSubmission checks if the input contains Enter key and notifies
@@ -504,78 +565,98 @@ func (h *TerminalHandler) resizeBySessionFallback(
 	return oldProcessID
 }
 
-// handleUserShellWS handles WebSocket connections for user shell terminals.
-// Each terminal tab gets its own independent shell process.
-func (h *TerminalHandler) handleUserShellWS(
+// shellScriptInfo holds the label and initial command resolved from a script.
+type shellScriptInfo struct {
+	label          string
+	initialCommand string
+}
+
+// resolveShellScript looks up a script by ID and returns its label and command.
+// Returns an error if the script cannot be retrieved.
+func (h *TerminalHandler) resolveShellScript(ctx context.Context, scriptID string) (*shellScriptInfo, error) {
+	script, err := h.scriptService.GetRepositoryScript(ctx, scriptID)
+	if err != nil {
+		h.logger.Error("failed to get repository script",
+			zap.String("script_id", scriptID),
+			zap.Error(err))
+		return nil, err
+	}
+	h.logger.Info("handleUserShellWS: resolved script",
+		zap.String("script_id", scriptID),
+		zap.String("script_name", script.Name),
+		zap.String("script_command", script.Command))
+	return &shellScriptInfo{label: script.Name, initialCommand: script.Command}, nil
+}
+
+// resolvePreferredShell returns the user's preferred shell, or empty string on error.
+func (h *TerminalHandler) resolvePreferredShell(ctx context.Context) string {
+	if h.userService == nil {
+		return ""
+	}
+	shell, err := h.userService.PreferredShell(ctx)
+	if err != nil {
+		h.logger.Debug("failed to get preferred shell, using default", zap.Error(err))
+		return ""
+	}
+	return shell
+}
+
+// resolveWorkingDir returns the workspace path for the given session, if available.
+func (h *TerminalHandler) resolveWorkingDir(sessionID string) string {
+	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !exists {
+		h.logger.Info("handleUserShellWS: no execution found, using empty working directory")
+		return ""
+	}
+	h.logger.Info("handleUserShellWS: got working directory from execution",
+		zap.String("working_dir", execution.WorkspacePath))
+	return execution.WorkspacePath
+}
+
+// resolveShellLabel returns the label and initial command for a user shell, derived
+// from either a script ID lookup or a plain label query parameter.
+// Returns an HTTP error string (non-empty) when the script lookup fails.
+func (h *TerminalHandler) resolveShellLabel(c *gin.Context) (label, initialCommand, httpErr string) {
+	scriptID := c.Query("scriptId")
+	labelParam := c.Query("label")
+
+	if scriptID != "" && h.scriptService != nil {
+		info, err := h.resolveShellScript(c.Request.Context(), scriptID)
+		if err != nil {
+			return "", "", "invalid script ID"
+		}
+		return info.label, info.initialCommand, ""
+	}
+	if labelParam != "" {
+		return labelParam, "", ""
+	}
+	return "", "", ""
+}
+
+// startUserShellProcess resolves shell parameters and starts (or reconnects to) the
+// user shell process. Returns the process ID on success, or an HTTP status + message on failure.
+func (h *TerminalHandler) startUserShellProcess(
 	c *gin.Context,
 	sessionID string,
 	terminalID string,
 	interactiveRunner *process.InteractiveRunner,
-) {
-	// Get optional parameters from query
-	scriptID := c.Query("scriptId") // Repository script ID to run
-	labelParam := c.Query("label")  // Label for plain shell terminals
-
-	var label string
-	var initialCommand string
-
-	// If scriptId is provided, look up the script from the database
-	if scriptID != "" && h.scriptService != nil {
-		script, err := h.scriptService.GetRepositoryScript(c.Request.Context(), scriptID)
-		if err != nil {
-			h.logger.Error("failed to get repository script",
-				zap.String("script_id", scriptID),
-				zap.Error(err))
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid script ID"})
-			return
-		}
-		label = script.Name
-		initialCommand = script.Command
-		h.logger.Info("handleUserShellWS: resolved script",
-			zap.String("script_id", scriptID),
-			zap.String("script_name", script.Name),
-			zap.String("script_command", script.Command))
-	} else if labelParam != "" {
-		// Use label from query param for plain shell terminals
-		label = labelParam
+) (processID string, httpStatus int, errMsg string) {
+	label, initialCommand, httpErr := h.resolveShellLabel(c)
+	if httpErr != "" {
+		return "", http.StatusBadRequest, httpErr
 	}
 
 	h.logger.Info("handleUserShellWS: starting user shell handling",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
-		zap.String("script_id", scriptID),
 		zap.String("label", label),
 		zap.String("initial_command", initialCommand))
 
-	// Get preferred shell from user settings
-	var preferredShell string
-	if h.userService != nil {
-		shell, err := h.userService.PreferredShell(c.Request.Context())
-		if err != nil {
-			h.logger.Debug("failed to get preferred shell, using default",
-				zap.Error(err))
-		} else {
-			preferredShell = shell
-		}
-	}
+	preferredShell := h.resolvePreferredShell(c.Request.Context())
+	workingDir := h.resolveWorkingDir(sessionID)
 
-	// Get working directory from execution (workspace path)
-	workingDir := ""
-	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
-		workingDir = execution.WorkspacePath
-		h.logger.Info("handleUserShellWS: got working directory from execution",
-			zap.String("working_dir", workingDir))
-	} else {
-		h.logger.Info("handleUserShellWS: no execution found, using empty working directory")
-	}
+	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
 
-	// Build shell options
-	opts := &process.UserShellOptions{
-		Label:          label,
-		InitialCommand: initialCommand,
-	}
-
-	// Start or get existing user shell for this terminal
 	h.logger.Info("handleUserShellWS: calling StartUserShell",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
@@ -585,29 +666,38 @@ func (h *TerminalHandler) handleUserShellWS(
 		zap.String("initial_command", opts.InitialCommand))
 
 	info, err := interactiveRunner.StartUserShell(
-		c.Request.Context(),
-		sessionID,
-		terminalID,
-		workingDir,
-		preferredShell,
-		opts,
+		c.Request.Context(), sessionID, terminalID, workingDir, preferredShell, opts,
 	)
 	if err != nil {
 		h.logger.Error("failed to start user shell",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
+		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
-	processID := info.ID
 	h.logger.Info("handleUserShellWS: user shell started successfully",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
-		zap.String("process_id", processID))
+		zap.String("process_id", info.ID))
 
-	// Upgrade to WebSocket
+	return info.ID, 0, ""
+}
+
+// handleUserShellWS handles WebSocket connections for user shell terminals.
+// Each terminal tab gets its own independent shell process.
+func (h *TerminalHandler) handleUserShellWS(
+	c *gin.Context,
+	sessionID string,
+	terminalID string,
+	interactiveRunner *process.InteractiveRunner,
+) {
+	processID, httpStatus, errMsg := h.startUserShellProcess(c, sessionID, terminalID, interactiveRunner)
+	if errMsg != "" {
+		c.JSON(httpStatus, gin.H{"error": errMsg})
+		return
+	}
+
 	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		h.logger.Error("failed to upgrade to WebSocket",
@@ -622,10 +712,7 @@ func (h *TerminalHandler) handleUserShellWS(
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", processID))
 
-	// Create WebSocket writer for output
 	wsw := newWsWriter(conn)
-
-	// Run the user shell terminal bridge
 	h.runUserShellBridge(conn, sessionID, terminalID, processID, interactiveRunner, wsw)
 }
 
@@ -676,58 +763,119 @@ func (h *TerminalHandler) runUserShellBridge(
 			continue
 		}
 
-		// Check for resize command (first byte 0x01)
 		if data[0] == resizeCommandByte {
-			// Set up PTY access BEFORE handling resize if not already done
-			if !directOutputSet {
-				if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
-					directOutputSet = true
-				}
-			}
-
-			// Handle resize for user shell
-			h.handleUserShellResize(data[1:], sessionID, terminalID, interactiveRunner)
+			directOutputSet = h.handleUserShellResizeCommand(
+				data[1:], sessionID, terminalID, processID,
+				interactiveRunner, wsw, directOutputSet, &ptyWriter,
+			)
 			continue
 		}
 
-		// Regular input - write to PTY if available
-		if ptyWriter != nil {
-			if _, err := ptyWriter.Write(data); err != nil {
-				h.logger.Debug("PTY write error",
+		directOutputSet = h.handleUserShellInput(
+			data, sessionID, terminalID, processID,
+			interactiveRunner, wsw, &ptyWriter, directOutputSet,
+		)
+	}
+}
+
+// handleUserShellResizeCommand processes a resize message in the user shell bridge loop.
+// Returns the updated directOutputSet flag.
+func (h *TerminalHandler) handleUserShellResizeCommand(
+	payload []byte,
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	directOutputSet bool,
+	ptyWriter *io.Writer,
+) bool {
+	// Set up PTY access BEFORE handling resize if not already done
+	if !directOutputSet {
+		if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+			directOutputSet = true
+		}
+	}
+	h.handleUserShellResize(payload, sessionID, terminalID, interactiveRunner)
+	return directOutputSet
+}
+
+// handleUserShellInput processes regular (non-resize) input in the user shell bridge loop.
+// Returns the updated directOutputSet flag.
+func (h *TerminalHandler) handleUserShellInput(
+	data []byte,
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) bool {
+	if *ptyWriter != nil {
+		return h.writeToReadyUserShellPty(data, sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+	}
+	return h.writeToUnreadyUserShellPty(data, sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter, directOutputSet)
+}
+
+// writeToReadyUserShellPty writes input to an established user shell PTY.
+// On failure it attempts to re-establish PTY access and retries the write.
+func (h *TerminalHandler) writeToReadyUserShellPty(
+	data []byte,
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) bool {
+	if _, err := (*ptyWriter).Write(data); err != nil {
+		h.logger.Debug("PTY write error",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		// Try to re-establish PTY access
+		if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+			directOutputSet = true
+			if _, err := (*ptyWriter).Write(data); err != nil {
+				h.logger.Debug("PTY write error after reconnect",
 					zap.String("session_id", sessionID),
 					zap.String("terminal_id", terminalID),
 					zap.Error(err))
-				// Try to re-establish PTY access
-				if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
-					directOutputSet = true
-					// Retry write
-					if _, err := ptyWriter.Write(data); err != nil {
-						h.logger.Debug("PTY write error after reconnect",
-							zap.String("session_id", sessionID),
-							zap.String("terminal_id", terminalID),
-							zap.Error(err))
-					}
-				}
-			}
-		} else {
-			// PTY not ready yet - try to set it up
-			if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, &ptyWriter) {
-				directOutputSet = true
-				// Retry writing after setup
-				if _, err := ptyWriter.Write(data); err != nil {
-					h.logger.Debug("PTY write error after setup",
-						zap.String("session_id", sessionID),
-						zap.String("terminal_id", terminalID),
-						zap.Error(err))
-				}
-			} else {
-				h.logger.Debug("PTY not ready, dropping input",
-					zap.String("session_id", sessionID),
-					zap.String("terminal_id", terminalID),
-					zap.Int("bytes", len(data)))
 			}
 		}
 	}
+	return directOutputSet
+}
+
+// writeToUnreadyUserShellPty sets up PTY access and writes input for a user shell.
+// Drops the input if setup fails.
+func (h *TerminalHandler) writeToUnreadyUserShellPty(
+	data []byte,
+	sessionID string,
+	terminalID string,
+	processID string,
+	interactiveRunner *process.InteractiveRunner,
+	wsw *wsWriter,
+	ptyWriter *io.Writer,
+	directOutputSet bool,
+) bool {
+	if h.setupUserShellPtyAccess(sessionID, terminalID, processID, interactiveRunner, wsw, ptyWriter) {
+		directOutputSet = true
+		if _, err := (*ptyWriter).Write(data); err != nil {
+			h.logger.Debug("PTY write error after setup",
+				zap.String("session_id", sessionID),
+				zap.String("terminal_id", terminalID),
+				zap.Error(err))
+		}
+	} else {
+		h.logger.Debug("PTY not ready, dropping input",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Int("bytes", len(data)))
+	}
+	return directOutputSet
 }
 
 // setupUserShellPtyAccess sets up PTY access for a user shell terminal.

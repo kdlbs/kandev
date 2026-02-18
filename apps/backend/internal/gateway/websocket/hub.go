@@ -168,6 +168,33 @@ func (h *Hub) Broadcast(msg *ws.Message) {
 	h.broadcast <- msg
 }
 
+// getSubscribersLocked reads subscribers for an ID from a subscriber map under the read lock.
+func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*Client {
+	h.mu.RLock()
+	subscriberMap := m[id]
+	clients := make([]*Client, 0, len(subscriberMap))
+	for client := range subscriberMap {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	return clients
+}
+
+// sendToClients delivers a pre-marshalled message to a list of clients.
+func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
+	for _, client := range clients {
+		if client.sendBytes(data) {
+			h.logger.Debug("Sent message to client",
+				zap.String("client_id", client.ID),
+				zap.String("action", action))
+		} else {
+			h.logger.Warn("Client send buffer full, dropping message",
+				zap.String("client_id", client.ID),
+				zap.String("action", action))
+		}
+	}
+}
+
 // BroadcastToTask sends a notification to clients subscribed to a specific task
 func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
@@ -175,32 +202,12 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-
-	// Copy client list while holding the lock to avoid race conditions
-	h.mu.RLock()
-	subscriberMap := h.taskSubscribers[taskID]
-	clients := make([]*Client, 0, len(subscriberMap))
-	for client := range subscriberMap {
-		clients = append(clients, client)
-	}
-	h.mu.RUnlock()
-
+	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-
-	for _, client := range clients {
-		if client.sendBytes(data) {
-			h.logger.Debug("Sent message to client",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		} else {
-			h.logger.Warn("Client send buffer full, dropping message",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		}
-	}
+	h.sendToClients(data, clients, msg.Action)
 }
 
 // BroadcastToSession sends a notification to clients subscribed to a specific session
@@ -210,31 +217,12 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-
-	h.mu.RLock()
-	subscriberMap := h.sessionSubscribers[sessionID]
-	clients := make([]*Client, 0, len(subscriberMap))
-	for client := range subscriberMap {
-		clients = append(clients, client)
-	}
-	h.mu.RUnlock()
-
+	clients := h.getSubscribersLocked(h.sessionSubscribers, sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-
-	for _, client := range clients {
-		if client.sendBytes(data) {
-			h.logger.Debug("Sent message to client",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		} else {
-			h.logger.Warn("Client send buffer full, dropping message",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		}
-	}
+	h.sendToClients(data, clients, msg.Action)
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user
@@ -244,32 +232,12 @@ func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-
-	// Copy client list while holding the lock to avoid race conditions
-	h.mu.RLock()
-	subscriberMap := h.userSubscribers[userID]
-	clients := make([]*Client, 0, len(subscriberMap))
-	for client := range subscriberMap {
-		clients = append(clients, client)
-	}
-	h.mu.RUnlock()
-
+	clients := h.getSubscribersLocked(h.userSubscribers, userID)
 	h.logger.Debug("BroadcastToUser",
 		zap.String("user_id", userID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-
-	for _, client := range clients {
-		if client.sendBytes(data) {
-			h.logger.Debug("Sent message to client",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		} else {
-			h.logger.Warn("Client send buffer full, dropping message",
-				zap.String("client_id", client.ID),
-				zap.String("action", msg.Action))
-		}
-	}
+	h.sendToClients(data, clients, msg.Action)
 }
 
 // SubscribeToTask subscribes a client to task notifications

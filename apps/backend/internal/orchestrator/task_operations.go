@@ -417,13 +417,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("workflow step getter not configured")
 	}
 
-	// Get the workflow step
 	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow step: %w", err)
 	}
 
-	// Get the session
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -432,73 +430,23 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("session does not belong to task")
 	}
 
-	// Get the task to use its description as the base prompt
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Check if session is in a step with pending approval
-	// If so, reject the request - user must use Approve button or send a chat message
 	if session.ReviewStatus != nil && *session.ReviewStatus == "pending" {
 		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
 
-	// Update session's workflow step to the new step
-	if session.WorkflowStepID == nil || *session.WorkflowStepID != workflowStepID {
-		if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, workflowStepID); err != nil {
-			s.logger.Warn("failed to update session workflow step",
-				zap.String("session_id", sessionID),
-				zap.String("workflow_step_id", workflowStepID),
-				zap.Error(err))
-		}
-		// Clear review status when moving to a new step
-		if session.ReviewStatus != nil && *session.ReviewStatus != "" {
-			if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-				s.logger.Warn("failed to clear session review status",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-		}
-	}
+	s.advanceSessionWorkflowStep(ctx, sessionID, workflowStepID, session)
 
-	// Build prompt from workflow step configuration
 	effectivePrompt := s.buildWorkflowPrompt(task.Description, step, taskID)
 
-	// Check if session needs to be resumed first
-	// A session in "running" or "waiting_for_input" state can receive prompts directly
-	// Other states (created, starting, completed, failed, cancelled) need resume
-	sessionState := session.State
-	if sessionState != models.TaskSessionStateRunning && sessionState != models.TaskSessionStateWaitingForInput {
-		// Try to resume the session
-		s.logger.Debug("session not running, attempting resume",
-			zap.String("session_id", sessionID),
-			zap.String("session_state", string(session.State)))
-
-		running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-		if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
-			return fmt.Errorf("session is not resumable (state: %s)", session.State)
-		}
-
-		if err := validateSessionWorktrees(session); err != nil {
-			return err
-		}
-
-		// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
-		// Session resume can take time and shouldn't be tied to the WS request lifecycle.
-		resumeCtx := context.WithoutCancel(ctx)
-		_, err = s.executor.ResumeSession(resumeCtx, session, true)
-		if err != nil {
-			_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
-			return fmt.Errorf("failed to resume session: %w", err)
-		}
-
-		s.logger.Debug("session resumed, now sending prompt")
+	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
+		return err
 	}
 
-	// Send the prompt using PromptTask (with planMode from step's on_enter events)
-	// Note: PromptTask internally uses context.WithoutCancel for the executor call
-	// No attachments for workflow-initiated prompts
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil)
 	if err != nil {
@@ -512,6 +460,57 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		zap.String("step_name", step.Name),
 		zap.Bool("plan_mode", stepPlanMode))
 
+	return nil
+}
+
+// advanceSessionWorkflowStep updates the session's workflow step and clears review status if the step changed.
+func (s *Service) advanceSessionWorkflowStep(ctx context.Context, sessionID, workflowStepID string, session *models.TaskSession) {
+	if session.WorkflowStepID != nil && *session.WorkflowStepID == workflowStepID {
+		return
+	}
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, workflowStepID); err != nil {
+		s.logger.Warn("failed to update session workflow step",
+			zap.String("session_id", sessionID),
+			zap.String("workflow_step_id", workflowStepID),
+			zap.Error(err))
+	}
+	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+}
+
+// ensureSessionRunning resumes the session if it is not currently running or waiting for input.
+func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
+	sessionState := session.State
+	if sessionState == models.TaskSessionStateRunning || sessionState == models.TaskSessionStateWaitingForInput {
+		return nil
+	}
+
+	s.logger.Debug("session not running, attempting resume",
+		zap.String("session_id", sessionID),
+		zap.String("session_state", string(session.State)))
+
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
+		return fmt.Errorf("session is not resumable (state: %s)", session.State)
+	}
+
+	if err := validateSessionWorktrees(session); err != nil {
+		return err
+	}
+
+	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+	resumeCtx := context.WithoutCancel(ctx)
+	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
+		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		return fmt.Errorf("failed to resume session: %w", err)
+	}
+
+	s.logger.Debug("session resumed, now sending prompt")
 	return nil
 }
 
@@ -671,44 +670,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 
 	// Check if model switching is requested
-	if model != "" {
-		// Get current model from agent profile snapshot (session already fetched above)
-		var currentModel string
-		if session.AgentProfileSnapshot != nil {
-			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
-				currentModel = m
-			}
-		}
-
-		// Trigger switch if models differ
-		if currentModel != model {
-			s.logger.Info("switching model",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("from", currentModel),
-				zap.String("to", model))
-
-			// Start a new turn for this prompt (model switch case)
-			s.startTurnForSession(ctx, sessionID)
-
-			// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the operation.
-			switchCtx := context.WithoutCancel(ctx)
-
-			// SwitchModel will stop agent, rebuild with new model, restart, and send prompt
-			switchResult, err := s.executor.SwitchModel(switchCtx, taskID, sessionID, model, effectivePrompt)
-			if err != nil {
-				return nil, fmt.Errorf("model switch failed: %w", err)
-			}
-
-			// Update session state to RUNNING and publish event so frontend knows agent is active
-			s.setSessionRunning(ctx, taskID, sessionID)
-
-			return &PromptResult{
-				StopReason:   switchResult.StopReason,
-				AgentMessage: switchResult.AgentMessage,
-			}, nil
-		}
-		// Model is the same, fall through to regular prompt
+	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
+		return result, err
 	}
 
 	previousSessionState := session.State
@@ -737,6 +700,39 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		StopReason:   result.StopReason,
 		AgentMessage: result.AgentMessage,
 	}, nil
+}
+
+// trySwitchModel handles model switching for a prompt. Returns (result, true, nil) if a switch was
+// performed, (nil, false, err) on error, or (nil, false, nil) if no switch was needed.
+func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession) (*PromptResult, bool, error) {
+	if model == "" {
+		return nil, false, nil
+	}
+	var currentModel string
+	if session.AgentProfileSnapshot != nil {
+		if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			currentModel = m
+		}
+	}
+	if currentModel == model {
+		return nil, false, nil
+	}
+	s.logger.Info("switching model",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from", currentModel),
+		zap.String("to", model))
+	s.startTurnForSession(ctx, sessionID)
+	switchCtx := context.WithoutCancel(ctx)
+	switchResult, err := s.executor.SwitchModel(switchCtx, taskID, sessionID, model, effectivePrompt)
+	if err != nil {
+		return nil, true, fmt.Errorf("model switch failed: %w", err)
+	}
+	s.setSessionRunning(ctx, taskID, sessionID)
+	return &PromptResult{
+		StopReason:   switchResult.StopReason,
+		AgentMessage: switchResult.AgentMessage,
+	}, true, nil
 }
 
 // RespondToPermission sends a response to a permission request for a session

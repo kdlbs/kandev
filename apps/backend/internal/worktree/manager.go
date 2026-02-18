@@ -227,19 +227,47 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 // createWorktree performs the actual git worktree creation.
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
-	// Generate a unique worktree ID and random suffix
+	worktreeDirName, branchName := m.buildWorktreeNames(req)
+
+	worktreePath, err := m.config.WorktreePath(worktreeDirName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worktree path: %w", err)
+	}
+
+	worktreeID, err := m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, baseRef)
+	if err != nil {
+		return nil, err
+	}
+
+	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+
+	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
+		return nil, err
+	}
+
+	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
+		return nil, err
+	}
+
+	m.logger.Info("created worktree",
+		zap.String("session_id", req.SessionID),
+		zap.String("task_id", req.TaskID),
+		zap.String("path", worktreePath),
+		zap.String("branch", branchName))
+
+	return wt, nil
+}
+
+// buildWorktreeNames derives the filesystem directory name and git branch name for a new worktree.
+func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName string) {
 	worktreeID := uuid.New().String()
 	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
 	branchSuffix := SmallSuffix(3)
 	prefix := NormalizeBranchPrefix(req.WorktreeBranchPrefix)
 
-	// Generate semantic name from task title if available
-	var worktreeDirName, branchName string
 	if req.TaskTitle != "" {
 		// Use semantic naming: {sanitized-title}_{suffix}
-		semanticName := SemanticWorktreeName(req.TaskTitle, dirSuffix)
-		worktreeDirName = semanticName
-		// For branch, use sanitized title (20 chars max) + suffix
+		dirName = SemanticWorktreeName(req.TaskTitle, dirSuffix)
 		sanitizedTitle := SanitizeForBranch(req.TaskTitle, 20)
 		if sanitizedTitle == "" {
 			sanitizedTitle = SanitizeForBranch(req.TaskID, 20)
@@ -247,33 +275,35 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		branchName = prefix + sanitizedTitle + "-" + branchSuffix
 	} else {
 		// Fallback to task ID based naming
-		worktreeDirName = req.TaskID + "_" + dirSuffix
+		dirName = req.TaskID + "_" + dirSuffix
 		branchName = prefix + SanitizeForBranch(req.TaskID, 20) + "-" + branchSuffix
 	}
+	return dirName, branchName
+}
 
-	worktreePath, err := m.config.WorktreePath(worktreeDirName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get worktree path: %w", err)
-	}
-
-	// Create worktree with new branch
+// gitAddWorktree runs "git worktree add" and returns the new worktree UUID.
+func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
+	worktreeID := uuid.New().String()
 	// git worktree add -b <branch> <path> <base-branch>
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add",
 		"-b", branchName,
 		worktreePath,
 		baseRef)
-	cmd.Dir = req.RepositoryPath
-
+	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		m.logger.Error("git worktree add failed",
 			zap.String("output", string(output)),
 			zap.Error(err))
-		return nil, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
+		return "", fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
 	}
+	return worktreeID, nil
+}
 
+// buildWorktreeRecord constructs an in-memory Worktree value from a completed git worktree add.
+func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, worktreePath, branchName string) *Worktree {
 	now := time.Now()
-	wt := &Worktree{
+	return &Worktree{
 		ID:             worktreeID,
 		SessionID:      req.SessionID,
 		TaskID:         req.TaskID,
@@ -286,8 +316,10 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
+}
 
-	// Persist to store
+// persistAndCacheWorktree saves the worktree to the store and updates the in-memory cache.
+func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req CreateRequest, worktreePath string) error {
 	if m.store != nil {
 		if req.SessionID == "" {
 			m.logger.Warn("skipping worktree persistence: missing session_id",
@@ -295,11 +327,11 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 				zap.String("worktree_id", wt.ID))
 		} else {
 			if err := m.store.CreateWorktree(ctx, wt); err != nil {
-				// Cleanup on failure
+				// Cleanup git worktree on store failure
 				if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
 					m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
 				}
-				return nil, fmt.Errorf("failed to persist worktree: %w", err)
+				return fmt.Errorf("failed to persist worktree: %w", err)
 			}
 		}
 	}
@@ -310,74 +342,7 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		m.worktrees[req.SessionID] = wt
 		m.mu.Unlock()
 	}
-
-	// Execute setup script if configured
-	if m.scriptMsgHandler != nil && m.repoProvider != nil {
-		repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
-		if err != nil {
-			m.logger.Warn("failed to fetch repository for setup script",
-				zap.String("repository_id", wt.RepositoryID),
-				zap.Error(err))
-		} else if strings.TrimSpace(repo.SetupScript) != "" {
-			m.logger.Info("executing setup script for worktree",
-				zap.String("worktree_id", wt.ID),
-				zap.String("repository_id", wt.RepositoryID))
-
-			scriptReq := ScriptExecutionRequest{
-				SessionID:    wt.SessionID,
-				TaskID:       wt.TaskID,
-				RepositoryID: wt.RepositoryID,
-				Script:       repo.SetupScript,
-				WorkingDir:   wt.Path,
-				ScriptType:   "setup",
-			}
-
-			if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
-				// Setup failed - cleanup worktree
-				m.logger.Error("setup script failed, cleaning up worktree",
-					zap.String("worktree_id", wt.ID),
-					zap.Error(err))
-
-				// Remove from cache
-				if wt.SessionID != "" {
-					m.mu.Lock()
-					delete(m.worktrees, wt.SessionID)
-					m.mu.Unlock()
-				}
-
-				// Remove directory
-				if cleanupErr := m.removeWorktreeDir(ctx, wt.Path, req.RepositoryPath); cleanupErr != nil {
-					m.logger.Warn("failed to cleanup worktree after setup failure",
-						zap.Error(cleanupErr))
-				}
-
-				// Mark as deleted in database
-				if m.store != nil {
-					now := time.Now()
-					wt.Status = StatusDeleted
-					wt.DeletedAt = &now
-					wt.UpdatedAt = now
-					if updateErr := m.store.UpdateWorktree(ctx, wt); updateErr != nil {
-						m.logger.Warn("failed to update worktree status",
-							zap.Error(updateErr))
-					}
-				}
-
-				return nil, fmt.Errorf("setup script failed: %w", err)
-			}
-
-			m.logger.Info("setup script completed successfully",
-				zap.String("worktree_id", wt.ID))
-		}
-	}
-
-	m.logger.Info("created worktree",
-		zap.String("session_id", req.SessionID),
-		zap.String("task_id", req.TaskID),
-		zap.String("path", worktreePath),
-		zap.String("branch", branchName))
-
-	return wt, nil
+	return nil
 }
 
 // GetBySessionID returns the worktree for a session, if it exists.
@@ -475,37 +440,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	}()
 
 	// Execute cleanup script BEFORE removing directory
-	if m.scriptMsgHandler != nil && m.repoProvider != nil {
-		repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
-		if err != nil {
-			m.logger.Warn("failed to fetch repository for cleanup script",
-				zap.String("repository_id", wt.RepositoryID),
-				zap.Error(err))
-		} else if strings.TrimSpace(repo.CleanupScript) != "" {
-			m.logger.Info("executing cleanup script for worktree",
-				zap.String("worktree_id", wt.ID),
-				zap.String("repository_id", wt.RepositoryID))
-
-			scriptReq := ScriptExecutionRequest{
-				SessionID:    wt.SessionID,
-				TaskID:       wt.TaskID,
-				RepositoryID: wt.RepositoryID,
-				Script:       repo.CleanupScript,
-				WorkingDir:   wt.Path,
-				ScriptType:   "cleanup",
-			}
-
-			if err := m.scriptMsgHandler.ExecuteCleanupScript(ctx, scriptReq); err != nil {
-				// Log error but continue with deletion
-				m.logger.Warn("cleanup script failed, proceeding with deletion",
-					zap.String("worktree_id", wt.ID),
-					zap.Error(err))
-			} else {
-				m.logger.Info("cleanup script completed successfully",
-					zap.String("worktree_id", wt.ID))
-			}
-		}
-	}
+	m.runWorktreeCleanupScript(ctx, wt)
 
 	// Remove worktree directory
 	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
@@ -561,6 +496,101 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		zap.Bool("branch_removed", removeBranch))
 
 	return nil
+}
+
+func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repositoryPath string) error {
+	if m.scriptMsgHandler == nil || m.repoProvider == nil {
+		return nil
+	}
+	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
+	if err != nil {
+		m.logger.Warn("failed to fetch repository for setup script",
+			zap.String("repository_id", wt.RepositoryID),
+			zap.Error(err))
+		return nil
+	}
+	if strings.TrimSpace(repo.SetupScript) == "" {
+		return nil
+	}
+	m.logger.Info("executing setup script for worktree",
+		zap.String("worktree_id", wt.ID),
+		zap.String("repository_id", wt.RepositoryID))
+	scriptReq := ScriptExecutionRequest{
+		SessionID:    wt.SessionID,
+		TaskID:       wt.TaskID,
+		RepositoryID: wt.RepositoryID,
+		Script:       repo.SetupScript,
+		WorkingDir:   wt.Path,
+		ScriptType:   "setup",
+	}
+	if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
+		m.logger.Error("setup script failed, cleaning up worktree",
+			zap.String("worktree_id", wt.ID),
+			zap.Error(err))
+		m.cleanupWorktreeOnSetupFailure(ctx, wt, repositoryPath)
+		return fmt.Errorf("setup script failed: %w", err)
+	}
+	m.logger.Info("setup script completed successfully", zap.String("worktree_id", wt.ID))
+	return nil
+}
+
+// cleanupWorktreeOnSetupFailure removes the in-memory cache entry, deletes the worktree
+// directory, and marks the worktree as deleted in the store after a setup script failure.
+func (m *Manager) cleanupWorktreeOnSetupFailure(ctx context.Context, wt *Worktree, repositoryPath string) {
+	if wt.SessionID != "" {
+		m.mu.Lock()
+		delete(m.worktrees, wt.SessionID)
+		m.mu.Unlock()
+	}
+	if cleanupErr := m.removeWorktreeDir(ctx, wt.Path, repositoryPath); cleanupErr != nil {
+		m.logger.Warn("failed to cleanup worktree after setup failure", zap.Error(cleanupErr))
+	}
+	if m.store == nil {
+		return
+	}
+	now := time.Now()
+	wt.Status = StatusDeleted
+	wt.DeletedAt = &now
+	wt.UpdatedAt = now
+	if updateErr := m.store.UpdateWorktree(ctx, wt); updateErr != nil {
+		m.logger.Warn("failed to update worktree status", zap.Error(updateErr))
+	}
+}
+
+// runWorktreeCleanupScript executes the repository cleanup script for a worktree before removal.
+func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
+	if m.scriptMsgHandler == nil || m.repoProvider == nil {
+		return
+	}
+	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
+	if err != nil {
+		m.logger.Warn("failed to fetch repository for cleanup script",
+			zap.String("repository_id", wt.RepositoryID),
+			zap.Error(err))
+		return
+	}
+	if strings.TrimSpace(repo.CleanupScript) == "" {
+		return
+	}
+	m.logger.Info("executing cleanup script for worktree",
+		zap.String("worktree_id", wt.ID),
+		zap.String("repository_id", wt.RepositoryID))
+	scriptReq := ScriptExecutionRequest{
+		SessionID:    wt.SessionID,
+		TaskID:       wt.TaskID,
+		RepositoryID: wt.RepositoryID,
+		Script:       repo.CleanupScript,
+		WorkingDir:   wt.Path,
+		ScriptType:   "cleanup",
+	}
+	if err := m.scriptMsgHandler.ExecuteCleanupScript(ctx, scriptReq); err != nil {
+		m.logger.Warn("cleanup script failed, proceeding with deletion",
+			zap.String("worktree_id", wt.ID),
+			zap.Error(err))
+	} else {
+		m.logger.Info("cleanup script completed successfully",
+			zap.String("worktree_id", wt.ID))
+	}
 }
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.

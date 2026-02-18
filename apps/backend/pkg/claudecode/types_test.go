@@ -39,13 +39,14 @@ func TestCLIMessage_GetResultData(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &CLIMessage{Result: tt.result}
 			got := msg.GetResultData()
-			if tt.wantNil {
+			switch {
+			case tt.wantNil:
 				if got != nil {
 					t.Errorf("GetResultData() = %v, want nil", got)
 				}
-			} else if got == nil {
+			case got == nil:
 				t.Fatalf("GetResultData() = nil, want non-nil")
-			} else if got.Text != tt.wantText {
+			case got.Text != tt.wantText:
 				t.Errorf("GetResultData().Text = %q, want %q", got.Text, tt.wantText)
 			}
 		})

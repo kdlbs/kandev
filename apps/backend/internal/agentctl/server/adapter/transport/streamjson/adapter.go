@@ -811,6 +811,95 @@ func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
 	})
 }
 
+// updateMainModel tracks the first model seen as the main model name.
+func (a *Adapter) updateMainModel(model string) {
+	if model == "" || a.agentInfo == nil {
+		return
+	}
+	a.agentInfo.Version = model
+	a.mu.Lock()
+	if a.mainModelName == "" {
+		a.mainModelName = model
+		a.logger.Debug("tracking main model", zap.String("model", model))
+	}
+	a.mu.Unlock()
+}
+
+// emitContextWindow emits a context window event.
+func (a *Adapter) emitContextWindow(sessionID, operationID string, contextUsed, contextSize int64) {
+	remaining := contextSize - contextUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	a.sendUpdate(AgentEvent{
+		Type:                   streams.EventTypeContextWindow,
+		SessionID:              sessionID,
+		OperationID:            operationID,
+		ContextWindowSize:      contextSize,
+		ContextWindowUsed:      contextUsed,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
+	})
+}
+
+// processTextBlock handles a text content block from an assistant message.
+func (a *Adapter) processTextBlock(block claudecode.ContentBlock, sessionID, operationID string) {
+	if block.Text == "" {
+		return
+	}
+	// Mark that we've sent streaming text this turn
+	// This prevents duplicate content from result.text
+	a.mu.Lock()
+	a.streamingTextSentThisTurn = true
+	a.mu.Unlock()
+
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeMessageChunk,
+		SessionID:   sessionID,
+		OperationID: operationID,
+		Text:        block.Text,
+	})
+}
+
+// processToolUseBlock handles a tool_use content block from an assistant message.
+func (a *Adapter) processToolUseBlock(block claudecode.ContentBlock, sessionID, operationID, parentToolUseID string) {
+	// Generate normalized payload using the normalizer
+	normalizedPayload := a.normalizer.NormalizeToolCall(block.Name, block.Input)
+
+	// Detect specific tool operation type for logging
+	toolType := DetectStreamJSONToolType(block.Name)
+
+	// Build a human-readable title for the tool call
+	toolTitle := block.Name
+	if cmd, ok := block.Input["command"].(string); ok && block.Name == claudecode.ToolBash {
+		toolTitle = cmd
+	} else if path, ok := block.Input["file_path"].(string); ok {
+		toolTitle = fmt.Sprintf("%s: %s", block.Name, path)
+	}
+	a.logger.Debug("tool_use block received",
+		zap.String("tool_call_id", block.ID),
+		zap.String("tool_name", block.Name),
+		zap.String("tool_type", toolType),
+		zap.String("title", toolTitle))
+
+	// Track this tool call as pending with its payload for result enrichment
+	a.mu.Lock()
+	a.pendingToolCalls[block.ID] = normalizedPayload
+	a.mu.Unlock()
+
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeToolCall,
+		SessionID:         sessionID,
+		OperationID:       operationID,
+		ToolCallID:        block.ID,
+		ParentToolCallID:  parentToolUseID,
+		ToolName:          block.Name,
+		ToolTitle:         toolTitle,
+		ToolStatus:        "running",
+		NormalizedPayload: normalizedPayload,
+	})
+}
+
 // handleAssistantMessage processes assistant messages (text, thinking, tool calls).
 func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	if msg.Message == nil {
@@ -834,38 +923,13 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 		zap.String("parent_tool_use_id", parentToolUseID))
 
 	// Update agent version and track main model name from model info
-	if msg.Message.Model != "" && a.agentInfo != nil {
-		a.agentInfo.Version = msg.Message.Model
-
-		// Track the main model name for context window lookup
-		// Only set if not already set (first model we see is the main one)
-		a.mu.Lock()
-		if a.mainModelName == "" {
-			a.mainModelName = msg.Message.Model
-			a.logger.Debug("tracking main model", zap.String("model", msg.Message.Model))
-		}
-		a.mu.Unlock()
-	}
+	a.updateMainModel(msg.Message.Model)
 
 	// Process content blocks
 	for _, block := range contentBlocks {
 		switch block.Type {
 		case "text":
-			if block.Text != "" {
-				// Mark that we've sent streaming text this turn
-				// This prevents duplicate content from result.text
-				a.mu.Lock()
-				a.streamingTextSentThisTurn = true
-				a.mu.Unlock()
-
-				a.sendUpdate(AgentEvent{
-					Type:        streams.EventTypeMessageChunk,
-					SessionID:   sessionID,
-					OperationID: operationID,
-					Text:        block.Text,
-				})
-			}
-
+			a.processTextBlock(block, sessionID, operationID)
 		case "thinking":
 			if block.Thinking != "" {
 				a.sendUpdate(AgentEvent{
@@ -875,44 +939,8 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 					ReasoningText: block.Thinking,
 				})
 			}
-
 		case "tool_use":
-			// Generate normalized payload using the normalizer
-			normalizedPayload := a.normalizer.NormalizeToolCall(block.Name, block.Input)
-
-			// Detect specific tool operation type for logging
-			toolType := DetectStreamJSONToolType(block.Name)
-
-			// Build a human-readable title for the tool call
-			toolTitle := block.Name
-			if cmd, ok := block.Input["command"].(string); ok && block.Name == claudecode.ToolBash {
-				toolTitle = cmd
-			} else if path, ok := block.Input["file_path"].(string); ok {
-				toolTitle = fmt.Sprintf("%s: %s", block.Name, path)
-			}
-			a.logger.Debug("tool_use block received",
-				zap.String("tool_call_id", block.ID),
-				zap.String("tool_name", block.Name),
-				zap.String("tool_type", toolType),
-				zap.String("title", toolTitle))
-
-			// Track this tool call as pending with its payload for result enrichment
-			a.mu.Lock()
-			a.pendingToolCalls[block.ID] = normalizedPayload
-			a.mu.Unlock()
-
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolCall,
-				SessionID:         sessionID,
-				OperationID:       operationID,
-				ToolCallID:        block.ID,
-				ParentToolCallID:  parentToolUseID,
-				ToolName:          block.Name,
-				ToolTitle:         toolTitle,
-				ToolStatus:        "running",
-				NormalizedPayload: normalizedPayload,
-			})
-
+			a.processToolUseBlock(block, sessionID, operationID, parentToolUseID)
 		}
 	}
 
@@ -930,20 +958,7 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 		contextSize := a.mainModelContextWindow
 		a.mu.Unlock()
 
-		remaining := contextSize - contextUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		a.sendUpdate(AgentEvent{
-			Type:                   streams.EventTypeContextWindow,
-			SessionID:              sessionID,
-			OperationID:            operationID,
-			ContextWindowSize:      contextSize,
-			ContextWindowUsed:      contextUsed,
-			ContextWindowRemaining: remaining,
-			ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
-		})
+		a.emitContextWindow(sessionID, operationID, contextUsed, contextSize)
 	}
 }
 
@@ -1022,6 +1037,76 @@ func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, opera
 	}
 }
 
+// updateContextWindowFromModelUsage updates context window from model_usage stats.
+// Returns the updated contextUsed and contextSize.
+func (a *Adapter) updateContextWindowFromModelUsage(msg *claudecode.CLIMessage) (contextUsed, contextSize int64) {
+	a.mu.Lock()
+	modelName := a.mainModelName
+	if msg.ModelUsage != nil && modelName != "" {
+		if modelStats, ok := msg.ModelUsage[modelName]; ok && modelStats.ContextWindow != nil {
+			a.mainModelContextWindow = *modelStats.ContextWindow
+			a.logger.Debug("updated context window from model_usage",
+				zap.String("model", modelName),
+				zap.Int64("context_window", a.mainModelContextWindow))
+		}
+	}
+	contextSize = a.mainModelContextWindow
+	contextUsed = a.contextTokensUsed
+	a.mu.Unlock()
+	return contextUsed, contextSize
+}
+
+// drainPendingToolCalls atomically removes and returns all pending tool call IDs.
+func (a *Adapter) drainPendingToolCalls() []string {
+	a.mu.Lock()
+	pendingTools := make([]string, 0, len(a.pendingToolCalls))
+	for toolID := range a.pendingToolCalls {
+		pendingTools = append(pendingTools, toolID)
+	}
+	a.pendingToolCalls = make(map[string]*streams.NormalizedPayload) // Clear pending
+	a.mu.Unlock()
+	return pendingTools
+}
+
+// extractResultText extracts text from the result message (only if not already streamed).
+func (a *Adapter) extractResultText(msg *claudecode.CLIMessage) string {
+	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+		return resultData.Text
+	}
+	if resultStr := msg.GetResultString(); resultStr != "" {
+		return resultStr
+	}
+	return ""
+}
+
+// extractResultErrorMsg extracts the error message from a result.
+func (a *Adapter) extractResultErrorMsg(msg *claudecode.CLIMessage) string {
+	if !msg.IsError {
+		return ""
+	}
+	if len(msg.Errors) > 0 {
+		return strings.Join(msg.Errors, "; ")
+	}
+	return ""
+}
+
+// signalResultCompletion sends the result to the waiting prompt goroutine.
+func (a *Adapter) signalResultCompletion(success bool, errMsg string) {
+	a.mu.RLock()
+	resultCh := a.resultCh
+	a.mu.RUnlock()
+
+	if resultCh == nil {
+		return
+	}
+	select {
+	case resultCh <- resultComplete{success: success, err: errMsg}:
+		a.logger.Debug("signaled prompt completion")
+	default:
+		a.logger.Warn("result channel full, dropping signal")
+	}
+}
+
 // handleResultMessage processes result (completion) messages.
 func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	a.logger.Info("received result message",
@@ -1038,14 +1123,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 
 	// Auto-complete any pending tool calls that didn't receive explicit tool_result
 	// This can happen if the tool result is not sent as a separate assistant message
-	a.mu.Lock()
-	pendingTools := make([]string, 0, len(a.pendingToolCalls))
-	for toolID := range a.pendingToolCalls {
-		pendingTools = append(pendingTools, toolID)
-	}
-	a.pendingToolCalls = make(map[string]*streams.NormalizedPayload) // Clear pending
-	a.mu.Unlock()
-
+	pendingTools := a.drainPendingToolCalls()
 	for _, toolID := range pendingTools {
 		a.logger.Debug("auto-completing pending tool call on result",
 			zap.String("tool_call_id", toolID))
@@ -1059,36 +1137,11 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	}
 
 	// Extract actual context window from model_usage if available
-	// This gives us the real context window size for the model
-	a.mu.Lock()
-	modelName := a.mainModelName
-	if msg.ModelUsage != nil && modelName != "" {
-		if modelStats, ok := msg.ModelUsage[modelName]; ok && modelStats.ContextWindow != nil {
-			a.mainModelContextWindow = *modelStats.ContextWindow
-			a.logger.Debug("updated context window from model_usage",
-				zap.String("model", modelName),
-				zap.Int64("context_window", a.mainModelContextWindow))
-		}
-	}
-	contextSize := a.mainModelContextWindow
-	contextUsed := a.contextTokensUsed
-	a.mu.Unlock()
+	contextUsed, contextSize := a.updateContextWindowFromModelUsage(msg)
 
 	// Emit final accurate context window event
 	if contextUsed > 0 {
-		remaining := contextSize - contextUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-		a.sendUpdate(AgentEvent{
-			Type:                   streams.EventTypeContextWindow,
-			SessionID:              sessionID,
-			OperationID:            operationID,
-			ContextWindowSize:      contextSize,
-			ContextWindowUsed:      contextUsed,
-			ContextWindowRemaining: remaining,
-			ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
-		})
+		a.emitContextWindow(sessionID, operationID, contextUsed, contextSize)
 	}
 
 	// Check if text was already streamed this turn via assistant messages
@@ -1100,13 +1153,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	// If text was already streamed via assistant messages, result.text is a duplicate.
 	// This prevents the same content from appearing twice in the conversation.
 	if !textWasStreamed {
-		var resultText string
-		if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-			resultText = resultData.Text
-		} else if resultStr := msg.GetResultString(); resultStr != "" {
-			resultText = resultStr
-		}
-		if resultText != "" {
+		if resultText := a.extractResultText(msg); resultText != "" {
 			a.logger.Debug("sending result text as message_chunk (no streaming text this turn)",
 				zap.Int("text_length", len(resultText)))
 			a.sendUpdate(AgentEvent{
@@ -1126,10 +1173,7 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	a.mu.Unlock()
 
 	// Build error message from errors array if available
-	var errorMsg string
-	if msg.IsError && len(msg.Errors) > 0 {
-		errorMsg = strings.Join(msg.Errors, "; ")
-	}
+	errorMsg := a.extractResultErrorMsg(msg)
 
 	// Send completion event AFTER any result text chunk
 	completeData := map[string]any{
@@ -1152,35 +1196,29 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	})
 
 	// Signal completion
-	a.mu.RLock()
-	resultCh := a.resultCh
-	a.mu.RUnlock()
-
-	if resultCh != nil {
-		select {
-		case resultCh <- resultComplete{success: !msg.IsError, err: errorMsg}:
-			a.logger.Debug("signaled prompt completion")
-		default:
-			a.logger.Warn("result channel full, dropping signal")
-		}
-	}
+	a.signalResultCompletion(!msg.IsError, errorMsg)
 
 	// Send error event if failed
 	if msg.IsError {
-		errMsg := "prompt failed"
-		// Use errors array first (most specific), then fallback to result string/data
-		if len(msg.Errors) > 0 {
-			errMsg = strings.Join(msg.Errors, "; ")
-		} else if errStr := msg.GetResultString(); errStr != "" {
-			errMsg = errStr
-		} else if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-			errMsg = resultData.Text
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypeError,
-			SessionID:   sessionID,
-			OperationID: operationID,
-			Error:       errMsg,
-		})
+		a.sendResultError(msg, sessionID, operationID)
 	}
+}
+
+// sendResultError emits an error event with the best available error message.
+func (a *Adapter) sendResultError(msg *claudecode.CLIMessage, sessionID, operationID string) {
+	errMsg := "prompt failed"
+	// Use errors array first (most specific), then fallback to result string/data
+	if len(msg.Errors) > 0 {
+		errMsg = strings.Join(msg.Errors, "; ")
+	} else if errStr := msg.GetResultString(); errStr != "" {
+		errMsg = errStr
+	} else if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+		errMsg = resultData.Text
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypeError,
+		SessionID:   sessionID,
+		OperationID: operationID,
+		Error:       errMsg,
+	})
 }

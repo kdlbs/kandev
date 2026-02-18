@@ -92,6 +92,9 @@ type resultComplete struct {
 // defaultCopilotContextWindow is the fallback context window size.
 const defaultCopilotContextWindow = 128000
 
+// mcpServerTypeHTTP is the HTTP transport type identifier for MCP servers.
+const mcpServerTypeHTTP = "http"
+
 // NewCopilotAdapter creates a new Copilot protocol adapter.
 func NewCopilotAdapter(cfg *Config, log *logger.Logger) *CopilotAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -275,8 +278,8 @@ func mcpServersToCopilotConfig(servers []types.McpServer) map[string]copilot.MCP
 		case "sse":
 			cfg["type"] = "sse"
 			cfg["url"] = srv.URL
-		case "http":
-			cfg["type"] = "http"
+		case mcpServerTypeHTTP:
+			cfg["type"] = mcpServerTypeHTTP
 			cfg["url"] = srv.URL
 		default: // stdio / local
 			cfg["type"] = "local"
@@ -513,64 +516,13 @@ func (a *CopilotAdapter) handleEvent(evt copilot.SessionEvent) {
 		a.logger.Info("session resumed", zap.String("session_id", sessionID))
 
 	case copilot.EventTypeAssistantMessage:
-		// Full message (non-streaming) - only accumulate if we haven't received deltas
-		// When streaming is used, deltas build up the text incrementally, and the final
-		// assistant.message contains the full text again - skip to avoid duplication
-		if evt.Data.Content != nil && *evt.Data.Content != "" {
-			a.mu.Lock()
-			alreadyReceivedDeltas := a.receivedDeltas
-			if !alreadyReceivedDeltas {
-				// Non-streaming mode: accumulate the full message
-				a.textAccumulator.WriteString(*evt.Data.Content)
-			}
-			a.mu.Unlock()
-
-			// Only send message chunk if we haven't been streaming
-			if !alreadyReceivedDeltas {
-				a.sendUpdate(AgentEvent{
-					Type:        EventTypeMessageChunk,
-					SessionID:   sessionID,
-					OperationID: operationID,
-					Text:        *evt.Data.Content,
-				})
-			}
-		}
+		a.handleAssistantMessage(evt, sessionID, operationID)
 
 	case copilot.EventTypeAssistantMessageDelta:
-		// Streaming message delta
-		if evt.Data.DeltaContent != nil && *evt.Data.DeltaContent != "" {
-			text := *evt.Data.DeltaContent
-			// Accumulate text locally to include in complete event
-			a.mu.Lock()
-			a.textAccumulator.WriteString(text)
-			a.receivedDeltas = true // Mark that we've received streaming deltas
-			a.mu.Unlock()
-
-			a.sendUpdate(AgentEvent{
-				Type:        EventTypeMessageChunk,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				Text:        text,
-			})
-		}
+		a.handleAssistantMessageDelta(evt, sessionID, operationID)
 
 	case copilot.EventTypeAssistantReasoning, copilot.EventTypeAssistantReasoningDelta:
-		// Reasoning/thinking content
-		var content string
-		if evt.Data.Content != nil {
-			content = *evt.Data.Content
-		}
-		if content == "" && evt.Data.DeltaContent != nil {
-			content = *evt.Data.DeltaContent
-		}
-		if content != "" {
-			a.sendUpdate(AgentEvent{
-				Type:          EventTypeReasoning,
-				SessionID:     sessionID,
-				OperationID:   operationID,
-				ReasoningText: content,
-			})
-		}
+		a.handleAssistantReasoning(evt, sessionID, operationID)
 
 	case copilot.EventTypeToolStart:
 		a.handleToolStart(evt, sessionID, operationID)
@@ -579,18 +531,7 @@ func (a *CopilotAdapter) handleEvent(evt copilot.SessionEvent) {
 		a.handleToolComplete(evt, sessionID, operationID)
 
 	case copilot.EventTypeToolProgress:
-		// Tool progress update
-		toolCallID := ""
-		if evt.Data.ToolCallID != nil {
-			toolCallID = *evt.Data.ToolCallID
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        EventTypeToolUpdate,
-			SessionID:   sessionID,
-			OperationID: operationID,
-			ToolCallID:  toolCallID,
-			ToolStatus:  "running",
-		})
+		a.handleToolProgress(evt, sessionID, operationID)
 
 	case copilot.EventTypeSessionIdle:
 		a.handleSessionIdle(sessionID, operationID)
@@ -614,6 +555,85 @@ func (a *CopilotAdapter) handleEvent(evt copilot.SessionEvent) {
 	default:
 		a.logger.Debug("unhandled SDK event", zap.String("type", string(evt.Type)))
 	}
+}
+
+// handleAssistantMessage handles a full (non-streaming) assistant message event.
+// It skips accumulation if streaming deltas were already received to avoid duplication.
+func (a *CopilotAdapter) handleAssistantMessage(evt copilot.SessionEvent, sessionID, operationID string) {
+	if evt.Data.Content == nil || *evt.Data.Content == "" {
+		return
+	}
+	a.mu.Lock()
+	alreadyReceivedDeltas := a.receivedDeltas
+	if !alreadyReceivedDeltas {
+		// Non-streaming mode: accumulate the full message
+		a.textAccumulator.WriteString(*evt.Data.Content)
+	}
+	a.mu.Unlock()
+
+	// Only send message chunk if we haven't been streaming
+	if !alreadyReceivedDeltas {
+		a.sendUpdate(AgentEvent{
+			Type:        EventTypeMessageChunk,
+			SessionID:   sessionID,
+			OperationID: operationID,
+			Text:        *evt.Data.Content,
+		})
+	}
+}
+
+// handleAssistantMessageDelta handles a streaming message delta event.
+func (a *CopilotAdapter) handleAssistantMessageDelta(evt copilot.SessionEvent, sessionID, operationID string) {
+	if evt.Data.DeltaContent == nil || *evt.Data.DeltaContent == "" {
+		return
+	}
+	text := *evt.Data.DeltaContent
+	// Accumulate text locally to include in complete event
+	a.mu.Lock()
+	a.textAccumulator.WriteString(text)
+	a.receivedDeltas = true // Mark that we've received streaming deltas
+	a.mu.Unlock()
+
+	a.sendUpdate(AgentEvent{
+		Type:        EventTypeMessageChunk,
+		SessionID:   sessionID,
+		OperationID: operationID,
+		Text:        text,
+	})
+}
+
+// handleAssistantReasoning handles reasoning/thinking content events.
+func (a *CopilotAdapter) handleAssistantReasoning(evt copilot.SessionEvent, sessionID, operationID string) {
+	var content string
+	if evt.Data.Content != nil {
+		content = *evt.Data.Content
+	}
+	if content == "" && evt.Data.DeltaContent != nil {
+		content = *evt.Data.DeltaContent
+	}
+	if content != "" {
+		a.sendUpdate(AgentEvent{
+			Type:          EventTypeReasoning,
+			SessionID:     sessionID,
+			OperationID:   operationID,
+			ReasoningText: content,
+		})
+	}
+}
+
+// handleToolProgress handles tool progress update events.
+func (a *CopilotAdapter) handleToolProgress(evt copilot.SessionEvent, sessionID, operationID string) {
+	toolCallID := ""
+	if evt.Data.ToolCallID != nil {
+		toolCallID = *evt.Data.ToolCallID
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        EventTypeToolUpdate,
+		SessionID:   sessionID,
+		OperationID: operationID,
+		ToolCallID:  toolCallID,
+		ToolStatus:  "running",
+	})
 }
 
 // handleToolStart processes tool execution start events.
@@ -870,73 +890,7 @@ func (a *CopilotAdapter) handlePermissionRequest(
 		return copilot.PermissionRequestResult{Kind: "approved"}, nil
 	}
 
-	// Build a human-readable title using cached tool data if available.
-	// The pendingToolPayloads map is populated by handleToolStart events
-	// which run in a separate goroutine from the permission handler.
-	// Wait briefly for the tool_call event to be processed first, ensuring
-	// the tool_call message is created in the DB before the permission message
-	// (needed for the frontend merge logic to work).
-	title := request.Kind
-	actionType := request.Kind
-	actionDetails := request.Extra
-
-	var cachedPayload *streams.NormalizedPayload
-	for i := 0; i < 10; i++ {
-		a.mu.RLock()
-		cachedPayload = a.pendingToolPayloads[request.ToolCallID]
-		a.mu.RUnlock()
-		if cachedPayload != nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	if cachedPayload != nil {
-		switch cachedPayload.Kind() {
-		case streams.ToolKindShellExec:
-			if se := cachedPayload.ShellExec(); se != nil {
-				title = se.Command
-				actionType = types.ActionTypeCommand
-				actionDetails = map[string]interface{}{
-					"command": se.Command,
-					"cwd":    se.WorkDir,
-				}
-			}
-		case streams.ToolKindModifyFile:
-			if mf := cachedPayload.ModifyFile(); mf != nil {
-				title = fmt.Sprintf("Write: %s", mf.FilePath)
-				actionType = types.ActionTypeFileWrite
-				actionDetails = map[string]interface{}{
-					"path": mf.FilePath,
-				}
-			}
-		case streams.ToolKindReadFile:
-			if rf := cachedPayload.ReadFile(); rf != nil {
-				title = fmt.Sprintf("Read: %s", rf.FilePath)
-				actionType = types.ActionTypeFileRead
-				actionDetails = map[string]interface{}{
-					"path": rf.FilePath,
-				}
-			}
-		default:
-			// For other tool kinds, use a generic label
-			title = string(cachedPayload.Kind())
-		}
-	}
-
-	// Convert Copilot permission request to kandev format
-	permReq := &PermissionRequest{
-		SessionID:     sessionID,
-		ToolCallID:    request.ToolCallID,
-		Title:         title,
-		ActionType:    actionType,
-		ActionDetails: actionDetails,
-		PendingID:     request.ToolCallID,
-		Options: []PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
-			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
-		},
-	}
+	permReq := a.buildPermissionRequest(request, sessionID)
 
 	a.logger.Info("requesting permission from user",
 		zap.String("kind", request.Kind),
@@ -964,6 +918,86 @@ func (a *CopilotAdapter) handlePermissionRequest(
 
 	a.logger.Info("permission denied")
 	return copilot.PermissionRequestResult{Kind: "denied-interactively-by-user"}, nil
+}
+
+// buildPermissionRequest constructs a PermissionRequest from a Copilot SDK request,
+// waiting briefly for cached tool payload data to populate action details.
+func (a *CopilotAdapter) buildPermissionRequest(request copilot.PermissionRequest, sessionID string) *PermissionRequest {
+	// Build a human-readable title using cached tool data if available.
+	// The pendingToolPayloads map is populated by handleToolStart events
+	// which run in a separate goroutine from the permission handler.
+	// Wait briefly for the tool_call event to be processed first, ensuring
+	// the tool_call message is created in the DB before the permission message
+	// (needed for the frontend merge logic to work).
+	title := request.Kind
+	actionType := request.Kind
+	actionDetails := request.Extra
+
+	var cachedPayload *streams.NormalizedPayload
+	for i := 0; i < 10; i++ {
+		a.mu.RLock()
+		cachedPayload = a.pendingToolPayloads[request.ToolCallID]
+		a.mu.RUnlock()
+		if cachedPayload != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if cachedPayload != nil {
+		var newDetails interface{}
+		title, actionType, newDetails = a.resolvePermissionActionDetails(cachedPayload, title, actionType, actionDetails)
+		if m, ok := newDetails.(map[string]interface{}); ok {
+			actionDetails = m
+		}
+	}
+
+	return &PermissionRequest{
+		SessionID:     sessionID,
+		ToolCallID:    request.ToolCallID,
+		Title:         title,
+		ActionType:    actionType,
+		ActionDetails: actionDetails,
+		PendingID:     request.ToolCallID,
+		Options: []PermissionOption{
+			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
+			{OptionID: "deny", Name: "Deny", Kind: "reject_once"},
+		},
+	}
+}
+
+// resolvePermissionActionDetails maps a cached tool payload to a human-readable title,
+// action type, and action details for use in a permission request.
+func (a *CopilotAdapter) resolvePermissionActionDetails(
+	cachedPayload *streams.NormalizedPayload,
+	title, actionType string,
+	actionDetails map[string]interface{},
+) (string, string, map[string]interface{}) {
+	switch cachedPayload.Kind() {
+	case streams.ToolKindShellExec:
+		if se := cachedPayload.ShellExec(); se != nil {
+			return se.Command, types.ActionTypeCommand, map[string]interface{}{
+				"command": se.Command,
+				"cwd":    se.WorkDir,
+			}
+		}
+	case streams.ToolKindModifyFile:
+		if mf := cachedPayload.ModifyFile(); mf != nil {
+			return fmt.Sprintf("Write: %s", mf.FilePath), types.ActionTypeFileWrite, map[string]interface{}{
+				"path": mf.FilePath,
+			}
+		}
+	case streams.ToolKindReadFile:
+		if rf := cachedPayload.ReadFile(); rf != nil {
+			return fmt.Sprintf("Read: %s", rf.FilePath), types.ActionTypeFileRead, map[string]interface{}{
+				"path": rf.FilePath,
+			}
+		}
+	default:
+		// For other tool kinds, use a generic label
+		return string(cachedPayload.Kind()), actionType, actionDetails
+	}
+	return title, actionType, actionDetails
 }
 
 // RequiresProcessKill returns true because the Copilot CLI server doesn't exit on stdin close.

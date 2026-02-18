@@ -567,49 +567,10 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		}
 	}
 
-	var outputs []string
-	var errors []string
-
-	// Handle untracked/new files - remove them from filesystem and index
-	if len(untrackedFiles) > 0 {
-		for _, path := range untrackedFiles {
-			// First, remove from index if staged
-			resetArgs := []string{"rm", "--cached", "--force", "--", path}
-			resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
-			if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
-				// Ignore "did not match" errors as file might not be in index
-				errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
-			}
-			if resetOutput != "" {
-				outputs = append(outputs, resetOutput)
-			}
-
-			// Then remove from working tree
-			fullPath := filepath.Join(g.workDir, path)
-			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				errors = append(errors, fmt.Sprintf("failed to remove %s: %s", path, err.Error()))
-			}
-		}
-	}
-
-	// Handle tracked files - restore from HEAD
-	if len(trackedFiles) > 0 {
-		// Use git restore to discard changes (Git 2.23+)
-		// --source=HEAD: restore from HEAD
-		// --staged: remove from index
-		// --worktree: remove from working tree
-		// --: separator between options and paths
-		args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, trackedFiles...)
-
-		output, err := g.runGitCommand(ctx, args...)
-		if output != "" {
-			outputs = append(outputs, output)
-		}
-
-		if err != nil {
-			errors = append(errors, err.Error())
-		}
-	}
+	outputs, errors := g.discardUntrackedFiles(ctx, untrackedFiles)
+	trackedOutputs, trackedErrors := g.discardTrackedFiles(ctx, trackedFiles)
+	outputs = append(outputs, trackedOutputs...)
+	errors = append(errors, trackedErrors...)
 
 	// Combine outputs and errors
 	result.Output = strings.Join(outputs, "\n")
@@ -627,6 +588,39 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		zap.Int("tracked_files", len(trackedFiles)),
 		zap.Bool("success", result.Success))
 	return result, nil
+}
+
+func (g *GitOperator) discardUntrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
+	for _, path := range paths {
+		resetArgs := []string{"rm", "--cached", "--force", "--", path}
+		resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
+		if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
+			errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
+		}
+		if resetOutput != "" {
+			outputs = append(outputs, resetOutput)
+		}
+		fullPath := filepath.Join(g.workDir, path)
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			errors = append(errors, fmt.Sprintf("failed to remove %s: %s", path, err.Error()))
+		}
+	}
+	return outputs, errors
+}
+
+func (g *GitOperator) discardTrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
+	output, err := g.runGitCommand(ctx, args...)
+	if output != "" {
+		outputs = append(outputs, output)
+	}
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
+	return outputs, errors
 }
 
 // Abort aborts an in-progress merge or rebase operation.
@@ -778,12 +772,13 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 		filePath := strings.TrimPrefix(bPath, "b/")
 
 		// Determine file status from diff content
-		status := "modified"
-		if strings.Contains(diffContent, "new file mode") {
+		status := fileStatusModified
+		switch {
+		case strings.Contains(diffContent, "new file mode"):
 			status = "added"
-		} else if strings.Contains(diffContent, "deleted file mode") {
-			status = "deleted"
-		} else if strings.Contains(diffContent, "rename from") {
+		case strings.Contains(diffContent, "deleted file mode"):
+			status = fileStatusDeleted
+		case strings.Contains(diffContent, "rename from"):
 			status = "renamed"
 		}
 

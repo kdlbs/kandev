@@ -51,21 +51,20 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 	return err
 }
 
-// GetLatestGitSnapshot retrieves the most recent git snapshot for a session.
-// Returns sql.ErrNoRows if no snapshot is found.
-func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, orderDir string) (*models.GitSnapshot, error) {
 	snapshot := &models.GitSnapshot{}
 	var snapshotType string
 	var filesJSON string
 	var metadataJSON string
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
-		ORDER BY created_at DESC LIMIT 1
-	`), sessionID).Scan(
+		ORDER BY created_at %s LIMIT 1
+	`, orderDir)
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(
 		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
@@ -90,43 +89,16 @@ func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string)
 	return snapshot, nil
 }
 
+// GetLatestGitSnapshot retrieves the most recent git snapshot for a session.
+// Returns sql.ErrNoRows if no snapshot is found.
+func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
+	return r.getGitSnapshotByOrder(ctx, sessionID, "DESC")
+}
+
 // GetFirstGitSnapshot retrieves the oldest git snapshot for a session (first one created).
 // Returns sql.ErrNoRows if no snapshot is found.
 func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
-	snapshot := &models.GitSnapshot{}
-	var snapshotType string
-	var filesJSON string
-	var metadataJSON string
-
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
-		       ahead, behind, files, triggered_by, metadata, created_at
-		FROM task_session_git_snapshots
-		WHERE session_id = ?
-		ORDER BY created_at ASC LIMIT 1
-	`), sessionID).Scan(
-		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
-		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
-		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
-		&metadataJSON, &snapshot.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshot.SnapshotType = models.SnapshotType(snapshotType)
-	if filesJSON != "" && filesJSON != "{}" {
-		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
-			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
-		}
-	}
-	if metadataJSON != "" && metadataJSON != "{}" {
-		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
-		}
-	}
-
-	return snapshot, nil
+	return r.getGitSnapshotByOrder(ctx, sessionID, "ASC")
 }
 
 // GetGitSnapshotsBySession retrieves all git snapshots for a session, ordered by created_at descending.

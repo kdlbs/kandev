@@ -273,37 +273,9 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 
 	// If immediate start is requested, start with default dimensions
 	if req.ImmediateStart {
-		cols := req.DefaultCols
-		rows := req.DefaultRows
-		if cols <= 0 {
-			cols = 120 // Default width
+		if err := r.immediateStartProcess(req, proc, id); err != nil {
+			return nil, err
 		}
-		if rows <= 0 {
-			rows = 40 // Default height
-		}
-
-		var startErr error
-		proc.startOnce.Do(func() {
-			r.logger.Info("immediate start - starting process with default dimensions",
-				zap.String("process_id", id),
-				zap.String("session_id", req.SessionID),
-				zap.Int("cols", cols),
-				zap.Int("rows", rows))
-			startErr = r.startProcess(proc, cols, rows)
-		})
-		if startErr != nil {
-			r.mu.Lock()
-			delete(r.processes, id)
-			r.mu.Unlock()
-			return nil, fmt.Errorf("failed to start process: %w", startErr)
-		}
-
-		r.logger.Info("interactive process started immediately",
-			zap.String("process_id", id),
-			zap.String("session_id", req.SessionID),
-			zap.Strings("command", req.Command),
-			zap.String("working_dir", req.WorkingDir),
-		)
 	} else {
 		r.logger.Info("interactive process created (waiting for terminal dimensions)",
 			zap.String("process_id", id),
@@ -317,6 +289,40 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 
 	info := proc.snapshot(false)
 	return &info, nil
+}
+
+// immediateStartProcess starts the PTY process immediately using default or provided dimensions.
+func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, proc *interactiveProcess, id string) error {
+	cols := req.DefaultCols
+	rows := req.DefaultRows
+	if cols <= 0 {
+		cols = 120
+	}
+	if rows <= 0 {
+		rows = 40
+	}
+	var startErr error
+	proc.startOnce.Do(func() {
+		r.logger.Info("immediate start - starting process with default dimensions",
+			zap.String("process_id", id),
+			zap.String("session_id", req.SessionID),
+			zap.Int("cols", cols),
+			zap.Int("rows", rows))
+		startErr = r.startProcess(proc, cols, rows)
+	})
+	if startErr != nil {
+		r.mu.Lock()
+		delete(r.processes, id)
+		r.mu.Unlock()
+		return fmt.Errorf("failed to start process: %w", startErr)
+	}
+	r.logger.Info("interactive process started immediately",
+		zap.String("process_id", id),
+		zap.String("session_id", req.SessionID),
+		zap.Strings("command", req.Command),
+		zap.String("working_dir", req.WorkingDir),
+	)
+	return nil
 }
 
 // startProcess actually spawns the PTY and process. Called on first resize.
@@ -707,112 +713,7 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 			firstRead = false
 		}
 		if n > 0 {
-			data := buf[:n]
-			dataStr := string(data)
-
-			// Respond to cursor position queries (DSR) if no terminal is connected yet.
-			// Some CLI tools (like Codex) query cursor position on startup with \e[6n
-			// and expect a response \e[row;colR. Without this, they timeout and exit.
-			// Only respond if no direct output writer is connected (no real terminal yet).
-			proc.directOutputMu.RLock()
-			hasDirectWriter := proc.directOutput != nil
-			proc.directOutputMu.RUnlock()
-
-			if !hasDirectWriter {
-				// Check for cursor position query (DSR): ESC [ 6 n or ESC [ ? 6 n
-				if containsDSRQuery(data) {
-					// Respond with cursor at position 1,1 (top-left)
-					response := "\x1b[1;1R"
-					if _, err := ptyInstance.Write([]byte(response)); err != nil {
-						r.logger.Debug("failed to respond to cursor position query",
-							zap.String("process_id", proc.info.ID),
-							zap.Error(err))
-					} else {
-						r.logger.Debug("responded to cursor position query",
-							zap.String("process_id", proc.info.ID))
-					}
-				}
-				// Check for primary device attributes query (DA1): ESC [ c or ESC [ 0 c
-				if containsDA1Query(data) {
-					// Respond as VT100 terminal with advanced video option
-					response := "\x1b[?1;2c"
-					if _, err := ptyInstance.Write([]byte(response)); err != nil {
-						r.logger.Debug("failed to respond to device attributes query",
-							zap.String("process_id", proc.info.ID),
-							zap.Error(err))
-					}
-				}
-			}
-
-			// Feed to status tracker for TUI state detection
-			if proc.statusTracker != nil {
-				proc.statusTracker.Write(data)
-
-				// Periodically check state (debounced by ShouldCheck)
-				if proc.statusTracker.ShouldCheck() {
-					newState := proc.statusTracker.CheckAndUpdate()
-					if newState != proc.lastState {
-						proc.lastState = newState
-						r.handleStateChange(proc, newState)
-					}
-				}
-			}
-
-			// Always buffer output for scrollback restoration on reconnect
-			chunk := ProcessOutputChunk{
-				Stream:    "stdout",
-				Data:      dataStr,
-				Timestamp: time.Now().UTC(),
-			}
-			proc.buffer.append(chunk)
-
-			// Check if we have a direct output writer (binary WebSocket mode)
-			proc.directOutputMu.RLock()
-			directWriter := proc.directOutput
-			proc.directOutputMu.RUnlock()
-
-			if directWriter != nil {
-				// Direct mode: write raw bytes to the WebSocket
-				if _, writeErr := directWriter.Write(data); writeErr != nil {
-					r.logger.Debug("direct output write error",
-						zap.String("process_id", proc.info.ID),
-						zap.Error(writeErr))
-					// Don't return - the writer might have closed but process continues
-				}
-			} else {
-				// No WebSocket connected: also publish via event bus
-				r.publishOutput(proc, chunk)
-			}
-
-			// Update recent output for prompt pattern matching (keep last 1KB)
-			// Trim before appending to prevent temporary memory spikes with large outputs
-			maxSize := 1024
-			if len(recentOutput)+len(dataStr) > maxSize {
-				// Calculate how much to keep from existing buffer
-				keepFromExisting := maxSize - len(dataStr)
-				if keepFromExisting < 0 {
-					keepFromExisting = 0
-				}
-				if keepFromExisting > 0 && len(recentOutput) > keepFromExisting {
-					recentOutput = recentOutput[len(recentOutput)-keepFromExisting:]
-				} else if keepFromExisting == 0 {
-					recentOutput = ""
-				}
-			}
-			recentOutput += dataStr
-			// Final trim in case dataStr itself was larger than maxSize
-			if len(recentOutput) > maxSize {
-				recentOutput = recentOutput[len(recentOutput)-maxSize:]
-			}
-
-			// Check prompt pattern for turn completion
-			if proc.promptPattern != nil && proc.promptPattern.MatchString(recentOutput) {
-				r.emitTurnComplete(proc)
-				recentOutput = "" // Reset after match
-			}
-
-			// Reset idle timer on any output
-			r.resetIdleTimer(proc)
+			recentOutput = r.processOutputData(proc, ptyInstance, buf[:n], recentOutput)
 		}
 		if err != nil {
 			r.logger.Debug("interactive process output read ended",
@@ -821,6 +722,129 @@ func (r *InteractiveRunner) readOutput(proc *interactiveProcess) {
 			return
 		}
 	}
+}
+
+// respondToTerminalQueries sends synthetic terminal responses (DSR/DA1) to the PTY
+// when no direct output writer (real terminal) is connected yet.
+func (r *InteractiveRunner) respondToTerminalQueries(proc *interactiveProcess, ptyInstance PtyHandle, data []byte) {
+	if containsDSRQuery(data) {
+		response := "\x1b[1;1R"
+		if _, err := ptyInstance.Write([]byte(response)); err != nil {
+			r.logger.Debug("failed to respond to cursor position query",
+				zap.String("process_id", proc.info.ID),
+				zap.Error(err))
+		} else {
+			r.logger.Debug("responded to cursor position query",
+				zap.String("process_id", proc.info.ID))
+		}
+	}
+	if containsDA1Query(data) {
+		response := "\x1b[?1;2c"
+		if _, err := ptyInstance.Write([]byte(response)); err != nil {
+			r.logger.Debug("failed to respond to device attributes query",
+				zap.String("process_id", proc.info.ID),
+				zap.Error(err))
+		}
+	}
+}
+
+// processOutputData handles a chunk of output data read from the PTY.
+// It responds to terminal queries, feeds the status tracker, buffers the output,
+// routes it to the direct writer or event bus, and manages the prompt-pattern window.
+// Returns the updated recentOutput string.
+func (r *InteractiveRunner) processOutputData(proc *interactiveProcess, ptyInstance PtyHandle, data []byte, recentOutput string) string {
+	dataStr := string(data)
+
+	// Respond to cursor position queries (DSR) if no terminal is connected yet.
+	// Some CLI tools (like Codex) query cursor position on startup with \e[6n
+	// and expect a response \e[row;colR. Without this, they timeout and exit.
+	// Only respond if no direct output writer is connected (no real terminal yet).
+	proc.directOutputMu.RLock()
+	hasDirectWriter := proc.directOutput != nil
+	proc.directOutputMu.RUnlock()
+
+	if !hasDirectWriter {
+		r.respondToTerminalQueries(proc, ptyInstance, data)
+	}
+
+	// Feed to status tracker for TUI state detection
+	if proc.statusTracker != nil {
+		proc.statusTracker.Write(data)
+
+		// Periodically check state (debounced by ShouldCheck)
+		if proc.statusTracker.ShouldCheck() {
+			newState := proc.statusTracker.CheckAndUpdate()
+			if newState != proc.lastState {
+				proc.lastState = newState
+				r.handleStateChange(proc, newState)
+			}
+		}
+	}
+
+	// Always buffer output for scrollback restoration on reconnect
+	chunk := ProcessOutputChunk{
+		Stream:    "stdout",
+		Data:      dataStr,
+		Timestamp: time.Now().UTC(),
+	}
+	proc.buffer.append(chunk)
+
+	// Check if we have a direct output writer (binary WebSocket mode)
+	proc.directOutputMu.RLock()
+	directWriter := proc.directOutput
+	proc.directOutputMu.RUnlock()
+
+	if directWriter != nil {
+		// Direct mode: write raw bytes to the WebSocket
+		if _, writeErr := directWriter.Write(data); writeErr != nil {
+			r.logger.Debug("direct output write error",
+				zap.String("process_id", proc.info.ID),
+				zap.Error(writeErr))
+			// Don't return - the writer might have closed but process continues
+		}
+	} else {
+		// No WebSocket connected: also publish via event bus
+		r.publishOutput(proc, chunk)
+	}
+
+	recentOutput = r.updateRecentOutput(recentOutput, dataStr)
+
+	// Check prompt pattern for turn completion
+	if proc.promptPattern != nil && proc.promptPattern.MatchString(recentOutput) {
+		r.emitTurnComplete(proc)
+		recentOutput = "" // Reset after match
+	}
+
+	// Reset idle timer on any output
+	r.resetIdleTimer(proc)
+
+	return recentOutput
+}
+
+// updateRecentOutput appends new output to the rolling 1KB window used for prompt
+// pattern matching, trimming the oldest data to stay within the size limit.
+func (r *InteractiveRunner) updateRecentOutput(recentOutput, dataStr string) string {
+	// Update recent output for prompt pattern matching (keep last 1KB)
+	// Trim before appending to prevent temporary memory spikes with large outputs
+	maxSize := 1024
+	if len(recentOutput)+len(dataStr) > maxSize {
+		// Calculate how much to keep from existing buffer
+		keepFromExisting := maxSize - len(dataStr)
+		if keepFromExisting < 0 {
+			keepFromExisting = 0
+		}
+		if keepFromExisting > 0 && len(recentOutput) > keepFromExisting {
+			recentOutput = recentOutput[len(recentOutput)-keepFromExisting:]
+		} else if keepFromExisting == 0 {
+			recentOutput = ""
+		}
+	}
+	recentOutput += dataStr
+	// Final trim in case dataStr itself was larger than maxSize
+	if len(recentOutput) > maxSize {
+		recentOutput = recentOutput[len(recentOutput)-maxSize:]
+	}
+	return recentOutput
 }
 
 func (r *InteractiveRunner) resetIdleTimer(proc *interactiveProcess) {

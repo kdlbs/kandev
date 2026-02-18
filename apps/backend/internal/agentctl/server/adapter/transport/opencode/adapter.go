@@ -582,6 +582,167 @@ func (a *Adapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
 	}
 }
 
+// resolvePartID returns the part ID to use, falling back to a composite key.
+func resolvePartID(partID, messageID, suffix string) string {
+	if partID != "" {
+		return partID
+	}
+	return messageID + ":" + suffix
+}
+
+// getOrCreateTextPartState fetches or initializes the textPartState for a given part ID.
+// Must be called with a.mu.Lock() held.
+func (a *Adapter) getOrCreateTextPartState(partID string) *textPartState {
+	if a.textParts == nil {
+		a.textParts = make(map[string]*textPartState)
+	}
+	state := a.textParts[partID]
+	if state == nil {
+		state = &textPartState{lastTextLen: 0}
+		a.textParts[partID] = state
+	}
+	return state
+}
+
+// computeIncrementalText returns the new text to emit, advancing the state.
+// Must be called with a.mu.Lock() held (state is modified in place).
+func computeIncrementalText(state *textPartState, cumulativeText, delta string) string {
+	if cumulativeText != "" {
+		if len(cumulativeText) > state.lastTextLen {
+			text := cumulativeText[state.lastTextLen:]
+			state.lastTextLen = len(cumulativeText)
+			return text
+		}
+		return ""
+	}
+	// No cumulative text available: use delta only for first chunk
+	if delta != "" && state.lastTextLen == 0 {
+		return delta
+	}
+	return ""
+}
+
+// handleTextPart processes a text part update, returning any new text to emit.
+func (a *Adapter) handleTextPart(part opencode.Part, delta string) string {
+	partID := resolvePartID(part.ID, part.MessageID, "text")
+
+	a.mu.Lock()
+	state := a.getOrCreateTextPartState(partID)
+	textToSend := computeIncrementalText(state, part.Text, delta)
+	a.mu.Unlock()
+
+	return textToSend
+}
+
+// handleReasoningPart processes a reasoning part update, returning any new text to emit.
+func (a *Adapter) handleReasoningPart(part opencode.Part, delta string) string {
+	partID := resolvePartID(part.ID, part.MessageID, "reasoning")
+
+	a.mu.Lock()
+	state := a.getOrCreateTextPartState(partID)
+	textToSend := computeIncrementalText(state, part.Text, delta)
+	a.mu.Unlock()
+
+	return textToSend
+}
+
+// handleToolPart processes a tool part update and emits the appropriate event.
+func (a *Adapter) handleToolPart(part opencode.Part, sessionID, operationID string) {
+	if part.State == nil {
+		return
+	}
+
+	toolCallID := part.CallID
+	toolName := part.Tool
+	state := part.State
+
+	// Determine status
+	status := normalizeToolStatus(state.Status)
+
+	// Build ToolState for normalization (do this first so we can use input for title)
+	toolState := buildToolState(state)
+
+	// Generate normalized payload
+	normalizedPayload := a.normalizer.NormalizeToolCall(toolName, toolState)
+
+	// Determine title: prefer derived title (command/path), then state.Title, fallback to toolName
+	title := deriveToolTitle(toolName, toolState.Input)
+	if title == "" {
+		title = state.Title
+	}
+	if title == "" {
+		title = toolName
+	}
+
+	// Track if we've seen this tool call before
+	a.mu.Lock()
+	if a.seenToolCalls == nil {
+		a.seenToolCalls = make(map[string]bool)
+	}
+	isFirstEvent := !a.seenToolCalls[toolCallID]
+	a.seenToolCalls[toolCallID] = true
+	a.mu.Unlock()
+
+	// Emit tool_call for the first event, tool_update for subsequent events
+	if isFirstEvent {
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeToolCall,
+			SessionID:         sessionID,
+			OperationID:       operationID,
+			ToolCallID:        toolCallID,
+			ToolName:          toolName,
+			ToolTitle:         title,
+			ToolStatus:        status,
+			NormalizedPayload: normalizedPayload,
+		})
+	} else {
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeToolUpdate,
+			SessionID:         sessionID,
+			OperationID:       operationID,
+			ToolCallID:        toolCallID,
+			ToolName:          toolName,
+			ToolTitle:         title,
+			ToolStatus:        status,
+			Error:             state.Error,
+			NormalizedPayload: normalizedPayload,
+		})
+	}
+}
+
+// normalizeToolStatus maps OpenCode tool status values to frontend-compatible strings.
+func normalizeToolStatus(status string) string {
+	switch status {
+	case opencode.ToolStatusPending:
+		return "pending"
+	case opencode.ToolStatusRunning:
+		return "running"
+	case opencode.ToolStatusCompleted:
+		return "complete" // Normalized to "complete" for frontend consistency
+	case opencode.ToolStatusError:
+		return "error"
+	default:
+		return status
+	}
+}
+
+// buildToolState constructs a ToolState from OpenCode's tool part state.
+func buildToolState(state *opencode.ToolStateUpdate) *ToolState {
+	toolState := &ToolState{
+		Output: state.Output,
+		Title:  state.Title,
+	}
+	if state.Input != nil {
+		toolState.Input = make(map[string]any)
+		_ = json.Unmarshal(state.Input, &toolState.Input) // Ignore error - input is optional
+	}
+	if state.Metadata != nil {
+		toolState.Metadata = make(map[string]any)
+		_ = json.Unmarshal(state.Metadata, &toolState.Metadata) // Ignore error - metadata is optional
+	}
+	return toolState
+}
+
 // handleMessagePartUpdated processes message.part.updated events
 func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, operationID string) {
 	parsed, err := opencode.ParseMessagePartUpdated(props)
@@ -606,41 +767,7 @@ func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, ope
 
 	switch part.Type {
 	case opencode.PartTypeText:
-		// Track text parts by ID to compute incremental text
-		// IMPORTANT: Always prefer cumulative part.Text over delta to avoid duplication
-		// The delta may be sent multiple times with the same content
-		partID := part.ID
-		if partID == "" {
-			// Fallback: use MessageID + type as unique key
-			partID = part.MessageID + ":text"
-		}
-
-		a.mu.Lock()
-		if a.textParts == nil {
-			a.textParts = make(map[string]*textPartState)
-		}
-		state := a.textParts[partID]
-		if state == nil {
-			state = &textPartState{lastTextLen: 0}
-			a.textParts[partID] = state
-		}
-
-		// Determine what text to send - prefer cumulative text to avoid duplication
-		var textToSend string
-		if part.Text != "" {
-			// Use cumulative text - compute what's new since last time
-			if len(part.Text) > state.lastTextLen {
-				textToSend = part.Text[state.lastTextLen:]
-				state.lastTextLen = len(part.Text)
-			}
-		} else if parsed.Delta != "" && state.lastTextLen == 0 {
-			// No cumulative text available, use delta only for first chunk
-			// This handles streaming before cumulative text is populated
-			textToSend = parsed.Delta
-		}
-		a.mu.Unlock()
-
-		if textToSend != "" {
+		if textToSend := a.handleTextPart(part, parsed.Delta); textToSend != "" {
 			a.sendUpdate(AgentEvent{
 				Type:        streams.EventTypeMessageChunk,
 				SessionID:   sessionID,
@@ -650,39 +777,7 @@ func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, ope
 		}
 
 	case opencode.PartTypeReasoning:
-		// Track reasoning parts by ID to compute incremental text
-		// IMPORTANT: Always prefer cumulative part.Text over delta to avoid duplication
-		partID := part.ID
-		if partID == "" {
-			// Fallback: use MessageID + type as unique key
-			partID = part.MessageID + ":reasoning"
-		}
-
-		a.mu.Lock()
-		if a.textParts == nil {
-			a.textParts = make(map[string]*textPartState)
-		}
-		state := a.textParts[partID]
-		if state == nil {
-			state = &textPartState{lastTextLen: 0}
-			a.textParts[partID] = state
-		}
-
-		// Determine what text to send - prefer cumulative text to avoid duplication
-		var textToSend string
-		if part.Text != "" {
-			// Use cumulative text - compute what's new since last time
-			if len(part.Text) > state.lastTextLen {
-				textToSend = part.Text[state.lastTextLen:]
-				state.lastTextLen = len(part.Text)
-			}
-		} else if parsed.Delta != "" && state.lastTextLen == 0 {
-			// No cumulative text available, use delta only for first chunk
-			textToSend = parsed.Delta
-		}
-		a.mu.Unlock()
-
-		if textToSend != "" {
+		if textToSend := a.handleReasoningPart(part, parsed.Delta); textToSend != "" {
 			a.sendUpdate(AgentEvent{
 				Type:          streams.EventTypeReasoning,
 				SessionID:     sessionID,
@@ -692,93 +787,7 @@ func (a *Adapter) handleMessagePartUpdated(props json.RawMessage, sessionID, ope
 		}
 
 	case opencode.PartTypeTool:
-		// Tool call
-		if part.State == nil {
-			return
-		}
-
-		toolCallID := part.CallID
-		toolName := part.Tool
-		state := part.State
-
-		// Determine status
-		var status string
-		switch state.Status {
-		case opencode.ToolStatusPending:
-			status = "pending"
-		case opencode.ToolStatusRunning:
-			status = "running"
-		case opencode.ToolStatusCompleted:
-			status = "complete" // Normalized to "complete" for frontend consistency
-		case opencode.ToolStatusError:
-			status = "error"
-		default:
-			status = state.Status
-		}
-
-		// Build ToolState for normalization (do this first so we can use input for title)
-		toolState := &ToolState{
-			Output: state.Output,
-			Title:  state.Title,
-		}
-		if state.Input != nil {
-			toolState.Input = make(map[string]any)
-			_ = json.Unmarshal(state.Input, &toolState.Input) // Ignore error - input is optional
-		}
-		if state.Metadata != nil {
-			toolState.Metadata = make(map[string]any)
-			_ = json.Unmarshal(state.Metadata, &toolState.Metadata) // Ignore error - metadata is optional
-		}
-
-		// Generate normalized payload
-		normalizedPayload := a.normalizer.NormalizeToolCall(toolName, toolState)
-
-		// Determine title: prefer derived title (command/path), then state.Title, fallback to toolName
-		// For tools like bash, the command is more useful than the description
-		title := deriveToolTitle(toolName, toolState.Input)
-		if title == "" {
-			title = state.Title
-		}
-		if title == "" {
-			title = toolName
-		}
-
-		// Track if we've seen this tool call before
-		a.mu.Lock()
-		if a.seenToolCalls == nil {
-			a.seenToolCalls = make(map[string]bool)
-		}
-		isFirstEvent := !a.seenToolCalls[toolCallID]
-		a.seenToolCalls[toolCallID] = true
-		a.mu.Unlock()
-
-		// Emit tool_call for the first event we see for this tool call
-		// This creates the message in the database
-		if isFirstEvent {
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolCall,
-				SessionID:         sessionID,
-				OperationID:       operationID,
-				ToolCallID:        toolCallID,
-				ToolName:          toolName,
-				ToolTitle:         title,
-				ToolStatus:        status,
-				NormalizedPayload: normalizedPayload,
-			})
-		} else {
-			// For subsequent events, emit tool_update to update the existing message
-			a.sendUpdate(AgentEvent{
-				Type:              streams.EventTypeToolUpdate,
-				SessionID:         sessionID,
-				OperationID:       operationID,
-				ToolCallID:        toolCallID,
-				ToolName:          toolName,
-				ToolTitle:         title,
-				ToolStatus:        status,
-				Error:             state.Error,
-				NormalizedPayload: normalizedPayload,
-			})
-		}
+		a.handleToolPart(part, sessionID, operationID)
 	}
 }
 
@@ -895,14 +904,7 @@ func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string)
 	a.mu.Unlock()
 
 	// Format title from metadata if available
-	title := fmt.Sprintf("Permission: %s", permission)
-	if parsed.Metadata != nil {
-		if cmd, ok := parsed.Metadata["command"].(string); ok {
-			title = fmt.Sprintf("Execute: %s", cmd)
-		} else if path, ok := parsed.Metadata["path"].(string); ok {
-			title = fmt.Sprintf("%s: %s", permission, path)
-		}
-	}
+	title := formatPermissionTitle(permission, parsed.Metadata)
 
 	// If we have a handler, call it to get user approval.
 	// The handler (process manager's handlePermissionRequest) will:
@@ -944,6 +946,19 @@ func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string)
 	}
 }
 
+// formatPermissionTitle builds a display title for a permission request.
+func formatPermissionTitle(permission string, metadata map[string]any) string {
+	if metadata != nil {
+		if cmd, ok := metadata["command"].(string); ok {
+			return fmt.Sprintf("Execute: %s", cmd)
+		}
+		if path, ok := metadata["path"].(string); ok {
+			return fmt.Sprintf("%s: %s", permission, path)
+		}
+	}
+	return fmt.Sprintf("Permission: %s", permission)
+}
+
 // RespondToPermission responds to a permission request (called via handler)
 func (a *Adapter) RespondToPermission(ctx context.Context, requestID string, approved bool, message string) error {
 	a.mu.Lock()
@@ -963,6 +978,69 @@ func (a *Adapter) RespondToPermission(ctx context.Context, requestID string, app
 	return a.client.ReplyPermission(ctx, requestID, reply, msg)
 }
 
+// openCodeConfigPath returns the path to the OpenCode config file.
+func openCodeConfigPath(homeDir string) (string, string, error) {
+	if homeDir == "" {
+		var err error
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get user home directory: %w", err)
+		}
+	}
+	configDir := filepath.Join(homeDir, ".config", "opencode")
+	configPath := filepath.Join(configDir, "opencode.json")
+	return configDir, configPath, nil
+}
+
+// loadOpenCodeConfig reads and parses the existing OpenCode config file.
+// Returns an empty map if the file doesn't exist.
+func loadOpenCodeConfig(configPath string, log *logger.Logger) (map[string]interface{}, error) {
+	existingData, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read existing opencode config: %w", err)
+	}
+
+	var rawConfig map[string]interface{}
+	if len(existingData) == 0 {
+		return make(map[string]interface{}), nil
+	}
+
+	if err := json.Unmarshal(existingData, &rawConfig); err != nil {
+		if log != nil {
+			log.Warn("failed to parse existing opencode config, will create new",
+				zap.String("path", configPath),
+				zap.Error(err))
+		}
+		return make(map[string]interface{}), nil
+	}
+	return rawConfig, nil
+}
+
+// buildMCPServerConfig builds the OpenCode server config entry for a single MCP server.
+func buildMCPServerConfig(server shared.McpServerConfig) map[string]interface{} {
+	serverConfig := make(map[string]interface{})
+
+	if server.Type == "sse" || server.Type == "http" || server.Type == "remote" {
+		// Remote transport - use url field
+		serverConfig["type"] = "remote"
+		if server.URL != "" {
+			serverConfig["url"] = server.URL
+		}
+	} else {
+		// Local/stdio transport - use command and args
+		serverConfig["type"] = "local"
+		if server.Command != "" {
+			// OpenCode expects command as an array: ["command", "arg1", "arg2"]
+			cmdArray := []string{server.Command}
+			cmdArray = append(cmdArray, server.Args...)
+			serverConfig["command"] = cmdArray
+		}
+	}
+
+	serverConfig["enabled"] = true
+	return serverConfig
+}
+
 // WriteOpenCodeMcpConfig writes MCP server configuration to OpenCode's config file.
 // It merges with existing config, preserving other settings and existing MCP servers.
 // OpenCode reads MCP servers from ~/.config/opencode/opencode.json at startup time.
@@ -973,41 +1051,19 @@ func WriteOpenCodeMcpConfig(mcpServers []shared.McpServerConfig, homeDir string,
 		return nil // Nothing to configure
 	}
 
-	// Determine config directory
-	if homeDir == "" {
-		var err error
-		homeDir, err = os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get user home directory: %w", err)
-		}
+	configDir, configPath, err := openCodeConfigPath(homeDir)
+	if err != nil {
+		return err
 	}
-	configDir := filepath.Join(homeDir, ".config", "opencode")
-	configPath := filepath.Join(configDir, "opencode.json")
 
 	// Create config directory if it doesn't exist
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create opencode config directory: %w", err)
 	}
 
-	// Read existing config if it exists
-	existingData, err := os.ReadFile(configPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing opencode config: %w", err)
-	}
-
-	// Parse existing config into a generic map to preserve all fields
-	var rawConfig map[string]interface{}
-	if len(existingData) > 0 {
-		if err := json.Unmarshal(existingData, &rawConfig); err != nil {
-			if log != nil {
-				log.Warn("failed to parse existing opencode config, will create new",
-					zap.String("path", configPath),
-					zap.Error(err))
-			}
-			rawConfig = make(map[string]interface{})
-		}
-	} else {
-		rawConfig = make(map[string]interface{})
+	rawConfig, err := loadOpenCodeConfig(configPath, log)
+	if err != nil {
+		return err
 	}
 
 	// Get or create mcp section
@@ -1018,32 +1074,9 @@ func WriteOpenCodeMcpConfig(mcpServers []shared.McpServerConfig, homeDir string,
 
 	// Add/update our MCP servers
 	for _, server := range mcpServers {
-		serverConfig := make(map[string]interface{})
-
-		if server.Type == "sse" || server.Type == "http" || server.Type == "remote" {
-			// Remote transport - use url field
-			serverConfig["type"] = "remote"
-			if server.URL != "" {
-				serverConfig["url"] = server.URL
-			}
-		} else {
-			// Local/stdio transport - use command and args
-			serverConfig["type"] = "local"
-			if server.Command != "" {
-				// OpenCode expects command as an array: ["command", "arg1", "arg2"]
-				cmdArray := []string{server.Command}
-				cmdArray = append(cmdArray, server.Args...)
-				serverConfig["command"] = cmdArray
-			}
-		}
-
-		// Always enable the server
-		serverConfig["enabled"] = true
-
-		mcpSection[server.Name] = serverConfig
+		mcpSection[server.Name] = buildMCPServerConfig(server)
 	}
 
-	// Update the mcp section in the config
 	rawConfig["mcp"] = mcpSection
 
 	// Marshal back to JSON with indentation

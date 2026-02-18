@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+
+// OS name constants used for runtime.GOOS comparisons.
+const (
+	osDarwin  = "darwin"
+	osLinux   = "linux"
+	osWindows = "windows"
+)
 type SystemProvider struct {
 	assets systemAssets
 }
@@ -21,12 +28,12 @@ func NewSystemProvider() *SystemProvider {
 
 func (p *SystemProvider) Available() bool {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		return true
-	case "windows":
+	case osWindows:
 		_, err := exec.LookPath("powershell.exe")
 		return err == nil
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			_, err := exec.LookPath("powershell.exe")
 			return err == nil
@@ -139,14 +146,14 @@ func parseSystemConfig(raw map[string]interface{}) (systemConfig, error) {
 
 func (p *SystemProvider) sendNotification(ctx context.Context, cfg systemConfig, title, body string) error {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		return runCommand(ctx, "osascript", "-e", buildAppleScript(title, body))
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			return p.sendWindowsNotification(ctx, cfg, title, body)
 		}
 		return sendLinuxNotification(ctx, cfg, title, body)
-	case "windows":
+	case osWindows:
 		return p.sendWindowsNotification(ctx, cfg, title, body)
 	default:
 		return fmt.Errorf("system notifications not supported on %s", runtime.GOOS)
@@ -204,13 +211,13 @@ func sendLinuxNotification(ctx context.Context, cfg systemConfig, title, body st
 
 func (p *SystemProvider) playSound(ctx context.Context, cfg systemConfig) error {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		soundPath := cfg.SoundFile
 		if soundPath == "" {
 			soundPath = "/System/Library/Sounds/Glass.aiff"
 		}
 		return runCommand(ctx, "afplay", soundPath)
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			return p.playWindowsSound(ctx, cfg)
 		}
@@ -223,7 +230,7 @@ func (p *SystemProvider) playSound(ctx context.Context, cfg systemConfig) error 
 			}
 		}
 		return runCommand(ctx, "sh", "-c", "printf '\\a'")
-	case "windows":
+	case osWindows:
 		return p.playWindowsSound(ctx, cfg)
 	default:
 		return nil
@@ -269,7 +276,7 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 }
 
 func isWSL() bool {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != osLinux {
 		return false
 	}
 	if os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "" {

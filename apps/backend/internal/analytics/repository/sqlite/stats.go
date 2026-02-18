@@ -310,10 +310,42 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	drv := r.db.DriverName()
-	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+	query := buildRepositoryStatsQuery(r.db.DriverName())
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
+		startArg, startArg, startArg, startArg,
+		startArg, startArg, startArg, startArg,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 
-	query := fmt.Sprintf(`
+	var results []*models.RepositoryStats
+	for rows.Next() {
+		var stats models.RepositoryStats
+		var totalDurationMs float64
+		err := rows.Scan(
+			&stats.RepositoryID, &stats.RepositoryName,
+			&stats.TotalTasks, &stats.CompletedTasks, &stats.InProgressTasks,
+			&stats.SessionCount, &stats.TurnCount, &stats.MessageCount,
+			&stats.UserMessageCount, &stats.ToolCallCount, &totalDurationMs,
+			&stats.TotalCommits, &stats.TotalFilesChanged,
+			&stats.TotalInsertions, &stats.TotalDeletions,
+		)
+		if err != nil {
+			return nil, err
+		}
+		stats.TotalDurationMs = int64(totalDurationMs)
+		results = append(results, &stats)
+	}
+
+	return results, rows.Err()
+}
+
+func buildRepositoryStatsQuery(drv string) string {
+	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
+	return fmt.Sprintf(`
 		SELECT
 			r.id, r.name,
 			COALESCE(task_stats.total_tasks, 0) as total_tasks,
@@ -378,37 +410,6 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
 		ORDER BY total_duration_ms DESC, total_tasks DESC, r.name ASC
 	`, dur)
-
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
-		startArg, startArg, startArg, startArg,
-		startArg, startArg, startArg, startArg,
-		workspaceID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var results []*models.RepositoryStats
-	for rows.Next() {
-		var stats models.RepositoryStats
-		var totalDurationMs float64
-		err := rows.Scan(
-			&stats.RepositoryID, &stats.RepositoryName,
-			&stats.TotalTasks, &stats.CompletedTasks, &stats.InProgressTasks,
-			&stats.SessionCount, &stats.TurnCount, &stats.MessageCount,
-			&stats.UserMessageCount, &stats.ToolCallCount, &totalDurationMs,
-			&stats.TotalCommits, &stats.TotalFilesChanged,
-			&stats.TotalInsertions, &stats.TotalDeletions,
-		)
-		if err != nil {
-			return nil, err
-		}
-		stats.TotalDurationMs = int64(totalDurationMs)
-		results = append(results, &stats)
-	}
-
-	return results, rows.Err()
 }
 
 // GetAgentUsage retrieves usage statistics per agent profile

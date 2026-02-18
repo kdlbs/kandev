@@ -262,24 +262,11 @@ func (h *Handlers) wsListTemplates(ctx context.Context, msg *ws.Message) (*ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsGetTemplateRequest struct {
-	ID string `json:"id"`
-}
-
 func (h *Handlers) wsGetTemplate(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetTemplateRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	resp, err := h.controller.GetTemplate(ctx, req.ID)
-	if err != nil {
-		h.logger.Error("failed to get template", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Template not found", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return h.wsGetByID(ctx, msg, "failed to get template", "Template not found",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.GetTemplate(ctx, id)
+		})
 }
 
 // WS handlers - Steps
@@ -293,35 +280,18 @@ func (h *Handlers) wsListSteps(ctx context.Context, msg *ws.Message) (*ws.Messag
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.WorkflowID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
-	}
-	resp, err := h.controller.ListStepsByWorkflow(ctx, controller.ListStepsRequest{WorkflowID: req.WorkflowID})
-	if err != nil {
-		h.logger.Error("failed to list steps", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list steps", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsGetStepRequest struct {
-	ID string `json:"id"`
+	return h.wsHandleStringField(ctx, msg, req.WorkflowID, "workflow_id",
+		"failed to list steps", "Failed to list steps",
+		func(ctx context.Context, workflowID string) (any, error) {
+			return h.controller.ListStepsByWorkflow(ctx, controller.ListStepsRequest{WorkflowID: workflowID})
+		})
 }
 
 func (h *Handlers) wsGetStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetStepRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	resp, err := h.controller.GetStep(ctx, req.ID)
-	if err != nil {
-		h.logger.Error("failed to get step", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Step not found", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return h.wsGetByID(ctx, msg, "failed to get step", "Step not found",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.GetStep(ctx, id)
+		})
 }
 
 type wsCreateStepsRequest struct {
@@ -358,14 +328,10 @@ func (h *Handlers) wsListHistory(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	resp, err := h.controller.ListHistoryBySession(ctx, controller.ListHistoryRequest{SessionID: req.SessionID})
-	if err != nil {
-		h.logger.Error("failed to list history", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list history", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return h.wsHandleStringField(ctx, msg, req.SessionID, "session_id",
+		"failed to list history", "Failed to list history",
+		func(ctx context.Context, sessionID string) (any, error) {
+			return h.controller.ListHistoryBySession(ctx, controller.ListHistoryRequest{SessionID: sessionID})
+		})
 }
 

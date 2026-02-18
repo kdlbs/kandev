@@ -95,24 +95,26 @@ func ParseCodexStderrError(line string) *CodexParsedError {
 	// Build a user-friendly message from available fields
 	var msg string
 
-	if errorMessage != "" {
+	switch {
+	case errorMessage != "":
 		// We have a specific error message from the API
 		msg = errorMessage
 		// Add reset time info if available
 		if resetsInSeconds > 0 {
 			duration := time.Duration(resetsInSeconds) * time.Second
-			if duration.Hours() >= 1 {
+			switch {
+			case duration.Hours() >= 1:
 				msg = fmt.Sprintf("%s (resets in %.0f hours)", msg, duration.Hours())
-			} else if duration.Minutes() >= 1 {
+			case duration.Minutes() >= 1:
 				msg = fmt.Sprintf("%s (resets in %.0f minutes)", msg, duration.Minutes())
-			} else {
+			default:
 				msg = fmt.Sprintf("%s (resets in %d seconds)", msg, int(duration.Seconds()))
 			}
 		}
-	} else if errorType != "" {
+	case errorType != "":
 		// We have an error type but no message
 		msg = fmt.Sprintf("Error: %s", errorType)
-	} else {
+	default:
 		// Unknown error format - show HTTP error and include JSON body
 		jsonBytes, _ := json.MarshalIndent(rawData, "", "  ")
 		msg = fmt.Sprintf("%s\n\n%s", httpError, string(jsonBytes))

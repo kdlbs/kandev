@@ -348,72 +348,8 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		return nil, err
 	}
 
-	// Create task-repository associations
-	var repoByPath map[string]*models.Repository
-	for _, repoInput := range req.Repositories {
-		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
-			repos, err := s.repo.ListRepositories(ctx, req.WorkspaceID)
-			if err != nil {
-				s.logger.Error("failed to list repositories", zap.Error(err))
-				return nil, err
-			}
-			repoByPath = make(map[string]*models.Repository, len(repos))
-			for _, repo := range repos {
-				if repo.LocalPath == "" {
-					continue
-				}
-				repoByPath[repo.LocalPath] = repo
-			}
-			break
-		}
-	}
-
-	for i, repoInput := range req.Repositories {
-		repositoryID := repoInput.RepositoryID
-		baseBranch := repoInput.BaseBranch
-		if repositoryID == "" && repoInput.LocalPath != "" {
-			repo := repoByPath[repoInput.LocalPath]
-			if repo == nil {
-				name := strings.TrimSpace(repoInput.Name)
-				if name == "" {
-					name = filepath.Base(repoInput.LocalPath)
-				}
-				defaultBranch := repoInput.DefaultBranch
-				if defaultBranch == "" {
-					defaultBranch = repoInput.BaseBranch
-				}
-				created, err := s.CreateRepository(ctx, &CreateRepositoryRequest{
-					WorkspaceID:   req.WorkspaceID,
-					Name:          name,
-					SourceType:    "local",
-					LocalPath:     repoInput.LocalPath,
-					DefaultBranch: defaultBranch,
-				})
-				if err != nil {
-					return nil, err
-				}
-				repo = created
-				repoByPath[repoInput.LocalPath] = repo
-			}
-			repositoryID = repo.ID
-			if baseBranch == "" {
-				baseBranch = repo.DefaultBranch
-			}
-		}
-		if repositoryID == "" {
-			return nil, fmt.Errorf("repository_id is required")
-		}
-		taskRepo := &models.TaskRepository{
-			TaskID:       task.ID,
-			RepositoryID: repositoryID,
-			BaseBranch:   baseBranch,
-			Position:     i,
-			Metadata:     make(map[string]interface{}),
-		}
-		if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
-			s.logger.Error("failed to create task repository", zap.Error(err))
-			return nil, err
-		}
+	if err := s.createTaskRepositories(ctx, task.ID, req.WorkspaceID, req.Repositories); err != nil {
+		return nil, err
 	}
 
 	// Load repositories into task for response
@@ -428,6 +364,99 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+// createTaskRepositories creates task-repository associations, resolving local paths to repository IDs.
+func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	var repoByPath map[string]*models.Repository
+	for _, repoInput := range repositories {
+		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+			repos, err := s.repo.ListRepositories(ctx, workspaceID)
+			if err != nil {
+				s.logger.Error("failed to list repositories", zap.Error(err))
+				return err
+			}
+			repoByPath = make(map[string]*models.Repository, len(repos))
+			for _, repo := range repos {
+				if repo.LocalPath == "" {
+					continue
+				}
+				repoByPath[repo.LocalPath] = repo
+			}
+			break
+		}
+	}
+
+	for i, repoInput := range repositories {
+		repositoryID, baseBranch, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+		if err != nil {
+			return err
+		}
+		if repositoryID == "" {
+			return fmt.Errorf("repository_id is required")
+		}
+		taskRepo := &models.TaskRepository{
+			TaskID:       taskID,
+			RepositoryID: repositoryID,
+			BaseBranch:   baseBranch,
+			Position:     i,
+			Metadata:     make(map[string]interface{}),
+		}
+		if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+			s.logger.Error("failed to create task repository", zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,
+// creating the repository if it doesn't exist yet.
+func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {
+	repositoryID = repoInput.RepositoryID
+	baseBranch = repoInput.BaseBranch
+	if repositoryID != "" || repoInput.LocalPath == "" {
+		return repositoryID, baseBranch, nil
+	}
+	repo := repoByPath[repoInput.LocalPath]
+	if repo == nil {
+		name := strings.TrimSpace(repoInput.Name)
+		if name == "" {
+			name = filepath.Base(repoInput.LocalPath)
+		}
+		defaultBranch := repoInput.DefaultBranch
+		if defaultBranch == "" {
+			defaultBranch = repoInput.BaseBranch
+		}
+		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+			WorkspaceID:   workspaceID,
+			Name:          name,
+			SourceType:    "local",
+			LocalPath:     repoInput.LocalPath,
+			DefaultBranch: defaultBranch,
+		})
+		if createErr != nil {
+			return "", "", createErr
+		}
+		repo = created
+		if repoByPath != nil {
+			repoByPath[repoInput.LocalPath] = repo
+		}
+	}
+	repositoryID = repo.ID
+	if baseBranch == "" {
+		baseBranch = repo.DefaultBranch
+	}
+	return repositoryID, baseBranch, nil
+}
+
+// replaceTaskRepositories deletes all existing task-repository associations and recreates them.
+func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
+	if err := s.repo.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
+		s.logger.Error("failed to delete task repositories", zap.Error(err))
+		return err
+	}
+	return s.createTaskRepositories(ctx, taskID, workspaceID, repositories)
 }
 
 // GetTask retrieves a task by ID and populates repositories
@@ -487,79 +516,8 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 
 	// Update task repositories if provided
 	if req.Repositories != nil {
-		// Delete existing repositories
-		if err := s.repo.DeleteTaskRepositoriesByTask(ctx, id); err != nil {
-			s.logger.Error("failed to delete task repositories", zap.Error(err))
+		if err := s.replaceTaskRepositories(ctx, task.ID, task.WorkspaceID, req.Repositories); err != nil {
 			return nil, err
-		}
-
-		// Resolve local paths to repository IDs (same logic as CreateTask)
-		var repoByPath map[string]*models.Repository
-		for _, repoInput := range req.Repositories {
-			if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
-				repos, err := s.repo.ListRepositories(ctx, task.WorkspaceID)
-				if err != nil {
-					s.logger.Error("failed to list repositories", zap.Error(err))
-					return nil, err
-				}
-				repoByPath = make(map[string]*models.Repository, len(repos))
-				for _, repo := range repos {
-					if repo.LocalPath == "" {
-						continue
-					}
-					repoByPath[repo.LocalPath] = repo
-				}
-				break
-			}
-		}
-
-		// Create new repositories
-		for i, repoInput := range req.Repositories {
-			repositoryID := repoInput.RepositoryID
-			baseBranch := repoInput.BaseBranch
-			if repositoryID == "" && repoInput.LocalPath != "" {
-				repo := repoByPath[repoInput.LocalPath]
-				if repo == nil {
-					name := strings.TrimSpace(repoInput.Name)
-					if name == "" {
-						name = filepath.Base(repoInput.LocalPath)
-					}
-					defaultBranch := repoInput.DefaultBranch
-					if defaultBranch == "" {
-						defaultBranch = repoInput.BaseBranch
-					}
-					created, err := s.CreateRepository(ctx, &CreateRepositoryRequest{
-						WorkspaceID:   task.WorkspaceID,
-						Name:          name,
-						SourceType:    "local",
-						LocalPath:     repoInput.LocalPath,
-						DefaultBranch: defaultBranch,
-					})
-					if err != nil {
-						return nil, err
-					}
-					repo = created
-					if repoByPath == nil {
-						repoByPath = make(map[string]*models.Repository)
-					}
-					repoByPath[repoInput.LocalPath] = repo
-				}
-				repositoryID = repo.ID
-				if baseBranch == "" {
-					baseBranch = repo.DefaultBranch
-				}
-			}
-			taskRepo := &models.TaskRepository{
-				TaskID:       task.ID,
-				RepositoryID: repositoryID,
-				BaseBranch:   baseBranch,
-				Position:     i,
-				Metadata:     make(map[string]interface{}),
-			}
-			if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
-				s.logger.Error("failed to create task repository", zap.Error(err))
-				return nil, err
-			}
 		}
 	}
 
@@ -648,35 +606,8 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 6. Background: Stop agents and cleanup worktrees
 	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		go func() {
-			cleanupStart := time.Now()
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-
-			if s.executionStopper != nil && len(activeSessionIDs) > 0 {
-				for _, sessionID := range activeSessionIDs {
-					if err := s.executionStopper.StopSession(cleanupCtx, sessionID, "task archived", true); err != nil {
-						s.logger.Warn("failed to stop session on task archive",
-							zap.String("task_id", id),
-							zap.String("session_id", sessionID),
-							zap.Error(err))
-					}
-				}
-			}
-
-			cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
-
-			if len(cleanupErrors) > 0 {
-				s.logger.Warn("task archive cleanup completed with errors",
-					zap.String("task_id", id),
-					zap.Int("error_count", len(cleanupErrors)),
-					zap.Duration("duration", time.Since(cleanupStart)))
-			} else {
-				s.logger.Info("task archive cleanup completed",
-					zap.String("task_id", id),
-					zap.Duration("duration", time.Since(cleanupStart)))
-			}
-		}()
+		s.runAsyncTaskCleanup(id, sessions, worktrees, activeSessionIDs,
+			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
 	return nil
@@ -752,40 +683,49 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 
 	// 7. Background: Stop agents and cleanup worktrees
 	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		go func() {
-			cleanupStart := time.Now()
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-
-			// Stop running agents using pre-fetched session IDs
-			if s.executionStopper != nil && len(activeSessionIDs) > 0 {
-				for _, sessionID := range activeSessionIDs {
-					if err := s.executionStopper.StopSession(cleanupCtx, sessionID, "task deleted", true); err != nil {
-						s.logger.Warn("failed to stop session on task delete",
-							zap.String("task_id", id),
-							zap.String("session_id", sessionID),
-							zap.Error(err))
-					}
-				}
-			}
-
-			// Cleanup worktrees and other resources
-			cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
-
-			if len(cleanupErrors) > 0 {
-				s.logger.Warn("task cleanup completed with errors",
-					zap.String("task_id", id),
-					zap.Int("error_count", len(cleanupErrors)),
-					zap.Duration("duration", time.Since(cleanupStart)))
-			} else {
-				s.logger.Info("task cleanup completed",
-					zap.String("task_id", id),
-					zap.Duration("duration", time.Since(cleanupStart)))
-			}
-		}()
+		s.runAsyncTaskCleanup(id, sessions, worktrees, activeSessionIDs,
+			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
 	return nil
+}
+
+func (s *Service) runAsyncTaskCleanup(
+	id string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	activeSessionIDs []string,
+	stopReason, stopFailMsg, cleanupMsg string,
+) {
+	go func() {
+		cleanupStart := time.Now()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		if s.executionStopper != nil && len(activeSessionIDs) > 0 {
+			for _, sessionID := range activeSessionIDs {
+				if err := s.executionStopper.StopSession(cleanupCtx, sessionID, stopReason, true); err != nil {
+					s.logger.Warn(stopFailMsg,
+						zap.String("task_id", id),
+						zap.String("session_id", sessionID),
+						zap.Error(err))
+				}
+			}
+		}
+
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+
+		if len(cleanupErrors) > 0 {
+			s.logger.Warn(cleanupMsg+" with errors",
+				zap.String("task_id", id),
+				zap.Int("error_count", len(cleanupErrors)),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		} else {
+			s.logger.Info(cleanupMsg,
+				zap.String("task_id", id),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		}
+	}()
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
@@ -970,98 +910,109 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 				zap.String("workflow_step_id", *session.WorkflowStepID),
 				zap.Error(err))
 		} else {
-			// Determine the target step from on_turn_complete actions
-			var newStepID string
-			for _, action := range step.Events.OnTurnComplete {
-				switch action.Type {
-				case "move_to_next":
-					nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
-					if err != nil {
-						s.logger.Warn("failed to get next step by position",
-							zap.String("workflow_id", step.WorkflowID),
-							zap.Int("current_position", step.Position),
-							zap.Error(err))
-					} else if nextStep != nil {
-						newStepID = nextStep.ID
-					}
-				case "move_to_step":
-					if stepID, ok := action.Config["step_id"].(string); ok && stepID != "" {
-						newStepID = stepID
-					}
-				}
-				if newStepID != "" {
-					break
-				}
-			}
-
-			// Fall back to next step by position if no transition actions found
-			if newStepID == "" && len(step.Events.OnTurnComplete) == 0 {
-				nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
-				if err != nil {
-					s.logger.Warn("failed to get next step by position for fallback",
-						zap.String("workflow_id", step.WorkflowID),
-						zap.Int("current_position", step.Position),
-						zap.Error(err))
-				} else if nextStep != nil {
-					newStepID = nextStep.ID
-					s.logger.Info("using next step by position for approval transition (fallback)",
-						zap.String("current_step", step.Name),
-						zap.String("next_step", nextStep.Name))
-				}
-			}
-
-			if newStepID != "" {
-				if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
-					s.logger.Error("failed to move session to next step after approval",
-						zap.String("session_id", sessionID),
-						zap.String("step_id", newStepID),
-						zap.Error(err))
-				} else {
-					// Also move the task to the new step
-					task, err := s.repo.GetTask(ctx, session.TaskID)
-					if err != nil {
-						s.logger.Error("failed to get task for approval transition",
-							zap.String("task_id", session.TaskID),
-							zap.Error(err))
-					} else {
-						task.WorkflowStepID = newStepID
-						task.UpdatedAt = time.Now().UTC()
-						if err := s.repo.UpdateTask(ctx, task); err != nil {
-							s.logger.Error("failed to move task to next step after approval",
-								zap.String("task_id", session.TaskID),
-								zap.String("step_id", newStepID),
-								zap.Error(err))
-						} else {
-							s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-							result.Task = task
-						}
-					}
-
-					// Reload session with new step
-					session, _ = s.repo.GetTaskSession(ctx, sessionID)
-					result.Session = session
-
-					// Get the new workflow step for the response
-					newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID)
-					if err == nil {
-						result.WorkflowStep = newStep
-					}
-
-					s.logger.Info("session approved and moved to next step",
-						zap.String("session_id", sessionID),
-						zap.String("from_step", step.ID),
-						zap.String("to_step", newStepID))
-				}
-			} else {
-				s.logger.Info("session approved but no next step found (may be at final step)",
-					zap.String("session_id", sessionID),
-					zap.String("current_step", step.ID),
-					zap.String("current_step_name", step.Name))
-			}
+			s.applyApprovalStepTransition(ctx, sessionID, step, result)
 		}
 	}
 
 	return result, nil
+}
+
+// applyApprovalStepTransition resolves the next workflow step and updates session/task accordingly.
+func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID string, step *wfmodels.WorkflowStep, result *ApproveSessionResult) {
+	newStepID := s.resolveApprovalNextStep(ctx, step)
+
+	if newStepID == "" {
+		s.logger.Info("session approved but no next step found (may be at final step)",
+			zap.String("session_id", sessionID),
+			zap.String("current_step", step.ID),
+			zap.String("current_step_name", step.Name))
+		return
+	}
+
+	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
+		s.logger.Error("failed to move session to next step after approval",
+			zap.String("session_id", sessionID),
+			zap.String("step_id", newStepID),
+			zap.Error(err))
+		return
+	}
+
+	// Also move the task to the new step
+	if task, err := s.repo.GetTask(ctx, result.Session.TaskID); err != nil {
+		s.logger.Error("failed to get task for approval transition",
+			zap.String("task_id", result.Session.TaskID),
+			zap.Error(err))
+	} else {
+		task.WorkflowStepID = newStepID
+		task.UpdatedAt = time.Now().UTC()
+		if err := s.repo.UpdateTask(ctx, task); err != nil {
+			s.logger.Error("failed to move task to next step after approval",
+				zap.String("task_id", result.Session.TaskID),
+				zap.String("step_id", newStepID),
+				zap.Error(err))
+		} else {
+			s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+			result.Task = task
+		}
+	}
+
+	// Reload session with new step
+	result.Session, _ = s.repo.GetTaskSession(ctx, sessionID)
+
+	// Get the new workflow step for the response
+	if newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID); err == nil {
+		result.WorkflowStep = newStep
+	}
+
+	s.logger.Info("session approved and moved to next step",
+		zap.String("session_id", sessionID),
+		zap.String("from_step", step.ID),
+		zap.String("to_step", newStepID))
+}
+
+// resolveApprovalNextStep determines the target step ID from a step's on_turn_complete actions,
+// falling back to the next step by position when no actions are configured.
+func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	var newStepID string
+	for _, action := range step.Events.OnTurnComplete {
+		switch action.Type {
+		case "move_to_next":
+			nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+			if err != nil {
+				s.logger.Warn("failed to get next step by position",
+					zap.String("workflow_id", step.WorkflowID),
+					zap.Int("current_position", step.Position),
+					zap.Error(err))
+			} else if nextStep != nil {
+				newStepID = nextStep.ID
+			}
+		case "move_to_step":
+			if stepID, ok := action.Config["step_id"].(string); ok && stepID != "" {
+				newStepID = stepID
+			}
+		}
+		if newStepID != "" {
+			return newStepID
+		}
+	}
+
+	// Fall back to next step by position if no transition actions found
+	if len(step.Events.OnTurnComplete) == 0 {
+		nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+		if err != nil {
+			s.logger.Warn("failed to get next step by position for fallback",
+				zap.String("workflow_id", step.WorkflowID),
+				zap.Int("current_position", step.Position),
+				zap.Error(err))
+		} else if nextStep != nil {
+			s.logger.Info("using next step by position for approval transition (fallback)",
+				zap.String("current_step", step.Name),
+				zap.String("next_step", nextStep.Name))
+			newStepID = nextStep.ID
+		}
+	}
+
+	return newStepID
 }
 
 // UpdateTaskState updates the state of a task, moves it to the matching column,
@@ -1920,6 +1871,16 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	}
 }
 
+func (s *Service) publishEventToBus(ctx context.Context, eventType, resourceType, resourceID string, data map[string]interface{}) {
+	event := bus.NewEvent(eventType, "task-service", data)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish "+resourceType+" event",
+			zap.String("event_type", eventType),
+			zap.String(resourceType+"_id", resourceID),
+			zap.Error(err))
+	}
+}
+
 func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, workspace *models.Workspace) {
 	if s.eventBus == nil || workspace == nil {
 		return
@@ -1937,13 +1898,7 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"updated_at":               workspace.UpdatedAt.Format(time.RFC3339),
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish workspace event",
-			zap.String("event_type", eventType),
-			zap.String("workspace_id", workspace.ID),
-			zap.Error(err))
-	}
+	s.publishEventToBus(ctx, eventType, "workspace", workspace.ID, data)
 }
 
 func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {
@@ -1960,13 +1915,7 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 		"updated_at":   workflow.UpdatedAt.Format(time.RFC3339),
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish workflow event",
-			zap.String("event_type", eventType),
-			zap.String("workflow_id", workflow.ID),
-			zap.Error(err))
-	}
+	s.publishEventToBus(ctx, eventType, "workflow", workflow.ID, data)
 }
 
 func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, executor *models.Executor) {
@@ -1986,13 +1935,7 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish executor event",
-			zap.String("event_type", eventType),
-			zap.String("executor_id", executor.ID),
-			zap.Error(err))
-	}
+	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
 }
 
 func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string, environment *models.Environment) {
@@ -2013,14 +1956,9 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 		"updated_at":    environment.UpdatedAt.Format(time.RFC3339),
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish environment event",
-			zap.String("event_type", eventType),
-			zap.String("environment_id", environment.ID),
-			zap.Error(err))
-	}
+	s.publishEventToBus(ctx, eventType, "environment", environment.ID, data)
 }
+
 
 // Message operations
 
@@ -2111,39 +2049,59 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	const maxRetries = 5
 	const retryDelay = 50 * time.Millisecond
 
+	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, maxRetries, retryDelay)
+	if err != nil {
+		return nil, err
+	}
+
+	message := s.buildMessage(ctx, id, req, session)
+
+	if err := s.createMessageWithRetry(ctx, message, maxRetries, retryDelay); err != nil {
+		return nil, err
+	}
+
+	// Publish message.added event
+	s.publishMessageEvent(ctx, events.MessageAdded, message)
+
+	s.logger.Info("message created with ID",
+		zap.String("message_id", message.ID),
+		zap.String("session_id", message.TaskSessionID),
+		zap.String("author_type", string(message.AuthorType)))
+
+	return message, nil
+}
+
+// getSessionWithRetry fetches a session, retrying on transient errors caused by out-of-order events.
+func (s *Service) getSessionWithRetry(ctx context.Context, sessionID, messageID string, maxRetries int, retryDelay time.Duration) (*models.TaskSession, error) {
 	var session *models.TaskSession
 	var err error
-
-	// Retry loop for getting the session (may not exist yet if events arrive out of order)
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		session, err = s.repo.GetTaskSession(ctx, req.TaskSessionID)
+		session, err = s.repo.GetTaskSession(ctx, sessionID)
 		if err == nil {
-			break
+			return session, nil
 		}
-
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-
 		if attempt < maxRetries-1 {
 			s.logger.Debug("session not found for message create, retrying",
-				zap.String("session_id", req.TaskSessionID),
-				zap.String("message_id", id),
+				zap.String("session_id", sessionID),
+				zap.String("message_id", messageID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
 			time.Sleep(retryDelay)
 		}
 	}
+	s.logger.Warn("session not found for message create after retries",
+		zap.String("session_id", sessionID),
+		zap.String("message_id", messageID),
+		zap.Int("retries", maxRetries),
+		zap.Error(err))
+	return nil, err
+}
 
-	if err != nil {
-		s.logger.Warn("session not found for message create after retries",
-			zap.String("session_id", req.TaskSessionID),
-			zap.String("message_id", id),
-			zap.Int("retries", maxRetries),
-			zap.Error(err))
-		return nil, err
-	}
-
+// buildMessage constructs a Message model from a CreateMessageRequest and resolved session.
+func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessageRequest, session *models.TaskSession) *models.Message {
 	authorType := models.MessageAuthorUser
 	if req.AuthorType == "agent" {
 		authorType = models.MessageAuthorAgent
@@ -2159,21 +2117,18 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		taskID = session.TaskID
 	}
 
-	// Ensure we have a turn ID - get active turn or start a new one
 	turnID := req.TurnID
 	if turnID == "" {
-		turn, err := s.getOrStartTurn(ctx, req.TaskSessionID)
-		if err != nil {
+		if turn, err := s.getOrStartTurn(ctx, req.TaskSessionID); err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
-			// Continue with empty turn ID - will fail on foreign key if turn is required
 		} else if turn != nil {
 			turnID = turn.ID
 		}
 	}
 
-	message := &models.Message{
+	return &models.Message{
 		ID:            id,
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        taskID,
@@ -2186,45 +2141,33 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		RequestsInput: req.RequestsInput,
 		CreatedAt:     time.Now().UTC(),
 	}
+}
 
-	// Retry loop for creating the message (handles transient DB errors)
+// createMessageWithRetry persists a message with retry logic for transient DB errors.
+func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Message, maxRetries int, retryDelay time.Duration) error {
+	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err = s.repo.CreateMessage(ctx, message)
 		if err == nil {
-			break
+			return nil
 		}
-
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-
 		if attempt < maxRetries-1 {
 			s.logger.Debug("failed to create message, retrying",
-				zap.String("message_id", id),
+				zap.String("message_id", message.ID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries),
 				zap.Error(err))
 			time.Sleep(retryDelay)
 		}
 	}
-
-	if err != nil {
-		s.logger.Error("failed to create message with ID after retries",
-			zap.String("id", id),
-			zap.Int("retries", maxRetries),
-			zap.Error(err))
-		return nil, err
-	}
-
-	// Publish message.added event
-	s.publishMessageEvent(ctx, events.MessageAdded, message)
-
-	s.logger.Info("message created with ID",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
-
-	return message, nil
+	s.logger.Error("failed to create message with ID after retries",
+		zap.String("id", message.ID),
+		zap.Int("retries", maxRetries),
+		zap.Error(err))
+	return err
 }
 
 // GetMessage retrieves a message by ID
@@ -2292,7 +2235,7 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	}
 
 	// Append the new content
-	message.Content = message.Content + additionalContent
+	message.Content += additionalContent
 
 	if err := s.repo.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to append message content",
@@ -2368,76 +2311,11 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
-	var message *models.Message
-	var err error
-
-	// Retry loop to handle race condition where complete event arrives before start event
-	// has finished creating the message in the database
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
-		if err == nil {
-			break // Found the message, proceed with update
-		}
-
-		// If context is cancelled, don't retry
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Log retry attempt (only warn on final failure)
-		if attempt < maxRetries-1 {
-			s.logger.Debug("tool call message not found, retrying",
-				zap.String("session_id", sessionID),
-				zap.String("tool_call_id", toolCallID),
-				zap.Int("attempt", attempt+1),
-				zap.Int("max_retries", maxRetries))
-			time.Sleep(retryDelay)
-		}
-	}
+	message, err := s.getToolCallMessageWithRetry(ctx, sessionID, toolCallID, maxRetries, retryDelay)
 
 	// If message not found and we have enough info to create it, do so
 	if err != nil && taskID != "" && msgType != "" {
-		s.logger.Info("tool call message not found, creating it",
-			zap.String("session_id", sessionID),
-			zap.String("tool_call_id", toolCallID),
-			zap.String("task_id", taskID),
-			zap.String("msg_type", msgType))
-
-		metadata := map[string]interface{}{
-			"tool_call_id": toolCallID,
-			"title":        title,
-			"status":       status,
-		}
-		// Add parent tool call ID for subagent nesting (if present)
-		if parentToolCallID != "" {
-			metadata["parent_tool_call_id"] = parentToolCallID
-		}
-		if normalized != nil {
-			metadata["normalized"] = normalized
-		}
-
-		msg, createErr := s.CreateMessage(ctx, &CreateMessageRequest{
-			TaskSessionID: sessionID,
-			TaskID:        taskID,
-			TurnID:        turnID,
-			Content:       title,
-			AuthorType:    "agent",
-			Type:          msgType,
-			Metadata:      metadata,
-		})
-		if createErr != nil {
-			s.logger.Error("failed to create tool call message as fallback",
-				zap.String("session_id", sessionID),
-				zap.String("tool_call_id", toolCallID),
-				zap.Error(createErr))
-			return createErr
-		}
-
-		s.logger.Info("created tool call message as fallback",
-			zap.String("message_id", msg.ID),
-			zap.String("tool_call_id", toolCallID),
-			zap.String("status", status))
-		return nil
+		return s.createToolCallMessageFallback(ctx, sessionID, toolCallID, parentToolCallID, status, title, turnID, taskID, msgType, normalized)
 	}
 
 	if err != nil {
@@ -2449,39 +2327,7 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 		return err
 	}
 
-	if message.Metadata == nil {
-		message.Metadata = make(map[string]interface{})
-	}
-	message.Metadata["status"] = status
-	if result != "" {
-		message.Metadata["result"] = result
-	}
-
-	// Add normalized tool data to metadata for frontend consumption
-	// and update message type if the normalized kind changed (e.g., read_file -> code_search for directories)
-	if normalized != nil {
-		message.Metadata["normalized"] = normalized
-
-		// Update message type if the normalized kind changed
-		// This handles cases like Read on a directory converting to code_search
-		newMsgType := models.MessageType(normalized.Kind().ToMessageType())
-		if newMsgType != message.Type {
-			s.logger.Debug("updating message type based on normalized kind",
-				zap.String("message_id", message.ID),
-				zap.String("old_type", string(message.Type)),
-				zap.String("new_type", string(newMsgType)),
-				zap.String("normalized_kind", string(normalized.Kind())))
-			message.Type = newMsgType
-		}
-	}
-
-	// Update title/content if provided and different from current
-	// This handles the case where the first event only had the tool name (e.g., "bash")
-	// and subsequent events have the actual command/path (e.g., "ls" or "/path/to/file")
-	if title != "" && title != message.Content {
-		message.Content = title
-		message.Metadata["title"] = title
-	}
+	s.applyToolCallMessageUpdate(message, status, result, title, normalized)
 
 	if err := s.repo.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update tool call message",
@@ -2500,6 +2346,106 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 		zap.String("status", status))
 
 	return nil
+}
+
+// getToolCallMessageWithRetry fetches a tool call message with retry logic for race conditions.
+func (s *Service) getToolCallMessageWithRetry(ctx context.Context, sessionID, toolCallID string, maxRetries int, retryDelay time.Duration) (*models.Message, error) {
+	var message *models.Message
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		message, err = s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
+		if err == nil {
+			return message, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempt < maxRetries-1 {
+			s.logger.Debug("tool call message not found, retrying",
+				zap.String("session_id", sessionID),
+				zap.String("tool_call_id", toolCallID),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", maxRetries))
+			time.Sleep(retryDelay)
+		}
+	}
+	return nil, err
+}
+
+// createToolCallMessageFallback creates a tool call message when it cannot be found via GetMessageByToolCallID.
+func (s *Service) createToolCallMessageFallback(ctx context.Context, sessionID, toolCallID, parentToolCallID, status, title, turnID, taskID, msgType string, normalized *streams.NormalizedPayload) error {
+	s.logger.Info("tool call message not found, creating it",
+		zap.String("session_id", sessionID),
+		zap.String("tool_call_id", toolCallID),
+		zap.String("task_id", taskID),
+		zap.String("msg_type", msgType))
+
+	metadata := map[string]interface{}{
+		"tool_call_id": toolCallID,
+		"title":        title,
+		"status":       status,
+	}
+	if parentToolCallID != "" {
+		metadata["parent_tool_call_id"] = parentToolCallID
+	}
+	if normalized != nil {
+		metadata["normalized"] = normalized
+	}
+
+	msg, createErr := s.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       title,
+		AuthorType:    "agent",
+		Type:          msgType,
+		Metadata:      metadata,
+	})
+	if createErr != nil {
+		s.logger.Error("failed to create tool call message as fallback",
+			zap.String("session_id", sessionID),
+			zap.String("tool_call_id", toolCallID),
+			zap.Error(createErr))
+		return createErr
+	}
+
+	s.logger.Info("created tool call message as fallback",
+		zap.String("message_id", msg.ID),
+		zap.String("tool_call_id", toolCallID),
+		zap.String("status", status))
+	return nil
+}
+
+// applyToolCallMessageUpdate applies status, result, normalized data, and title to a tool call message.
+func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, result, title string, normalized *streams.NormalizedPayload) {
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	message.Metadata["status"] = status
+	if result != "" {
+		message.Metadata["result"] = result
+	}
+
+	if normalized != nil {
+		message.Metadata["normalized"] = normalized
+		// Update message type if the normalized kind changed
+		// This handles cases like Read on a directory converting to code_search
+		newMsgType := models.MessageType(normalized.Kind().ToMessageType())
+		if newMsgType != message.Type {
+			s.logger.Debug("updating message type based on normalized kind",
+				zap.String("message_id", message.ID),
+				zap.String("old_type", string(message.Type)),
+				zap.String("new_type", string(newMsgType)),
+				zap.String("normalized_kind", string(normalized.Kind())))
+			message.Type = newMsgType
+		}
+	}
+
+	// Update title/content if provided and different from current
+	if title != "" && title != message.Content {
+		message.Content = title
+		message.Metadata["title"] = title
+	}
 }
 
 // UpdatePermissionMessage updates a permission request message's status.

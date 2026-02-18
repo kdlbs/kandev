@@ -52,8 +52,7 @@ func (h *Handlers) httpCreatePrompt(c *gin.Context) {
 	resp, err := h.controller.CreatePrompt(c.Request.Context(), req)
 	if err != nil {
 		status := http.StatusInternalServerError
-		switch err {
-		case service.ErrInvalidPrompt:
+		if err == service.ErrInvalidPrompt {
 			status = http.StatusBadRequest
 		}
 		h.logger.Error("failed to create prompt", zap.Error(err))

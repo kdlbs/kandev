@@ -145,7 +145,7 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	repo := repository.Repository(repoImpl)
+	repo := repoImpl
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)

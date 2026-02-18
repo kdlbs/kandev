@@ -88,41 +88,47 @@ type wsAgentIDRequest struct {
 	AgentID string `json:"agent_id"`
 }
 
-func (h *Handlers) wsGetAgentStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+// parseAgentIDRequest parses the agent_id from a WebSocket message and validates it is non-empty.
+func (h *Handlers) parseAgentIDRequest(msg *ws.Message) (string, *ws.Message, error) {
 	var req wsAgentIDRequest
 	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		errMsg, wsErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return "", errMsg, wsErr
 	}
 	if req.AgentID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
+		errMsg, wsErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
+		return "", errMsg, wsErr
 	}
+	return req.AgentID, nil, nil
+}
 
-	resp, err := h.controller.GetAgentStatus(ctx, dto.GetAgentStatusRequest{AgentID: req.AgentID})
+func (h *Handlers) wsGetAgentStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	agentID, errMsg, err := h.parseAgentIDRequest(msg)
+	if errMsg != nil || err != nil {
+		return errMsg, err
+	}
+	resp, err := h.controller.GetAgentStatus(ctx, dto.GetAgentStatusRequest{AgentID: agentID})
 	if err != nil {
 		if err == controller.ErrAgentNotFound {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Agent not found", nil)
 		}
-		h.logger.Error("failed to get agent status", zap.String("agent_id", req.AgentID), zap.Error(err))
+		h.logger.Error("failed to get agent status", zap.String("agent_id", agentID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
 func (h *Handlers) wsGetAgentLogs(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsAgentIDRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	agentID, errMsg, err := h.parseAgentIDRequest(msg)
+	if errMsg != nil || err != nil {
+		return errMsg, err
 	}
-	if req.AgentID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
-	}
-
-	resp, err := h.controller.GetAgentLogs(ctx, dto.GetAgentLogsRequest{AgentID: req.AgentID})
+	resp, err := h.controller.GetAgentLogs(ctx, dto.GetAgentLogsRequest{AgentID: agentID})
 	if err != nil {
 		if err == controller.ErrAgentNotFound {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Agent not found", nil)
 		}
-		h.logger.Error("failed to get agent logs", zap.String("agent_id", req.AgentID), zap.Error(err))
+		h.logger.Error("failed to get agent logs", zap.String("agent_id", agentID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

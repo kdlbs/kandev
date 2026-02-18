@@ -13,10 +13,17 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// Agent event type string constants.
+const (
+	agentEventComplete = "complete"
+	agentEventError    = "error"
 )
 
 // toolKindToMessageType maps the normalized tool kind to a frontend message type.
@@ -193,60 +200,62 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.publishQueueStatusEvent(ctx, data.SessionID)
 
 	// Execute the queued message asynchronously
-	go func() {
-		promptCtx := context.Background() // Use a fresh context for async execution
+	go s.executeQueuedMessage(data.SessionID, queuedMsg)
+}
 
-		// Create user message for the queued message (so it appears in chat history)
-		if s.messageCreator != nil {
-			turnID := s.getActiveTurnID(queuedMsg.SessionID)
-			if turnID == "" {
-				// Start a new turn if needed
-				s.startTurnForSession(promptCtx, queuedMsg.SessionID)
-				turnID = s.getActiveTurnID(queuedMsg.SessionID)
-			}
+func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
+	promptCtx := context.Background() // Use a fresh context for async execution
 
-			// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
-			// This matches the behavior of direct prompts
-			meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
-			err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
-			if err != nil {
-				s.logger.Error("failed to create user message for queued message",
-					zap.String("session_id", queuedMsg.SessionID),
-					zap.Error(err))
-				// Continue anyway - the prompt should still be sent
-			}
+	// Create user message for the queued message (so it appears in chat history)
+	if s.messageCreator != nil {
+		turnID := s.getActiveTurnID(queuedMsg.SessionID)
+		if turnID == "" {
+			// Start a new turn if needed
+			s.startTurnForSession(promptCtx, queuedMsg.SessionID)
+			turnID = s.getActiveTurnID(queuedMsg.SessionID)
 		}
 
-		// Convert queue attachments to v1 attachments
-		attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
-		for i, att := range queuedMsg.Attachments {
-			attachments[i] = v1.MessageAttachment{
-				Type:     att.Type,
-				Data:     att.Data,
-				MimeType: att.MimeType,
-			}
-		}
-
-		_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-			queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+		// Note: Attachments will be sent to the agent via PromptTask but not stored in the message
+		// This matches the behavior of direct prompts
+		meta := NewUserMessageMeta().WithPlanMode(queuedMsg.PlanMode)
+		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.SessionID, turnID, meta.ToMap())
 		if err != nil {
-			s.logger.Error("failed to execute queued message",
-				zap.String("session_id", data.SessionID),
-				zap.String("task_id", queuedMsg.TaskID),
-				zap.String("queue_id", queuedMsg.ID),
+			s.logger.Error("failed to create user message for queued message",
+				zap.String("session_id", queuedMsg.SessionID),
 				zap.Error(err))
-
-			// TODO: Implement dead letter queue for failed queued messages
-			// Currently, failed messages are lost. Consider:
-			// 1. Retry mechanism with exponential backoff
-			// 2. Persist failed messages to database for manual intervention
-			// 3. Notification to user about failed queue execution
-			s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
-				zap.String("session_id", data.SessionID),
-				zap.String("queue_id", queuedMsg.ID),
-				zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+			// Continue anyway - the prompt should still be sent
 		}
-	}()
+	}
+
+	// Convert queue attachments to v1 attachments
+	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
+	for i, att := range queuedMsg.Attachments {
+		attachments[i] = v1.MessageAttachment{
+			Type:     att.Type,
+			Data:     att.Data,
+			MimeType: att.MimeType,
+		}
+	}
+
+	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
+		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments)
+	if err != nil {
+		s.logger.Error("failed to execute queued message",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+
+		// TODO: Implement dead letter queue for failed queued messages
+		// Currently, failed messages are lost. Consider:
+		// 1. Retry mechanism with exponential backoff
+		// 2. Persist failed messages to database for manual intervention
+		// 3. Notification to user about failed queue execution
+		s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+			zap.String("session_id", callerSessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+	}
 }
 
 // handleAgentCompleted handles agent completion events
@@ -345,9 +354,16 @@ func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID s
 		return false
 	}
 
-	// Resolve the target step ID
-	var targetStepID string
-	switch transitionAction.Type {
+	targetStepID, ok := s.resolveTransitionTargetStep(ctx, taskID, sessionID, currentStep, transitionAction)
+	if !ok {
+		return false
+	}
+	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
+	return true
+}
+
+func (s *Service) resolveTransitionTargetStep(ctx context.Context, taskID, sessionID string, currentStep *wfmodels.WorkflowStep, action *wfmodels.OnTurnCompleteAction) (string, bool) {
+	switch action.Type {
 	case wfmodels.OnTurnCompleteMoveToNext:
 		nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
 		if err != nil {
@@ -356,15 +372,14 @@ func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID s
 				zap.Int("current_position", currentStep.Position),
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return false
+			return "", false
 		}
 		if nextStep == nil {
-			s.logger.Debug("no next step found (last step), staying",
-				zap.String("step_name", currentStep.Name))
+			s.logger.Debug("no next step found (last step), staying", zap.String("step_name", currentStep.Name))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return false
+			return "", false
 		}
-		targetStepID = nextStep.ID
+		return nextStep.ID, true
 	case wfmodels.OnTurnCompleteMoveToPrevious:
 		prevStep, err := s.workflowStepGetter.GetPreviousStepByPosition(ctx, currentStep.WorkflowID, currentStep.Position)
 		if err != nil {
@@ -373,32 +388,29 @@ func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID s
 				zap.Int("current_position", currentStep.Position),
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return false
+			return "", false
 		}
 		if prevStep == nil {
-			s.logger.Debug("no previous step found (first step), staying",
-				zap.String("step_name", currentStep.Name))
+			s.logger.Debug("no previous step found (first step), staying", zap.String("step_name", currentStep.Name))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return false
+			return "", false
 		}
-		targetStepID = prevStep.ID
+		return prevStep.ID, true
 	case wfmodels.OnTurnCompleteMoveToStep:
-		if transitionAction.Config != nil {
-			if sid, ok := transitionAction.Config["step_id"].(string); ok {
+		var targetStepID string
+		if action.Config != nil {
+			if sid, ok := action.Config["step_id"].(string); ok {
 				targetStepID = sid
 			}
 		}
 		if targetStepID == "" {
-			s.logger.Warn("move_to_step action missing step_id config",
-				zap.String("step_id", currentStep.ID))
+			s.logger.Warn("move_to_step action missing step_id config", zap.String("step_id", currentStep.ID))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return false
+			return "", false
 		}
+		return targetStepID, true
 	}
-
-	// Execute the step transition
-	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
-	return true
+	return "", false
 }
 
 // processOnTurnStart processes the on_turn_start events for the current step.
@@ -936,7 +948,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "tool_update":
 		s.handleToolUpdateEvent(ctx, payload)
 
-	case "complete":
+	case agentEventComplete:
 		s.logger.Debug("orchestrator received complete event",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -946,78 +958,11 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.completeTurnForSession(ctx, sessionID)
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 
-	case "error":
-		// Handle error events
-		// Note: Agent-specific error parsing is done in the adapter layer.
-		// The adapter provides a user-friendly message in the Text field,
-		// with raw details in the Data field for debugging.
-		if sessionID != "" && s.messageCreator != nil {
-			// Build error message - adapters should provide parsed message in Text field
-			errorMsg := payload.Data.Error
-			if errorMsg == "" {
-				errorMsg = payload.Data.Text
-			}
-			if errorMsg == "" {
-				errorMsg = "An error occurred while processing your request"
-			}
-
-			// Build metadata with all available error context
-			metadata := map[string]interface{}{
-				"provider":       "agent",
-				"provider_agent": payload.AgentID,
-			}
-			if payload.Data.Data != nil {
-				metadata["error_data"] = payload.Data.Data
-			}
-
-			if err := s.messageCreator.CreateSessionMessage(
-				ctx,
-				taskID,
-				errorMsg,
-				sessionID,
-				string(v1.MessageTypeError),
-				s.getActiveTurnID(sessionID),
-				metadata,
-				false,
-			); err != nil {
-				s.logger.Error("failed to create error message",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-			}
-		}
-		// Complete the turn since the agent errored
-		s.completeTurnForSession(ctx, sessionID)
+	case agentEventError:
+		s.handleAgentErrorEvent(ctx, payload)
 
 	case "session_status":
-		// Handle session status events (resumed vs new session)
-		// Also store the agent's session ID as resume token for session recovery
-		if sessionID != "" && payload.Data.ACPSessionID != "" {
-			s.storeResumeToken(ctx, taskID, sessionID, payload.Data.ACPSessionID)
-		}
-
-		if sessionID != "" && s.messageCreator != nil {
-			var statusMsg string
-			if payload.Data.SessionStatus == "resumed" {
-				statusMsg = "Session resumed"
-			} else {
-				statusMsg = "New session started"
-			}
-			if err := s.messageCreator.CreateSessionMessage(
-				ctx,
-				taskID,
-				statusMsg,
-				sessionID,
-				string(v1.MessageTypeStatus),
-				s.getActiveTurnID(sessionID),
-				nil,
-				false,
-			); err != nil {
-				s.logger.Error("failed to create session status message",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-		}
+		s.handleSessionStatusEvent(ctx, payload)
 
 	case "available_commands":
 		// Handle available commands events - broadcast to WebSocket for frontend
@@ -1044,64 +989,114 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 
 	case "log":
-		// Handle log events - store agent log messages to the database
-		if sessionID != "" && s.messageCreator != nil {
-			// Try to extract data as map
-			dataMap, _ := payload.Data.Data.(map[string]interface{})
+		s.handleAgentLogEvent(ctx, payload)
+	}
+}
 
-			// Extract log message content
-			logMsg := payload.Data.Text
-			if logMsg == "" && dataMap != nil {
-				if msg, ok := dataMap["message"].(string); ok {
-					logMsg = msg
-				}
-			}
-			if logMsg == "" {
-				return // No message content to store
-			}
+// handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
+func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	taskID := payload.TaskID
+	sessionID := payload.SessionID
+	if sessionID != "" && s.messageCreator != nil {
+		errorMsg := payload.Data.Error
+		if errorMsg == "" {
+			errorMsg = payload.Data.Text
+		}
+		if errorMsg == "" {
+			errorMsg = "An error occurred while processing your request"
+		}
+		metadata := map[string]interface{}{
+			"provider":       "agent",
+			"provider_agent": payload.AgentID,
+		}
+		if payload.Data.Data != nil {
+			metadata["error_data"] = payload.Data.Data
+		}
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, taskID, errorMsg, sessionID,
+			string(v1.MessageTypeError), s.getActiveTurnID(sessionID), metadata, false,
+		); err != nil {
+			s.logger.Error("failed to create error message",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
+	s.completeTurnForSession(ctx, sessionID)
+}
 
-			// Build metadata with log level and other context
-			metadata := map[string]interface{}{
-				"provider":       "agent",
-				"provider_agent": payload.AgentID,
-			}
-			if dataMap != nil {
-				if level, ok := dataMap["level"].(string); ok {
-					metadata["level"] = level
-				}
-				// Include any additional data from the log event
-				for k, v := range dataMap {
-					if k != "message" && k != "level" {
-						metadata[k] = v
-					}
-				}
-			}
+// handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
+func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	taskID := payload.TaskID
+	sessionID := payload.SessionID
+	if sessionID != "" && payload.Data.ACPSessionID != "" {
+		s.storeResumeToken(ctx, taskID, sessionID, payload.Data.ACPSessionID)
+	}
+	if sessionID == "" || s.messageCreator == nil {
+		return
+	}
+	statusMsg := "New session started"
+	if payload.Data.SessionStatus == "resumed" {
+		statusMsg = "Session resumed"
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, taskID, statusMsg, sessionID,
+		string(v1.MessageTypeStatus), s.getActiveTurnID(sessionID), nil, false,
+	); err != nil {
+		s.logger.Error("failed to create session status message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
 
-			if err := s.messageCreator.CreateSessionMessage(
-				ctx,
-				taskID,
-				logMsg,
-				sessionID,
-				string(v1.MessageTypeLog),
-				s.getActiveTurnID(sessionID),
-				metadata,
-				false,
-			); err != nil {
-				s.logger.Error("failed to create log message",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			} else {
-				level := "unknown"
-				if l, ok := metadata["level"].(string); ok {
-					level = l
-				}
-				s.logger.Debug("created log message",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.String("level", level))
+// handleAgentLogEvent handles log events by storing agent log messages to the database.
+func (s *Service) handleAgentLogEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	taskID := payload.TaskID
+	sessionID := payload.SessionID
+	if sessionID == "" || s.messageCreator == nil {
+		return
+	}
+	dataMap, _ := payload.Data.Data.(map[string]interface{})
+	logMsg := payload.Data.Text
+	if logMsg == "" && dataMap != nil {
+		if msg, ok := dataMap["message"].(string); ok {
+			logMsg = msg
+		}
+	}
+	if logMsg == "" {
+		return
+	}
+	metadata := map[string]interface{}{
+		"provider":       "agent",
+		"provider_agent": payload.AgentID,
+	}
+	if dataMap != nil {
+		if level, ok := dataMap["level"].(string); ok {
+			metadata["level"] = level
+		}
+		for k, v := range dataMap {
+			if k != "message" && k != "level" {
+				metadata[k] = v
 			}
 		}
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, taskID, logMsg, sessionID,
+		string(v1.MessageTypeLog), s.getActiveTurnID(sessionID), metadata, false,
+	); err != nil {
+		s.logger.Error("failed to create log message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else {
+		level := "unknown"
+		if l, ok := metadata["level"].(string); ok {
+			level = l
+		}
+		s.logger.Debug("created log message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("level", level))
 	}
 }
 
@@ -1162,48 +1157,49 @@ func (s *Service) saveAgentTextIfPresent(ctx context.Context, payload *lifecycle
 	}
 }
 
-// handleMessageStreamingEvent handles streaming message events for real-time text updates.
-// It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
-func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+// handleStreamingEventKind is the shared implementation for streaming message and thinking events.
+// appendFn appends content to an existing message; createFn creates a new streaming message.
+func (s *Service) handleStreamingEventKind(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	kind string,
+	appendFn func(context.Context, string, string) error,
+	createFn func(context.Context, string, string, string, string, string) error,
+) {
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
 	}
-
 	if s.messageCreator == nil {
 		return
 	}
-
-	// MessageID is pre-generated by the manager to avoid race conditions
 	messageID := payload.Data.MessageID
 	if messageID == "" {
-		s.logger.Warn("streaming message event missing message ID",
+		s.logger.Warn("streaming "+kind+" event missing message ID",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID))
 		return
 	}
-
 	if payload.Data.IsAppend {
-		// Append to existing message
-		if err := s.messageCreator.AppendAgentMessage(ctx, messageID, payload.Data.Text); err != nil {
-			s.logger.Error("failed to append to streaming message",
+		if err := appendFn(ctx, messageID, payload.Data.Text); err != nil {
+			s.logger.Error("failed to append to streaming "+kind,
 				zap.String("task_id", payload.TaskID),
 				zap.String("message_id", messageID),
 				zap.Error(err))
 		} else {
-			s.logger.Debug("appended to streaming message",
+			s.logger.Debug("appended to streaming "+kind,
 				zap.String("task_id", payload.TaskID),
 				zap.String("message_id", messageID),
 				zap.Int("content_length", len(payload.Data.Text)))
 		}
 	} else {
-		// Create new streaming message with the pre-generated ID
-		if err := s.messageCreator.CreateAgentMessageStreaming(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, s.getActiveTurnID(payload.SessionID)); err != nil {
-			s.logger.Error("failed to create streaming message",
+		turnID := s.getActiveTurnID(payload.SessionID)
+		if err := createFn(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, turnID); err != nil {
+			s.logger.Error("failed to create streaming "+kind,
 				zap.String("task_id", payload.TaskID),
 				zap.String("message_id", messageID),
 				zap.Error(err))
 		} else {
-			s.logger.Debug("created streaming message",
+			s.logger.Debug("created streaming "+kind,
 				zap.String("task_id", payload.TaskID),
 				zap.String("session_id", payload.SessionID),
 				zap.String("message_id", messageID),
@@ -1212,54 +1208,20 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 	}
 }
 
+// handleMessageStreamingEvent handles streaming message events for real-time text updates.
+// It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
+func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	s.handleStreamingEventKind(ctx, payload, "message",
+		s.messageCreator.AppendAgentMessage,
+		s.messageCreator.CreateAgentMessageStreaming)
+}
+
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	if payload.Data.Text == "" || payload.SessionID == "" {
-		return
-	}
-
-	if s.messageCreator == nil {
-		return
-	}
-
-	// MessageID is pre-generated by the manager to avoid race conditions
-	messageID := payload.Data.MessageID
-	if messageID == "" {
-		s.logger.Warn("streaming thinking event missing message ID",
-			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID))
-		return
-	}
-
-	if payload.Data.IsAppend {
-		// Append to existing thinking message
-		if err := s.messageCreator.AppendThinkingMessage(ctx, messageID, payload.Data.Text); err != nil {
-			s.logger.Error("failed to append to streaming thinking message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("message_id", messageID),
-				zap.Error(err))
-		} else {
-			s.logger.Debug("appended to streaming thinking message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("message_id", messageID),
-				zap.Int("content_length", len(payload.Data.Text)))
-		}
-	} else {
-		// Create new streaming thinking message with the pre-generated ID
-		if err := s.messageCreator.CreateThinkingMessageStreaming(ctx, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, s.getActiveTurnID(payload.SessionID)); err != nil {
-			s.logger.Error("failed to create streaming thinking message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("message_id", messageID),
-				zap.Error(err))
-		} else {
-			s.logger.Debug("created streaming thinking message",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID),
-				zap.String("message_id", messageID),
-				zap.Int("content_length", len(payload.Data.Text)))
-		}
-	}
+	s.handleStreamingEventKind(ctx, payload, "thinking message",
+		s.messageCreator.AppendThinkingMessage,
+		s.messageCreator.CreateThinkingMessageStreaming)
 }
 
 // handleToolUpdateEvent handles tool_update events and updates messages
@@ -1280,7 +1242,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 
 	// Handle all status updates (running, complete, error)
 	switch payload.Data.ToolStatus {
-	case "running", "complete", "completed", "success", "error", "failed":
+	case "running", agentEventComplete, "completed", "success", agentEventError, "failed":
 		if err := s.messageCreator.UpdateToolCallMessage(
 			ctx,
 			payload.TaskID,
@@ -1302,8 +1264,8 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 
 		// Update session state for completion events
 		// Allow tool completions to wake session from WAITING_FOR_INPUT
-		if payload.Data.ToolStatus == "complete" || payload.Data.ToolStatus == "completed" ||
-			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == "error" || payload.Data.ToolStatus == "failed" {
+		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == "completed" ||
+			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == "failed" {
 			s.updateTaskSessionState(ctx, payload.TaskID, payload.SessionID, models.TaskSessionStateRunning, "", true)
 		}
 	}
@@ -1460,62 +1422,62 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 		},
 	}
 
-	sessionID := data.SessionID
-	taskID := data.TaskID
+	go s.persistGitSnapshot(data.SessionID, data.TaskID, snapshot)
+}
 
-	// Persist snapshot to database asynchronously, but skip if duplicate of latest
-	go func() {
-		bgCtx := context.Background()
+func (s *Service) persistGitSnapshot(sessionID, taskID string, snapshot *models.GitSnapshot) {
+	bgCtx := context.Background()
 
-		// Check if this is a duplicate of the latest snapshot
-		latest, err := s.repo.GetLatestGitSnapshot(bgCtx, sessionID)
-		if err == nil && latest != nil {
-			// Compare key fields to detect duplicates
-			if s.isSnapshotDuplicate(latest, snapshot) {
-				s.logger.Debug("skipping duplicate git snapshot",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID))
-				return
-			}
-		}
-
-		if err := s.repo.CreateGitSnapshot(bgCtx, snapshot); err != nil {
-			s.logger.Error("failed to create git snapshot",
+	// Check if this is a duplicate of the latest snapshot
+	latest, err := s.repo.GetLatestGitSnapshot(bgCtx, sessionID)
+	if err == nil && latest != nil {
+		// Compare key fields to detect duplicates
+		if s.isSnapshotDuplicate(latest, snapshot) {
+			s.logger.Debug("skipping duplicate git snapshot",
 				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		} else {
-			s.logger.Debug("created git snapshot",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("snapshot_id", snapshot.ID))
-
-			// Publish event to notify frontend
-			if s.eventBus != nil {
-				event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
-					Type:      lifecycle.GitEventTypeSnapshotCreated,
-					SessionID: sessionID,
-					TaskID:    taskID,
-					Timestamp: snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
-					Snapshot: &lifecycle.GitSnapshotData{
-						ID:           snapshot.ID,
-						SessionID:    snapshot.SessionID,
-						SnapshotType: string(snapshot.SnapshotType),
-						Branch:       snapshot.Branch,
-						RemoteBranch: snapshot.RemoteBranch,
-						HeadCommit:   snapshot.HeadCommit,
-						BaseCommit:   snapshot.BaseCommit,
-						Ahead:        snapshot.Ahead,
-						Behind:       snapshot.Behind,
-						Files:        snapshot.Files,
-						TriggeredBy:  snapshot.TriggeredBy,
-						CreatedAt:    snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
-					},
-				})
-				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
-			}
+				zap.String("session_id", sessionID))
+			return
 		}
-	}()
+	}
+
+	if err := s.repo.CreateGitSnapshot(bgCtx, snapshot); err != nil {
+		s.logger.Error("failed to create git snapshot",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	s.logger.Debug("created git snapshot",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("snapshot_id", snapshot.ID))
+
+	if s.eventBus == nil {
+		return
+	}
+
+	event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
+		Type:      lifecycle.GitEventTypeSnapshotCreated,
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Timestamp: snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
+		Snapshot: &lifecycle.GitSnapshotData{
+			ID:           snapshot.ID,
+			SessionID:    snapshot.SessionID,
+			SnapshotType: string(snapshot.SnapshotType),
+			Branch:       snapshot.Branch,
+			RemoteBranch: snapshot.RemoteBranch,
+			HeadCommit:   snapshot.HeadCommit,
+			BaseCommit:   snapshot.BaseCommit,
+			Ahead:        snapshot.Ahead,
+			Behind:       snapshot.Behind,
+			Files:        snapshot.Files,
+			TriggeredBy:  snapshot.TriggeredBy,
+			CreatedAt:    snapshot.CreatedAt.Format("2006-01-02T15:04:05.000000000Z07:00"),
+		},
+	})
+	_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
 }
 
 // isSnapshotDuplicate checks if two snapshots have the same content
@@ -1813,80 +1775,78 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 		zap.String("current_head", currentHead))
 
 	// Remove orphaned commits asynchronously
-	go func() {
-		bgCtx := context.Background()
+	go s.pruneOrphanedCommits(sessionID, taskID, previousHead, currentHead)
+}
 
-		// Get all stored commits for this session
-		commits, err := s.repo.GetSessionCommits(bgCtx, sessionID)
-		if err != nil {
-			s.logger.Error("failed to get session commits for reset handling",
+func (s *Service) pruneOrphanedCommits(sessionID, taskID, previousHead, currentHead string) {
+	bgCtx := context.Background()
+
+	commits, err := s.repo.GetSessionCommits(bgCtx, sessionID)
+	if err != nil {
+		s.logger.Error("failed to get session commits for reset handling",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if len(commits) == 0 {
+		return
+	}
+
+	// Build a map for quick lookup
+	commitBySHA := make(map[string]*models.SessionCommit)
+	for _, c := range commits {
+		commitBySHA[c.CommitSHA] = c
+	}
+
+	// Walk the parent chain from currentHead to find reachable commits
+	reachable := make(map[string]bool)
+	for cur := currentHead; cur != ""; {
+		reachable[cur] = true
+		if c, exists := commitBySHA[cur]; exists {
+			cur = c.ParentSHA
+		} else {
+			break
+		}
+	}
+
+	// Delete commits that are not reachable from currentHead
+	var deleted int
+	for _, c := range commits {
+		if reachable[c.CommitSHA] {
+			continue
+		}
+		if err := s.repo.DeleteSessionCommit(bgCtx, c.ID); err != nil {
+			s.logger.Error("failed to delete orphaned commit",
 				zap.String("session_id", sessionID),
+				zap.String("commit_sha", c.CommitSHA),
 				zap.Error(err))
-			return
-		}
-
-		if len(commits) == 0 {
-			return
-		}
-
-		// Build a map for quick lookup
-		commitBySHA := make(map[string]*models.SessionCommit)
-		for _, c := range commits {
-			commitBySHA[c.CommitSHA] = c
-		}
-
-		// Walk the parent chain from currentHead to find reachable commits
-		reachable := make(map[string]bool)
-		current := currentHead
-		for current != "" {
-			reachable[current] = true
-			if c, exists := commitBySHA[current]; exists {
-				current = c.ParentSHA
-			} else {
-				// Parent not in our stored commits, stop walking
-				break
-			}
-		}
-
-		// Delete commits that are not reachable from currentHead
-		var deleted int
-		for _, c := range commits {
-			if !reachable[c.CommitSHA] {
-				if err := s.repo.DeleteSessionCommit(bgCtx, c.ID); err != nil {
-					s.logger.Error("failed to delete orphaned commit",
-						zap.String("session_id", sessionID),
-						zap.String("commit_sha", c.CommitSHA),
-						zap.Error(err))
-				} else {
-					deleted++
-					s.logger.Debug("deleted orphaned commit after reset",
-						zap.String("session_id", sessionID),
-						zap.String("commit_sha", c.CommitSHA))
-				}
-			}
-		}
-
-		if deleted > 0 {
-			s.logger.Info("removed orphaned commits after git reset",
+		} else {
+			deleted++
+			s.logger.Debug("deleted orphaned commit after reset",
 				zap.String("session_id", sessionID),
-				zap.Int("deleted_count", deleted),
-				zap.String("new_head", currentHead))
-
-			// Publish event to notify frontend that commits changed
-			if s.eventBus != nil {
-				event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
-					Type:      lifecycle.GitEventTypeCommitsReset,
-					SessionID: sessionID,
-					TaskID:    taskID,
-					Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
-					Reset: &lifecycle.GitResetData{
-						PreviousHead: previousHead,
-						CurrentHead:  currentHead,
-						DeletedCount: deleted,
-					},
-				})
-				_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
-			}
+				zap.String("commit_sha", c.CommitSHA))
 		}
-	}()
+	}
+
+	if deleted == 0 || s.eventBus == nil {
+		return
+	}
+
+	s.logger.Info("removed orphaned commits after git reset",
+		zap.String("session_id", sessionID),
+		zap.Int("deleted_count", deleted),
+		zap.String("new_head", currentHead))
+
+	event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
+		Type:      lifecycle.GitEventTypeCommitsReset,
+		SessionID: sessionID,
+		TaskID:    taskID,
+		Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
+		Reset: &lifecycle.GitResetData{
+			PreviousHead: previousHead,
+			CurrentHead:  currentHead,
+			DeletedCount: deleted,
+		},
+	})
+	_ = s.eventBus.Publish(bgCtx, events.BuildGitWSEventSubject(sessionID), event)
 }

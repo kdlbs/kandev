@@ -18,11 +18,12 @@ func (p *StandardPassthrough) BuildPassthroughCommand(opts PassthroughOptions) C
 		Model(p.Cfg.ModelFlag, opts.Model).
 		Settings(p.PermSettings, opts.PermissionValues)
 
-	if opts.SessionID != "" && !p.Cfg.SessionResumeFlag.IsEmpty() {
+	switch {
+	case opts.SessionID != "" && !p.Cfg.SessionResumeFlag.IsEmpty():
 		b.Resume(p.Cfg.SessionResumeFlag, opts.SessionID, false)
-	} else if opts.Resume && !p.Cfg.ResumeFlag.IsEmpty() {
+	case opts.Resume && !p.Cfg.ResumeFlag.IsEmpty():
 		b.Flag(p.Cfg.ResumeFlag.Args()...)
-	} else if opts.Prompt != "" {
+	case opts.Prompt != "":
 		b.Prompt(p.Cfg.PromptFlag, opts.Prompt)
 	}
 

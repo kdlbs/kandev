@@ -288,13 +288,7 @@ func emitSubagent(enc *json.Encoder, scanner *bufio.Scanner, model string) {
 	})
 
 	randomDelay(model)
-
-	_ = enc.Encode(SystemMsg{
-		Type:          TypeSystem,
-		SessionID:     sessionID,
-		SessionStatus: "active",
-	})
-
+	_ = enc.Encode(SystemMsg{Type: TypeSystem, SessionID: sessionID, SessionStatus: "active"})
 	randomDelay(model)
 	emitThinkingBlock(enc, "Exploring the project structure...", taskToolID)
 	randomDelay(model)
@@ -302,8 +296,11 @@ func emitSubagent(enc *json.Encoder, scanner *bufio.Scanner, model string) {
 	paths := randomFilePaths(5)
 	emitTextBlock(enc, fmt.Sprintf("Found %d files. The project structure looks well-organized.", len(paths)), taskToolID)
 	randomDelay(model)
+	emitSubagentChildGlob(enc, taskToolID, model, paths)
+	emitSubagentCompletion(enc, taskToolID, model, paths)
+}
 
-	// Child Glob tool
+func emitSubagentChildGlob(enc *json.Encoder, taskToolID, model string, paths []string) {
 	childToolID := nextToolID()
 	_ = enc.Encode(AssistantMsg{
 		Type:            TypeAssistant,
@@ -312,12 +309,10 @@ func emitSubagent(enc *json.Encoder, scanner *bufio.Scanner, model string) {
 			Role: "assistant",
 			Content: []ContentBlock{
 				{
-					Type: BlockToolUse,
-					ID:   childToolID,
-					Name: ToolGlob,
-					Input: map[string]any{
-						"pattern": "**/*",
-					},
+					Type:  BlockToolUse,
+					ID:    childToolID,
+					Name:  ToolGlob,
+					Input: map[string]any{"pattern": "**/*"},
 				},
 			},
 			Model:      "mock-default",
@@ -325,25 +320,20 @@ func emitSubagent(enc *json.Encoder, scanner *bufio.Scanner, model string) {
 			Usage:      defaultUsage(),
 		},
 	})
-
 	randomDelay(model)
-
 	_ = enc.Encode(UserMsg{
 		Type:            TypeUser,
 		ParentToolUseID: taskToolID,
 		Message: UserMsgBody{
-			Role: "user",
-			Content: []ContentBlock{
-				{
-					Type:      BlockToolResult,
-					ToolUseID: childToolID,
-					Content:   strings.Join(paths, "\n"),
-				},
-			},
+			Role:    "user",
+			Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: childToolID, Content: strings.Join(paths, "\n")}},
 		},
 	})
-
 	randomDelay(model)
+}
+
+// emitSubagentCompletion emits the final text block and tool result for a subagent task.
+func emitSubagentCompletion(enc *json.Encoder, taskToolID, model string, paths []string) {
 	emitTextBlock(enc, "Project structure analysis complete.", taskToolID)
 	randomDelay(model)
 

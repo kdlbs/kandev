@@ -189,7 +189,7 @@ func TestResolveGitDir(t *testing.T) {
 		t.Fatalf("mkdir alt git: %v", err)
 	}
 	gitRef := filepath.Join(altRepo, ".git")
-	relPath := filepath.Join("gitdir")
+	relPath := "gitdir"
 	if err := os.WriteFile(gitRef, []byte("gitdir: "+relPath+"\n"), 0o644); err != nil {
 		t.Fatalf("write gitdir ref: %v", err)
 	}
@@ -284,7 +284,7 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	repo := repository.Repository(repoImpl)
+	repo := repoImpl
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
