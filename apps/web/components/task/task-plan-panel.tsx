@@ -10,11 +10,8 @@ import { Button } from '@kandev/ui/button';
 import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { PlanSelectionPopover } from './plan-selection-popover';
-import type { PlanComment } from './plan-comments';
+import { usePlanComments } from '@/hooks/domains/comments/use-plan-comments';
 import type { TextSelection, CommentHighlight } from '@/components/editors/tiptap/tiptap-plan-editor';
-import type { DocumentComment } from '@/lib/state/slices/ui/types';
-
-const EMPTY_COMMENTS: DocumentComment[] = [];
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -69,7 +66,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === '';
 
   const commentHighlights: CommentHighlight[] = commentState.comments.map((c) => ({
-    id: c.id, selectedText: c.selectedText, comment: c.comment,
+    id: c.id, selectedText: c.selectedText, comment: c.text,
   }));
   const { textSelection, setTextSelection } = selectionState;
 
@@ -132,7 +129,7 @@ function PlanSelectionPopoverWrapper({
 }) {
   if (!textSelection || !activeSessionId) return null;
   const editingComment = commentState.editingCommentId
-    ? commentState.comments.find(c => c.id === commentState.editingCommentId)?.comment
+    ? commentState.comments.find(c => c.id === commentState.editingCommentId)?.text
     : undefined;
   const onDelete = commentState.editingCommentId
     ? () => commentState.handleDeleteComment(commentState.editingCommentId!)
@@ -258,49 +255,6 @@ function usePlanDraft(
 
   const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
   return { draftContent, setDraftContent, editorKey, isEditorFocused, handleEmptyStateClick, hasUnsavedChanges };
-}
-
-/** Comment state and handlers */
-function usePlanComments(activeSessionId: string | null | undefined) {
-  const setDocumentComments = useAppStore((state) => state.setDocumentComments);
-  const storeComments = useAppStore((state) =>
-    activeSessionId ? state.documentPanel.commentsBySessionId[activeSessionId] ?? EMPTY_COMMENTS : EMPTY_COMMENTS
-  );
-  const [comments, setComments] = useState<PlanComment[]>([]);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-
-  const handleAddComment = useCallback((comment: string, selectedText: string) => {
-    if (editingCommentId) {
-      setComments(prev => prev.map(c => c.id === editingCommentId ? { ...c, comment, selectedText } : c));
-      setEditingCommentId(null);
-    } else {
-      setComments(prev => [...prev, { id: crypto.randomUUID(), selectedText, comment }]);
-    }
-  }, [editingCommentId]);
-
-  const handleDeleteComment = useCallback((commentId: string) => {
-    setComments(prev => prev.filter(c => c.id !== commentId));
-  }, []);
-
-  // Sync to store
-  useEffect(() => {
-    if (activeSessionId) {
-      setDocumentComments(activeSessionId, comments.map(c => ({ id: c.id, selectedText: c.selectedText, comment: c.comment })));
-    }
-  }, [activeSessionId, comments, setDocumentComments]);
-
-  // Detect external clear
-  const prevStoreCommentsLenRef = useRef(storeComments.length);
-  useEffect(() => {
-    const prevLen = prevStoreCommentsLenRef.current;
-    prevStoreCommentsLenRef.current = storeComments.length;
-    if (prevLen > 0 && storeComments.length === 0 && comments.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing store clear to local state
-      setComments([]);
-    }
-  }, [storeComments.length, comments.length]);
-
-  return { comments, editingCommentId, setEditingCommentId, handleAddComment, handleDeleteComment };
 }
 
 /** Text selection and floating button state */

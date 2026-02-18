@@ -120,7 +120,7 @@ export function ReviewCommentsAttachment({
 
                       {/* Comment text */}
                       <p className="whitespace-pre-wrap text-xs leading-relaxed">
-                        {comment.annotation}
+                        {comment.text}
                       </p>
                     </div>
                   ))}
@@ -134,41 +134,5 @@ export function ReviewCommentsAttachment({
   );
 }
 
-/**
- * Format review comments as human-readable markdown for sending to agent.
- * This format is both agent-friendly and displays nicely in the chat UI.
- */
-export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string {
-  if (!comments || comments.length === 0) {
-    return '';
-  }
-
-  const lines: string[] = ['### Review Comments', ''];
-
-  // Group comments by file
-  const byFile = new Map<string, DiffComment[]>();
-  for (const comment of comments) {
-    const existing = byFile.get(comment.filePath) || [];
-    existing.push(comment);
-    byFile.set(comment.filePath, existing);
-  }
-
-  for (const [filePath, fileComments] of byFile) {
-    for (const comment of fileComments) {
-      const lineRange = comment.startLine === comment.endLine
-        ? `${comment.startLine}`
-        : `${comment.startLine}-${comment.endLine}`;
-
-      lines.push(`**${filePath}:${lineRange}**`);
-      lines.push('```');
-      lines.push(comment.codeContent);
-      lines.push('```');
-      lines.push(`> ${comment.annotation}`);
-      lines.push('');
-    }
-  }
-
-  lines.push('---');
-  lines.push('');
-  return lines.join('\n');
-}
+// Re-export from unified comment system
+export { formatReviewCommentsAsMarkdown } from '@/lib/state/slices/comments/format';

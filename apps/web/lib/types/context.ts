@@ -1,5 +1,4 @@
-import type { DiffComment } from '@/lib/diff/types';
-import type { DocumentComment } from '@/lib/state/slices/ui/types';
+import type { DiffComment, PlanComment } from '@/lib/state/slices/comments';
 import type { ImageAttachment } from '@/components/task/chat/image-attachment-preview';
 
 type ContextItemBase = {
@@ -38,7 +37,7 @@ export type CommentContextItem = ContextItemBase & {
 
 export type PlanCommentContextItem = ContextItemBase & {
   kind: 'plan-comment';
-  comments: DocumentComment[];
+  comments: PlanComment[];
   onOpen: () => void;
 };
 

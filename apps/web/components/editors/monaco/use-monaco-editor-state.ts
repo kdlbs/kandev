@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, useRef, type RefObject } from 'react';
 import type { OnMount, OnChange } from '@monaco-editor/react';
 import type { editor as monacoEditor, IDisposable } from 'monaco-editor';
-import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
+import { useCommentsStore } from '@/lib/state/slices/comments';
+import { useDiffFileComments } from '@/hooks/domains/comments/use-diff-comments';
 import { buildDiffComment, useCommentedLines } from '@/lib/diff/comment-utils';
 import { useToast } from '@/components/toast-provider';
 import { useCommandPanelOpen } from '@/lib/commands/command-registry';
@@ -57,12 +58,12 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   const { toast } = useToast();
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
-  const addComment = useDiffCommentsStore((state) => state.addComment);
-  const removeComment = useDiffCommentsStore((state) => state.removeComment);
-  const updateComment = useDiffCommentsStore((state) => state.updateComment);
-  const editingCommentId = useDiffCommentsStore((state) => state.editingCommentId);
-  const setEditingComment = useDiffCommentsStore((state) => state.setEditingComment);
-  const comments = useFileComments(sessionId ?? '', path);
+  const addComment = useCommentsStore((state) => state.addComment);
+  const removeComment = useCommentsStore((state) => state.removeComment);
+  const updateComment = useCommentsStore((state) => state.updateComment);
+  const editingCommentId = useCommentsStore((state) => state.editingCommentId);
+  const setEditingComment = useCommentsStore((state) => state.setEditingComment);
+  const comments = useDiffFileComments(sessionId ?? '', path);
   const commentedLines = useCommentedLines(comments);
 
   const handleGutterSelectionComplete = useCallback(
@@ -111,7 +112,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
           if (e.target.type !== 3 && e.target.type !== 4) return;
           const lineNumber = e.target.position?.lineNumber;
           if (!lineNumber) return;
-          const storeState = useDiffCommentsStore.getState();
+          const storeState = useCommentsStore.getState();
           const fileComments = storeState.getCommentsForFile(sessionId ?? '', path);
           const lineComments = fileComments.filter((c) => lineNumber >= c.startLine && lineNumber <= c.endLine);
           if (lineComments.length > 0) {
@@ -256,7 +257,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       if (!formZoneRange || !sessionId) return;
       addComment(buildDiffComment({
         filePath: path, sessionId, startLine: formZoneRange.startLine, endLine: formZoneRange.endLine,
-        side: 'additions', annotation, codeContent: formZoneRange.codeContent,
+        side: 'additions', text: annotation, codeContent: formZoneRange.codeContent,
       }));
       setFormZoneRange(null); clearGutterSelection();
       const editor = editorRef.current;
@@ -272,15 +273,15 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   const handleDeleteComment = useCallback(
     (commentId: string) => {
       if (!sessionId) return;
-      removeComment(sessionId, path, commentId);
+      removeComment(commentId);
       toast({ title: 'Comment deleted' });
     },
-    [sessionId, path, removeComment, toast],
+    [sessionId, removeComment, toast],
   );
 
   const handleUpdateComment = useCallback(
     (commentId: string, annotation: string) => {
-      updateComment(commentId, { annotation }); setEditingComment(null);
+      updateComment(commentId, { text: annotation }); setEditingComment(null);
       toast({ title: 'Comment updated' });
     },
     [updateComment, setEditingComment, toast],

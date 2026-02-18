@@ -44,15 +44,8 @@ export type ActiveDocument =
   | { type: 'plan'; taskId: string }
   | { type: 'file'; path: string; name: string };
 
-export type DocumentComment = {
-  id: string;
-  selectedText: string;
-  comment: string;
-};
-
 export type DocumentPanelState = {
   activeDocumentBySessionId: Record<string, ActiveDocument | null>;
-  commentsBySessionId: Record<string, DocumentComment[]>;
 };
 
 export type UISliceState = {
@@ -82,7 +75,6 @@ export type UISliceActions = {
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
-  setDocumentComments: (sessionId: string, comments: DocumentComment[]) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

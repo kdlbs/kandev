@@ -67,7 +67,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
         return (
           <div className="my-1 px-2">
             <CommentForm
-              initialContent={comment.annotation}
+              initialContent={comment.text}
               onSubmit={(content) => handleCommentUpdate(comment.id, content)}
               onCancel={() => setEditingComment(null)}
               isEditing

@@ -45,7 +45,7 @@ const DATA_KEYS: (keyof FileDiffData)[] = ['filePath', 'diff', 'oldContent', 'ne
 function areCommentsEqual(prev: DiffComment[] | undefined, next: DiffComment[] | undefined): boolean {
   if (prev === next) return true;
   if (!prev || !next || prev.length !== next.length) return false;
-  return prev.every((c, i) => c.id === next[i].id && c.annotation === next[i].annotation);
+  return prev.every((c, i) => c.id === next[i].id && c.text === next[i].text);
 }
 
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {

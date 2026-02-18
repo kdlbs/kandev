@@ -136,7 +136,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
           startLine: selectedLineRange.start,
           endLine: selectedLineRange.end,
           side: (selectedLineRange.side || 'additions') as DiffComment['side'],
-          annotation: content,
+          text: content,
         }));
       } else if (sessionId) {
         addComment(

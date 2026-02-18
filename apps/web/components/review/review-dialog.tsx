@@ -4,7 +4,7 @@ import { memo, useMemo, useCallback, createRef, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@kandev/ui/dialog';
 import type { DiffComment } from '@/lib/diff/types';
 import type { FileInfo, CumulativeDiff } from '@/lib/state/slices/session-runtime/types';
-import { useDiffCommentsStore } from '@/lib/state/slices/diff-comments/diff-comments-slice';
+import { useCommentsStore, isDiffComment } from '@/lib/state/slices/comments';
 import { useSessionFileReviews } from '@/hooks/use-session-file-reviews';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import { useAppStore } from '@/components/state-provider';
@@ -62,11 +62,18 @@ function computeReviewSets(allFiles: ReviewFile[], reviews: ReturnType<typeof us
   return { reviewedFiles: reviewed, staleFiles: stale };
 }
 
-function computeCommentCounts(bySession: Record<string, Record<string, DiffComment[]>>, sessionId: string): Record<string, number> {
+function computeCommentCounts(
+  byId: Record<string, import('@/lib/state/slices/comments').Comment>,
+  sessionCommentIds: string[] | undefined,
+): Record<string, number> {
   const counts: Record<string, number> = {};
-  const sessionComments = bySession[sessionId];
-  if (!sessionComments) return counts;
-  for (const [filePath, comments] of Object.entries(sessionComments)) { if (comments.length > 0) counts[filePath] = comments.length; }
+  if (!sessionCommentIds) return counts;
+  for (const id of sessionCommentIds) {
+    const comment = byId[id];
+    if (comment && isDiffComment(comment)) {
+      counts[comment.filePath] = (counts[comment.filePath] ?? 0) + 1;
+    }
+  }
   return counts;
 }
 
@@ -78,15 +85,19 @@ export const ReviewDialog = memo(function ReviewDialog({
   const [wordWrap, setWordWrap] = useState(false);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
-  const bySession = useDiffCommentsStore((s) => s.bySession);
-  const getPendingComments = useDiffCommentsStore((s) => s.getPendingComments);
-  const markCommentsSent = useDiffCommentsStore((s) => s.markCommentsSent);
+  const byId = useCommentsStore((s) => s.byId);
+  const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
+  const getStorePendingComments = useCommentsStore((s) => s.getPendingComments);
+  const getPendingComments = useCallback((): DiffComment[] => {
+    return getStorePendingComments().filter(isDiffComment);
+  }, [getStorePendingComments]);
+  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { discard } = useGitOperations(sessionId);
   const { toast } = useToast();
 
   const allFiles = useMemo<ReviewFile[]>(() => buildAllFiles(gitStatusFiles, cumulativeDiff), [gitStatusFiles, cumulativeDiff]);
   const { reviewedFiles, staleFiles } = useMemo(() => computeReviewSets(allFiles, reviews), [allFiles, reviews]);
-  const commentCountByFile = useMemo(() => computeCommentCounts(bySession, sessionId), [bySession, sessionId]);
+  const commentCountByFile = useMemo(() => computeCommentCounts(byId, sessionCommentIds), [byId, sessionCommentIds]);
   const totalCommentCount = useMemo(() => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0), [commentCountByFile]);
   const fileRefs = useMemo(() => { const refs = new Map<string, React.RefObject<HTMLDivElement | null>>(); for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>()); return refs; }, [allFiles]);
 

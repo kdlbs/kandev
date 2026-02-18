@@ -91,7 +91,7 @@ export function useViewZones({
       const node = isEditing
         ? createElement('div', { className: 'px-2 py-0.5' },
             createElement(CommentForm, {
-              initialContent: comment.annotation,
+              initialContent: comment.text,
               onSubmit: (c: string) => handleCommentUpdateRef.current?.(comment.id, c),
               onCancel: () => setEditingComment(null),
               isEditing: true,
