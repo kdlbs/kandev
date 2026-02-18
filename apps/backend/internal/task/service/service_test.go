@@ -79,12 +79,12 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, cleanup, err := repository.Provide(sqlxDB)
+	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
 	repo := repoImpl
-	if _, err := worktree.NewSQLiteStore(sqlxDB); err != nil {
+	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 	t.Cleanup(func() {

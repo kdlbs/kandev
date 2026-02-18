@@ -12,9 +12,14 @@ import (
 
 const (
 	defaultBusyTimeout = 5 * time.Second
+
+	// defaultSQLiteReaderConns is the number of concurrent read connections.
+	// SQLite WAL mode allows many readers alongside a single writer; 4 is a
+	// reasonable default for a desktop/server workload.
+	defaultSQLiteReaderConns = 4
 )
 
-// OpenSQLite opens a SQLite database with shared best-practice settings.
+// OpenSQLite opens a SQLite database configured for writes (single connection).
 func OpenSQLite(dbPath string) (*sql.DB, error) {
 	normalizedPath := normalizeSQLitePath(dbPath)
 	if err := ensureSQLiteDir(normalizedPath); err != nil {
@@ -24,7 +29,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create database file: %w", err)
 	}
 
-	// SQLite DSN settings:
+	// Writer DSN settings:
 	// - foreign_keys=on: enforce FK constraints consistently.
 	// - busy_timeout: wait briefly on locks to reduce transient "database is locked".
 	// - journal_mode=WAL: better read concurrency with a single writer.
@@ -40,9 +45,33 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// SQLite allows a single writer, keep pool small and deterministic.
+	// Single writer connection: serializes writes and avoids SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+
+	return db, nil
+}
+
+// OpenSQLiteReader opens a read-only SQLite connection pool with multiple
+// concurrent connections. Combined with WAL mode, this allows readers to
+// proceed without blocking on (or being blocked by) writes.
+func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
+	normalizedPath := normalizeSQLitePath(dbPath)
+
+	// Reader DSN: read-only mode, FK enforcement, shared cache.
+	// journal_mode and synchronous are database-level (set by the writer).
+	dsn := fmt.Sprintf(
+		"file:%s?_foreign_keys=on&_mode=ro&_busy_timeout=%d&_cache=shared",
+		normalizedPath,
+		int(defaultBusyTimeout/time.Millisecond),
+	)
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open read-only database: %w", err)
+	}
+
+	db.SetMaxOpenConns(defaultSQLiteReaderConns)
+	db.SetMaxIdleConns(defaultSQLiteReaderConns)
 
 	return db, nil
 }

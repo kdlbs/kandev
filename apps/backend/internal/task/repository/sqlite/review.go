@@ -37,7 +37,7 @@ func (r *Repository) UpsertSessionFileReview(ctx context.Context, review *models
 
 // GetSessionFileReviews retrieves all file reviews for a session.
 func (r *Repository) GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, file_path, reviewed, diff_hash, reviewed_at, created_at, updated_at
 		FROM session_file_reviews
 		WHERE session_id = ?

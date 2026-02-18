@@ -136,7 +136,7 @@ func setupTestRepo(t *testing.T) repository.Repository {
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
-	repo, cleanup, err := repository.Provide(sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}

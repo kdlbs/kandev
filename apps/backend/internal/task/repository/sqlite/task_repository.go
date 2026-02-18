@@ -39,7 +39,7 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 	taskRepo := &models.TaskRepository{}
 	var metadataJSON string
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		FROM task_repositories WHERE id = ?
 	`), id).Scan(
@@ -68,7 +68,7 @@ func (r *Repository) GetTaskRepository(ctx context.Context, id string) (*models.
 
 // ListTaskRepositories returns all repository links for a task
 func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, repository_id, base_branch, position, metadata, created_at, updated_at
 		FROM task_repositories
 		WHERE task_id = ?

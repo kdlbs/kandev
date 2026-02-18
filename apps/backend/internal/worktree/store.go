@@ -12,13 +12,14 @@ import (
 
 // SQLiteStore implements Store interface using SQLite.
 type SQLiteStore struct {
-	db *sqlx.DB
+	db *sqlx.DB // writer
+	ro *sqlx.DB // reader
 }
 
 // NewSQLiteStore creates a new SQLite-backed worktree store.
-// It uses the provided sqlx.DB connection and ensures the task_session_worktrees table exists.
-func NewSQLiteStore(db *sqlx.DB) (*SQLiteStore, error) {
-	store := &SQLiteStore{db: db}
+// It uses the provided writer and reader connections and ensures the task_session_worktrees table exists.
+func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
+	store := &SQLiteStore{db: writer, ro: reader}
 	if err := store.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize worktree schema: %w", err)
 	}
@@ -101,7 +102,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 	var mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
-	err := s.db.QueryRowContext(ctx, s.db.Rebind(`
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -204,7 +205,7 @@ func scanWorktreeRow(row *sql.Row) (*Worktree, error) {
 
 // GetWorktreeBySessionID retrieves the worktree by session ID.
 func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
-	row := s.db.QueryRowContext(ctx, s.db.Rebind(`
+	row := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -230,7 +231,7 @@ func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID stri
 // GetWorktreeByTaskID retrieves the most recent active worktree by task ID.
 // Since multiple worktrees can exist per task, this returns the most recently created active one.
 func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*Worktree, error) {
-	row := s.db.QueryRowContext(ctx, s.db.Rebind(`
+	row := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -256,7 +257,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 
 // GetWorktreesByTaskID retrieves all worktrees for a task.
 func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -286,7 +287,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 
 // GetWorktreesByRepositoryID retrieves all worktrees for a repository.
 func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID string) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,
@@ -367,7 +368,7 @@ func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
 
 // ListActiveWorktrees returns all worktrees with status 'active'.
 func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, error) {
-	rows, err := s.db.QueryContext(ctx, s.db.Rebind(`
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
 			tsw.session_id,

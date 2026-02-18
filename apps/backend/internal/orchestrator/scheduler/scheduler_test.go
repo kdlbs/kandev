@@ -141,7 +141,7 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, cleanup, err := repository.Provide(sqlxDB)
+	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}

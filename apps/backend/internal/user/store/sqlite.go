@@ -17,21 +17,22 @@ const (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(dbConn, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, false)
 }
 
-func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
-			if closeErr := dbConn.Close(); closeErr != nil {
+			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
 			}
 		}
@@ -84,7 +85,7 @@ func (r *sqliteRepository) Close() error {
 }
 
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, email, created_at, updated_at
 		FROM users WHERE id = ?
 	`), id)
@@ -96,7 +97,7 @@ func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, er
 }
 
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT settings, updated_at
 		FROM users WHERE id = ?
 	`), userID)

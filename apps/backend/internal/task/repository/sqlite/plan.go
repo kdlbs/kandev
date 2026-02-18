@@ -36,7 +36,7 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 // GetTaskPlan retrieves a task plan by task ID.
 func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error) {
 	plan := &models.TaskPlan{}
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, title, content, created_by, created_at, updated_at
 		FROM task_plans WHERE task_id = ?
 	`), taskID).Scan(&plan.ID, &plan.TaskID, &plan.Title, &plan.Content, &plan.CreatedBy, &plan.CreatedAt, &plan.UpdatedAt)

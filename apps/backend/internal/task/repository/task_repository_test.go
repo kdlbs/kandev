@@ -315,7 +315,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
 	sqlxDB1 := sqlx.NewDb(dbConn1, "sqlite3")
-	repo1, err := sqlite.NewWithDB(sqlxDB1)
+	repo1, err := sqlite.NewWithDB(sqlxDB1, sqlxDB1)
 	if err != nil {
 		t.Fatalf("failed to create first repository: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestSQLiteRepository_Persistence(t *testing.T) {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
 	sqlxDB2 := sqlx.NewDb(dbConn2, "sqlite3")
-	repo2, err := sqlite.NewWithDB(sqlxDB2)
+	repo2, err := sqlite.NewWithDB(sqlxDB2, sqlxDB2)
 	if err != nil {
 		t.Fatalf("failed to create second repository: %v", err)
 	}

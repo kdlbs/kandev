@@ -15,21 +15,22 @@ import (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(dbConn, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, false)
 }
 
-func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
-			if closeErr := dbConn.Close(); closeErr != nil {
+			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
 			}
 		}
@@ -112,7 +113,7 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 }
 
 func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Agent, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE id = ?
 	`), id)
@@ -120,7 +121,7 @@ func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Age
 }
 
 func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*models.Agent, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents WHERE name = ?
 	`), name)
@@ -156,7 +157,7 @@ func (r *sqliteRepository) DeleteAgent(ctx context.Context, id string) error {
 }
 
 func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
 		FROM agents ORDER BY created_at DESC
 	`)
@@ -179,7 +180,7 @@ func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, err
 }
 
 func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT profile_id, enabled, servers_json, meta_json, created_at, updated_at
 		FROM agent_profile_mcp_configs
 		WHERE profile_id = ?
@@ -288,7 +289,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 }
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
 	`), id)
@@ -296,7 +297,7 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 }
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, agent_id, name, agent_display_name, model, auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at
 		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
 	`), agentID)

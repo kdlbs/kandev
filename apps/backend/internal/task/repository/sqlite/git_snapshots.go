@@ -64,7 +64,7 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 		WHERE session_id = ?
 		ORDER BY created_at %s LIMIT 1
 	`, orderDir)
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(
 		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
@@ -116,7 +116,7 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), sessionID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 // GetSessionCommits retrieves all commits for a session, ordered by committed_at descending.
 // Returns an empty slice if no commits are found.
 func (r *Repository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, commit_sha, parent_sha, author_name, author_email,
 		       commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 		       files_changed, insertions, deletions, created_at
@@ -225,7 +225,7 @@ func (r *Repository) GetSessionCommits(ctx context.Context, sessionID string) ([
 func (r *Repository) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
 	commit := &models.SessionCommit{}
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, commit_sha, parent_sha, author_name, author_email,
 		       commit_message, committed_at, pre_commit_snapshot_id, post_commit_snapshot_id,
 		       files_changed, insertions, deletions, created_at

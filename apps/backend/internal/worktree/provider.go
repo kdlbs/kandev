@@ -7,9 +7,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// Provide creates the worktree manager using the shared database connection.
-func Provide(db *sqlx.DB, cfg *config.Config, log *logger.Logger) (*Manager, func() error, error) {
-	store, err := NewSQLiteStore(db)
+// Provide creates the worktree manager using separate writer and reader pools.
+func Provide(writer, reader *sqlx.DB, cfg *config.Config, log *logger.Logger) (*Manager, func() error, error) {
+	store, err := NewSQLiteStore(writer, reader)
 	if err != nil {
 		return nil, nil, err
 	}

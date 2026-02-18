@@ -67,7 +67,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB)
+	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	require.NoError(t, err)
 	taskRepo := taskRepoImpl
 	t.Cleanup(func() {
@@ -80,12 +80,12 @@ func NewTestServer(t *testing.T) *TestServer {
 			}
 		}
 	})
-	if _, err := worktree.NewSQLiteStore(sqlxDB); err != nil {
+	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 
 	// Initialize workflow service
-	_, workflowSvc, _, err := workflow.Provide(sqlxDB, log)
+	_, workflowSvc, _, err := workflow.Provide(sqlxDB, sqlxDB, log)
 	require.NoError(t, err)
 
 	// Initialize task service and wire workflow step creator

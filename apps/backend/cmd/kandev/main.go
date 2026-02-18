@@ -42,7 +42,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 
 	// Database
-	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // Command-line flags
@@ -183,7 +183,7 @@ func startServices( //nolint:cyclop
 	// ============================================
 	log.Info("Initializing Task Service...")
 
-	dbConn, repos, repoCleanups, err := provideRepositories(cfg, log)
+	dbPool, repos, repoCleanups, err := provideRepositories(cfg, log)
 	if err != nil {
 		log.Error("Failed to initialize repositories", zap.Error(err))
 		return false
@@ -225,7 +225,7 @@ func startServices( //nolint:cyclop
 		}()
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbConn, repos, services, agentSettingsController, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbPool, repos, services, agentSettingsController, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -237,7 +237,7 @@ func startAgentInfrastructure(
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
 	dockerClient *docker.Client,
-	dbConn *sqlx.DB,
+	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -257,7 +257,7 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	_, worktreeRecreator, worktreeCleanup, err := provideWorktreeManager(dbConn, cfg, log, lifecycleMgr, services.Task)
+	_, worktreeRecreator, worktreeCleanup, err := provideWorktreeManager(dbPool, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
 		log.Error("Failed to initialize worktree manager", zap.Error(err))
 		return false

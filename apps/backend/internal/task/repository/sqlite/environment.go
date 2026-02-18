@@ -40,7 +40,7 @@ func (r *Repository) GetEnvironment(ctx context.Context, id string) (*models.Env
 	var buildConfigJSON string
 	var isSystem int
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at, deleted_at
 		FROM environments WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
@@ -104,7 +104,7 @@ func (r *Repository) DeleteEnvironment(ctx context.Context, id string) error {
 
 // ListEnvironments returns all non-deleted environments
 func (r *Repository) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, kind, is_system, worktree_root, image_tag, dockerfile, build_config, created_at, updated_at, deleted_at
 		FROM environments WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)

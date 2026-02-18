@@ -69,7 +69,7 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 
 // GetTurn retrieves a turn by ID
 func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
 	`), id)
@@ -78,7 +78,7 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 
 // GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns
 		WHERE task_session_id = ? AND completed_at IS NULL
@@ -122,7 +122,7 @@ func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
 	`), sessionID)
@@ -289,7 +289,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 // GetTaskSession retrieves an agent session by ID
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -302,7 +302,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 
 // GetTaskSessionByTaskID retrieves the most recent agent session for a task
 func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -315,7 +315,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 
 // GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -421,7 +421,7 @@ func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) err
 
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -450,7 +450,7 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 
 // ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -479,7 +479,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -508,7 +508,7 @@ func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID 
 
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE agent_profile_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
@@ -521,7 +521,7 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 
 func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE environment_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1
@@ -534,7 +534,7 @@ func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, env
 
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
@@ -679,7 +679,7 @@ func (r *Repository) CreateTaskSessionWorktree(ctx context.Context, sessionWorkt
 }
 
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT
 			tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
 			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
@@ -733,7 +733,7 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 
 // GetPrimarySessionByTaskID retrieves the primary session for a task
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -764,7 +764,7 @@ func (r *Repository) GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs 
 		WHERE task_id IN (%s) AND is_primary = 1
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +801,7 @@ func (r *Repository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []st
 		GROUP BY task_id
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +839,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		WHERE task_id IN (%s) AND is_primary = 1
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
