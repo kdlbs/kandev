@@ -9,9 +9,9 @@ import (
 	"github.com/kandev/kandev/internal/workflow/service"
 )
 
-// Provide creates the workflow repository and service using the shared database connection.
-func Provide(db *sqlx.DB, log *logger.Logger) (*repository.Repository, *service.Service, func() error, error) {
-	repo, err := repository.NewWithDB(db)
+// Provide creates the workflow repository and service using separate writer and reader pools.
+func Provide(writer, reader *sqlx.DB, log *logger.Logger) (*repository.Repository, *service.Service, func() error, error) {
+	repo, err := repository.NewWithDB(writer, reader)
 	if err != nil {
 		return nil, nil, nil, err
 	}

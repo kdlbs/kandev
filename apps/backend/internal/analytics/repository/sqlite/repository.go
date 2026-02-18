@@ -5,13 +5,14 @@ import "github.com/jmoiron/sqlx"
 
 // Repository provides SQLite-based analytics operations.
 type Repository struct {
-	db *sqlx.DB
+	db *sqlx.DB // writer (for schema init)
+	ro *sqlx.DB // reader (for all queries — this repo is pure reads)
 }
 
-// NewWithDB creates a new analytics repository with an existing database connection.
-// It automatically creates performance indexes for stats queries.
-func NewWithDB(dbConn *sqlx.DB) (*Repository, error) {
-	repo := &Repository{db: dbConn}
+// NewWithDB creates a new analytics repository with existing database connections.
+// It automatically creates performance indexes for stats queries using the writer.
+func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
+	repo := &Repository{db: writer, ro: reader}
 	if err := repo.ensureStatsIndexes(); err != nil {
 		return nil, err
 	}

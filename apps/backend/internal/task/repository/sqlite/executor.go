@@ -41,7 +41,7 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 	var isSystem int
 	var resumable int
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
@@ -103,7 +103,7 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 }
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
@@ -204,7 +204,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 }
 
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 			agent_execution_id, container_id, agentctl_url, agentctl_port,
 			worktree_id, worktree_path, worktree_branch, created_at, updated_at
@@ -256,7 +256,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	var resumable int
 	var lastSeen sql.NullTime
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 		       agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
@@ -315,7 +315,7 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM task_sessions
 		WHERE executor_id = ? AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		LIMIT 1

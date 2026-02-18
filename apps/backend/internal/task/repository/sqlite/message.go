@@ -60,7 +60,7 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE id = ?
 	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
@@ -81,7 +81,7 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 
 // ListMessages returns all messages for a session ordered by creation time.
 func (r *Repository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`), sessionID)
@@ -132,7 +132,7 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 		return nil, false, err
 	}
 	query, args := buildListMessagesQuery(sessionID, opts, cursor, sortDir, limit)
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -236,13 +236,13 @@ func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, f
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
 		%s
 	`, dialect.JSONExtract(drv, "metadata", fieldName), orderSuffix)
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -274,13 +274,13 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	var requestsInput int
 	var messageType string
 	var metadataJSON string
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE %s = ?
 		ORDER BY created_at DESC LIMIT 1
 	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err

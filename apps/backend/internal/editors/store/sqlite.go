@@ -18,18 +18,19 @@ import (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(dbConn, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, false)
 }
 
-func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -120,7 +121,7 @@ func (r *sqliteRepository) ensureDefaults(ctx context.Context) error {
 }
 
 func (r *sqliteRepository) ListEditors(ctx context.Context) ([]*models.Editor, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at
 		FROM editors
 		ORDER BY name ASC
@@ -147,7 +148,7 @@ func (r *sqliteRepository) ListEditors(ctx context.Context) ([]*models.Editor, e
 }
 
 func (r *sqliteRepository) GetEditorByType(ctx context.Context, editorType string) (*models.Editor, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at
 		FROM editors
 		WHERE type = ?
@@ -156,7 +157,7 @@ func (r *sqliteRepository) GetEditorByType(ctx context.Context, editorType strin
 }
 
 func (r *sqliteRepository) GetEditorByID(ctx context.Context, editorID string) (*models.Editor, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, type, name, kind, command, scheme, config, installed, enabled, created_at, updated_at
 		FROM editors
 		WHERE id = ?

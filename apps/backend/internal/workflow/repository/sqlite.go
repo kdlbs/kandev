@@ -17,12 +17,13 @@ import (
 
 // Repository provides SQLite-based workflow storage operations.
 type Repository struct {
-	db *sqlx.DB
+	db *sqlx.DB // writer
+	ro *sqlx.DB // reader
 }
 
-// NewWithDB creates a new SQLite repository with an existing database connection.
-func NewWithDB(db *sqlx.DB) (*Repository, error) {
-	repo := &Repository{db: db}
+// NewWithDB creates a new SQLite repository with existing database connections.
+func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
+	repo := &Repository{db: writer, ro: reader}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
 	}
@@ -493,7 +494,7 @@ func (r *Repository) GetTemplate(ctx context.Context, id string) (*models.Workfl
 	var stepsJSON string
 	var isSystem int
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, description, is_system, steps, created_at, updated_at
 		FROM workflow_templates WHERE id = ?
 	`), id).Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
@@ -575,7 +576,7 @@ func scanTemplateRows(rows *sql.Rows) ([]*models.WorkflowTemplate, error) {
 
 // ListTemplates returns all workflow templates.
 func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, description, is_system, steps, created_at, updated_at
 		FROM workflow_templates
 		ORDER BY is_system DESC,
@@ -596,7 +597,7 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]*models.WorkflowTempl
 
 // GetSystemTemplates returns only system workflow templates.
 func (r *Repository) GetSystemTemplates(ctx context.Context) ([]*models.WorkflowTemplate, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, description, is_system, steps, created_at, updated_at
 		FROM workflow_templates WHERE is_system = 1 ORDER BY name ASC
 	`)
@@ -677,7 +678,7 @@ const stepSelectColumns = `id, workflow_id, name, position, color, prompt, event
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE id = ?
 	`), id)
@@ -733,7 +734,7 @@ func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptS
 // GetStartStep returns the step marked as is_start_step for a workflow.
 // Returns nil if no step is marked.
 func (r *Repository) GetStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE workflow_id = ? AND is_start_step = 1
 		LIMIT 1
@@ -796,7 +797,7 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 
 // ListStepsByWorkflow returns all workflow steps for a workflow.
 func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*models.WorkflowStep, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+stepSelectColumns+`
 		FROM workflow_steps WHERE workflow_id = ? ORDER BY position
 	`), workflowID)
@@ -854,7 +855,7 @@ func (r *Repository) CreateHistory(ctx context.Context, history *models.SessionS
 
 // ListHistoryBySession returns all step history entries for a session.
 func (r *Repository) ListHistoryBySession(ctx context.Context, sessionID string) ([]*models.SessionStepHistory, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, from_step_id, to_step_id, trigger, actor_id, metadata, created_at
 		FROM session_step_history WHERE session_id = ? ORDER BY created_at
 	`), sessionID)

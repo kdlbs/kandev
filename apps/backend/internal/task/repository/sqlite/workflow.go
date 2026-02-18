@@ -51,7 +51,7 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 	workflow := &models.Workflow{}
 	var workflowTemplateID sql.NullString
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, name, description, workflow_template_id, created_at, updated_at
 		FROM workflows WHERE id = ?
 	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &workflowTemplateID, &workflow.CreatedAt, &workflow.UpdatedAt)
@@ -113,7 +113,7 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string) ([]*
 	}
 	query += " ORDER BY created_at DESC"
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

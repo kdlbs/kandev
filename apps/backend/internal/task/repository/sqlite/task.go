@@ -52,7 +52,7 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 	task := &models.Task{}
 	var metadata string
 	var archivedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
 		FROM tasks WHERE id = ?
 	`), id).Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &archivedAt, &task.CreatedAt, &task.UpdatedAt)
@@ -111,7 +111,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 
 // ListTasks returns all non-archived tasks for a workflow
 func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
 		FROM tasks
 		WHERE workflow_id = ? AND archived_at IS NULL
@@ -128,7 +128,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 // CountTasksByWorkflow returns the number of non-archived tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL`), workflowID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL`), workflowID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -138,7 +138,7 @@ func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string
 // CountTasksByWorkflowStep returns the number of non-archived tasks in a workflow step
 func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL`), stepID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL`), stepID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -147,7 +147,7 @@ func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string
 
 // ListTasksByWorkflowStep returns all non-archived tasks in a workflow step
 func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
 		FROM tasks
 		WHERE workflow_step_id = ? AND archived_at IS NULL ORDER BY position
@@ -201,11 +201,11 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
 func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilter string, pageSize, offset int) (*sql.Rows, int, error) {
 	var total int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+archiveFilter), workspaceID).Scan(&total)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+archiveFilter), workspaceID).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
 		FROM tasks
 		WHERE workspace_id = ?`+archiveFilter+`
@@ -218,7 +218,7 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilt
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
 func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiveFilter string, pageSize, offset int, includeArchived bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
-	like := dialect.Like(r.db.DriverName())
+	like := dialect.Like(r.ro.DriverName())
 
 	tFilter := ""
 	if !includeArchived {
@@ -238,7 +238,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiv
 		)
 	`, tFilter, like, like, like, like)
 	var total int
-	if err := r.db.QueryRowContext(ctx, r.db.Rebind(countQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total); err != nil {
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(countQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -257,7 +257,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiv
 		ORDER BY t.updated_at DESC
 		LIMIT ? OFFSET ?
 	`, tFilter, like, like, like, like)
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(selectQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), workspaceID, searchPattern, searchPattern, searchPattern, searchPattern, pageSize, offset)
 	return rows, total, err
 }
 
@@ -311,7 +311,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings
 func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
 		SELECT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.archived_at, t.created_at, t.updated_at
 		FROM tasks t
@@ -320,7 +320,7 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 			AND t.archived_at IS NULL
 			AND t.updated_at <= %s
 	`, dialect.NowMinusHours(drv, "ws.auto_archive_after_hours"))
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query))
 	if err != nil {
 		return nil, err
 	}

@@ -2,9 +2,9 @@ package store
 
 import "github.com/jmoiron/sqlx"
 
-// Provide creates the SQLite agent settings store using the shared database connection.
-func Provide(db *sqlx.DB) (*sqliteRepository, func() error, error) {
-	repo, err := newSQLiteRepositoryWithDB(db)
+// Provide creates the SQLite agent settings store using separate writer and reader pools.
+func Provide(writer, reader *sqlx.DB) (*sqliteRepository, func() error, error) {
+	repo, err := newSQLiteRepositoryWithDB(writer, reader)
 	if err != nil {
 		return nil, nil, err
 	}

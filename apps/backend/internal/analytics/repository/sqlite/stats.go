@@ -40,7 +40,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
 
 	query := fmt.Sprintf(`
@@ -80,7 +80,7 @@ func (r *Repository) GetTaskStats(ctx context.Context, workspaceID string, start
 		ORDER BY t.updated_at DESC
 	`, dur)
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		startArg, startArg, startArg, startArg,
 		workspaceID, startArg, startArg,
 	)
@@ -128,7 +128,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
 
 	query := fmt.Sprintf(`
@@ -168,7 +168,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 
 	var stats models.GlobalStats
 	var totalDurationMs float64
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query),
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query),
 		workspaceID, startArg, startArg,
 		workspaceID, startArg, startArg,
 		workspaceID, startArg, startArg,
@@ -199,7 +199,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 
 // GetDailyActivity retrieves daily activity statistics for the last N days
 func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) {
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	dateStart := dialect.DateNowMinusDays(drv, "?")
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
@@ -235,7 +235,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 		ORDER BY d.date ASC
 	`, dateStart, datePlus, curDate, dateOfTurn, dateOfMsg, dateOfTurn, dateOfTurn)
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), days-1, workspaceID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 
 // GetCompletedTaskActivity retrieves completed task counts for the last N days
 func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID string, days int) ([]*models.CompletedTaskActivity, error) {
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	dateStart := dialect.DateNowMinusDays(drv, "?")
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
@@ -285,7 +285,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 		ORDER BY d.date ASC
 	`, dateStart, datePlus, curDate, dateOfCompleted, dateOfCompleted)
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), days-1, workspaceID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,8 +310,8 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	query := buildRepositoryStatsQuery(r.db.DriverName())
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query),
+	query := buildRepositoryStatsQuery(r.ro.DriverName())
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		startArg, startArg, startArg, startArg,
 		startArg, startArg, startArg, startArg,
 		workspaceID,
@@ -419,7 +419,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		startArg = start.UTC().Format(time.RFC3339)
 	}
 
-	drv := r.db.DriverName()
+	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
 	jeName := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "name")
 	jeDisplay := dialect.JSONExtract(drv, "s.agent_profile_snapshot", "agent_display_name")
@@ -444,7 +444,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		LIMIT ?
 	`, jeName, jeDisplay, jeModel, jeModelName, jeLLM, dur)
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), workspaceID, startArg, startArg, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -488,7 +488,7 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 	`
 
 	var stats models.GitStats
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), workspaceID, startArg, startArg).Scan(
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg).Scan(
 		&stats.TotalCommits, &stats.TotalFilesChanged,
 		&stats.TotalInsertions, &stats.TotalDeletions,
 	)

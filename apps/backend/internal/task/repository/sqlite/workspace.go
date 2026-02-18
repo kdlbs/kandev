@@ -45,7 +45,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultEnvironmentID sql.NullString
 	var defaultAgentProfileID sql.NullString
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
 	`), id).Scan(
@@ -116,7 +116,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 
 // ListWorkspaces returns all workspaces
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)

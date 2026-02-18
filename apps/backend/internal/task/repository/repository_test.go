@@ -21,11 +21,11 @@ func createTestSQLiteRepo(t *testing.T) (*sqlite.Repository, func()) {
 		t.Fatalf("failed to open SQLite database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := sqlite.NewWithDB(sqlxDB)
+	repo, err := sqlite.NewWithDB(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create SQLite repository: %v", err)
 	}
-	if _, err := worktree.NewSQLiteStore(sqlxDB); err != nil {
+	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
 

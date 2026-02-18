@@ -15,16 +15,17 @@ import (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader
 	ownsDB bool
 }
 
-func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(dbConn, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, false)
 }
 
-func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -67,7 +68,7 @@ func (r *sqliteRepository) Close() error {
 }
 
 func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		ORDER BY builtin DESC, name ASC
@@ -96,7 +97,7 @@ func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, e
 }
 
 func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE id = ?
@@ -111,7 +112,7 @@ func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*model
 }
 
 func (r *sqliteRepository) GetPromptByName(ctx context.Context, name string) (*models.Prompt, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, name, content, builtin, created_at, updated_at
 		FROM custom_prompts
 		WHERE name = ?

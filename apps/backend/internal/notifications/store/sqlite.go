@@ -14,18 +14,19 @@ import (
 )
 
 type sqliteRepository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader
 	ownsDB bool
 }
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(dbConn *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(dbConn, false)
+func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(writer, reader, false)
 }
 
-func newSQLiteRepository(dbConn *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
-	repo := &sqliteRepository{db: dbConn, ownsDB: ownsDB}
+func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
@@ -126,7 +127,7 @@ func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.
 }
 
 func (r *sqliteRepository) GetProvider(ctx context.Context, id string) (*models.Provider, error) {
-	row := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, user_id, name, type, config, enabled, created_at, updated_at
 		FROM notification_providers
 		WHERE id = ?
@@ -135,7 +136,7 @@ func (r *sqliteRepository) GetProvider(ctx context.Context, id string) (*models.
 }
 
 func (r *sqliteRepository) ListProvidersByUser(ctx context.Context, userID string) ([]*models.Provider, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, user_id, name, type, config, enabled, created_at, updated_at
 		FROM notification_providers
 		WHERE user_id = ?
@@ -168,7 +169,7 @@ func (r *sqliteRepository) DeleteProvider(ctx context.Context, id string) error 
 }
 
 func (r *sqliteRepository) ListSubscriptionsByProvider(ctx context.Context, providerID string) ([]*models.Subscription, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, user_id, provider_id, event_type, enabled, created_at, updated_at
 		FROM notification_subscriptions
 		WHERE provider_id = ?

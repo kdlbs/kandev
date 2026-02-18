@@ -37,7 +37,7 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
 	repository := &models.Repository{}
 
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
 		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE id = ? AND deleted_at IS NULL
@@ -94,7 +94,7 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 
 // ListRepositories returns all repositories for a workspace
 func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
 		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
 		FROM repositories WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
@@ -140,7 +140,7 @@ func (r *Repository) CreateRepositoryScript(ctx context.Context, script *models.
 // GetRepositoryScript retrieves a repository script by ID
 func (r *Repository) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
 	script := &models.RepositoryScript{}
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, repository_id, name, command, position, created_at, updated_at
 		FROM repository_scripts WHERE id = ?
 	`), id).Scan(&script.ID, &script.RepositoryID, &script.Name, &script.Command, &script.Position, &script.CreatedAt, &script.UpdatedAt)
@@ -181,7 +181,7 @@ func (r *Repository) DeleteRepositoryScript(ctx context.Context, id string) erro
 
 // ListRepositoryScripts returns all scripts for a repository
 func (r *Repository) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, repository_id, name, command, position, created_at, updated_at
 		FROM repository_scripts WHERE repository_id = ? ORDER BY position
 	`), repositoryID)

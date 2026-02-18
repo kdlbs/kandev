@@ -10,17 +10,18 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db     *sqlx.DB
+	db     *sqlx.DB // writer
+	ro     *sqlx.DB // reader (read-only pool)
 	ownsDB bool
 }
 
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
-func NewWithDB(dbConn *sqlx.DB) (*Repository, error) {
-	return newRepository(dbConn, false)
+func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
+	return newRepository(writer, reader, false)
 }
 
-func newRepository(dbConn *sqlx.DB, ownsDB bool) (*Repository, error) {
-	repo := &Repository{db: dbConn, ownsDB: ownsDB}
+func newRepository(writer, reader *sqlx.DB, ownsDB bool) (*Repository, error) {
+	repo := &Repository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
 			if closeErr := dbConn.Close(); closeErr != nil {
