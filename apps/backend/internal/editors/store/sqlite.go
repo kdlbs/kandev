@@ -33,7 +33,7 @@ func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepositor
 	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
-			if closeErr := dbConn.Close(); closeErr != nil {
+			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
 			}
 		}
@@ -41,7 +41,7 @@ func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepositor
 	}
 	if err := repo.ensureDefaults(context.Background()); err != nil {
 		if ownsDB {
-			if closeErr := dbConn.Close(); closeErr != nil {
+			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after defaults error: %w", closeErr)
 			}
 		}

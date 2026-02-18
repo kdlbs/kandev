@@ -133,7 +133,7 @@ func execOrFatal(t *testing.T, dbConn *sqlx.DB, query string, args ...any) {
 func TestEnsureStatsIndexes_CreatesIndexes(t *testing.T) {
 	dbConn := createTestDB(t)
 
-	repo, err := NewWithDB(dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestEnsureStatsIndexes_Idempotent(t *testing.T) {
 
 func TestGetRepositoryStats_ExcludesSoftDeletedRepos(t *testing.T) {
 	dbConn := createTestDB(t)
-	repo, err := NewWithDB(dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestGetRepositoryStats_ExcludesSoftDeletedRepos(t *testing.T) {
 
 func TestGetGlobalStats_EmptyWorkspace(t *testing.T) {
 	dbConn := createTestDB(t)
-	repo, err := NewWithDB(dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestGetGlobalStats_EmptyWorkspace(t *testing.T) {
 
 func TestGetGlobalStats_WithTimeFilter(t *testing.T) {
 	dbConn := createTestDB(t)
-	repo, err := NewWithDB(dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestGetGlobalStats_WithTimeFilter(t *testing.T) {
 
 func TestGetGitStats_EmptyWorkspace(t *testing.T) {
 	dbConn := createTestDB(t)
-	repo, err := NewWithDB(dbConn)
+	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}

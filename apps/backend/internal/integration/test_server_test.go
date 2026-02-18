@@ -237,7 +237,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB)
+	taskRepoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	require.NoError(t, err)
 	taskRepo := taskRepoImpl
 	t.Cleanup(func() {

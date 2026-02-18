@@ -18,7 +18,7 @@ func createService(t *testing.T) (*Service, func()) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, repoCleanup, err := promptstore.Provide(sqlxDB)
+	repoImpl, repoCleanup, err := promptstore.Provide(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}

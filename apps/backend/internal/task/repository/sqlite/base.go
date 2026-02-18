@@ -24,7 +24,7 @@ func newRepository(writer, reader *sqlx.DB, ownsDB bool) (*Repository, error) {
 	repo := &Repository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
 		if ownsDB {
-			if closeErr := dbConn.Close(); closeErr != nil {
+			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
 			}
 		}
