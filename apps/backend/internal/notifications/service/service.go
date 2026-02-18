@@ -267,27 +267,33 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 		}
 	}
 	if !hasSystem {
-		adapter := s.providers[models.ProviderTypeSystem]
-		if adapter != nil && adapter.Available() {
-			provider := &models.Provider{
-				ID:      uuid.New().String(),
-				UserID:  userID,
-				Name:    "System Notifications",
-				Type:    models.ProviderTypeSystem,
-				Config: map[string]interface{}{
-					"sound_enabled": false,
-				},
-				Enabled: true,
-			}
-			if err := s.repo.CreateProvider(ctx, provider); err != nil {
-				return err
-			}
-			if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput}); err != nil {
-				return err
-			}
+		if err := s.ensureSystemProvider(ctx, userID); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// ensureSystemProvider creates the system notification provider if the adapter is available.
+func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error {
+	adapter := s.providers[models.ProviderTypeSystem]
+	if adapter == nil || !adapter.Available() {
+		return nil
+	}
+	provider := &models.Provider{
+		ID:      uuid.New().String(),
+		UserID:  userID,
+		Name:    "System Notifications",
+		Type:    models.ProviderTypeSystem,
+		Config: map[string]interface{}{
+			"sound_enabled": false,
+		},
+		Enabled: true,
+	}
+	if err := s.repo.CreateProvider(ctx, provider); err != nil {
+		return err
+	}
+	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput})
 }
 
 func (s *Service) validateProvider(providerType models.ProviderType, config map[string]interface{}) error {

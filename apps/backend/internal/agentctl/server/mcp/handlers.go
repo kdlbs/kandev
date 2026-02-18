@@ -150,56 +150,19 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("prompt is required"), nil
 		}
-		args := req.GetArguments()
-		optionsRaw, ok := args["options"]
-		if !ok {
-			return mcp.NewToolResultError("options is required"), nil
-		}
 
-		// Parse options - must be array of objects with label and description
-		optionsJSON, err := json.Marshal(optionsRaw)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err)), nil
-		}
-
-		var options []map[string]interface{}
-		if err := json.Unmarshal(optionsJSON, &options); err != nil {
-			return mcp.NewToolResultError("options must be an array of objects with 'label' and 'description' fields. Example: [{\"label\": \"Option A\", \"description\": \"Description of option A\"}]"), nil
-		}
-
-		// Validate options
-		if len(options) < 2 {
-			return mcp.NewToolResultError("options must contain at least 2 choices"), nil
-		}
-		if len(options) > 6 {
-			return mcp.NewToolResultError("options must contain at most 6 choices"), nil
-		}
-
-		for i, opt := range options {
-			label, hasLabel := opt["label"].(string)
-			if !hasLabel || label == "" {
-				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'label' field (1-5 words describing the choice)", i+1)), nil
-			}
-			description, hasDesc := opt["description"].(string)
-			if !hasDesc || description == "" {
-				return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'description' field (explanation of what this option means)", i+1)), nil
-			}
-			// Generate option_id if not provided
-			if _, hasID := opt["option_id"].(string); !hasID {
-				opt["option_id"] = fmt.Sprintf("opt_%d", i+1)
-			}
+		options, errResult := parseQuestionOptions(req)
+		if errResult != nil {
+			return errResult, nil
 		}
 
 		questionCtx := req.GetString("context", "")
-
-		// Build the question object in the format expected by the backend
 		question := map[string]interface{}{
 			"id":      "q1",
 			"title":   "Question",
 			"prompt":  prompt,
 			"options": options,
 		}
-
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
 			"question":   question,
@@ -215,25 +178,90 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		// Extract the answer from the response
-		if answer, ok := result["answer"]; ok {
-			if answerMap, ok := answer.(map[string]interface{}); ok {
-				if selectedOptions, ok := answerMap["selected_options"].([]interface{}); ok && len(selectedOptions) > 0 {
-					return mcp.NewToolResultText(fmt.Sprintf("User selected: %v", selectedOptions[0])), nil
-				}
-				if customText, ok := answerMap["custom_text"].(string); ok && customText != "" {
-					return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText)), nil
-				}
-			}
-		}
-		if rejected, ok := result["rejected"].(bool); ok && rejected {
-			reason, _ := result["reject_reason"].(string)
-			return mcp.NewToolResultText(fmt.Sprintf("User rejected the question: %s", reason)), nil
-		}
-
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
+		return extractQuestionAnswer(result), nil
 	}
+}
+
+// parseQuestionOptions extracts and validates the "options" argument from the request.
+// Returns (options, nil) on success or (nil, *mcp.CallToolResult) on validation failure.
+func parseQuestionOptions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.CallToolResult) {
+	args := req.GetArguments()
+	optionsRaw, ok := args["options"]
+	if !ok {
+		return nil, mcp.NewToolResultError("options is required")
+	}
+
+	optionsJSON, err := json.Marshal(optionsRaw)
+	if err != nil {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("failed to parse options: %v", err))
+	}
+
+	var options []map[string]interface{}
+	if err := json.Unmarshal(optionsJSON, &options); err != nil {
+		return nil, mcp.NewToolResultError("options must be an array of objects with 'label' and 'description' fields. Example: [{\"label\": \"Option A\", \"description\": \"Description of option A\"}]")
+	}
+
+	if len(options) < 2 {
+		return nil, mcp.NewToolResultError("options must contain at least 2 choices")
+	}
+	if len(options) > 6 {
+		return nil, mcp.NewToolResultError("options must contain at most 6 choices")
+	}
+
+	if errResult := validateAndNormalizeOptions(options); errResult != nil {
+		return nil, errResult
+	}
+
+	return options, nil
+}
+
+// validateAndNormalizeOptions checks each option for required fields and assigns a default option_id.
+func validateAndNormalizeOptions(options []map[string]interface{}) *mcp.CallToolResult {
+	for i, opt := range options {
+		label, hasLabel := opt["label"].(string)
+		if !hasLabel || label == "" {
+			return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'label' field (1-5 words describing the choice)", i+1))
+		}
+		description, hasDesc := opt["description"].(string)
+		if !hasDesc || description == "" {
+			return mcp.NewToolResultError(fmt.Sprintf("option %d is missing required 'description' field (explanation of what this option means)", i+1))
+		}
+		// Generate option_id if not provided
+		if _, hasID := opt["option_id"].(string); !hasID {
+			opt["option_id"] = fmt.Sprintf("opt_%d", i+1)
+		}
+	}
+	return nil
+}
+
+// extractQuestionAnswer converts the backend question response into an MCP tool result.
+func extractQuestionAnswer(result map[string]interface{}) *mcp.CallToolResult {
+	if answer, ok := result["answer"]; ok {
+		if res := extractAnswerMap(answer); res != nil {
+			return res
+		}
+	}
+	if rejected, ok := result["rejected"].(bool); ok && rejected {
+		reason, _ := result["reject_reason"].(string)
+		return mcp.NewToolResultText(fmt.Sprintf("User rejected the question: %s", reason))
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(data))
+}
+
+// extractAnswerMap inspects an answer map for selected options or custom text.
+func extractAnswerMap(answer interface{}) *mcp.CallToolResult {
+	answerMap, ok := answer.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if selectedOptions, ok := answerMap["selected_options"].([]interface{}); ok && len(selectedOptions) > 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("User selected: %v", selectedOptions[0]))
+	}
+	if customText, ok := answerMap["custom_text"].(string); ok && customText != "" {
+		return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText))
+	}
+	return nil
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {

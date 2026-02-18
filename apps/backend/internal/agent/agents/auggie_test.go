@@ -4,6 +4,25 @@ import (
 	"testing"
 )
 
+// assertDefaultModel verifies that exactly one model has IsDefault=true and it matches wantDef.
+func assertDefaultModel(t *testing.T, models []Model, wantDef string) {
+	t.Helper()
+	found := false
+	for _, m := range models {
+		if m.ID == wantDef {
+			if !m.IsDefault {
+				t.Errorf("model %q should have IsDefault=true", wantDef)
+			}
+			found = true
+		} else if m.IsDefault {
+			t.Errorf("model %q should not have IsDefault=true", m.ID)
+		}
+	}
+	if !found {
+		t.Errorf("default model %q not found in results", wantDef)
+	}
+}
+
 func TestAuggieParseModels(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -98,20 +117,7 @@ Another random line`,
 				}
 			}
 			if tt.wantDef != "" {
-				found := false
-				for _, m := range models {
-					if m.ID == tt.wantDef {
-						if !m.IsDefault {
-							t.Errorf("model %q should have IsDefault=true", tt.wantDef)
-						}
-						found = true
-					} else if m.IsDefault {
-						t.Errorf("model %q should not have IsDefault=true", m.ID)
-					}
-				}
-				if !found {
-					t.Errorf("default model %q not found in results", tt.wantDef)
-				}
+				assertDefaultModel(t, models, tt.wantDef)
 			}
 		})
 	}

@@ -83,7 +83,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	repo := repository.Repository(repoImpl)
+	repo := repoImpl
 	if _, err := worktree.NewSQLiteStore(sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}

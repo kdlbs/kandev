@@ -56,74 +56,22 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Generate ID if not provided
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
 	}
-
-	// Check if ID already exists
 	if _, exists := m.instances[id]; exists {
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
 	}
 
-	// Allocate a port and bind a listener to avoid races with address reuse.
-	var (
-		port     int
-		listener net.Listener
-	)
-	maxAttempts := m.config.Ports.Max - m.config.Ports.Base + 1
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		allocated, err := m.portAlloc.Allocate(id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to allocate port: %w", err)
-		}
-		addr := fmt.Sprintf(":%d", allocated)
-		ln, err := net.Listen("tcp", addr)
-		if err != nil {
-			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
-				m.portAlloc.MarkUnavailable(allocated)
-				m.logger.Warn("port already in use; retrying",
-					zap.String("instance_id", id),
-					zap.Int("port", allocated))
-				continue
-			}
-			m.portAlloc.Release(allocated)
-			return nil, fmt.Errorf("failed to bind instance port %d: %w", allocated, err)
-		}
-		port = allocated
-		listener = ln
-		break
-	}
-	if listener == nil {
-		return nil, fmt.Errorf("failed to allocate an available port for instance %s", id)
+	port, listener, err := m.allocatePortAndListener(id)
+	if err != nil {
+		return nil, err
 	}
 
-	// Determine agent command, adding workspace flag if needed
-	agentCmd := req.AgentCommand
-	if agentCmd == "" {
-		agentCmd = m.config.Defaults.AgentCommand
-	}
-	if req.WorkspacePath != "" && req.WorkspaceFlag != "" {
-		if !strings.Contains(agentCmd, req.WorkspaceFlag) {
-			agentCmd = agentCmd + " " + req.WorkspaceFlag + " " + req.WorkspacePath
-		}
-	}
-
-	// Build overrides from request
+	agentCmd := m.resolveAgentCommand(req)
 	autoStart := req.AutoStart
-
-	// Convert MCP server configs
-	var mcpServers []config.McpServerConfig
-	for _, mcp := range req.McpServers {
-		mcpServers = append(mcpServers, config.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-		})
-	}
+	mcpServers := buildMcpServerConfigs(req.McpServers)
 
 	m.logger.Info("CreateInstance: received request",
 		zap.String("req_protocol", req.Protocol),
@@ -156,32 +104,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// even without an agent running (for dev server, etc.)
 	procMgr.GetWorkspaceTracker().Start(context.Background())
 
-	// Create HTTP handler using factory
-	var handler http.Handler
-	if m.serverFactory != nil {
-		handler = m.serverFactory(instanceCfg, procMgr, m.logger)
-	} else {
-		// Default to a simple handler if no factory is set
-		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte("server factory not configured")); err != nil {
-				m.logger.Debug("failed to write default response", zap.Error(err))
-			}
-		})
-	}
-
-	// Create HTTP server
-	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: handler,
-	}
-
-	// Start HTTP server in background
-	go func() {
-		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			m.logger.Error("instance server error", zap.String("instance_id", id), zap.Error(err))
-		}
-	}()
+	handler := m.buildHTTPHandler(instanceCfg, procMgr)
+	httpServer := m.startHTTPServer(port, listener, handler, id)
 
 	// Create and store instance
 	inst := &Instance{
@@ -206,6 +130,87 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		ID:   id,
 		Port: port,
 	}, nil
+}
+
+// allocatePortAndListener allocates a free port and binds a TCP listener to it.
+func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) {
+	maxAttempts := m.config.Ports.Max - m.config.Ports.Base + 1
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		allocated, err := m.portAlloc.Allocate(id)
+		if err != nil {
+			return 0, nil, fmt.Errorf("failed to allocate port: %w", err)
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", allocated))
+		if err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
+				m.portAlloc.MarkUnavailable(allocated)
+				m.logger.Warn("port already in use; retrying",
+					zap.String("instance_id", id),
+					zap.Int("port", allocated))
+				continue
+			}
+			m.portAlloc.Release(allocated)
+			return 0, nil, fmt.Errorf("failed to bind instance port %d: %w", allocated, err)
+		}
+		return allocated, ln, nil
+	}
+	return 0, nil, fmt.Errorf("failed to allocate an available port for instance %s", id)
+}
+
+// resolveAgentCommand returns the effective agent command for a create request.
+func (m *Manager) resolveAgentCommand(req *CreateRequest) string {
+	agentCmd := req.AgentCommand
+	if agentCmd == "" {
+		agentCmd = m.config.Defaults.AgentCommand
+	}
+	if req.WorkspacePath != "" && req.WorkspaceFlag != "" && !strings.Contains(agentCmd, req.WorkspaceFlag) {
+		agentCmd = agentCmd + " " + req.WorkspaceFlag + " " + req.WorkspacePath
+	}
+	return agentCmd
+}
+
+// buildMcpServerConfigs converts instance McpServerConfig entries to config.McpServerConfig.
+func buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfig {
+	result := make([]config.McpServerConfig, 0, len(mcpServers))
+	for _, mcp := range mcpServers {
+		result = append(result, config.McpServerConfig{
+			Name:    mcp.Name,
+			URL:     mcp.URL,
+			Type:    mcp.Type,
+			Command: mcp.Command,
+			Args:    mcp.Args,
+		})
+	}
+	return result
+}
+
+// buildHTTPHandler creates the HTTP handler for an instance.
+func (m *Manager) buildHTTPHandler(instanceCfg *config.InstanceConfig, procMgr *process.Manager) http.Handler {
+	if m.serverFactory != nil {
+		return m.serverFactory(instanceCfg, procMgr, m.logger)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if _, err := w.Write([]byte("server factory not configured")); err != nil {
+			m.logger.Debug("failed to write default response", zap.Error(err))
+		}
+	})
+}
+
+// startHTTPServer creates and starts an HTTP server on the given listener.
+func (m *Manager) startHTTPServer(port int, listener net.Listener, handler http.Handler, id string) *http.Server {
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: handler,
+	}
+	go func() {
+		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+			m.logger.Error("instance server error",
+				zap.String("instance_id", id),
+				zap.Error(err))
+		}
+	}()
+	return httpServer
 }
 
 // GetInstance returns an instance by ID.

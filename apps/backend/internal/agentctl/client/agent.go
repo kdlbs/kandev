@@ -207,83 +207,96 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	// Read messages in a goroutine
-	go func() {
-		var lastErr error
-		defer func() {
-			// Clean up pending requests before signaling disconnect
-			c.cleanupPendingRequests()
+	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
 
-			c.mu.Lock()
-			c.agentStreamConn = nil
-			c.mu.Unlock()
-			if err := conn.Close(); err != nil {
-				c.logger.Debug("failed to close updates websocket", zap.Error(err))
-			}
-			// Signal disconnect to caller
-			if onDisconnect != nil {
-				onDisconnect(lastErr)
-			}
-		}()
+	return nil
+}
 
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					c.logger.Info("updates stream closed normally")
-					// Normal close — don't report as disconnect error
-				} else {
-					c.logger.Debug("updates stream error", zap.Error(err))
-					lastErr = err
-				}
-				return
-			}
+// readUpdatesStream is the read loop for the agent updates WebSocket stream.
+func (c *Client) readUpdatesStream(
+	ctx context.Context,
+	conn *websocket.Conn,
+	handler func(AgentEvent),
+	mcpHandler MCPHandler,
+	onDisconnect func(err error),
+	writeMessage func([]byte) error,
+) {
+	var lastErr error
+	defer func() {
+		// Clean up pending requests before signaling disconnect
+		c.cleanupPendingRequests()
 
-			// Try to parse as ws.Message to check message type
-			var wsMsg ws.Message
-			if err := json.Unmarshal(message, &wsMsg); err == nil {
-				// Check if this is a response/error to a pending request
-				if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
-					continue
-				}
-
-				// This is an MCP request - dispatch it
-				if wsMsg.Type == ws.MessageTypeRequest {
-					if mcpHandler != nil {
-						go func(msg ws.Message) {
-							resp, err := mcpHandler.Dispatch(ctx, &msg)
-							if err != nil {
-								c.logger.Error("MCP dispatch error", zap.Error(err))
-								resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-							}
-							if resp != nil {
-								data, err := json.Marshal(resp)
-								if err != nil {
-									c.logger.Error("failed to marshal MCP response", zap.Error(err))
-									return
-								}
-								if err := writeMessage(data); err != nil {
-									c.logger.Debug("failed to write MCP response", zap.Error(err))
-								}
-							}
-						}(wsMsg)
-					}
-					continue
-				}
-			}
-
-			// Not a ws.Message request/response, parse as agent event
-			var event AgentEvent
-			if err := json.Unmarshal(message, &event); err != nil {
-				c.logger.Warn("failed to parse agent event", zap.Error(err))
-				continue
-			}
-
-			handler(event)
+		c.mu.Lock()
+		c.agentStreamConn = nil
+		c.mu.Unlock()
+		if err := conn.Close(); err != nil {
+			c.logger.Debug("failed to close updates websocket", zap.Error(err))
+		}
+		// Signal disconnect to caller
+		if onDisconnect != nil {
+			onDisconnect(lastErr)
 		}
 	}()
 
-	return nil
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				c.logger.Info("updates stream closed normally")
+				// Normal close — don't report as disconnect error
+			} else {
+				c.logger.Debug("updates stream error", zap.Error(err))
+				lastErr = err
+			}
+			return
+		}
+
+		// Try to parse as ws.Message to check message type
+		var wsMsg ws.Message
+		if err := json.Unmarshal(message, &wsMsg); err == nil {
+			// Check if this is a response/error to a pending request
+			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
+				continue
+			}
+
+			// This is an MCP request - dispatch it
+			if wsMsg.Type == ws.MessageTypeRequest {
+				if mcpHandler != nil {
+					go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
+				}
+				continue
+			}
+		}
+
+		// Not a ws.Message request/response, parse as agent event
+		var event AgentEvent
+		if err := json.Unmarshal(message, &event); err != nil {
+			c.logger.Warn("failed to parse agent event", zap.Error(err))
+			continue
+		}
+
+		handler(event)
+	}
+}
+
+// dispatchMCPRequest handles an incoming MCP request message, dispatches it to the handler,
+// and writes the response back over the stream.
+func (c *Client) dispatchMCPRequest(ctx context.Context, msg ws.Message, mcpHandler MCPHandler, writeMessage func([]byte) error) {
+	resp, err := mcpHandler.Dispatch(ctx, &msg)
+	if err != nil {
+		c.logger.Error("MCP dispatch error", zap.Error(err))
+		resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+	if resp != nil {
+		data, err := json.Marshal(resp)
+		if err != nil {
+			c.logger.Error("failed to marshal MCP response", zap.Error(err))
+			return
+		}
+		if err := writeMessage(data); err != nil {
+			c.logger.Debug("failed to write MCP response", zap.Error(err))
+		}
+	}
 }
 
 // CloseUpdatesStream closes the agent events stream connection.

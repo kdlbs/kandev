@@ -69,6 +69,7 @@ func (n *Normalizer) NormalizeToolCall(toolName string, state *ToolState) *strea
 }
 
 // NormalizeToolResult updates the payload with tool result data.
+//
 // Deprecated: Result data is now handled in NormalizeToolCall via ToolState
 func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, result any) {
 	// Keep for backwards compatibility but normalization now happens in NormalizeToolCall
@@ -171,35 +172,43 @@ func (n *Normalizer) normalizeGlob(state *ToolState) *streams.NormalizedPayload 
 	payload := streams.NewCodeSearch("", pattern, path, pattern)
 
 	// Parse output (newline-separated file list) and metadata
-	if state.Output != "" || state.Metadata != nil {
-		payload.CodeSearch().Output = &streams.CodeSearchOutput{}
-
-		// Parse file list from output
-		if state.Output != "" {
-			lines := strings.Split(strings.TrimSpace(state.Output), "\n")
-			// Filter out empty lines and the truncation message
-			var files []string
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line != "" && !strings.HasPrefix(line, "(Results are truncated") {
-					files = append(files, line)
-				}
-			}
-			payload.CodeSearch().Output.Files = files
-		}
-
-		// Extract metadata
-		if state.Metadata != nil {
-			if count, ok := state.Metadata["count"].(float64); ok {
-				payload.CodeSearch().Output.FileCount = int(count)
-			}
-			if truncated, ok := state.Metadata["truncated"].(bool); ok {
-				payload.CodeSearch().Output.Truncated = truncated
-			}
-		}
+	if state.Output == "" && state.Metadata == nil {
+		return payload
 	}
 
+	payload.CodeSearch().Output = &streams.CodeSearchOutput{}
+	applyGlobOutput(payload.CodeSearch().Output, state)
+
 	return payload
+}
+
+// applyGlobOutput populates CodeSearchOutput from glob tool state.
+func applyGlobOutput(out *streams.CodeSearchOutput, state *ToolState) {
+	if state.Output != "" {
+		out.Files = parseGlobFiles(state.Output)
+	}
+	if state.Metadata == nil {
+		return
+	}
+	if count, ok := state.Metadata["count"].(float64); ok {
+		out.FileCount = int(count)
+	}
+	if truncated, ok := state.Metadata["truncated"].(bool); ok {
+		out.Truncated = truncated
+	}
+}
+
+// parseGlobFiles splits newline-separated output into a file list, filtering empty lines.
+func parseGlobFiles(output string) []string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var files []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "(Results are truncated") {
+			files = append(files, line)
+		}
+	}
+	return files
 }
 
 // normalizeGrep converts OpenCode grep tool data to code_search.
@@ -212,42 +221,52 @@ func (n *Normalizer) normalizeGrep(state *ToolState) *streams.NormalizedPayload 
 	payload := streams.NewCodeSearch(query, pattern, path, "")
 
 	// Parse output and metadata
-	if state.Output != "" || state.Metadata != nil {
-		payload.CodeSearch().Output = &streams.CodeSearchOutput{}
-
-		// Parse file list from output (grep typically outputs file:line format)
-		if state.Output != "" {
-			lines := strings.Split(strings.TrimSpace(state.Output), "\n")
-			fileSet := make(map[string]bool)
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-				// Extract file path (before first colon for grep output)
-				if idx := strings.Index(line, ":"); idx > 0 {
-					fileSet[line[:idx]] = true
-				} else {
-					fileSet[line] = true
-				}
-			}
-			var files []string
-			for f := range fileSet {
-				files = append(files, f)
-			}
-			payload.CodeSearch().Output.Files = files
-			payload.CodeSearch().Output.FileCount = len(files)
-		}
-
-		// Extract metadata
-		if state.Metadata != nil {
-			if truncated, ok := state.Metadata["truncated"].(bool); ok {
-				payload.CodeSearch().Output.Truncated = truncated
-			}
-		}
+	if state.Output == "" && state.Metadata == nil {
+		return payload
 	}
 
+	payload.CodeSearch().Output = &streams.CodeSearchOutput{}
+	applyGrepOutput(payload.CodeSearch().Output, state)
+
 	return payload
+}
+
+// applyGrepOutput populates CodeSearchOutput from grep tool state.
+func applyGrepOutput(out *streams.CodeSearchOutput, state *ToolState) {
+	if state.Output != "" {
+		files := parseGrepFiles(state.Output)
+		out.Files = files
+		out.FileCount = len(files)
+	}
+	if state.Metadata == nil {
+		return
+	}
+	if truncated, ok := state.Metadata["truncated"].(bool); ok {
+		out.Truncated = truncated
+	}
+}
+
+// parseGrepFiles extracts unique file paths from grep output lines.
+func parseGrepFiles(output string) []string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	fileSet := make(map[string]bool)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Extract file path (before first colon for grep output)
+		if idx := strings.Index(line, ":"); idx > 0 {
+			fileSet[line[:idx]] = true
+		} else {
+			fileSet[line] = true
+		}
+	}
+	var files []string
+	for f := range fileSet {
+		files = append(files, f)
+	}
+	return files
 }
 
 // normalizeRead converts OpenCode read tool data.
@@ -264,27 +283,33 @@ func (n *Normalizer) normalizeRead(state *ToolState) *streams.NormalizedPayload 
 	payload := streams.NewReadFile(filePath, offset, limit)
 
 	// Add output if available
-	if state.Output != "" || state.Metadata != nil {
-		payload.ReadFile().Output = &streams.ReadFileOutput{
-			Content: state.Output,
-		}
+	if state.Output == "" && state.Metadata == nil {
+		return payload
+	}
 
-		if state.Metadata != nil {
-			if lineCount, ok := state.Metadata["line_count"].(float64); ok {
-				payload.ReadFile().Output.LineCount = int(lineCount)
-			}
-			if truncated, ok := state.Metadata["truncated"].(bool); ok {
-				payload.ReadFile().Output.Truncated = truncated
-			}
-		}
+	payload.ReadFile().Output = &streams.ReadFileOutput{
+		Content: state.Output,
+	}
+	applyReadMetadata(payload.ReadFile().Output, state)
 
-		// Calculate line count from content if not in metadata
-		if payload.ReadFile().Output.LineCount == 0 && state.Output != "" {
-			payload.ReadFile().Output.LineCount = strings.Count(state.Output, "\n") + 1
+	return payload
+}
+
+// applyReadMetadata fills ReadFileOutput from read tool metadata and content.
+func applyReadMetadata(out *streams.ReadFileOutput, state *ToolState) {
+	if state.Metadata != nil {
+		if lineCount, ok := state.Metadata["line_count"].(float64); ok {
+			out.LineCount = int(lineCount)
+		}
+		if truncated, ok := state.Metadata["truncated"].(bool); ok {
+			out.Truncated = truncated
 		}
 	}
 
-	return payload
+	// Calculate line count from content if not in metadata
+	if out.LineCount == 0 && state.Output != "" {
+		out.LineCount = strings.Count(state.Output, "\n") + 1
+	}
 }
 
 // normalizeGeneric wraps unknown tools as generic.
@@ -301,6 +326,7 @@ func (n *Normalizer) normalizeGeneric(toolName string, state *ToolState) *stream
 }
 
 // normalizeBashResult updates bash payload with result data.
+//
 // Deprecated: Use ToolState in NormalizeToolCall instead
 func (n *Normalizer) normalizeBashResult(payload *streams.ShellExecPayload, result any) {
 	if payload.Output == nil {

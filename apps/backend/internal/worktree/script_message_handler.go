@@ -130,29 +130,7 @@ func (h *DefaultScriptMessageHandler) executeScript(_ context.Context, req Scrip
 	exitCode, scriptErr := h.runScriptWithOutput(scriptCtx, req, msg)
 
 	// Update final status
-	if scriptErr != nil {
-		msg.Metadata["status"] = "failed"
-		msg.Metadata["error"] = scriptErr.Error()
-		if msg.Content == "" {
-			msg.Content = fmt.Sprintf("Script execution failed: %s", scriptErr.Error())
-		} else {
-			msg.Content += fmt.Sprintf("\n\nScript execution failed: %s", scriptErr.Error())
-		}
-	} else if exitCode == 0 {
-		msg.Metadata["status"] = "exited"
-		msg.Metadata["exit_code"] = exitCode
-		if msg.Content == "" {
-			msg.Content = "Script completed successfully"
-		}
-	} else {
-		msg.Metadata["status"] = "failed"
-		msg.Metadata["exit_code"] = exitCode
-		if msg.Content == "" {
-			msg.Content = fmt.Sprintf("Script failed with exit code: %d", exitCode)
-		} else {
-			msg.Content += fmt.Sprintf("\n\nScript failed with exit code: %d", exitCode)
-		}
-	}
+	applyScriptFinalStatus(msg, exitCode, scriptErr)
 
 	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	if updateErr := h.taskService.UpdateMessage(scriptCtx, msg); updateErr != nil {
@@ -166,14 +144,48 @@ func (h *DefaultScriptMessageHandler) executeScript(_ context.Context, req Scrip
 		zap.Int("exit_code", exitCode),
 		zap.Bool("success", exitCode == 0))
 
-	// Return error if setup script failed
-	if failOnError && (scriptErr != nil || exitCode != 0) {
-		if scriptErr != nil {
-			return scriptErr
+	return scriptExecutionError(failOnError, exitCode, scriptErr)
+}
+
+// applyScriptFinalStatus updates the message metadata and content based on script outcome.
+func applyScriptFinalStatus(msg *models.Message, exitCode int, scriptErr error) {
+	switch {
+	case scriptErr != nil:
+		msg.Metadata["status"] = "failed"
+		msg.Metadata["error"] = scriptErr.Error()
+		if msg.Content == "" {
+			msg.Content = fmt.Sprintf("Script execution failed: %s", scriptErr.Error())
+		} else {
+			msg.Content += fmt.Sprintf("\n\nScript execution failed: %s", scriptErr.Error())
 		}
+	case exitCode == 0:
+		msg.Metadata["status"] = "exited"
+		msg.Metadata["exit_code"] = exitCode
+		if msg.Content == "" {
+			msg.Content = "Script completed successfully"
+		}
+	default:
+		msg.Metadata["status"] = "failed"
+		msg.Metadata["exit_code"] = exitCode
+		if msg.Content == "" {
+			msg.Content = fmt.Sprintf("Script failed with exit code: %d", exitCode)
+		} else {
+			msg.Content += fmt.Sprintf("\n\nScript failed with exit code: %d", exitCode)
+		}
+	}
+}
+
+// scriptExecutionError returns an error if failOnError is set and the script did not succeed.
+func scriptExecutionError(failOnError bool, exitCode int, scriptErr error) error {
+	if !failOnError {
+		return nil
+	}
+	if scriptErr != nil {
+		return scriptErr
+	}
+	if exitCode != 0 {
 		return fmt.Errorf("script exited with code %d", exitCode)
 	}
-
 	return nil
 }
 
@@ -201,11 +213,9 @@ func (h *DefaultScriptMessageHandler) createScriptMessage(ctx context.Context, r
 // runScriptWithOutput runs the script and captures output, streaming it to the message.
 // The passed context should already have an appropriate timeout set.
 func (h *DefaultScriptMessageHandler) runScriptWithOutput(ctx context.Context, req ScriptExecutionRequest, msg *models.Message) (int, error) {
-	// Run script with sh -c to support complex commands
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Script)
 	cmd.Dir = req.WorkingDir
 
-	// Create pipes for stdout and stderr
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return -1, fmt.Errorf("failed to create stdout pipe: %w", err)
@@ -214,8 +224,6 @@ func (h *DefaultScriptMessageHandler) runScriptWithOutput(ctx context.Context, r
 	if err != nil {
 		return -1, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
-
-	// Start the command
 	if err := cmd.Start(); err != nil {
 		return -1, fmt.Errorf("failed to start script: %w", err)
 	}
@@ -224,89 +232,51 @@ func (h *DefaultScriptMessageHandler) runScriptWithOutput(ctx context.Context, r
 		zap.String("message_id", msg.ID),
 		zap.String("command", req.Script))
 
-	// Stream output
 	var outputBuf bytes.Buffer
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	// Stream stdout
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 1024)
-		for {
-			n, err := stdoutPipe.Read(buf)
-			if n > 0 {
-				mu.Lock()
-				outputBuf.Write(buf[:n])
-				msg.Content = outputBuf.String()
-				mu.Unlock()
-
-				// Update message with incremental output (best-effort)
-				if updateErr := h.taskService.UpdateMessage(context.Background(), msg); updateErr != nil {
-					h.logger.Debug("failed to update message with output",
-						zap.String("message_id", msg.ID),
-						zap.Error(updateErr))
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					h.logger.Debug("error reading stdout",
-						zap.Error(err))
-				}
-				break
-			}
-		}
-	}()
-
-	// Stream stderr
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 1024)
-		for {
-			n, err := stderrPipe.Read(buf)
-			if n > 0 {
-				mu.Lock()
-				outputBuf.Write(buf[:n])
-				msg.Content = outputBuf.String()
-				mu.Unlock()
-
-				// Update message with incremental output (best-effort)
-				if updateErr := h.taskService.UpdateMessage(context.Background(), msg); updateErr != nil {
-					h.logger.Debug("failed to update message with output",
-						zap.String("message_id", msg.ID),
-						zap.Error(updateErr))
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					h.logger.Debug("error reading stderr",
-						zap.Error(err))
-				}
-				break
-			}
-		}
-	}()
-
-	// Wait for output streaming to finish
+	wg.Add(2)
+	go h.streamPipeOutput(stdoutPipe, &outputBuf, &mu, msg, &wg)
+	go h.streamPipeOutput(stderrPipe, &outputBuf, &mu, msg, &wg)
 	wg.Wait()
 
-	// Wait for command to complete
 	err = cmd.Wait()
-
-	// Get exit code
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			// Other error (e.g., timeout, command not found)
 			return -1, err
 		}
 	}
-
 	return exitCode, nil
+}
+
+// streamPipeOutput reads from pipe and streams output into msg.Content incrementally.
+func (h *DefaultScriptMessageHandler) streamPipeOutput(pipe io.Reader, outputBuf *bytes.Buffer, mu *sync.Mutex, msg *models.Message, wg *sync.WaitGroup) {
+	defer wg.Done()
+	buf := make([]byte, 1024)
+	for {
+		n, err := pipe.Read(buf)
+		if n > 0 {
+			mu.Lock()
+			outputBuf.Write(buf[:n])
+			msg.Content = outputBuf.String()
+			mu.Unlock()
+			if updateErr := h.taskService.UpdateMessage(context.Background(), msg); updateErr != nil {
+				h.logger.Debug("failed to update message with output",
+					zap.String("message_id", msg.ID),
+					zap.Error(updateErr))
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				h.logger.Debug("error reading pipe output", zap.Error(err))
+			}
+			break
+		}
+	}
 }
 
 // runScriptWithoutMessage runs a script without message tracking (used when session is deleted).

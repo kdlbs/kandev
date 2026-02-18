@@ -169,7 +169,10 @@ func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Messa
 	if req.Name == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
+	return h.doCreateWorkspace(ctx, msg, req)
+}
 
+func (h *WorkspaceHandlers) doCreateWorkspace(ctx context.Context, msg *ws.Message, req wsCreateWorkspaceRequest) (*ws.Message, error) {
 	resp, err := h.controller.CreateWorkspace(ctx, dto.CreateWorkspaceRequest{
 		Name:                  req.Name,
 		Description:           req.Description,
@@ -238,23 +241,9 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsDeleteWorkspaceRequest struct {
-	ID string `json:"id"`
-}
-
 func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDeleteWorkspaceRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-
-	resp, err := h.controller.DeleteWorkspace(ctx, dto.DeleteWorkspaceRequest{ID: req.ID})
-	if err != nil {
-		h.logger.Error("failed to delete workspace", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workspace", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workspace",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.DeleteWorkspace(ctx, dto.DeleteWorkspaceRequest{ID: id})
+		})
 }

@@ -135,56 +135,22 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	req.Content = strings.TrimSpace(req.Content)
-	if req.TaskSessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-	}
-	// Content can be empty if there are attachments (image-only messages)
-	if req.Content == "" && len(req.Attachments) == 0 {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
+
+	if errMsg := validateAddMessageRequest(req); errMsg != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 
-	// Check if session is currently processing a prompt (RUNNING state)
-	// This prevents duplicate/concurrent prompts that can cause race conditions
-	sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: req.TaskSessionID})
-	if err != nil {
-		h.logger.Error("failed to get task session", zap.String("session_id", req.TaskSessionID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
+	// Check session state — may block the message or flag it as a create-start
+	sessionResp, wsErr := h.checkSessionStateForMessage(ctx, msg, req.TaskSessionID)
+	if wsErr != nil {
+		return wsErr, nil
 	}
-	if sessionResp.Session.State == models.TaskSessionStateRunning {
-		h.logger.Warn("rejected message submission while agent is busy",
-			zap.String("session_id", req.TaskSessionID),
-			zap.String("session_state", string(sessionResp.Session.State)))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
-	}
-	if sessionResp.Session.State == models.TaskSessionStateFailed ||
-		sessionResp.Session.State == models.TaskSessionStateCancelled {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"Session has ended. Please create a new session to continue.", nil)
-	}
-
-	// Handle CREATED sessions: save the message, then start the agent with it as the prompt
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 
-	// Get the current task state to determine if we need to transition
-	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: req.TaskID})
-	if err != nil {
+	// Transition task from REVIEW → IN_PROGRESS if needed
+	if err := h.ensureTaskInProgress(ctx, req.TaskID); err != nil {
 		h.logger.Error("failed to get task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
-	}
-
-	// If task is in REVIEW state, transition back to IN_PROGRESS (also moves to matching column)
-	if task.State == v1.TaskStateReview {
-		if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: req.TaskID, State: v1.TaskStateInProgress}); err != nil {
-			h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
-				zap.String("task_id", req.TaskID),
-				zap.Error(err))
-		} else {
-			h.logger.Info("task transitioned from REVIEW to IN_PROGRESS",
-				zap.String("task_id", req.TaskID))
-		}
 	}
 
 	// Build metadata with attachments, plan mode, review comments, and context files
@@ -193,7 +159,6 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithReviewComments(req.HasReviewComments).
 		WithAttachments(req.Attachments).
 		WithContextFiles(req.ContextFiles)
-	metadata := meta.ToMap()
 
 	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
@@ -201,7 +166,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		Content:       req.Content,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
-		Metadata:      metadata,
+		Metadata:      meta.ToMap(),
 	})
 	if err != nil {
 		h.logger.Error("failed to create message", zap.Error(err))
@@ -216,116 +181,207 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// Auto-forward message as prompt to running agent if orchestrator is available.
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
-	// The user's message is already saved, and agent responses are broadcast via notifications.
 	if h.orchestrator != nil {
-		// Process on_turn_start events synchronously BEFORE sending the prompt.
-		// This transitions the task to the right step (e.g., Review → In Progress)
-		// before the agent receives the message.
-		if !isCreatedSession {
-			if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
-				h.logger.Warn("failed to process on_turn_start",
-					zap.String("task_id", req.TaskID),
-					zap.String("session_id", req.TaskSessionID),
-					zap.Error(err))
-			}
-		}
-		taskID := req.TaskID
-		sessionID := req.TaskSessionID
-		content := req.Content
-		model := req.Model
-		planMode := req.PlanMode
-		attachments := req.Attachments
-		startCreated := isCreatedSession
-		agentProfileID := sessionResp.Session.AgentProfileID
-		go func() {
-			promptCtx := context.WithoutCancel(ctx)
-
-			// For CREATED sessions, start the agent with this message as the initial prompt
-			if startCreated {
-				if err := h.orchestrator.StartCreatedSession(promptCtx, taskID, sessionID, agentProfileID, content); err != nil {
-					h.logger.Warn("failed to start created session from message",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID),
-						zap.Error(err))
-
-					errorMsg := "Failed to start agent"
-					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
-						TaskSessionID: sessionID,
-						TaskID:        taskID,
-						Content:       errorMsg,
-						AuthorType:    "agent",
-						Type:          string(v1.MessageTypeError),
-						Metadata: map[string]interface{}{
-							"error": err.Error(),
-						},
-					}); createErr != nil {
-						h.logger.Error("failed to create error message",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(createErr))
-					}
-				}
-				return
-			}
-
-			_, err := h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
-			if err != nil {
-				if errors.Is(err, executor.ErrExecutionNotFound) {
-					if resumeErr := h.orchestrator.ResumeTaskSession(promptCtx, taskID, sessionID); resumeErr != nil {
-						h.logger.Warn("failed to resume task session for prompt",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(resumeErr))
-					} else {
-						// Wait for the agent to become ready after resume.
-						// ResumeTaskSession starts the agent asynchronously, so we poll
-						// the session state until it transitions to a promptable state.
-						if waitErr := h.waitForSessionReady(promptCtx, sessionID); waitErr != nil {
-							h.logger.Warn("session did not become ready after resume",
-								zap.String("task_id", taskID),
-								zap.String("session_id", sessionID),
-								zap.Error(waitErr))
-							err = waitErr
-						} else {
-							_, err = h.orchestrator.PromptTask(promptCtx, taskID, sessionID, content, model, planMode, attachments)
-						}
-					}
-				}
-				// If prompt still failed after retries, create an error message for the user
-				if err != nil {
-					h.logger.Warn("failed to forward message as prompt to agent",
-						zap.String("task_id", taskID),
-						zap.Error(err))
-
-					// Create an error message so the user sees feedback
-					errorMsg := "Failed to send message to agent"
-					if strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
-						errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
-					} else if errors.Is(err, executor.ErrExecutionNotFound) {
-						errorMsg = "Agent is not running. Please restart the session."
-					}
-
-					if _, createErr := h.messageController.CreateMessage(promptCtx, dto.CreateMessageRequest{
-						TaskSessionID: sessionID,
-						TaskID:        taskID,
-						Content:       errorMsg,
-						AuthorType:    "agent",
-						Type:          string(v1.MessageTypeError),
-						Metadata: map[string]interface{}{
-							"error": err.Error(),
-						},
-					}); createErr != nil {
-						h.logger.Error("failed to create error message for prompt failure",
-							zap.String("task_id", taskID),
-							zap.String("session_id", sessionID),
-							zap.Error(createErr))
-					}
-				}
-			}
-		}()
+		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, isCreatedSession)
 	}
 
 	return response, nil
+}
+
+// validateAddMessageRequest returns a non-empty error string if the request is invalid.
+func validateAddMessageRequest(req wsAddMessageRequest) string {
+	if req.TaskSessionID == "" {
+		return "session_id is required"
+	}
+	if req.TaskID == "" {
+		return "task_id is required"
+	}
+	// Content can be empty if there are attachments (image-only messages)
+	if req.Content == "" && len(req.Attachments) == 0 {
+		return "content or attachments are required"
+	}
+	return ""
+}
+
+// checkSessionStateForMessage loads the session and returns an error WS message if the
+// session is in a state that blocks new messages (running, failed, cancelled).
+func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *ws.Message, sessionID string) (*dto.GetTaskSessionResponse, *ws.Message) {
+	sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: sessionID})
+	if err != nil {
+		h.logger.Error("failed to get task session", zap.String("session_id", sessionID), zap.Error(err))
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
+		return nil, wsErr
+	}
+	switch sessionResp.Session.State {
+	case models.TaskSessionStateRunning:
+		h.logger.Warn("rejected message submission while agent is busy",
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(sessionResp.Session.State)))
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
+		return nil, wsErr
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session has ended. Please create a new session to continue.", nil)
+		return nil, wsErr
+	}
+	return &sessionResp, nil
+}
+
+// ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
+// Returns an error only when the task cannot be fetched.
+func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) error {
+	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: taskID})
+	if err != nil {
+		return err
+	}
+	if task.State != v1.TaskStateReview {
+		return nil
+	}
+	if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: taskID, State: v1.TaskStateInProgress}); err != nil {
+		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	} else {
+		h.logger.Info("task transitioned from REVIEW to IN_PROGRESS",
+			zap.String("task_id", taskID))
+	}
+	return nil
+}
+
+// dispatchPromptAsync runs on_turn_start handling and then forwards the message to the
+// agent as a prompt in a background goroutine.
+func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession bool) {
+	// Process on_turn_start events synchronously BEFORE sending the prompt.
+	// This transitions the task to the right step (e.g., Review → In Progress)
+	// before the agent receives the message.
+	if !isCreatedSession {
+		if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+			h.logger.Warn("failed to process on_turn_start",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+		}
+	}
+	taskID := req.TaskID
+	sessionID := req.TaskSessionID
+	content := req.Content
+	model := req.Model
+	planMode := req.PlanMode
+	attachments := req.Attachments
+	go func() {
+		promptCtx := context.WithoutCancel(ctx)
+		h.forwardMessageAsPrompt(promptCtx, taskID, sessionID, agentProfileID, content, model, planMode, attachments, isCreatedSession)
+	}()
+}
+
+// forwardMessageAsPrompt sends a user message to the agent as a prompt.
+// For CREATED sessions, it starts the agent; otherwise it prompts the running agent,
+// with automatic resume handling if the agent is not found.
+func (h *MessageHandlers) forwardMessageAsPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	startCreated bool,
+) {
+	// For CREATED sessions, start the agent with this message as the initial prompt
+	if startCreated {
+		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content); err != nil {
+			h.logger.Warn("failed to start created session from message",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+
+			errorMsg := "Failed to start agent"
+			if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+				TaskSessionID: sessionID,
+				TaskID:        taskID,
+				Content:       errorMsg,
+				AuthorType:    "agent",
+				Type:          string(v1.MessageTypeError),
+				Metadata: map[string]interface{}{
+					"error": err.Error(),
+				},
+			}); createErr != nil {
+				h.logger.Error("failed to create error message",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(createErr))
+			}
+		}
+		return
+	}
+
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	if err != nil {
+		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
+	}
+	if err != nil {
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+	}
+}
+
+// handlePromptWithResume attempts to resume a session and retry a prompt when the
+// initial prompt fails with ErrExecutionNotFound.
+func (h *MessageHandlers) handlePromptWithResume(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origErr error,
+) error {
+	if !errors.Is(origErr, executor.ErrExecutionNotFound) {
+		return origErr
+	}
+	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
+		h.logger.Warn("failed to resume task session for prompt",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(resumeErr))
+		return origErr
+	}
+	// Wait for the agent to become ready after resume.
+	// ResumeTaskSession starts the agent asynchronously, so we poll
+	// the session state until it transitions to a promptable state.
+	if waitErr := h.waitForSessionReady(ctx, sessionID); waitErr != nil {
+		h.logger.Warn("session did not become ready after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(waitErr))
+		return waitErr
+	}
+	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	return err
+}
+
+// createPromptErrorMessage creates an agent error message visible to the user when
+// forwarding a prompt to the agent fails.
+func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error) {
+	h.logger.Warn("failed to forward message as prompt to agent",
+		zap.String("task_id", taskID),
+		zap.Error(promptErr))
+
+	errorMsg := "Failed to send message to agent"
+	if strings.Contains(promptErr.Error(), "context deadline exceeded") || strings.Contains(promptErr.Error(), "timeout") {
+		errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
+	} else if errors.Is(promptErr, executor.ErrExecutionNotFound) {
+		errorMsg = "Agent is not running. Please restart the session."
+	}
+
+	if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		Content:       errorMsg,
+		AuthorType:    "agent",
+		Type:          string(v1.MessageTypeError),
+		Metadata: map[string]interface{}{
+			"error": promptErr.Error(),
+		},
+	}); createErr != nil {
+		h.logger.Error("failed to create error message for prompt failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(createErr))
+	}
 }
 
 // waitForSessionReady polls the session state after a resume operation until the agent

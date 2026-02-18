@@ -18,6 +18,11 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// History entry type constants.
+const (
+	historyEntryTypeToolCall = "tool_call"
+)
+
 // SessionHistoryManager stores and retrieves session history for context injection.
 // This enables the fork_session pattern for ACP agents that don't support session/load.
 //
@@ -132,7 +137,7 @@ func (m *SessionHistoryManager) AppendAgentMessage(sessionID, message string) er
 // AppendToolCall appends a tool call to the session history.
 func (m *SessionHistoryManager) AppendToolCall(sessionID string, event agentctl.AgentEvent) error {
 	return m.AppendEntry(sessionID, HistoryEntry{
-		Type:       "tool_call",
+		Type:       historyEntryTypeToolCall,
 		ToolCallID: event.ToolCallID,
 		ToolName:   event.ToolName,
 		ToolStatus: event.ToolStatus,
@@ -217,7 +222,7 @@ func (m *SessionHistoryManager) GenerateResumeContext(sessionID, newPrompt strin
 			fmt.Fprintf(&historyBuilder, "\n[USER]: %s\n", truncateForContext(entry.Content, 2000))
 		case "agent_message":
 			fmt.Fprintf(&historyBuilder, "\n[ASSISTANT]: %s\n", truncateForContext(entry.Content, 2000))
-		case "tool_call":
+		case historyEntryTypeToolCall:
 			fmt.Fprintf(&historyBuilder, "\n[TOOL CALL: %s]\n", entry.ToolName)
 		case "tool_result":
 			fmt.Fprintf(&historyBuilder, "\n[TOOL RESULT: %s] %s\n", entry.ToolName, truncateForContext(entry.Content, 500))

@@ -144,7 +144,8 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 		result, err := handler(ctx, req)
 		duration := time.Since(start)
 
-		if err != nil {
+		switch {
+		case err != nil:
 			s.logger.Debug("MCP tool error",
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
@@ -156,7 +157,7 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 					zap.Duration("duration", duration),
 					zap.Error(err))
 			}
-		} else if result != nil && result.IsError {
+		case result != nil && result.IsError:
 			s.logger.Debug("MCP tool returned error",
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
@@ -168,7 +169,7 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 					zap.Duration("duration", duration),
 					zap.Any("result", result.Content))
 			}
-		} else {
+		default:
 			s.logger.Debug("MCP tool success",
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration))
@@ -186,6 +187,13 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 
 // registerTools registers all MCP tools.
 func (s *Server) registerTools() {
+	s.registerKanbanTools()
+	s.registerInteractionTools()
+	s.registerPlanTools()
+	s.logger.Info("registered MCP tools", zap.Int("count", 11))
+}
+
+func (s *Server) registerKanbanTools() {
 	// Use NewToolWithRawSchema for parameter-less tools to ensure the schema
 	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
 	// omitempty which drops empty properties maps, causing OpenAI API validation
@@ -197,7 +205,6 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_boards",
 			mcp.WithDescription("List all boards in a workspace."),
@@ -205,7 +212,6 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("list_boards", s.listBoardsHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps",
 			mcp.WithDescription("List all workflow steps in a board."),
@@ -213,7 +219,6 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("list_workflow_steps", s.listWorkflowStepsHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks",
 			mcp.WithDescription("List all tasks on a board."),
@@ -221,7 +226,6 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("list_tasks", s.listTasksHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task",
 			mcp.WithDescription("Create a new task on a board."),
@@ -233,7 +237,6 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("create_task", s.createTaskHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task",
 			mcp.WithDescription("Update an existing task."),
@@ -244,7 +247,9 @@ func (s *Server) registerTools() {
 		),
 		s.wrapHandler("update_task", s.updateTaskHandler()),
 	)
+}
 
+func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question",
 			mcp.WithDescription(`Ask the user a clarifying question with multiple choice options.
@@ -298,7 +303,9 @@ Another example:
 		),
 		s.wrapHandler("ask_user_question", s.askUserQuestionHandler()),
 	)
+}
 
+func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan",
 			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
@@ -308,7 +315,6 @@ Another example:
 		),
 		s.wrapHandler("create_task_plan", s.createTaskPlanHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan",
 			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
@@ -316,7 +322,6 @@ Another example:
 		),
 		s.wrapHandler("get_task_plan", s.getTaskPlanHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan",
 			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
@@ -326,7 +331,6 @@ Another example:
 		),
 		s.wrapHandler("update_task_plan", s.updateTaskPlanHandler()),
 	)
-
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_plan",
 			mcp.WithDescription("Delete a task plan."),
@@ -334,6 +338,4 @@ Another example:
 		),
 		s.wrapHandler("delete_task_plan", s.deleteTaskPlanHandler()),
 	)
-
-	s.logger.Info("registered MCP tools", zap.Int("count", 11))
 }

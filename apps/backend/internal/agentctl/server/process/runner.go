@@ -284,6 +284,17 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 
 	r.publishStatus(proc)
 
+	if err := r.startAndActivate(proc, cmd, id, stdout, stderr); err != nil {
+		return nil, err
+	}
+
+	info := proc.snapshot(false)
+	return &info, nil
+}
+
+// startAndActivate starts the command and transitions the process to running state.
+// On failure, marks the process as failed and removes it from tracking.
+func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id string, stdout, stderr io.ReadCloser) error {
 	if err := cmd.Start(); err != nil {
 		proc.mu.Lock()
 		proc.info.Status = types.ProcessStatusFailed
@@ -293,23 +304,17 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 		r.mu.Lock()
 		delete(r.processes, id)
 		r.mu.Unlock()
-		return nil, fmt.Errorf("failed to start process: %w", err)
+		return fmt.Errorf("failed to start process: %w", err)
 	}
-
-	// Update status to running after successful start so callers can subscribe immediately.
 	proc.mu.Lock()
 	proc.info.Status = types.ProcessStatusRunning
 	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
 	r.publishStatus(proc)
-
-	// Stream output and wait in the background; wait() is responsible for final status + cleanup.
 	go r.readOutput(proc, stdout, "stdout")
 	go r.readOutput(proc, stderr, "stderr")
 	go r.wait(proc)
-
-	info := proc.snapshot(false)
-	return &info, nil
+	return nil
 }
 
 // Stop attempts to gracefully terminate a process, escalating to force-kill if needed.

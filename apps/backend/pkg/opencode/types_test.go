@@ -83,10 +83,8 @@ func TestParseMessageUpdated(t *testing.T) {
 	}
 	if props.Info.Model == nil {
 		t.Error("expected model to be set")
-	} else {
-		if props.Info.Model.ProviderID != "anthropic" {
-			t.Errorf("expected providerID 'anthropic', got %s", props.Info.Model.ProviderID)
-		}
+	} else if props.Info.Model.ProviderID != "anthropic" {
+		t.Errorf("expected providerID 'anthropic', got %s", props.Info.Model.ProviderID)
 	}
 	if props.Info.Tokens == nil {
 		t.Error("expected tokens to be set")

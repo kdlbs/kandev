@@ -86,32 +86,14 @@ func (s *GithubReleaseStrategy) Install(ctx context.Context) (*InstallResult, er
 
 	outPath := filepath.Join(s.binDir, s.binary)
 
-	// Decompress .gz
+	// Decompress .gz or write directly
 	if strings.HasSuffix(asset, ".gz") {
-		gzReader, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
-		}
-		defer func() { _ = gzReader.Close() }()
-
-		outFile, err := os.Create(outPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create output file: %w", err)
-		}
-		defer func() { _ = outFile.Close() }()
-
-		if _, err := io.Copy(outFile, gzReader); err != nil {
-			return nil, fmt.Errorf("failed to decompress: %w", err)
+		if err := writeGzipBody(resp.Body, outPath); err != nil {
+			return nil, err
 		}
 	} else {
-		outFile, err := os.Create(outPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create output file: %w", err)
-		}
-		defer func() { _ = outFile.Close() }()
-
-		if _, err := io.Copy(outFile, resp.Body); err != nil {
-			return nil, fmt.Errorf("failed to write binary: %w", err)
+		if err := writeBody(resp.Body, outPath); err != nil {
+			return nil, err
 		}
 	}
 
@@ -124,4 +106,38 @@ func (s *GithubReleaseStrategy) Install(ctx context.Context) (*InstallResult, er
 	return &InstallResult{
 		BinaryPath: outPath,
 	}, nil
+}
+
+// writeGzipBody decompresses a gzip reader into outPath.
+func writeGzipBody(body io.Reader, outPath string) error {
+	gzReader, err := gzip.NewReader(body)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer func() { _ = gzReader.Close() }()
+
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	if _, err := io.Copy(outFile, gzReader); err != nil {
+		return fmt.Errorf("failed to decompress: %w", err)
+	}
+	return nil
+}
+
+// writeBody writes a plain reader into outPath.
+func writeBody(body io.Reader, outPath string) error {
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	if _, err := io.Copy(outFile, body); err != nil {
+		return fmt.Errorf("failed to write binary: %w", err)
+	}
+	return nil
 }

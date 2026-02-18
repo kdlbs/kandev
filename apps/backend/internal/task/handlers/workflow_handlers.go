@@ -274,23 +274,9 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsDeleteWorkflowRequest struct {
-	ID string `json:"id"`
-}
-
 func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDeleteWorkflowRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-
-	resp, err := h.controller.DeleteWorkflow(ctx, dto.DeleteWorkflowRequest{ID: req.ID})
-	if err != nil {
-		h.logger.Error("failed to delete workflow", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workflow",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.DeleteWorkflow(ctx, dto.DeleteWorkflowRequest{ID: id})
+		})
 }

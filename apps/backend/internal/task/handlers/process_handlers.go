@@ -22,6 +22,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
+
+// queryValueTrue is the string "true" used in query parameter comparisons.
+const queryValueTrue = "true"
+
 type ProcessHandlers struct {
 	service      *service.Service
 	lifecycleMgr *lifecycle.Manager
@@ -58,6 +62,22 @@ func RegisterProcessRoutes(
 	processes.GET("/:processId", handlers.httpGetProcess)
 }
 
+// resolveExecutorID returns the executor ID for a session. If the session has no
+// executor ID set, it falls back to the workspace default, then to the local executor.
+func (h *ProcessHandlers) resolveExecutorID(ctx context.Context, session *models.TaskSession) string {
+	if session.ExecutorID != "" {
+		return session.ExecutorID
+	}
+	if task, err := h.service.GetTask(ctx, session.TaskID); err == nil {
+		if workspace, err := h.service.GetWorkspace(ctx, task.WorkspaceID); err == nil {
+			if workspace.DefaultExecutorID != nil {
+				return *workspace.DefaultExecutorID
+			}
+		}
+	}
+	return models.ExecutorIDLocal
+}
+
 type httpStartProcessRequest struct {
 	Kind         string `json:"kind"`
 	ScriptName   string `json:"script_name,omitempty"`
@@ -92,20 +112,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		h.logger.Warn("start process executor not found",
@@ -117,7 +124,137 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
-	repoID := body.RepositoryID
+	repoID, repo, ok := h.resolveProcessRepository(c, session, body.RepositoryID, sessionID)
+	if !ok {
+		return
+	}
+
+	target, ok := h.resolveScriptTarget(c, session, body, repoID, repo, sessionID)
+	if !ok {
+		return
+	}
+
+	command, portEnv, ok := h.prepareCommandWithPorts(c, sessionID, target.command)
+	if !ok {
+		return
+	}
+
+	if !h.ensureAgentctlReady(c, session, sessionID) {
+		return
+	}
+
+	switch executor.Type {
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
+		h.startLocalProcess(c, sessionID, repoID, target.kind, target.scriptName, command, target.workingDir, portEnv)
+	default:
+		h.logger.Warn("start process unsupported executor type",
+			zap.String("session_id", sessionID),
+			zap.String("executor_id", executorID),
+			zap.String("executor_type", string(executor.Type)),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "executor type not supported for process runner"})
+	}
+}
+
+// resolvedScript holds the resolved script command and metadata for a process start request.
+type resolvedScript struct {
+	command    string
+	kind       string
+	scriptName string
+	workingDir string
+}
+
+// resolveScriptTarget resolves the script command and working directory for a process start request.
+// Returns the resolved script and true on success; on failure writes the HTTP error response and returns false.
+func (h *ProcessHandlers) resolveScriptTarget(
+	c *gin.Context,
+	session *models.TaskSession,
+	body httpStartProcessRequest,
+	repoID string,
+	repo *models.Repository,
+	sessionID string,
+) (*resolvedScript, bool) {
+	command, kind, scriptName, err := resolveScriptCommand(c.Request.Context(), h.service, repo, body.Kind, body.ScriptName)
+	if err != nil {
+		h.logger.Warn("start process script resolution failed",
+			zap.String("session_id", sessionID),
+			zap.String("repo_id", repoID),
+			zap.String("kind", body.Kind),
+			zap.String("script_name", body.ScriptName),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	workingDir := repo.LocalPath
+	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
+		workingDir = session.Worktrees[0].WorktreePath
+	}
+	h.logger.Info("start process resolved command",
+		zap.String("session_id", sessionID),
+		zap.String("repo_id", repoID),
+		zap.String("kind", kind),
+		zap.String("script_name", scriptName),
+		zap.String("working_dir", workingDir),
+		zap.String("command", command),
+	)
+	return &resolvedScript{command: command, kind: kind, scriptName: scriptName, workingDir: workingDir}, true
+}
+
+// prepareCommandWithPorts transforms a command by allocating port placeholders.
+// Returns the transformed command, the port environment map, and true on success.
+// On failure it writes the HTTP error response itself and returns false.
+func (h *ProcessHandlers) prepareCommandWithPorts(c *gin.Context, sessionID, command string) (string, map[string]string, bool) {
+	transformed, portEnv, err := portutil.TransformCommand(command)
+	if err != nil {
+		h.logger.Error("failed to transform command with port placeholders",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "port allocation failed"})
+		return "", nil, false
+	}
+	if len(portEnv) > 0 {
+		h.logger.Info("allocated ports for dev process",
+			zap.String("session_id", sessionID),
+			zap.Any("ports", portEnv))
+	}
+	return transformed, portEnv, true
+}
+
+// ensureAgentctlReady ensures the workspace execution exists and agentctl is responsive.
+// Returns true when ready; on failure it writes the HTTP error response itself and returns false.
+func (h *ProcessHandlers) ensureAgentctlReady(c *gin.Context, session *models.TaskSession, sessionID string) bool {
+	if _, err := h.lifecycleMgr.EnsureWorkspaceExecutionForSession(
+		c.Request.Context(),
+		session.TaskID,
+		session.ID,
+	); err != nil {
+		h.logger.Error("failed to ensure workspace execution for process", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return false
+	}
+	readyCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	if err := h.lifecycleMgr.WaitForAgentctlReadyForSession(readyCtx, session.ID); err != nil {
+		h.logger.Warn("agentctl not ready for process start",
+			zap.String("session_id", sessionID),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl not ready"})
+		return false
+	}
+	return true
+}
+
+// resolveProcessRepository resolves the repository ID and fetches the repository for a
+// start-process request. Returns the repo ID, repo model, and false (writing the HTTP
+// error itself) when the repository cannot be determined.
+func (h *ProcessHandlers) resolveProcessRepository(
+	c *gin.Context,
+	session *models.TaskSession,
+	requestedRepoID, sessionID string,
+) (string, *models.Repository, bool) {
+	repoID := requestedRepoID
 	if repoID == "" {
 		repoID = session.RepositoryID
 	}
@@ -134,7 +271,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			zap.String("task_id", session.TaskID),
 		)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session has no repository"})
-		return
+		return "", nil, false
 	}
 	repo, err := h.service.GetRepository(c.Request.Context(), repoID)
 	if err != nil {
@@ -144,125 +281,71 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			zap.Error(err),
 		)
 		handleNotFound(c, h.logger, err, "repository not found")
-		return
+		return "", nil, false
 	}
+	return repoID, repo, true
+}
 
-	command, kind, scriptName, err := resolveScriptCommand(c.Request.Context(), h.service, repo, body.Kind, body.ScriptName)
+// getRunningDevProcess returns an already-running dev process for the session, or nil.
+func (h *ProcessHandlers) getRunningDevProcess(ctx context.Context, sessionID string) *agentctlclient.ProcessInfo {
+	existing, err := h.lifecycleMgr.ListProcesses(ctx, sessionID)
 	if err != nil {
-		h.logger.Warn("start process script resolution failed",
-			zap.String("session_id", sessionID),
-			zap.String("repo_id", repoID),
-			zap.String("kind", body.Kind),
-			zap.String("script_name", body.ScriptName),
-			zap.Error(err),
-		)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	workingDir := repo.LocalPath
-	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
-		workingDir = session.Worktrees[0].WorktreePath
-	}
-	h.logger.Info("start process resolved command",
-		zap.String("session_id", sessionID),
-		zap.String("repo_id", repoID),
-		zap.String("kind", kind),
-		zap.String("script_name", scriptName),
-		zap.String("working_dir", workingDir),
-		zap.String("command", command),
-	)
-
-	// Transform command to replace port placeholders
-	transformedCommand, portEnv, err := portutil.TransformCommand(command)
-	if err != nil {
-		h.logger.Error("failed to transform command with port placeholders",
+		h.logger.Warn("failed to list processes for dev check",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "port allocation failed"})
-		return
+		return nil
 	}
-	command = transformedCommand
+	for i := range existing {
+		proc := &existing[i]
+		if proc.Kind != streams.ProcessKindDev {
+			continue
+		}
+		if proc.Status == agentctltypes.ProcessStatusRunning || proc.Status == agentctltypes.ProcessStatusStarting {
+			return proc
+		}
+	}
+	return nil
+}
 
-	if len(portEnv) > 0 {
-		h.logger.Info("allocated ports for dev process",
+// startLocalProcess handles starting a process on a local/worktree/docker executor.
+// It deduplicates running dev processes and starts the new process via the lifecycle manager.
+func (h *ProcessHandlers) startLocalProcess(
+	c *gin.Context,
+	sessionID, repoID, kind, scriptName, command, workingDir string,
+	portEnv map[string]string,
+) {
+	if streams.ProcessKind(kind) == streams.ProcessKindDev {
+		if proc := h.getRunningDevProcess(c.Request.Context(), sessionID); proc != nil {
+			c.JSON(http.StatusOK, gin.H{"process": proc})
+			return
+		}
+	}
+	proc, err := h.lifecycleMgr.StartProcess(c.Request.Context(), lifecycle.StartProcessRequest{
+		SessionID:  sessionID,
+		Kind:       kind,
+		ScriptName: scriptName,
+		Command:    command,
+		WorkingDir: workingDir,
+		Env:        portEnv,
+	})
+	if err != nil {
+		h.logger.Error("failed to start process",
 			zap.String("session_id", sessionID),
-			zap.Any("ports", portEnv))
-	}
-
-	if _, err := h.lifecycleMgr.EnsureWorkspaceExecutionForSession(
-		c.Request.Context(),
-		session.TaskID,
-		session.ID,
-	); err != nil {
-		h.logger.Error("failed to ensure workspace execution for process", zap.Error(err))
+			zap.String("repo_id", repoID),
+			zap.String("kind", kind),
+			zap.String("script_name", scriptName),
+			zap.Error(err),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	readyCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
-	defer cancel()
-	if err := h.lifecycleMgr.WaitForAgentctlReadyForSession(readyCtx, session.ID); err != nil {
-		h.logger.Warn("agentctl not ready for process start",
-			zap.String("session_id", sessionID),
-			zap.Error(err),
-		)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl not ready"})
-		return
-	}
-
-	switch executor.Type {
-	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
-		if streams.ProcessKind(kind) == streams.ProcessKindDev {
-			if existing, err := h.lifecycleMgr.ListProcesses(c.Request.Context(), sessionID); err == nil {
-				for _, proc := range existing {
-					if proc.Kind != streams.ProcessKindDev {
-						continue
-					}
-					if proc.Status == agentctltypes.ProcessStatusRunning || proc.Status == agentctltypes.ProcessStatusStarting {
-						c.JSON(http.StatusOK, gin.H{"process": proc})
-						return
-					}
-				}
-			} else {
-				h.logger.Warn("failed to list processes for dev check",
-					zap.String("session_id", sessionID),
-					zap.Error(err),
-				)
-			}
-		}
-		proc, err := h.lifecycleMgr.StartProcess(c.Request.Context(), lifecycle.StartProcessRequest{
-			SessionID:  sessionID,
-			Kind:       kind,
-			ScriptName: scriptName,
-			Command:    command,
-			WorkingDir: workingDir,
-			Env:        portEnv,
-		})
-		if err != nil {
-			h.logger.Error("failed to start process",
-				zap.String("session_id", sessionID),
-				zap.String("repo_id", repoID),
-				zap.String("kind", kind),
-				zap.String("script_name", scriptName),
-				zap.Error(err),
-			)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		h.logger.Info("process started",
-			zap.String("session_id", sessionID),
-			zap.String("process_id", proc.ID),
-			zap.String("kind", kind),
-			zap.String("script_name", scriptName),
-		)
-		c.JSON(http.StatusOK, gin.H{"process": proc})
-	default:
-		h.logger.Warn("start process unsupported executor type",
-			zap.String("session_id", sessionID),
-			zap.String("executor_id", executorID),
-			zap.String("executor_type", string(executor.Type)),
-		)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "executor type not supported for process runner"})
-	}
+	h.logger.Info("process started",
+		zap.String("session_id", sessionID),
+		zap.String("process_id", proc.ID),
+		zap.String("kind", kind),
+		zap.String("script_name", scriptName),
+	)
+	c.JSON(http.StatusOK, gin.H{"process": proc})
 }
 
 func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
@@ -283,19 +366,7 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
@@ -338,20 +409,7 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
@@ -399,26 +457,13 @@ func (h *ProcessHandlers) httpGetProcess(c *gin.Context) {
 		return
 	}
 
-	executorID := session.ExecutorID
-	// TODO: fix session, should always have executorID
-	if executorID == "" {
-		if task, err := h.service.GetTask(c.Request.Context(), session.TaskID); err == nil {
-			if workspace, err := h.service.GetWorkspace(c.Request.Context(), task.WorkspaceID); err == nil {
-				if workspace.DefaultExecutorID != nil {
-					executorID = *workspace.DefaultExecutorID
-				}
-			}
-		}
-		if executorID == "" {
-			executorID = models.ExecutorIDLocal
-		}
-	}
+	executorID := h.resolveExecutorID(c.Request.Context(), session)
 	executor, err := h.service.GetExecutor(c.Request.Context(), executorID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "executor not found")
 		return
 	}
-	includeOutput := c.Query("include_output") == "true"
+	includeOutput := c.Query("include_output") == queryValueTrue
 	switch executor.Type {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
 		proc, err := h.lifecycleMgr.GetProcess(c.Request.Context(), processID, includeOutput)

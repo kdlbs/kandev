@@ -67,7 +67,7 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *RepositoryHandlers) httpListRepositories(c *gin.Context) {
-	includeScripts := c.Query("include_scripts") == "true"
+	includeScripts := c.Query("include_scripts") == queryValueTrue
 	resp, err := h.controller.ListRepositories(c.Request.Context(), dto.ListRepositoriesRequest{
 		WorkspaceID:    c.Param("id"),
 		IncludeScripts: includeScripts,

@@ -14,6 +14,7 @@ linters:
     - unconvert
     - dupword
     - maintidx
+    - revive
 
   settings:
     funlen:
@@ -34,6 +35,13 @@ linters:
       max-func-lines: 30
     maintidx:
       under: 15
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 800
+              skip-comments: true
+              skip-blank-lines: true
 
   exclusions:
     rules:

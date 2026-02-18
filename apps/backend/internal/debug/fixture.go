@@ -15,6 +15,13 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// Protocol and file type constants.
+const (
+	protocolACP        = "acp"
+	protocolStreamJSON = "streamjson"
+	filetypeUnknown    = "unknown"
+)
+
 // DiscoveredFile represents a discovered fixture file.
 type DiscoveredFile struct {
 	Path         string `json:"path"`
@@ -324,10 +331,10 @@ func parseDebugFilename(filename string) (fileType, protocol, agent string) {
 	// Legacy pattern: {protocol}-{agent}
 	protocol, agent = splitProtocolAgent(name)
 	if isKnownProtocol(protocol) {
-		return "unknown", protocol, agent
+		return filetypeUnknown, protocol, agent
 	}
 
-	return "unknown", "unknown", ""
+	return filetypeUnknown, filetypeUnknown, ""
 }
 
 // splitProtocolAgent splits "{protocol}-{agent}" into protocol and agent.
@@ -348,7 +355,7 @@ func parseProtocolFromFilename(filename string) string {
 // isKnownProtocol checks if the protocol is one of the known protocols.
 func isKnownProtocol(protocol string) bool {
 	switch protocol {
-	case "acp", "streamjson", "codex", "opencode":
+	case protocolACP, protocolStreamJSON, "codex", "opencode":
 		return true
 	default:
 		return false
@@ -375,9 +382,9 @@ func countLines(path string) int {
 // getNormalizerForProtocol returns the appropriate normalizer for the protocol.
 func getNormalizerForProtocol(protocol string) normalizer {
 	switch protocol {
-	case "acp":
+	case protocolACP:
 		return acp.NewNormalizer()
-	case "streamjson":
+	case protocolStreamJSON:
 		return streamjson.NewNormalizer()
 	default:
 		return nil
@@ -415,14 +422,14 @@ func normalizeFixtureFile(filePath string) ([]NormalizedFixture, error) {
 
 		// Extract tool info and normalize based on protocol
 		switch protocol {
-		case "acp":
+		case protocolACP:
 			args, _ := input.Input["args"].(map[string]any)
 			kind, _ := args["kind"].(string)
 			fixture.ToolName = kind
 			fixture.ToolType = acp.DetectToolOperationType(kind, args)
 			fixture.Payload = norm.NormalizeToolCall(kind, args)
 
-		case "streamjson":
+		case protocolStreamJSON:
 			toolName, _ := input.Input["tool_name"].(string)
 			args, _ := input.Input["args"].(map[string]any)
 			fixture.ToolName = toolName

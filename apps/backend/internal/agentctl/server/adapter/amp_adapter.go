@@ -392,6 +392,90 @@ func (a *AmpAdapter) handleUserMessage(msg *amp.Message, sessionID, operationID 
 	}
 }
 
+// updateMainModel updates agent version and tracks the main model name.
+func (a *AmpAdapter) updateMainModel(model string) {
+	if model == "" || a.agentInfo == nil {
+		return
+	}
+	a.agentInfo.Version = model
+	a.mu.Lock()
+	if a.mainModelName == "" {
+		a.mainModelName = model
+		a.logger.Debug("tracking main model", zap.String("model", model))
+	}
+	a.mu.Unlock()
+}
+
+// emitContextWindow emits a context window event.
+func (a *AmpAdapter) emitContextWindow(sessionID, operationID string, contextUsed, contextSize int64) {
+	remaining := contextSize - contextUsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	a.sendUpdate(AgentEvent{
+		Type:                   EventTypeContextWindow,
+		SessionID:              sessionID,
+		OperationID:            operationID,
+		ContextWindowSize:      contextSize,
+		ContextWindowUsed:      contextUsed,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
+	})
+}
+
+// trackUsageAndEmitContextWindow updates token tracking and emits a context window event.
+func (a *AmpAdapter) trackUsageAndEmitContextWindow(usage *amp.TokenUsage, sessionID, operationID string) {
+	if usage == nil {
+		return
+	}
+	contextUsed := usage.InputTokens + usage.OutputTokens +
+		usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+
+	a.mu.Lock()
+	a.contextTokensUsed = contextUsed
+	contextSize := a.mainModelContextWindow
+	a.mu.Unlock()
+
+	a.emitContextWindow(sessionID, operationID, contextUsed, contextSize)
+}
+
+// processAssistantContentBlock processes a single content block from an assistant message.
+func (a *AmpAdapter) processAssistantContentBlock(block *amp.ContentBlock, sessionID, operationID string) {
+	switch block.Type {
+	case amp.ContentTypeText:
+		if block.Text != "" {
+			// Accumulate text locally to include in complete event
+			// This bypasses the race condition with the manager's buffer
+			a.mu.Lock()
+			a.textAccumulator.WriteString(block.Text)
+			a.mu.Unlock()
+
+			a.sendUpdate(AgentEvent{
+				Type:        EventTypeMessageChunk,
+				SessionID:   sessionID,
+				OperationID: operationID,
+				Text:        block.Text,
+			})
+		}
+
+	case amp.ContentTypeThinking:
+		if block.Thinking != "" {
+			a.sendUpdate(AgentEvent{
+				Type:          EventTypeReasoning,
+				SessionID:     sessionID,
+				OperationID:   operationID,
+				ReasoningText: block.Thinking,
+			})
+		}
+
+	case amp.ContentTypeToolUse:
+		a.handleToolUse(block, sessionID, operationID)
+
+	case amp.ContentTypeToolResult:
+		a.handleToolResult(block, sessionID, operationID)
+	}
+}
+
 // handleAssistantMessage processes assistant messages.
 func (a *AmpAdapter) handleAssistantMessage(msg *amp.Message, sessionID, operationID string) {
 	if msg.Message == nil {
@@ -408,80 +492,15 @@ func (a *AmpAdapter) handleAssistantMessage(msg *amp.Message, sessionID, operati
 		zap.Strings("block_types", blockTypes))
 
 	// Update agent version and track main model
-	if msg.Message.Model != "" && a.agentInfo != nil {
-		a.agentInfo.Version = msg.Message.Model
-
-		a.mu.Lock()
-		if a.mainModelName == "" {
-			a.mainModelName = msg.Message.Model
-			a.logger.Debug("tracking main model", zap.String("model", msg.Message.Model))
-		}
-		a.mu.Unlock()
-	}
+	a.updateMainModel(msg.Message.Model)
 
 	// Process content blocks
-	for _, block := range msg.Message.Content {
-		switch block.Type {
-		case amp.ContentTypeText:
-			if block.Text != "" {
-				// Accumulate text locally to include in complete event
-				// This bypasses the race condition with the manager's buffer
-				a.mu.Lock()
-				a.textAccumulator.WriteString(block.Text)
-				a.mu.Unlock()
-
-				a.sendUpdate(AgentEvent{
-					Type:        EventTypeMessageChunk,
-					SessionID:   sessionID,
-					OperationID: operationID,
-					Text:        block.Text,
-				})
-			}
-
-		case amp.ContentTypeThinking:
-			if block.Thinking != "" {
-				a.sendUpdate(AgentEvent{
-					Type:          EventTypeReasoning,
-					SessionID:     sessionID,
-					OperationID:   operationID,
-					ReasoningText: block.Thinking,
-				})
-			}
-
-		case amp.ContentTypeToolUse:
-			a.handleToolUse(&block, sessionID, operationID)
-
-		case amp.ContentTypeToolResult:
-			a.handleToolResult(&block, sessionID, operationID)
-		}
+	for i := range msg.Message.Content {
+		a.processAssistantContentBlock(&msg.Message.Content[i], sessionID, operationID)
 	}
 
 	// Calculate and emit token usage
-	if msg.Message.Usage != nil {
-		usage := msg.Message.Usage
-		contextUsed := usage.InputTokens + usage.OutputTokens +
-			usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-
-		a.mu.Lock()
-		a.contextTokensUsed = contextUsed
-		contextSize := a.mainModelContextWindow
-		a.mu.Unlock()
-
-		remaining := contextSize - contextUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		a.sendUpdate(AgentEvent{
-			Type:                   EventTypeContextWindow,
-			SessionID:              sessionID,
-			OperationID:            operationID,
-			ContextWindowSize:      contextSize,
-			ContextWindowUsed:      contextUsed,
-			ContextWindowRemaining: remaining,
-			ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
-		})
-	}
+	a.trackUsageAndEmitContextWindow(msg.Message.Usage, sessionID, operationID)
 
 	// Check for turn completion - Amp signals this via stop_reason in assistant messages
 	// (unlike Claude Code which sends a separate "result" message)
@@ -609,19 +628,7 @@ func (a *AmpAdapter) handleTurnComplete(sessionID, operationID string) {
 
 	// Emit final context window event
 	if contextUsed > 0 {
-		remaining := contextSize - contextUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-		a.sendUpdate(AgentEvent{
-			Type:                   EventTypeContextWindow,
-			SessionID:              sessionID,
-			OperationID:            operationID,
-			ContextWindowSize:      contextSize,
-			ContextWindowUsed:      contextUsed,
-			ContextWindowRemaining: remaining,
-			ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
-		})
+		a.emitContextWindow(sessionID, operationID, contextUsed, contextSize)
 	}
 
 	// Send completion event WITHOUT text - text was already sent via message_chunk events
@@ -650,6 +657,71 @@ func (a *AmpAdapter) handleTurnComplete(sessionID, operationID string) {
 	}
 }
 
+// extractResultErrorMsg extracts the error message from a result message.
+func (a *AmpAdapter) extractResultErrorMsg(msg *amp.Message) string {
+	if !msg.IsError {
+		return ""
+	}
+	if msg.Error != "" {
+		return msg.Error
+	}
+	if errStr := msg.GetResultString(); errStr != "" {
+		return errStr
+	}
+	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+		return resultData.Text
+	}
+	return "prompt failed"
+}
+
+// signalResultCompletion sends the result to the result channel.
+func (a *AmpAdapter) signalResultCompletion(success bool, errMsg string) {
+	a.mu.RLock()
+	resultCh := a.resultCh
+	a.mu.RUnlock()
+
+	if resultCh == nil {
+		return
+	}
+	select {
+	case resultCh <- resultComplete{success: success, err: errMsg}:
+		a.logger.Debug("signaled prompt completion")
+	default:
+		a.logger.Warn("result channel full, dropping signal")
+	}
+}
+
+// updateContextWindowFromModelUsage updates the context window size from model_usage.
+func (a *AmpAdapter) updateContextWindowFromModelUsage(msg *amp.Message) (contextUsed, contextSize int64) {
+	a.mu.Lock()
+	modelName := a.mainModelName
+	if msg.ModelUsage != nil && modelName != "" {
+		if modelStats, ok := msg.ModelUsage[modelName]; ok && modelStats.ContextWindow != nil {
+			a.mainModelContextWindow = *modelStats.ContextWindow
+			a.logger.Debug("updated context window from model_usage",
+				zap.String("model", modelName),
+				zap.Int64("context_window", a.mainModelContextWindow))
+		}
+	}
+	contextSize = a.mainModelContextWindow
+	contextUsed = a.contextTokensUsed
+	a.mu.Unlock()
+	return contextUsed, contextSize
+}
+
+// drainPendingToolCalls atomically takes all pending tool calls and clears them.
+func (a *AmpAdapter) drainPendingToolCalls() map[string]*streams.NormalizedPayload {
+	a.mu.Lock()
+	pending := make(map[string]*streams.NormalizedPayload, len(a.pendingToolCalls))
+	for toolID := range a.pendingToolCalls {
+		pending[toolID] = a.pendingToolPayloads[toolID]
+	}
+	a.pendingToolCalls = make(map[string]bool)
+	a.pendingToolPayloads = make(map[string]*streams.NormalizedPayload)
+	a.mu.Unlock()
+	return pending
+}
+
 // handleResultMessage processes result (completion) messages.
 func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationID string) {
 	a.logger.Info("received result message",
@@ -674,16 +746,10 @@ func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationI
 	if !alreadyCompleted {
 		a.completeSent = true
 	}
-
-	// Auto-complete any pending tool calls
-	pendingTools := make(map[string]*streams.NormalizedPayload, len(a.pendingToolCalls))
-	for toolID := range a.pendingToolCalls {
-		pendingTools[toolID] = a.pendingToolPayloads[toolID]
-	}
-	a.pendingToolCalls = make(map[string]bool)
-	a.pendingToolPayloads = make(map[string]*streams.NormalizedPayload)
 	a.mu.Unlock()
 
+	// Auto-complete any pending tool calls
+	pendingTools := a.drainPendingToolCalls()
 	for toolID, cachedPayload := range pendingTools {
 		a.logger.Info("auto-completing pending tool call on result",
 			zap.String("tool_call_id", toolID))
@@ -698,35 +764,11 @@ func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationI
 	}
 
 	// Extract context window from model_usage if available
-	a.mu.Lock()
-	modelName := a.mainModelName
-	if msg.ModelUsage != nil && modelName != "" {
-		if modelStats, ok := msg.ModelUsage[modelName]; ok && modelStats.ContextWindow != nil {
-			a.mainModelContextWindow = *modelStats.ContextWindow
-			a.logger.Debug("updated context window from model_usage",
-				zap.String("model", modelName),
-				zap.Int64("context_window", a.mainModelContextWindow))
-		}
-	}
-	contextSize := a.mainModelContextWindow
-	contextUsed := a.contextTokensUsed
-	a.mu.Unlock()
+	contextUsed, contextSize := a.updateContextWindowFromModelUsage(msg)
 
 	// Emit final context window event
 	if contextUsed > 0 {
-		remaining := contextSize - contextUsed
-		if remaining < 0 {
-			remaining = 0
-		}
-		a.sendUpdate(AgentEvent{
-			Type:                   EventTypeContextWindow,
-			SessionID:              sessionID,
-			OperationID:            operationID,
-			ContextWindowSize:      contextSize,
-			ContextWindowUsed:      contextUsed,
-			ContextWindowRemaining: remaining,
-			ContextEfficiency:      float64(contextUsed) / float64(contextSize) * 100,
-		})
+		a.emitContextWindow(sessionID, operationID, contextUsed, contextSize)
 	}
 
 	// Only send completion event if not already sent by handleTurnComplete
@@ -753,32 +795,10 @@ func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationI
 	}
 
 	// Extract error message if failed
-	var errorMsg string
-	if msg.IsError {
-		errorMsg = "prompt failed"
-		// Try the error field first (Amp sends errors in this field)
-		if msg.Error != "" {
-			errorMsg = msg.Error
-		} else if errStr := msg.GetResultString(); errStr != "" {
-			errorMsg = errStr
-		} else if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
-			errorMsg = resultData.Text
-		}
-	}
+	errorMsg := a.extractResultErrorMsg(msg)
 
 	// Signal completion
-	a.mu.RLock()
-	resultCh := a.resultCh
-	a.mu.RUnlock()
-
-	if resultCh != nil {
-		select {
-		case resultCh <- resultComplete{success: !msg.IsError, err: errorMsg}:
-			a.logger.Debug("signaled prompt completion")
-		default:
-			a.logger.Warn("result channel full, dropping signal")
-		}
-	}
+	a.signalResultCompletion(!msg.IsError, errorMsg)
 
 	// Send error event if failed
 	if msg.IsError {

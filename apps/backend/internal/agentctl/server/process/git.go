@@ -567,49 +567,10 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		}
 	}
 
-	var outputs []string
-	var errors []string
-
-	// Handle untracked/new files - remove them from filesystem and index
-	if len(untrackedFiles) > 0 {
-		for _, path := range untrackedFiles {
-			// First, remove from index if staged
-			resetArgs := []string{"rm", "--cached", "--force", "--", path}
-			resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
-			if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
-				// Ignore "did not match" errors as file might not be in index
-				errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
-			}
-			if resetOutput != "" {
-				outputs = append(outputs, resetOutput)
-			}
-
-			// Then remove from working tree
-			fullPath := filepath.Join(g.workDir, path)
-			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				errors = append(errors, fmt.Sprintf("failed to remove %s: %s", path, err.Error()))
-			}
-		}
-	}
-
-	// Handle tracked files - restore from HEAD
-	if len(trackedFiles) > 0 {
-		// Use git restore to discard changes (Git 2.23+)
-		// --source=HEAD: restore from HEAD
-		// --staged: remove from index
-		// --worktree: remove from working tree
-		// --: separator between options and paths
-		args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, trackedFiles...)
-
-		output, err := g.runGitCommand(ctx, args...)
-		if output != "" {
-			outputs = append(outputs, output)
-		}
-
-		if err != nil {
-			errors = append(errors, err.Error())
-		}
-	}
+	outputs, errors := g.discardUntrackedFiles(ctx, untrackedFiles)
+	trackedOutputs, trackedErrors := g.discardTrackedFiles(ctx, trackedFiles)
+	outputs = append(outputs, trackedOutputs...)
+	errors = append(errors, trackedErrors...)
 
 	// Combine outputs and errors
 	result.Output = strings.Join(outputs, "\n")
@@ -627,6 +588,39 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		zap.Int("tracked_files", len(trackedFiles)),
 		zap.Bool("success", result.Success))
 	return result, nil
+}
+
+func (g *GitOperator) discardUntrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
+	for _, path := range paths {
+		resetArgs := []string{"rm", "--cached", "--force", "--", path}
+		resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
+		if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
+			errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
+		}
+		if resetOutput != "" {
+			outputs = append(outputs, resetOutput)
+		}
+		fullPath := filepath.Join(g.workDir, path)
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			errors = append(errors, fmt.Sprintf("failed to remove %s: %s", path, err.Error()))
+		}
+	}
+	return outputs, errors
+}
+
+func (g *GitOperator) discardTrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
+	output, err := g.runGitCommand(ctx, args...)
+	if output != "" {
+		outputs = append(outputs, output)
+	}
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
+	return outputs, errors
 }
 
 // Abort aborts an in-progress merge or rebase operation.
@@ -678,6 +672,41 @@ type CommitDiffResult struct {
 	Error        string                 `json:"error,omitempty"`
 }
 
+// isHexChar reports whether r is a valid hexadecimal digit (0-9, a-f, A-F).
+func isHexChar(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// validateCommitSHA returns an error string if sha is not a valid hex SHA, or "" if it is valid.
+func validateCommitSHA(sha string) string {
+	if sha == "" || len(sha) > 64 {
+		return "invalid commit SHA"
+	}
+	for _, c := range sha {
+		if !isHexChar(c) {
+			return "invalid commit SHA: must be hexadecimal"
+		}
+	}
+	return ""
+}
+
+// sumFileDiffStats adds up insertions and deletions across all parsed file entries.
+func sumFileDiffStats(files map[string]interface{}) (insertions, deletions int) {
+	for _, fileInfo := range files {
+		fi, ok := fileInfo.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if additions, ok := fi["additions"].(int); ok {
+			insertions += additions
+		}
+		if dels, ok := fi["deletions"].(int); ok {
+			deletions += dels
+		}
+	}
+	return insertions, deletions
+}
+
 // ShowCommit gets the diff for a specific commit using git show.
 func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
 	result := &CommitDiffResult{
@@ -685,18 +714,9 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	}
 
 	// Validate commit SHA (basic validation - alphanumeric only)
-	if commitSHA == "" || len(commitSHA) > 64 {
-		result.Error = "invalid commit SHA"
+	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
+		result.Error = errMsg
 		return result, nil
-	}
-	for _, c := range commitSHA {
-		isDigit := c >= '0' && c <= '9'
-		isLowerHex := c >= 'a' && c <= 'f'
-		isUpperHex := c >= 'A' && c <= 'F'
-		if !isDigit && !isLowerHex && !isUpperHex {
-			result.Error = "invalid commit SHA: must be hexadecimal"
-			return result, nil
-		}
 	}
 
 	// Get commit metadata
@@ -724,18 +744,7 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	// Parse the diff output into files
 	result.Files = g.parseCommitDiff(diffOutput)
 	result.FilesChanged = len(result.Files)
-
-	// Calculate total insertions/deletions
-	for _, fileInfo := range result.Files {
-		if fi, ok := fileInfo.(map[string]interface{}); ok {
-			if additions, ok := fi["additions"].(int); ok {
-				result.Insertions += additions
-			}
-			if deletions, ok := fi["deletions"].(int); ok {
-				result.Deletions += deletions
-			}
-		}
-	}
+	result.Insertions, result.Deletions = sumFileDiffStats(result.Files)
 
 	result.Success = true
 	return result, nil
@@ -778,12 +787,13 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 		filePath := strings.TrimPrefix(bPath, "b/")
 
 		// Determine file status from diff content
-		status := "modified"
-		if strings.Contains(diffContent, "new file mode") {
+		status := fileStatusModified
+		switch {
+		case strings.Contains(diffContent, "new file mode"):
 			status = "added"
-		} else if strings.Contains(diffContent, "deleted file mode") {
-			status = "deleted"
-		} else if strings.Contains(diffContent, "rename from") {
+		case strings.Contains(diffContent, "deleted file mode"):
+			status = fileStatusDeleted
+		case strings.Contains(diffContent, "rename from"):
 			status = "renamed"
 		}
 

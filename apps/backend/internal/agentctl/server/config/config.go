@@ -182,36 +182,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
 	}
 
-	// Apply overrides if provided
-	if overrides != nil {
-		if overrides.Protocol != "" {
-			cfg.Protocol = overrides.Protocol
-		}
-		if overrides.AgentCommand != "" {
-			cfg.AgentCommand = overrides.AgentCommand
-		}
-		if overrides.WorkDir != "" {
-			cfg.WorkDir = overrides.WorkDir
-		}
-		if overrides.AutoStart != nil {
-			cfg.AutoStart = *overrides.AutoStart
-		}
-		if overrides.Env != nil {
-			cfg.AgentEnv = overrides.Env
-		}
-		if overrides.ApprovalPolicy != "" {
-			cfg.ApprovalPolicy = overrides.ApprovalPolicy
-		}
-		if overrides.AgentType != "" {
-			cfg.AgentType = overrides.AgentType
-		}
-		if len(overrides.McpServers) > 0 {
-			cfg.McpServers = overrides.McpServers
-		}
-		if overrides.SessionID != "" {
-			cfg.SessionID = overrides.SessionID
-		}
-	}
+	applyOverrides(cfg, overrides)
 
 	// Inject local kandev MCP server for MCP tunneling through the agent stream
 	// This ensures the kandev MCP server is available for protocols that read MCP config
@@ -230,6 +201,40 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	return cfg
+}
+
+// applyOverrides applies non-zero fields from overrides to cfg.
+func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
+	if overrides == nil {
+		return
+	}
+	if overrides.Protocol != "" {
+		cfg.Protocol = overrides.Protocol
+	}
+	if overrides.AgentCommand != "" {
+		cfg.AgentCommand = overrides.AgentCommand
+	}
+	if overrides.WorkDir != "" {
+		cfg.WorkDir = overrides.WorkDir
+	}
+	if overrides.AutoStart != nil {
+		cfg.AutoStart = *overrides.AutoStart
+	}
+	if overrides.Env != nil {
+		cfg.AgentEnv = overrides.Env
+	}
+	if overrides.ApprovalPolicy != "" {
+		cfg.ApprovalPolicy = overrides.ApprovalPolicy
+	}
+	if overrides.AgentType != "" {
+		cfg.AgentType = overrides.AgentType
+	}
+	if len(overrides.McpServers) > 0 {
+		cfg.McpServers = overrides.McpServers
+	}
+	if overrides.SessionID != "" {
+		cfg.SessionID = overrides.SessionID
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance

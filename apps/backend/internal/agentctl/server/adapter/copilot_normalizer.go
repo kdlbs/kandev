@@ -53,7 +53,7 @@ func (n *CopilotNormalizer) NormalizeToolCall(toolName string, args any) *stream
 		return n.normalizeEdit(argsMap)
 	case CopilotToolGlob, CopilotToolGrep, "search", "find":
 		return n.normalizeCodeSearch(toolNameLower, argsMap)
-	case CopilotToolWebFetch, CopilotToolWebSearch, "fetch", "http":
+	case CopilotToolWebFetch, CopilotToolWebSearch, "fetch", mcpServerTypeHTTP:
 		return n.normalizeHttpRequest(toolNameLower, argsMap)
 	default:
 		return n.normalizeGeneric(toolName, argsMap)
@@ -63,61 +63,94 @@ func (n *CopilotNormalizer) NormalizeToolCall(toolName string, args any) *stream
 // NormalizeToolResult updates the payload with tool result data.
 func (n *CopilotNormalizer) NormalizeToolResult(cachedPayload *streams.NormalizedPayload, result any, isError bool) *streams.NormalizedPayload {
 	if cachedPayload == nil {
-		// No cached payload, create a generic one with the result
-		output := n.extractOutput(result)
-		payload := streams.NewGeneric("unknown", nil)
-		if payload.Generic() != nil {
-			payload.Generic().Output = output
-		}
-		return payload
+		return n.normalizeResultNoCached(result)
 	}
 
-	// Update the cached payload with the result
 	switch cachedPayload.Kind() {
 	case streams.ToolKindShellExec:
-		if cachedPayload.ShellExec() != nil {
-			output, exitCode := n.parseShellResult(result)
-			cachedPayload.ShellExec().Output = &streams.ShellExecOutput{
-				Stdout:   output,
-				ExitCode: exitCode,
-			}
-			if isError {
-				cachedPayload.ShellExec().Output.Stderr = output
-				cachedPayload.ShellExec().Output.Stdout = ""
-			}
-		}
+		n.normalizeShellExecResult(cachedPayload, result, isError)
 	case streams.ToolKindHttpRequest:
-		if cachedPayload.HttpRequest() != nil {
-			if output, ok := n.extractOutput(result).(string); ok {
-				cachedPayload.HttpRequest().Response = output
-			}
-		}
+		n.normalizeHttpRequestResult(cachedPayload, result)
 	case streams.ToolKindGeneric:
-		if cachedPayload.Generic() != nil {
-			cachedPayload.Generic().Output = n.extractOutput(result)
-		}
+		n.normalizeGenericResult(cachedPayload, result)
 	case streams.ToolKindReadFile:
-		if cachedPayload.ReadFile() != nil {
-			if output, ok := n.extractOutput(result).(string); ok {
-				cachedPayload.ReadFile().Output = &streams.ReadFileOutput{
-					Content: output,
-				}
-			}
-		}
+		n.normalizeReadFileResult(cachedPayload, result)
 	case streams.ToolKindCodeSearch:
-		if cachedPayload.CodeSearch() != nil {
-			if output, ok := n.extractOutput(result).(string); ok {
-				// Parse file list from newline-separated output
-				files := n.parseFileList(output)
-				cachedPayload.CodeSearch().Output = &streams.CodeSearchOutput{
-					Files:     files,
-					FileCount: len(files),
-				}
-			}
-		}
+		n.normalizeCodeSearchResult(cachedPayload, result)
 	}
 
 	return cachedPayload
+}
+
+// normalizeResultNoCached creates a generic payload when no cached payload exists.
+func (n *CopilotNormalizer) normalizeResultNoCached(result any) *streams.NormalizedPayload {
+	output := n.extractOutput(result)
+	payload := streams.NewGeneric("unknown", nil)
+	if payload.Generic() != nil {
+		payload.Generic().Output = output
+	}
+	return payload
+}
+
+// normalizeShellExecResult populates ShellExec output from tool result.
+func (n *CopilotNormalizer) normalizeShellExecResult(payload *streams.NormalizedPayload, result any, isError bool) {
+	if payload.ShellExec() == nil {
+		return
+	}
+	output, exitCode := n.parseShellResult(result)
+	payload.ShellExec().Output = &streams.ShellExecOutput{
+		Stdout:   output,
+		ExitCode: exitCode,
+	}
+	if isError {
+		payload.ShellExec().Output.Stderr = output
+		payload.ShellExec().Output.Stdout = ""
+	}
+}
+
+// normalizeHttpRequestResult populates HttpRequest response from tool result.
+func (n *CopilotNormalizer) normalizeHttpRequestResult(payload *streams.NormalizedPayload, result any) {
+	if payload.HttpRequest() == nil {
+		return
+	}
+	if output, ok := n.extractOutput(result).(string); ok {
+		payload.HttpRequest().Response = output
+	}
+}
+
+// normalizeGenericResult populates Generic output from tool result.
+func (n *CopilotNormalizer) normalizeGenericResult(payload *streams.NormalizedPayload, result any) {
+	if payload.Generic() == nil {
+		return
+	}
+	payload.Generic().Output = n.extractOutput(result)
+}
+
+// normalizeReadFileResult populates ReadFile output from tool result.
+func (n *CopilotNormalizer) normalizeReadFileResult(payload *streams.NormalizedPayload, result any) {
+	if payload.ReadFile() == nil {
+		return
+	}
+	if output, ok := n.extractOutput(result).(string); ok {
+		payload.ReadFile().Output = &streams.ReadFileOutput{
+			Content: output,
+		}
+	}
+}
+
+// normalizeCodeSearchResult populates CodeSearch output from tool result.
+func (n *CopilotNormalizer) normalizeCodeSearchResult(payload *streams.NormalizedPayload, result any) {
+	if payload.CodeSearch() == nil {
+		return
+	}
+	if output, ok := n.extractOutput(result).(string); ok {
+		// Parse file list from newline-separated output
+		files := n.parseFileList(output)
+		payload.CodeSearch().Output = &streams.CodeSearchOutput{
+			Files:     files,
+			FileCount: len(files),
+		}
+	}
 }
 
 // toMap converts an argument to a map[string]any.
@@ -138,6 +171,16 @@ func (n *CopilotNormalizer) toMap(args any) map[string]any {
 	return nil
 }
 
+// extractStringFieldFromMap tries common output field names on a map.
+func extractStringFieldFromMap(m map[string]any) (string, bool) {
+	for _, key := range []string{"output", "stdout", "content", "text"} {
+		if v, ok := m[key].(string); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // extractOutput extracts a string output from various result formats.
 func (n *CopilotNormalizer) extractOutput(result any) any {
 	if result == nil {
@@ -148,42 +191,29 @@ func (n *CopilotNormalizer) extractOutput(result any) any {
 	case string:
 		return r
 	case map[string]any:
-		// Try common output field names
-		if output, ok := r["output"].(string); ok {
-			return output
-		}
-		if stdout, ok := r["stdout"].(string); ok {
-			return stdout
-		}
-		if content, ok := r["content"].(string); ok {
-			return content
-		}
-		if text, ok := r["text"].(string); ok {
-			return text
+		if v, ok := extractStringFieldFromMap(r); ok {
+			return v
 		}
 		return r
 	default:
-		// Handle struct types (like Copilot SDK's *Result) via JSON round-trip
-		if data, err := json.Marshal(result); err == nil {
-			var m map[string]any
-			if err := json.Unmarshal(data, &m); err == nil {
-				// Try to extract content from the unmarshaled map
-				if content, ok := m["content"].(string); ok {
-					return content
-				}
-				if output, ok := m["output"].(string); ok {
-					return output
-				}
-				if stdout, ok := m["stdout"].(string); ok {
-					return stdout
-				}
-				if text, ok := m["text"].(string); ok {
-					return text
-				}
-			}
-		}
+		return n.extractOutputFromStruct(result)
+	}
+}
+
+// extractOutputFromStruct handles struct types (like Copilot SDK's *Result) via JSON round-trip.
+func (n *CopilotNormalizer) extractOutputFromStruct(result any) any {
+	data, err := json.Marshal(result)
+	if err != nil {
 		return result
 	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return result
+	}
+	if v, ok := extractStringFieldFromMap(m); ok {
+		return v
+	}
+	return result
 }
 
 // parseShellResult extracts output and exit code from shell execution result.
@@ -199,47 +229,56 @@ func (n *CopilotNormalizer) parseShellResult(result any) (string, int) {
 	case string:
 		output = r
 	case map[string]any:
-		// Try various output field names used by different tools
-		output = shared.GetString(r, "output")
-		if output == "" {
-			output = shared.GetString(r, "stdout")
-		}
-		if output == "" {
-			output = shared.GetString(r, "content")
-		}
-		if output == "" {
-			output = shared.GetString(r, "text")
-		}
-		exitCode = shared.GetInt(r, "exitCode")
-		if exitCode == 0 {
-			exitCode = shared.GetInt(r, "exit_code")
-		}
+		output, exitCode = n.parseShellResultFromMap(r)
 	default:
-		// Handle struct types (like Copilot SDK's *Result) via JSON round-trip
-		if data, err := json.Marshal(result); err == nil {
-			var m map[string]any
-			if err := json.Unmarshal(data, &m); err == nil {
-				// Try to extract content from the unmarshaled map
-				if content, ok := m["content"].(string); ok {
-					output = content
-				} else if out, ok := m["output"].(string); ok {
-					output = out
-				} else if stdout, ok := m["stdout"].(string); ok {
-					output = stdout
-				} else {
-					// Fallback: return the JSON string
-					output = string(data)
-				}
-			} else {
-				output = string(data)
-			}
-		}
+		output, exitCode = n.parseShellResultFromStruct(result)
 	}
 
 	// Strip Copilot's "<exited with exit code N>" suffix and extract exit code
 	output, exitCode = n.cleanShellOutput(output, exitCode)
 
 	return output, exitCode
+}
+
+// parseShellResultFromMap extracts output and exit code from a map result.
+func (n *CopilotNormalizer) parseShellResultFromMap(r map[string]any) (string, int) {
+	output := shared.GetString(r, "output")
+	if output == "" {
+		output = shared.GetString(r, "stdout")
+	}
+	if output == "" {
+		output = shared.GetString(r, "content")
+	}
+	if output == "" {
+		output = shared.GetString(r, "text")
+	}
+	exitCode := shared.GetInt(r, "exitCode")
+	if exitCode == 0 {
+		exitCode = shared.GetInt(r, "exit_code")
+	}
+	return output, exitCode
+}
+
+// parseShellResultFromStruct handles struct types via JSON round-trip.
+func (n *CopilotNormalizer) parseShellResultFromStruct(result any) (string, int) {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return "", 0
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return string(data), 0
+	}
+	if content, ok := m["content"].(string); ok {
+		return content, 0
+	}
+	if out, ok := m["output"].(string); ok {
+		return out, 0
+	}
+	if stdout, ok := m["stdout"].(string); ok {
+		return stdout, 0
+	}
+	return string(data), 0
 }
 
 // cleanShellOutput strips Copilot's "<exited with exit code N>" suffix from shell output

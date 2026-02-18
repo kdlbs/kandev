@@ -28,6 +28,13 @@ var (
 	ErrWorkspaceNotFound   = errors.New("workspace path not found")
 )
 
+// Editor kind constants for custom editor types.
+const (
+	editorKindCustomRemoteSSH  = "custom_remote_ssh"
+	editorKindCustomHostedURL  = "custom_hosted_url"
+	editorKindCustomCommand    = "custom_command"
+)
+
 type UserSettingsProvider interface {
 	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 	ClearDefaultEditorID(ctx context.Context, editorID string) error
@@ -91,43 +98,55 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 		return "", err
 	}
 
+	return s.dispatchEditorKind(editor, worktreePath, absPath, input.Line, input.Column)
+}
+
+func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPath string, line, column int) (string, error) {
 	switch editor.Kind {
-	case "custom_remote_ssh":
-		cfg, err := parseRemoteSSHConfig(editor.Config)
-		if err != nil {
-			return "", err
-		}
-		scheme := cfg.Scheme
-		if scheme == "" {
-			scheme = editor.Scheme
-		}
-		return buildRemoteSSHURL(scheme, cfg.User, cfg.Host, absPath, input.Line, input.Column), nil
-	case "custom_hosted_url":
+	case editorKindCustomRemoteSSH:
+		return openRemoteSSHEditor(editor, absPath, line, column)
+	case editorKindCustomHostedURL:
 		cfg, err := parseHostedURLConfig(editor.Config)
 		if err != nil {
 			return "", err
 		}
-		return buildHostedURL(cfg.URL, absPath, input.Line, input.Column)
-	case "custom_command":
+		return buildHostedURL(cfg.URL, absPath, line, column)
+	case editorKindCustomCommand:
 		cfg, err := parseCommandConfig(editor.Config)
 		if err != nil {
 			return "", err
 		}
-		return launchCommand(cfg.Command, worktreePath, absPath, input.Line, input.Column)
+		return launchCommand(cfg.Command, worktreePath, absPath, line, column)
 	default:
-		if !editor.Installed {
-			return "", ErrEditorUnavailable
-		}
-		if editor.Command == "" {
-			return "", ErrEditorConfigInvalid
-		}
-		args := buildLocalArgs(editor.Type, absPath, input.Line, input.Column)
-		cmd := exec.Command(editor.Command, args...)
-		if err := cmd.Start(); err != nil {
-			return "", fmt.Errorf("launch failed: %w", err)
-		}
-		return "", nil
+		return openBuiltinEditor(editor, absPath, line, column)
 	}
+}
+
+func openRemoteSSHEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
+	cfg, err := parseRemoteSSHConfig(editor.Config)
+	if err != nil {
+		return "", err
+	}
+	scheme := cfg.Scheme
+	if scheme == "" {
+		scheme = editor.Scheme
+	}
+	return buildRemoteSSHURL(scheme, cfg.User, cfg.Host, absPath, line, column), nil
+}
+
+func openBuiltinEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
+	if !editor.Installed {
+		return "", ErrEditorUnavailable
+	}
+	if editor.Command == "" {
+		return "", ErrEditorConfigInvalid
+	}
+	args := buildLocalArgs(editor.Type, absPath, line, column)
+	cmd := exec.Command(editor.Command, args...)
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("launch failed: %w", err)
+	}
+	return "", nil
 }
 
 func (s *Service) OpenFolder(ctx context.Context, sessionID string) error {
@@ -488,7 +507,7 @@ func expandCommandPlaceholders(template, worktreePath, absPath string, line, col
 
 func isCustomKind(kind string) bool {
 	switch kind {
-	case "custom_command", "custom_remote_ssh", "custom_hosted_url":
+	case editorKindCustomCommand, editorKindCustomRemoteSSH, editorKindCustomHostedURL:
 		return true
 	default:
 		return false
@@ -500,13 +519,13 @@ func validateEditorConfig(editor *models.Editor) error {
 		return ErrEditorConfigInvalid
 	}
 	switch editor.Kind {
-	case "custom_command":
+	case editorKindCustomCommand:
 		_, err := parseCommandConfig(editor.Config)
 		return err
-	case "custom_remote_ssh":
+	case editorKindCustomRemoteSSH:
 		_, err := parseRemoteSSHConfig(editor.Config)
 		return err
-	case "custom_hosted_url":
+	case editorKindCustomHostedURL:
 		_, err := parseHostedURLConfig(editor.Config)
 		return err
 	default:

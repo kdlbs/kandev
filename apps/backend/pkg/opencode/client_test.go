@@ -246,10 +246,8 @@ func TestClient_SendPrompt_WithModel(t *testing.T) {
 
 	if receivedBody.Model == nil {
 		t.Error("expected model to be set")
-	} else {
-		if receivedBody.Model.ProviderID != "anthropic" {
-			t.Errorf("expected providerID 'anthropic', got %s", receivedBody.Model.ProviderID)
-		}
+	} else if receivedBody.Model.ProviderID != "anthropic" {
+		t.Errorf("expected providerID 'anthropic', got %s", receivedBody.Model.ProviderID)
 	}
 	if receivedBody.Agent != "coder" {
 		t.Errorf("expected agent 'coder', got %s", receivedBody.Agent)

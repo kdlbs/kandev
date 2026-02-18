@@ -8,39 +8,58 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+// Tool operation type constants.
+const (
+	toolKindEdit    = "edit"
+	toolKindRead    = "read"
+	toolKindExecute = "execute"
+	toolKindGlob    = "glob"
+	toolKindGrep    = "grep"
+	toolKindSearch  = "search"
+
+	toolTypeEdit    = "tool_edit"
+	toolTypeRead    = "tool_read"
+	toolTypeExecute = "tool_execute"
+	toolTypeSearch  = "tool_search"
+	toolTypeGeneric = "tool_call"
+
+	toolStatusComplete = "complete"
+	toolStatusError    = "error"
+)
+
 // DetectToolOperationType determines the specific tool operation type from ACP tool data.
 // Used for logging and backwards compatibility.
 func DetectToolOperationType(toolKind string, args map[string]any) string {
 	// Check Auggie's "kind" field first
 	if kind, ok := args["kind"].(string); ok {
 		switch kind {
-		case "edit":
-			return "tool_edit"
-		case "read":
+		case toolKindEdit:
+			return toolTypeEdit
+		case toolKindRead:
 			// Check if this is a directory read (file listing)
 			if rawInput, ok := args["raw_input"].(map[string]any); ok {
 				if readType, ok := rawInput["type"].(string); ok && readType == "directory" {
-					return "tool_search"
+					return toolTypeSearch
 				}
 			}
-			return "tool_read"
-		case "execute":
-			return "tool_execute"
+			return toolTypeRead
+		case toolKindExecute:
+			return toolTypeExecute
 		}
 	}
 
 	// Fallback to tool kind/name matching
 	switch strings.ToLower(toolKind) {
-	case "edit":
-		return "tool_edit"
-	case "read", "view":
-		return "tool_read"
-	case "execute", "bash", "run":
-		return "tool_execute"
-	case "glob", "grep", "search":
-		return "tool_search"
+	case toolKindEdit:
+		return toolTypeEdit
+	case toolKindRead, "view":
+		return toolTypeRead
+	case toolKindExecute, "bash", "run":
+		return toolTypeExecute
+	case toolKindGlob, toolKindGrep, toolKindSearch:
+		return toolTypeSearch
 	default:
-		return "tool_call" // Generic fallback
+		return toolTypeGeneric // Generic fallback (intentional: different from tool type constants)
 	}
 }
 
@@ -61,13 +80,13 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 	}
 
 	switch strings.ToLower(kind) {
-	case "edit":
+	case toolKindEdit:
 		return n.normalizeEdit(args)
-	case "read", "view":
+	case toolKindRead, "view":
 		return n.normalizeRead(args)
-	case "execute", "bash", "run", "shell":
+	case toolKindExecute, "bash", "run", "shell":
 		return n.normalizeExecute(args)
-	case "glob", "grep", "search":
+	case toolKindGlob, toolKindGrep, toolKindSearch:
 		return n.normalizeCodeSearch(toolName, args)
 	default:
 		return n.normalizeGeneric(toolName, args)
@@ -305,9 +324,9 @@ func (n *Normalizer) normalizeCodeSearch(toolName string, args map[string]any) *
 
 	var query, glob string
 	switch strings.ToLower(toolName) {
-	case "glob":
+	case toolKindGlob:
 		glob = pattern
-	case "grep", "search":
+	case toolKindGrep, toolKindSearch:
 		query = shared.GetString(rawInput, "query")
 	}
 

@@ -44,6 +44,9 @@ type RepositoryPathValidation struct {
 
 var ErrPathNotAllowed = errors.New("path is not within an allowed root")
 
+// gitHEAD is the HEAD git ref.
+const gitHEAD = "HEAD"
+
 func (s *Service) DiscoverLocalRepositories(ctx context.Context, root string) (RepositoryDiscoveryResult, error) {
 	roots := s.discoveryRoots()
 	if root != "" {
@@ -98,13 +101,14 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	defaultBranch := ""
 	message := ""
 
-	if !allowed {
+	switch {
+	case !allowed:
 		message = "Path is outside the allowed roots"
-	} else if !exists {
+	case !exists:
 		message = "Path does not exist"
-	} else if !isDir {
+	case !isDir:
 		message = "Path is not a directory"
-	} else {
+	default:
 		var gitErr error
 		defaultBranch, gitErr = readGitDefaultBranch(absPath)
 		isGit = gitErr == nil
@@ -210,68 +214,20 @@ func normalizeRoots(roots []string) []string {
 
 func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRepository, error) {
 	repos := make([]LocalRepository, 0)
-	libraryRoot := filepath.Join(root, "Library")
-	cacheRoot := filepath.Join(root, ".cache")
+	walker := &repoWalker{
+		root:        root,
+		maxDepth:    maxDepth,
+		libraryRoot: filepath.Join(root, "Library"),
+		cacheRoot:   filepath.Join(root, ".cache"),
+		ctx:         ctx,
+	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+		repo, walkErr := walker.visit(path, d, err)
+		if walkErr != nil {
+			return walkErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if path == root {
-			return nil
-		}
-
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		depth := strings.Count(rel, string(os.PathSeparator))
-		if d.IsDir() && depth > maxDepth {
-			return fs.SkipDir
-		}
-
-		if isWithinRoot(path, libraryRoot) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if isWithinRoot(path, cacheRoot) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		name := d.Name()
-		if d.IsDir() && name == "Library" && filepath.Dir(path) == root {
-			return fs.SkipDir
-		}
-		if d.IsDir() && name == ".cache" && filepath.Dir(path) == root {
-			return fs.SkipDir
-		}
-		if d.IsDir() && strings.HasPrefix(name, ".") && name != ".git" {
-			return fs.SkipDir
-		}
-		if d.IsDir() && name == "node_modules" {
-			return fs.SkipDir
-		}
-		if name == ".git" {
-			repoPath := filepath.Dir(path)
-			repo := LocalRepository{
-				Path:          repoPath,
-				Name:          filepath.Base(repoPath),
-				DefaultBranch: "",
-			}
-			if branch, err := readGitDefaultBranch(repoPath); err == nil {
-				repo.DefaultBranch = branch
-			}
-			repos = append(repos, repo)
-			if d.IsDir() {
-				return fs.SkipDir
-			}
+		if repo != nil {
+			repos = append(repos, *repo)
 		}
 		return nil
 	})
@@ -282,6 +238,87 @@ func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRe
 		return nil, err
 	}
 	return repos, nil
+}
+
+// repoWalker holds state for the WalkDir callback used in scanRootForRepos.
+type repoWalker struct {
+	root        string
+	maxDepth    int
+	libraryRoot string
+	cacheRoot   string
+	ctx         context.Context
+}
+
+// visit is the WalkDir callback. Returns a non-nil *LocalRepository when a git repo is found.
+func (w *repoWalker) visit(path string, d fs.DirEntry, err error) (*LocalRepository, error) {
+	if err != nil {
+		return nil, nil //nolint:nilerr // skip entries that cannot be accessed
+	}
+	if w.ctx.Err() != nil {
+		return nil, w.ctx.Err()
+	}
+	if path == w.root {
+		return nil, nil
+	}
+
+	if skip := w.skipDir(path, d); skip != nil {
+		return nil, skip
+	}
+
+	if d.Name() == ".git" {
+		return w.makeRepo(path, d), nil
+	}
+	return nil, nil
+}
+
+// skipDir returns fs.SkipDir when a directory should not be traversed, or nil to continue.
+func (w *repoWalker) skipDir(path string, d fs.DirEntry) error {
+	rel, err := filepath.Rel(w.root, path)
+	if err != nil {
+		return nil
+	}
+	depth := strings.Count(rel, string(os.PathSeparator))
+	if d.IsDir() && depth > w.maxDepth {
+		return fs.SkipDir
+	}
+	if isWithinRoot(path, w.libraryRoot) || isWithinRoot(path, w.cacheRoot) {
+		if d.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
+	}
+	return w.skipByName(path, d)
+}
+
+// skipByName skips well-known directories that should never be scanned.
+func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
+	if !d.IsDir() {
+		return nil
+	}
+	name := d.Name()
+	if (name == "Library" || name == ".cache") && filepath.Dir(path) == w.root {
+		return fs.SkipDir
+	}
+	if strings.HasPrefix(name, ".") && name != ".git" {
+		return fs.SkipDir
+	}
+	if name == "node_modules" {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+// makeRepo builds a LocalRepository from a .git entry path.
+func (w *repoWalker) makeRepo(path string, d fs.DirEntry) *LocalRepository {
+	repoPath := filepath.Dir(path)
+	repo := &LocalRepository{
+		Path: repoPath,
+		Name: filepath.Base(repoPath),
+	}
+	if branch, err := readGitDefaultBranch(repoPath); err == nil {
+		repo.DefaultBranch = branch
+	}
+	return repo
 }
 
 func isPathAllowed(path string, roots []string) bool {
@@ -322,7 +359,7 @@ func readGitDefaultBranch(repoPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	headPath := filepath.Join(gitDir, "HEAD")
+	headPath := filepath.Join(gitDir, gitHEAD)
 	content, err := os.ReadFile(headPath)
 	if err != nil {
 		return "", err
@@ -336,7 +373,7 @@ func readGitDefaultBranch(repoPath string) (string, error) {
 		}
 	}
 	if trimmed != "" {
-		return "HEAD", nil
+		return gitHEAD, nil
 	}
 	return "", fmt.Errorf("unable to determine branch")
 }
@@ -389,110 +426,9 @@ func listGitBranches(repoPath string) ([]Branch, error) {
 	refsRoot := resolveCommonGitDir(gitDir)
 	branchMap := make(map[string]Branch)
 
-	// List local branches from refs/heads
-	localRefsRoot := filepath.Join(refsRoot, "refs", "heads")
-	_ = filepath.WalkDir(localRefsRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(localRefsRoot, path)
-		if err != nil {
-			return nil
-		}
-		if rel == "" || rel == "." {
-			return nil
-		}
-		name := filepath.ToSlash(rel)
-		branchMap[name] = Branch{
-			Name: name,
-			Type: "local",
-		}
-		return nil
-	})
-
-	// List remote branches from refs/remotes
-	remoteRefsRoot := filepath.Join(refsRoot, "refs", "remotes")
-	_ = filepath.WalkDir(remoteRefsRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(remoteRefsRoot, path)
-		if err != nil {
-			return nil
-		}
-		if rel == "" || rel == "." {
-			return nil
-		}
-		fullPath := filepath.ToSlash(rel)
-		parts := strings.SplitN(fullPath, "/", 2)
-		if len(parts) < 2 {
-			return nil
-		}
-		remoteName := parts[0]
-		branchName := parts[1]
-		// Skip HEAD references
-		if branchName == "HEAD" {
-			return nil
-		}
-		key := "remotes/" + fullPath
-		branchMap[key] = Branch{
-			Name:   branchName,
-			Type:   "remote",
-			Remote: remoteName,
-		}
-		return nil
-	})
-
-	// Read packed-refs file for additional branches
-	packedRefs := filepath.Join(refsRoot, "packed-refs")
-	if content, err := os.ReadFile(packedRefs); err == nil {
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
-				continue
-			}
-			parts := strings.Split(line, " ")
-			if len(parts) < 2 {
-				continue
-			}
-			ref := parts[1]
-			if strings.HasPrefix(ref, "refs/heads/") {
-				name := strings.TrimPrefix(ref, "refs/heads/")
-				if _, exists := branchMap[name]; !exists {
-					branchMap[name] = Branch{
-						Name: name,
-						Type: "local",
-					}
-				}
-			} else if strings.HasPrefix(ref, "refs/remotes/") {
-				fullPath := strings.TrimPrefix(ref, "refs/remotes/")
-				remoteParts := strings.SplitN(fullPath, "/", 2)
-				if len(remoteParts) < 2 {
-					continue
-				}
-				remoteName := remoteParts[0]
-				branchName := remoteParts[1]
-				if branchName == "HEAD" {
-					continue
-				}
-				key := "remotes/" + fullPath
-				if _, exists := branchMap[key]; !exists {
-					branchMap[key] = Branch{
-						Name:   branchName,
-						Type:   "remote",
-						Remote: remoteName,
-					}
-				}
-			}
-		}
-	}
+	collectLocalBranches(filepath.Join(refsRoot, "refs", "heads"), branchMap)
+	collectRemoteBranches(filepath.Join(refsRoot, "refs", "remotes"), branchMap)
+	parsePackedRefs(refsRoot, branchMap)
 
 	if len(branchMap) == 0 {
 		return nil, fmt.Errorf("no branches found")
@@ -502,8 +438,6 @@ func listGitBranches(repoPath string) ([]Branch, error) {
 	for _, branch := range branchMap {
 		result = append(result, branch)
 	}
-
-	// Sort: local branches first, then remote branches, alphabetically within each group
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Type != result[j].Type {
 			return result[i].Type == "local"
@@ -513,6 +447,73 @@ func listGitBranches(repoPath string) ([]Branch, error) {
 		}
 		return result[i].Name < result[j].Name
 	})
-
 	return result, nil
+}
+
+func collectLocalBranches(localRefsRoot string, branchMap map[string]Branch) {
+	_ = filepath.WalkDir(localRefsRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(localRefsRoot, path)
+		if err != nil || rel == "" || rel == "." {
+			return nil
+		}
+		name := filepath.ToSlash(rel)
+		branchMap[name] = Branch{Name: name, Type: "local"}
+		return nil
+	})
+}
+
+func collectRemoteBranches(remoteRefsRoot string, branchMap map[string]Branch) {
+	_ = filepath.WalkDir(remoteRefsRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(remoteRefsRoot, path)
+		if err != nil || rel == "" || rel == "." {
+			return nil
+		}
+		fullPath := filepath.ToSlash(rel)
+		parts := strings.SplitN(fullPath, "/", 2)
+		if len(parts) < 2 || parts[1] == gitHEAD {
+			return nil
+		}
+		branchMap["remotes/"+fullPath] = Branch{Name: parts[1], Type: "remote", Remote: parts[0]}
+		return nil
+	})
+}
+
+func parsePackedRefs(refsRoot string, branchMap map[string]Branch) {
+	content, err := os.ReadFile(filepath.Join(refsRoot, "packed-refs"))
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
+			continue
+		}
+		parts := strings.Split(line, " ")
+		if len(parts) < 2 {
+			continue
+		}
+		ref := parts[1]
+		if strings.HasPrefix(ref, "refs/heads/") {
+			name := strings.TrimPrefix(ref, "refs/heads/")
+			if _, exists := branchMap[name]; !exists {
+				branchMap[name] = Branch{Name: name, Type: "local"}
+			}
+		} else if strings.HasPrefix(ref, "refs/remotes/") {
+			fullPath := strings.TrimPrefix(ref, "refs/remotes/")
+			rp := strings.SplitN(fullPath, "/", 2)
+			if len(rp) < 2 || rp[1] == gitHEAD {
+				continue
+			}
+			key := "remotes/" + fullPath
+			if _, exists := branchMap[key]; !exists {
+				branchMap[key] = Branch{Name: rp[1], Type: "remote", Remote: rp[0]}
+			}
+		}
+	}
 }

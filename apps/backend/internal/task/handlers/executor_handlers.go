@@ -289,25 +289,10 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsDeleteExecutorRequest struct {
-	ID string `json:"id"`
-}
-
 func (h *ExecutorHandlers) wsDeleteExecutor(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDeleteExecutorRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	resp, err := h.controller.DeleteExecutor(ctx, dto.DeleteExecutorRequest{ID: req.ID})
-	if err != nil {
-		h.logger.Error("failed to delete executor", zap.Error(err))
-		if errors.Is(err, controller.ErrActiveTaskSessions) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "executor is used by an active agent session", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete executor", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return wsHandleIDRequestActiveCheck(ctx, msg, h.logger,
+		"failed to delete executor", "executor is used by an active agent session",
+		func(ctx context.Context, id string) (any, error) {
+			return h.controller.DeleteExecutor(ctx, dto.DeleteExecutorRequest{ID: id})
+		})
 }

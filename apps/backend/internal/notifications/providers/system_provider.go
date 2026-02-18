@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+
+// OS name constants used for runtime.GOOS comparisons.
+const (
+	osDarwin  = "darwin"
+	osLinux   = "linux"
+	osWindows = "windows"
+)
 type SystemProvider struct {
 	assets systemAssets
 }
@@ -21,12 +28,12 @@ func NewSystemProvider() *SystemProvider {
 
 func (p *SystemProvider) Available() bool {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		return true
-	case "windows":
+	case osWindows:
 		_, err := exec.LookPath("powershell.exe")
 		return err == nil
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			_, err := exec.LookPath("powershell.exe")
 			return err == nil
@@ -81,55 +88,8 @@ func parseSystemConfig(raw map[string]interface{}) (systemConfig, error) {
 	if raw == nil {
 		return cfg, nil
 	}
-	if value, ok := raw["sound_enabled"]; ok {
-		enabled, ok := value.(bool)
-		if !ok {
-			return cfg, fmt.Errorf("sound_enabled must be a boolean")
-		}
-		cfg.SoundEnabled = enabled
-	}
-	if value, ok := raw["sound_file"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("sound_file must be a string")
-		}
-		cfg.SoundFile = strings.TrimSpace(text)
-	}
-	if value, ok := raw["app_name"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("app_name must be a string")
-		}
-		if strings.TrimSpace(text) != "" {
-			cfg.AppName = strings.TrimSpace(text)
-		}
-	}
-	if value, ok := raw["icon_path"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("icon_path must be a string")
-		}
-		cfg.IconPath = strings.TrimSpace(text)
-	}
-	if value, ok := raw["timeout_ms"]; ok {
-		switch v := value.(type) {
-		case float64:
-			cfg.TimeoutMS = int(v)
-		case int:
-			cfg.TimeoutMS = v
-		case int64:
-			cfg.TimeoutMS = int(v)
-		case string:
-			if strings.TrimSpace(v) != "" {
-				parsed, err := strconv.Atoi(strings.TrimSpace(v))
-				if err != nil {
-					return cfg, fmt.Errorf("timeout_ms must be a number")
-				}
-				cfg.TimeoutMS = parsed
-			}
-		default:
-			return cfg, fmt.Errorf("timeout_ms must be a number")
-		}
+	if err := applySystemConfigFields(&cfg, raw); err != nil {
+		return cfg, err
 	}
 	if cfg.TimeoutMS <= 0 {
 		cfg.TimeoutMS = 10000
@@ -137,16 +97,112 @@ func parseSystemConfig(raw map[string]interface{}) (systemConfig, error) {
 	return cfg, nil
 }
 
+func applySystemConfigFields(cfg *systemConfig, raw map[string]interface{}) error {
+	if err := parseSoundEnabled(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseSoundFile(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseAppName(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseIconPath(cfg, raw); err != nil {
+		return err
+	}
+	return parseTimeoutMS(cfg, raw)
+}
+
+func parseSoundEnabled(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["sound_enabled"]
+	if !ok {
+		return nil
+	}
+	enabled, ok := value.(bool)
+	if !ok {
+		return fmt.Errorf("sound_enabled must be a boolean")
+	}
+	cfg.SoundEnabled = enabled
+	return nil
+}
+
+func parseSoundFile(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["sound_file"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("sound_file must be a string")
+	}
+	cfg.SoundFile = strings.TrimSpace(text)
+	return nil
+}
+
+func parseAppName(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["app_name"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("app_name must be a string")
+	}
+	if trimmed := strings.TrimSpace(text); trimmed != "" {
+		cfg.AppName = trimmed
+	}
+	return nil
+}
+
+func parseIconPath(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["icon_path"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("icon_path must be a string")
+	}
+	cfg.IconPath = strings.TrimSpace(text)
+	return nil
+}
+
+func parseTimeoutMS(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["timeout_ms"]
+	if !ok {
+		return nil
+	}
+	switch v := value.(type) {
+	case float64:
+		cfg.TimeoutMS = int(v)
+	case int:
+		cfg.TimeoutMS = v
+	case int64:
+		cfg.TimeoutMS = int(v)
+	case string:
+		if strings.TrimSpace(v) != "" {
+			parsed, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				return fmt.Errorf("timeout_ms must be a number")
+			}
+			cfg.TimeoutMS = parsed
+		}
+	default:
+		return fmt.Errorf("timeout_ms must be a number")
+	}
+	return nil
+}
+
 func (p *SystemProvider) sendNotification(ctx context.Context, cfg systemConfig, title, body string) error {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		return runCommand(ctx, "osascript", "-e", buildAppleScript(title, body))
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			return p.sendWindowsNotification(ctx, cfg, title, body)
 		}
 		return sendLinuxNotification(ctx, cfg, title, body)
-	case "windows":
+	case osWindows:
 		return p.sendWindowsNotification(ctx, cfg, title, body)
 	default:
 		return fmt.Errorf("system notifications not supported on %s", runtime.GOOS)
@@ -204,13 +260,13 @@ func sendLinuxNotification(ctx context.Context, cfg systemConfig, title, body st
 
 func (p *SystemProvider) playSound(ctx context.Context, cfg systemConfig) error {
 	switch runtime.GOOS {
-	case "darwin":
+	case osDarwin:
 		soundPath := cfg.SoundFile
 		if soundPath == "" {
 			soundPath = "/System/Library/Sounds/Glass.aiff"
 		}
 		return runCommand(ctx, "afplay", soundPath)
-	case "linux":
+	case osLinux:
 		if isWSL() {
 			return p.playWindowsSound(ctx, cfg)
 		}
@@ -223,7 +279,7 @@ func (p *SystemProvider) playSound(ctx context.Context, cfg systemConfig) error 
 			}
 		}
 		return runCommand(ctx, "sh", "-c", "printf '\\a'")
-	case "windows":
+	case osWindows:
 		return p.playWindowsSound(ctx, cfg)
 	default:
 		return nil
@@ -269,7 +325,7 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 }
 
 func isWSL() bool {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != osLinux {
 		return false
 	}
 	if os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSL_INTEROP") != "" {

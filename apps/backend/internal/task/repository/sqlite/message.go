@@ -123,34 +123,48 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 	if limit < 0 {
 		limit = 0
 	}
-
 	sortDir := "ASC"
 	if strings.EqualFold(opts.Sort, "desc") {
 		sortDir = "DESC"
 	}
+	cursor, err := r.resolveMessageCursor(ctx, sessionID, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	query, args := buildListMessagesQuery(sessionID, opts, cursor, sortDir, limit)
+	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanMessageRows(rows, limit)
+}
 
-	var cursor *models.Message
+func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string, opts models.ListMessagesOptions) (*models.Message, error) {
 	if opts.Before != "" {
-		var err error
-		cursor, err = r.GetMessage(ctx, opts.Before)
+		cursor, err := r.GetMessage(ctx, opts.Before)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		if cursor.TaskSessionID != sessionID {
-			return nil, false, fmt.Errorf("message cursor not found: %s", opts.Before)
+			return nil, fmt.Errorf("message cursor not found: %s", opts.Before)
 		}
+		return cursor, nil
 	}
 	if opts.After != "" {
-		var err error
-		cursor, err = r.GetMessage(ctx, opts.After)
+		cursor, err := r.GetMessage(ctx, opts.After)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		if cursor.TaskSessionID != sessionID {
-			return nil, false, fmt.Errorf("message cursor not found: %s", opts.After)
+			return nil, fmt.Errorf("message cursor not found: %s", opts.After)
 		}
+		return cursor, nil
 	}
+	return nil, nil
+}
 
+func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, cursor *models.Message, sortDir string, limit int) (string, []interface{}) {
 	query := `
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ?`
@@ -168,43 +182,39 @@ func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string
 		query += " LIMIT ?"
 		args = append(args, limit+1)
 	}
+	return query, args
+}
 
-	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
-		return nil, false, err
-	}
-	defer func() { _ = rows.Close() }()
-
+func scanMessageRows(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}, limit int) ([]*models.Message, bool, error) {
 	var result []*models.Message
 	for rows.Next() {
 		message := &models.Message{}
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
-		if err != nil {
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt); err != nil {
 			return nil, false, err
 		}
 		message.RequestsInput = requestsInput == 1
 		message.Type = models.MessageType(messageType)
-
 		if metadataJSON != "" && metadataJSON != "{}" {
 			if err := json.Unmarshal([]byte(metadataJSON), &message.Metadata); err != nil {
 				return nil, false, fmt.Errorf("failed to deserialize message metadata: %w", err)
 			}
 		}
-
 		result = append(result, message)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	hasMore := false
 	if limit > 0 && len(result) > limit {
-		hasMore = true
-		result = result[:limit]
+		return result[:limit], true, nil
 	}
-	return result, hasMore, nil
+	return result, false, nil
 }
 
 // DeleteMessage deletes a message by ID
@@ -221,10 +231,7 @@ func (r *Repository) DeleteMessage(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetMessageByToolCallID retrieves a tool message by session ID and tool_call_id in metadata.
-// Searches all message types that have a tool_call_id in metadata (tool_call, tool_read, tool_edit,
-// tool_execute, tool_search, todo, etc.).
-func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
+func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, fieldName, fieldValue, orderSuffix string) (*models.Message, error) {
 	message := &models.Message{}
 	var requestsInput int
 	var messageType string
@@ -233,9 +240,9 @@ func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, tool
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
 		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
-		ORDER BY created_at ASC LIMIT 1
-	`, dialect.JSONExtract(drv, "metadata", "tool_call_id"))
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, toolCallID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
+		%s
+	`, dialect.JSONExtract(drv, "metadata", fieldName), orderSuffix)
+	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
 		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -248,28 +255,16 @@ func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, tool
 	return message, nil
 }
 
+// GetMessageByToolCallID retrieves a tool message by session ID and tool_call_id in metadata.
+// Searches all message types that have a tool_call_id in metadata (tool_call, tool_read, tool_edit,
+// tool_execute, tool_search, todo, etc.).
+func (r *Repository) GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error) {
+	return r.getMessageByMetadataField(ctx, sessionID, "tool_call_id", toolCallID, "ORDER BY created_at ASC LIMIT 1")
+}
+
 // GetMessageByPendingID retrieves a message by session ID and pending_id in metadata
 func (r *Repository) GetMessageByPendingID(ctx context.Context, sessionID, pendingID string) (*models.Message, error) {
-	message := &models.Message{}
-	var requestsInput int
-	var messageType string
-	var metadataJSON string
-	drv := r.db.DriverName()
-	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
-		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
-	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(query), sessionID, pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
-		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	message.RequestsInput = requestsInput == 1
-	message.Type = models.MessageType(messageType)
-	if metadataJSON != "" {
-		_ = json.Unmarshal([]byte(metadataJSON), &message.Metadata)
-	}
-	return message, nil
+	return r.getMessageByMetadataField(ctx, sessionID, "pending_id", pendingID, "")
 }
 
 // FindMessageByPendingID finds a message by pending_id alone (without requiring session ID).

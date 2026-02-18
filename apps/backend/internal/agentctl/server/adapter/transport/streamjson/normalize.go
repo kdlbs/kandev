@@ -61,32 +61,68 @@ func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, res
 
 	switch payload.Kind() {
 	case streams.ToolKindReadFile:
-		if payload.ReadFile() != nil && resultStr != "" {
-			shared.NormalizeReadResult(payload.ReadFile(), resultStr)
-		}
+		n.normalizeReadFileResult(payload, resultStr)
 	case streams.ToolKindCodeSearch:
-		if payload.CodeSearch() != nil && resultStr != "" {
-			shared.NormalizeCodeSearchResult(payload.CodeSearch(), resultStr)
-		}
+		n.normalizeCodeSearchResult(payload, resultStr)
 	case streams.ToolKindModifyFile:
-		if payload.ModifyFile() != nil && resultStr != "" {
-			shared.NormalizeModifyResult(payload.ModifyFile(), resultStr)
-		}
+		n.normalizeModifyFileResult(payload, resultStr)
 	case streams.ToolKindShellExec:
-		if payload.ShellExec() != nil {
-			shared.NormalizeShellResult(payload.ShellExec(), result)
-		}
+		n.normalizeShellExecResult(payload, result)
 	case streams.ToolKindHttpRequest:
-		if payload.HttpRequest() != nil {
-			if r, ok := result.(string); ok {
-				payload.HttpRequest().Response = r
-			}
-		}
+		n.normalizeHttpRequestResult(payload, result)
 	case streams.ToolKindGeneric:
-		if payload.Generic() != nil {
-			payload.Generic().Output = result
-		}
+		n.normalizeGenericResult(payload, result)
 	}
+}
+
+// normalizeReadFileResult populates ReadFile output.
+func (n *Normalizer) normalizeReadFileResult(payload *streams.NormalizedPayload, resultStr string) {
+	if payload.ReadFile() == nil || resultStr == "" {
+		return
+	}
+	shared.NormalizeReadResult(payload.ReadFile(), resultStr)
+}
+
+// normalizeCodeSearchResult populates CodeSearch output.
+func (n *Normalizer) normalizeCodeSearchResult(payload *streams.NormalizedPayload, resultStr string) {
+	if payload.CodeSearch() == nil || resultStr == "" {
+		return
+	}
+	shared.NormalizeCodeSearchResult(payload.CodeSearch(), resultStr)
+}
+
+// normalizeModifyFileResult populates ModifyFile output.
+func (n *Normalizer) normalizeModifyFileResult(payload *streams.NormalizedPayload, resultStr string) {
+	if payload.ModifyFile() == nil || resultStr == "" {
+		return
+	}
+	shared.NormalizeModifyResult(payload.ModifyFile(), resultStr)
+}
+
+// normalizeShellExecResult populates ShellExec output.
+func (n *Normalizer) normalizeShellExecResult(payload *streams.NormalizedPayload, result any) {
+	if payload.ShellExec() == nil {
+		return
+	}
+	shared.NormalizeShellResult(payload.ShellExec(), result)
+}
+
+// normalizeHttpRequestResult populates HttpRequest response.
+func (n *Normalizer) normalizeHttpRequestResult(payload *streams.NormalizedPayload, result any) {
+	if payload.HttpRequest() == nil {
+		return
+	}
+	if r, ok := result.(string); ok {
+		payload.HttpRequest().Response = r
+	}
+}
+
+// normalizeGenericResult populates Generic output.
+func (n *Normalizer) normalizeGenericResult(payload *streams.NormalizedPayload, result any) {
+	if payload.Generic() == nil {
+		return
+	}
+	payload.Generic().Output = result
 }
 
 // normalizeEdit converts stream-json Edit/Write tool data.

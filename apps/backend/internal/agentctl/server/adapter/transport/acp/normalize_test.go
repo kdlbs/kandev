@@ -31,23 +31,23 @@ func TestACPNormalization(t *testing.T) {
 
 			// Verify the Kind is set correctly based on tool type
 			switch toolType {
-			case "tool_edit":
+			case toolTypeEdit:
 				if payload.Kind() != streams.ToolKindModifyFile {
 					t.Errorf("expected Kind %q, got %q", streams.ToolKindModifyFile, payload.Kind())
 				}
-			case "tool_read":
+			case toolTypeRead:
 				if payload.Kind() != streams.ToolKindReadFile {
 					t.Errorf("expected Kind %q, got %q", streams.ToolKindReadFile, payload.Kind())
 				}
-			case "tool_execute":
+			case toolTypeExecute:
 				if payload.Kind() != streams.ToolKindShellExec {
 					t.Errorf("expected Kind %q, got %q", streams.ToolKindShellExec, payload.Kind())
 				}
-			case "tool_search":
+			case toolTypeSearch:
 				if payload.Kind() != streams.ToolKindCodeSearch {
 					t.Errorf("expected Kind %q, got %q", streams.ToolKindCodeSearch, payload.Kind())
 				}
-			case "tool_call":
+			case toolTypeGeneric:
 				if payload.Kind() != streams.ToolKindGeneric {
 					t.Errorf("expected Kind %q, got %q", streams.ToolKindGeneric, payload.Kind())
 				}
@@ -68,73 +68,73 @@ func TestDetectToolOperationType(t *testing.T) {
 			name:     "edit kind from args",
 			toolKind: "",
 			args:     map[string]any{"kind": "edit"},
-			want:     "tool_edit",
+			want:     toolTypeEdit,
 		},
 		{
 			name:     "read kind from args",
 			toolKind: "",
 			args:     map[string]any{"kind": "read"},
-			want:     "tool_read",
+			want:     toolTypeRead,
 		},
 		{
 			name:     "execute kind from args",
 			toolKind: "",
 			args:     map[string]any{"kind": "execute"},
-			want:     "tool_execute",
+			want:     toolTypeExecute,
 		},
 		{
 			name:     "edit from toolKind parameter",
 			toolKind: "edit",
 			args:     map[string]any{},
-			want:     "tool_edit",
+			want:     toolTypeEdit,
 		},
 		{
 			name:     "read from toolKind parameter",
 			toolKind: "read",
 			args:     map[string]any{},
-			want:     "tool_read",
+			want:     toolTypeRead,
 		},
 		{
 			name:     "view from toolKind parameter",
 			toolKind: "view",
 			args:     map[string]any{},
-			want:     "tool_read",
+			want:     toolTypeRead,
 		},
 		{
 			name:     "bash from toolKind parameter",
 			toolKind: "bash",
 			args:     map[string]any{},
-			want:     "tool_execute",
+			want:     toolTypeExecute,
 		},
 		{
 			name:     "run from toolKind parameter",
 			toolKind: "run",
 			args:     map[string]any{},
-			want:     "tool_execute",
+			want:     toolTypeExecute,
 		},
 		{
 			name:     "search kind returns tool_search",
 			toolKind: "search",
 			args:     map[string]any{"kind": "search"},
-			want:     "tool_search",
+			want:     toolTypeSearch,
 		},
 		{
 			name:     "unknown kind falls back to tool_call",
 			toolKind: "custom_tool",
 			args:     map[string]any{"kind": "custom_tool"},
-			want:     "tool_call",
+			want:     toolTypeGeneric,
 		},
 		{
 			name:     "empty kind and args falls back to tool_call",
 			toolKind: "",
 			args:     map[string]any{},
-			want:     "tool_call",
+			want:     toolTypeGeneric,
 		},
 		{
 			name:     "args kind takes priority over toolKind",
 			toolKind: "read",
 			args:     map[string]any{"kind": "edit"},
-			want:     "tool_edit",
+			want:     toolTypeEdit,
 		},
 		{
 			name:     "read with directory type returns tool_search",
@@ -145,7 +145,7 @@ func TestDetectToolOperationType(t *testing.T) {
 					"type": "directory",
 				},
 			},
-			want: "tool_search",
+			want: toolTypeSearch,
 		},
 	}
 

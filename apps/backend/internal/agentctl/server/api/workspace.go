@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
@@ -52,40 +54,11 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	defer close(done)
 
 	// Handle incoming messages (shell_input, shell_resize, ping) in a goroutine
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				var msg types.WorkspaceStreamMessage
-				if err := conn.ReadJSON(&msg); err != nil {
-					s.logger.Debug("workspace stream WebSocket read error", zap.Error(err))
-					return
-				}
-
-				switch msg.Type {
-				case types.WorkspaceMessageTypeShellInput:
-					if shell != nil {
-						if _, err := shell.Write([]byte(msg.Data)); err != nil {
-							s.logger.Debug("shell write error", zap.Error(err))
-						}
-					}
-				case types.WorkspaceMessageTypeShellResize:
-					// Resize is currently not implemented in the shell session
-					// TODO: Implement shell.Resize(cols, rows) when needed
-					s.logger.Debug("shell resize requested", zap.Int("cols", msg.Cols), zap.Int("rows", msg.Rows))
-				case types.WorkspaceMessageTypePing:
-					// Respond with pong
-					pongMsg := types.NewWorkspacePong()
-					if err := conn.WriteJSON(pongMsg); err != nil {
-						s.logger.Debug("workspace stream pong write error", zap.Error(err))
-						return
-					}
-				}
-			}
-		}
-	}()
+	var shellWriter io.Writer
+	if shell != nil {
+		shellWriter = shell
+	}
+	go s.handleWorkspaceStreamInput(conn, shellWriter, done)
 
 	// Forward all workspace events to WebSocket
 	for {
@@ -122,7 +95,7 @@ func (s *Server) handleFileTree(c *gin.Context) {
 	depth := 1
 	if d := c.Query("depth"); d != "" {
 		if _, err := json.Number(d).Int64(); err == nil {
-			depth = int(mustParseInt(d))
+			depth = mustParseInt(d)
 		}
 	}
 
@@ -258,6 +231,37 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 		Path:    path,
 		Success: true,
 	})
+}
+
+func (s *Server) handleWorkspaceStreamInput(conn *websocket.Conn, shell io.Writer, done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			var msg types.WorkspaceStreamMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				s.logger.Debug("workspace stream WebSocket read error", zap.Error(err))
+				return
+			}
+			switch msg.Type {
+			case types.WorkspaceMessageTypeShellInput:
+				if shell != nil {
+					if _, err := shell.Write([]byte(msg.Data)); err != nil {
+						s.logger.Debug("shell write error", zap.Error(err))
+					}
+				}
+			case types.WorkspaceMessageTypeShellResize:
+				s.logger.Debug("shell resize requested", zap.Int("cols", msg.Cols), zap.Int("rows", msg.Rows))
+			case types.WorkspaceMessageTypePing:
+				pongMsg := types.NewWorkspacePong()
+				if err := conn.WriteJSON(pongMsg); err != nil {
+					s.logger.Debug("workspace stream pong write error", zap.Error(err))
+					return
+				}
+			}
+		}
+	}
 }
 
 // mustParseInt parses a string to int, returns 0 on error

@@ -102,7 +102,8 @@ func TestNewStoreProfileResolver(t *testing.T) {
 
 	if resolver == nil {
 		t.Fatal("expected non-nil resolver")
-	} else if resolver.store != mockRepo {
+	}
+	if resolver.store != mockRepo {
 		t.Error("expected resolver to use the provided store")
 	}
 }
@@ -137,28 +138,27 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info == nil {
 		t.Fatal("expected non-nil profile info")
-	} else {
-		if info.ProfileID != "profile-123" {
-			t.Errorf("expected ProfileID 'profile-123', got '%s'", info.ProfileID)
-		}
-		if info.ProfileName != "My Profile" {
-			t.Errorf("expected ProfileName 'My Profile', got '%s'", info.ProfileName)
-		}
-		if info.AgentID != "agent-456" {
-			t.Errorf("expected AgentID 'agent-456', got '%s'", info.AgentID)
-		}
-		if info.AgentName != "claude" {
-			t.Errorf("expected AgentName 'claude', got '%s'", info.AgentName)
-		}
-		if info.Model != "claude-3.5-sonnet" {
-			t.Errorf("expected Model 'claude-3.5-sonnet', got '%s'", info.Model)
-		}
-		if info.AutoApprove != true {
-			t.Error("expected AutoApprove to be true")
-		}
-		if info.DangerouslySkipPermissions != false {
-			t.Error("expected DangerouslySkipPermissions to be false")
-		}
+	}
+	if info.ProfileID != "profile-123" {
+		t.Errorf("expected ProfileID 'profile-123', got '%s'", info.ProfileID)
+	}
+	if info.ProfileName != "My Profile" {
+		t.Errorf("expected ProfileName 'My Profile', got '%s'", info.ProfileName)
+	}
+	if info.AgentID != "agent-456" {
+		t.Errorf("expected AgentID 'agent-456', got '%s'", info.AgentID)
+	}
+	if info.AgentName != "claude" {
+		t.Errorf("expected AgentName 'claude', got '%s'", info.AgentName)
+	}
+	if info.Model != "claude-3.5-sonnet" {
+		t.Errorf("expected Model 'claude-3.5-sonnet', got '%s'", info.Model)
+	}
+	if info.AutoApprove != true {
+		t.Error("expected AutoApprove to be true")
+	}
+	if info.DangerouslySkipPermissions != false {
+		t.Error("expected DangerouslySkipPermissions to be false")
 	}
 }
 
@@ -265,7 +265,8 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 	}
 	if info == nil {
 		t.Fatal("expected non-nil profile info")
-	} else if info.Model != "claude-sonnet-4-20250514" {
+	}
+	if info.Model != "claude-sonnet-4-20250514" {
 		// Should have fallback to registry's default model
 		t.Errorf("expected Model 'claude-sonnet-4-20250514' (from registry), got '%s'", info.Model)
 	}
@@ -300,7 +301,8 @@ func TestStoreProfileResolver_ResolveProfile_EmptyModelNoRegistry(t *testing.T) 
 	}
 	if info == nil {
 		t.Fatal("expected non-nil profile info")
-	} else if info.Model != "" {
+	}
+	if info.Model != "" {
 		// Model should remain empty since no registry fallback available
 		t.Errorf("expected empty Model when no registry fallback, got '%s'", info.Model)
 	}
