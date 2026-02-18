@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useRef, memo, useCallback } from 'react';
+import { memo } from 'react';
 import { IconCheck, IconX, IconFileCode2 } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { FilePathButton } from './file-path-button';
 import type { Message } from '@/lib/types/http';
 import { ExpandableRow } from './expandable-row';
+import { useExpandState } from './use-expand-state';
 
 type ReadFileOutput = {
   content?: string;
@@ -21,15 +22,10 @@ type ReadFilePayload = {
   output?: ReadFileOutput;
 };
 
-type NormalizedPayload = {
-  kind?: string;
-  read_file?: ReadFilePayload;
-};
-
 type ToolReadMetadata = {
   tool_call_id?: string;
   status?: 'pending' | 'running' | 'complete' | 'error';
-  normalized?: NormalizedPayload;
+  normalized?: { read_file?: ReadFilePayload };
 };
 
 type ToolReadMessageProps = {
@@ -39,56 +35,33 @@ type ToolReadMessageProps = {
   onOpenFile?: (path: string) => void;
 };
 
-export const ToolReadMessage = memo(function ToolReadMessage({ comment, worktreePath, onOpenFile }: ToolReadMessageProps) {
+function ReadStatusIcon({ status }: { status: string | undefined }) {
+  if (status === 'complete') return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
+  if (status === 'error') return <IconX className="h-3.5 w-3.5 text-red-500" />;
+  if (status === 'running') return <GridSpinner className="text-muted-foreground" />;
+  return null;
+}
+
+function getReadSummary(lineCount: number | undefined): string {
+  if (lineCount) return `Read ${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+  return 'Read';
+}
+
+function parseReadMetadata(comment: Message) {
   const metadata = comment.metadata as ToolReadMetadata | undefined;
-  const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
-  const prevStatusRef = useRef(metadata?.status);
-
   const status = metadata?.status;
-  const normalized = metadata?.normalized;
-  const readFile = normalized?.read_file;
+  const readFile = metadata?.normalized?.read_file;
   const readOutput = readFile?.output;
-
   const filePath = readFile?.file_path;
   const hasOutput = !!readOutput?.content;
   const isSuccess = status === 'complete';
+  return { status, readOutput, filePath, hasOutput, isSuccess };
+}
 
-  // Reset manual state when status changes (allows auto-expand behavior to resume)
-  if (prevStatusRef.current !== status) {
-    prevStatusRef.current = status;
-    if (manualExpandState !== null) {
-      setManualExpandState(null);
-    }
-  }
-
-  // Derive expanded state: manual override takes precedence, otherwise auto-expand when running
+export const ToolReadMessage = memo(function ToolReadMessage({ comment, worktreePath, onOpenFile }: ToolReadMessageProps) {
+  const { status, readOutput, filePath, hasOutput, isSuccess } = parseReadMetadata(comment);
   const autoExpanded = status === 'running';
-  const isExpanded = manualExpandState ?? autoExpanded;
-
-  const handleToggle = useCallback(() => {
-    setManualExpandState((prev) => !(prev ?? autoExpanded));
-  }, [autoExpanded]);
-
-  const getStatusIcon = () => {
-    switch (status) {
-      case 'complete':
-        return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-      case 'error':
-        return <IconX className="h-3.5 w-3.5 text-red-500" />;
-      case 'running':
-        return <GridSpinner className="text-muted-foreground" />;
-      default:
-        return null;
-    }
-  };
-
-  // Generate summary text
-  const getSummary = () => {
-    if (readOutput?.line_count) {
-      return `Read ${readOutput.line_count} line${readOutput.line_count !== 1 ? 's' : ''}`;
-    }
-    return 'Read';
-  };
+  const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
   return (
     <ExpandableRow
@@ -96,16 +69,12 @@ export const ToolReadMessage = memo(function ToolReadMessage({ comment, worktree
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-            <span className="font-mono text-xs text-muted-foreground">{getSummary()}</span>
-            {!isSuccess && getStatusIcon()}
+            <span className="font-mono text-xs text-muted-foreground">{getReadSummary(readOutput?.line_count)}</span>
+            {!isSuccess && <ReadStatusIcon status={status} />}
           </span>
           {filePath && (
             <span className="min-w-0">
-              <FilePathButton
-                filePath={filePath}
-                worktreePath={worktreePath}
-                onOpenFile={onOpenFile}
-              />
+              <FilePathButton filePath={filePath} worktreePath={worktreePath} onOpenFile={onOpenFile} />
             </span>
           )}
           {readOutput?.truncated && (

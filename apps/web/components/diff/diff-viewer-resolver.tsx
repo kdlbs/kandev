@@ -30,7 +30,8 @@ interface DiffViewerResolverProps {
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {
   const provider = useEditorProvider('diff-viewer');
   if (provider === 'monaco') {
-    const { enableComments: _enableComments, ...rest } = props;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { enableComments, ...rest } = props;
     return <MonacoDiffViewer {...rest} />;
   }
   return <PierreDiffViewer {...props} />;

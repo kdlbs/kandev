@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Textarea } from '@kandev/ui/textarea';
@@ -20,6 +20,33 @@ type PlanSelectionPopoverProps = {
   onDelete?: () => void; // Delete callback when editing existing comment
 };
 
+function computePopoverPosition(position: SelectionPosition): { left: number; top: number } {
+  const popoverWidth = 384;
+  const popoverHeight = 200;
+  const gap = 8;
+  let left = position.x + gap;
+  let top = position.y + gap;
+  if (left + popoverWidth > window.innerWidth - 16) left = Math.max(16, window.innerWidth - popoverWidth - 16);
+  if (top + popoverHeight > window.innerHeight - 16) top = Math.max(16, position.y - popoverHeight - gap);
+  return { left, top };
+}
+
+function usePopoverDismiss(onClose: () => void, popoverRef: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
+    };
+    const timer = setTimeout(() => { document.addEventListener('mousedown', handleClickOutside); }, 100);
+    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handleClickOutside); };
+  }, [onClose, popoverRef]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+}
+
 export function PlanSelectionPopover({
   selectedText,
   position,
@@ -32,38 +59,8 @@ export function PlanSelectionPopover({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Focus textarea on mount
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
-  // Close on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    // Delay adding listener to avoid immediate close from selection click
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [onClose]);
-
-  // Close on Escape
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  useEffect(() => { textareaRef.current?.focus(); }, []);
+  usePopoverDismiss(onClose, popoverRef);
 
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
@@ -71,41 +68,13 @@ export function PlanSelectionPopover({
     onClose();
   }, [comment, onAdd, selectedText, onClose]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [handleSubmit]
-  );
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSubmit(); }
+  }, [handleSubmit]);
 
   const isDisabled = !comment.trim();
-
-  // Truncate text for preview
-  const previewText = selectedText.length > 80
-    ? selectedText.slice(0, 80).trim() + '…'
-    : selectedText;
-
-  // Calculate position - anchor at bottom-right of selection, adjust if would overflow
-  const popoverWidth = 384; // w-96 = 24rem = 384px
-  const popoverHeight = 200; // approximate height of popover
-  const gap = 8;
-
-  // Start at bottom-right of selection
-  let left = position.x + gap;
-  let top = position.y + gap;
-
-  // If would overflow right, shift left
-  if (left + popoverWidth > window.innerWidth - 16) {
-    left = Math.max(16, window.innerWidth - popoverWidth - 16);
-  }
-
-  // If would overflow bottom, position above the selection instead
-  if (top + popoverHeight > window.innerHeight - 16) {
-    top = Math.max(16, position.y - popoverHeight - gap);
-  }
+  const previewText = selectedText.length > 80 ? selectedText.slice(0, 80).trim() + '…' : selectedText;
+  const { left, top } = computePopoverPosition(position);
 
   return (
     <div

@@ -17,6 +17,38 @@ type MonacoInlineDiffProps = {
   className?: string;
 };
 
+/** Parse original/modified content from diff data. */
+function parseDiffData(data: FileDiffData): { original: string; modified: string } {
+  if (data.oldContent || data.newContent) {
+    return { original: data.oldContent ?? '', modified: data.newContent ?? '' };
+  }
+  if (data.diff) {
+    return parsePatchToSides(data.diff);
+  }
+  return { original: '', modified: '' };
+}
+
+/** Reconstruct original/modified sides from a unified diff patch. */
+function parsePatchToSides(diff: string): { original: string; modified: string } {
+  const originalLines: string[] = [];
+  const modifiedLines: string[] = [];
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff ') || line.startsWith('index ') ||
+        line.startsWith('--- ') || line.startsWith('+++ ') ||
+        line.startsWith('@@') || line.startsWith('\\')) continue;
+    if (line.startsWith('-')) {
+      originalLines.push(line.slice(1));
+    } else if (line.startsWith('+')) {
+      modifiedLines.push(line.slice(1));
+    } else {
+      const content = line.startsWith(' ') ? line.slice(1) : line;
+      originalLines.push(content);
+      modifiedLines.push(content);
+    }
+  }
+  return { original: originalLines.join('\n'), modified: modifiedLines.join('\n') };
+}
+
 export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
   const { resolvedTheme } = useTheme();
   const language = getMonacoLanguage(data.filePath);
@@ -33,37 +65,10 @@ export function MonacoInlineDiff({ data, className }: MonacoInlineDiffProps) {
     };
   }, []);
 
-  const { original, modified } = useMemo(() => {
-    if (data.oldContent || data.newContent) {
-      return {
-        original: data.oldContent ?? '',
-        modified: data.newContent ?? '',
-      };
-    }
-
-    // Reconstruct from unified diff patch
-    if (data.diff) {
-      const originalLines: string[] = [];
-      const modifiedLines: string[] = [];
-      for (const line of data.diff.split('\n')) {
-        if (line.startsWith('diff ') || line.startsWith('index ') ||
-            line.startsWith('--- ') || line.startsWith('+++ ') ||
-            line.startsWith('@@') || line.startsWith('\\')) continue;
-        if (line.startsWith('-')) {
-          originalLines.push(line.slice(1));
-        } else if (line.startsWith('+')) {
-          modifiedLines.push(line.slice(1));
-        } else {
-          const content = line.startsWith(' ') ? line.slice(1) : line;
-          originalLines.push(content);
-          modifiedLines.push(content);
-        }
-      }
-      return { original: originalLines.join('\n'), modified: modifiedLines.join('\n') };
-    }
-
-    return { original: '', modified: '' };
-  }, [data.oldContent, data.newContent, data.diff]);
+  const { original, modified } = useMemo(
+    () => parseDiffData(data),
+    [data],
+  );
 
   const lineCount = Math.max(
     original.split('\n').length,

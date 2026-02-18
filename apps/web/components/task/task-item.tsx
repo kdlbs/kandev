@@ -71,30 +71,6 @@ export const TaskItem = memo(function TaskItem({
   const isInProgress = state === 'IN_PROGRESS' || state === 'SCHEDULING';
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
-  // Determine what to show on the right side (below step name)
-  const renderRightMeta = () => {
-    if (isInProgress) {
-      return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    }
-    if (hasDiffStats) {
-      return (
-        <span className="text-[11px] font-mono text-muted-foreground">
-          <span className="text-emerald-500">+{diffStats.additions}</span>
-          {' '}
-          <span className="text-rose-500">-{diffStats.deletions}</span>
-        </span>
-      );
-    }
-    if (updatedAt) {
-      return (
-        <span className="text-[11px] text-muted-foreground/60">
-          {formatRelativeTime(updatedAt)}
-        </span>
-      );
-    }
-    return null;
-  };
-
   return (
     <div
       role="button"
@@ -141,16 +117,12 @@ export const TaskItem = memo(function TaskItem({
             effectiveMenuOpen ? 'opacity-0' : 'group-hover:opacity-0'
           )}
         >
-          {isArchived ? (
-            <span className="text-[10px] text-muted-foreground/70 bg-amber-500/15 text-amber-500 px-1.5 py-px rounded-[6px]">
-              Archived
-            </span>
-          ) : stepName ? (
-            <span className="text-[10px] text-muted-foreground/70 bg-foreground/[0.06] px-1.5 py-px rounded-[6px]">
-              {stepName}
-            </span>
-          ) : null}
-          {renderRightMeta()}
+          <TaskItemStepBadge isArchived={isArchived} stepName={stepName} />
+          <TaskItemRightMeta
+            isInProgress={isInProgress}
+            diffStats={hasDiffStats ? diffStats : undefined}
+            updatedAt={updatedAt}
+          />
         </div>
 
         {/* Action buttons - hidden by default, visible on hover */}
@@ -179,3 +151,54 @@ export const TaskItem = memo(function TaskItem({
     </div>
   );
 });
+
+/** Step badge or "Archived" badge */
+function TaskItemStepBadge({ isArchived, stepName }: { isArchived?: boolean; stepName?: string }) {
+  if (isArchived) {
+    return (
+      <span className="text-[10px] text-muted-foreground/70 bg-amber-500/15 text-amber-500 px-1.5 py-px rounded-[6px]">
+        Archived
+      </span>
+    );
+  }
+  if (stepName) {
+    return (
+      <span className="text-[10px] text-muted-foreground/70 bg-foreground/[0.06] px-1.5 py-px rounded-[6px]">
+        {stepName}
+      </span>
+    );
+  }
+  return null;
+}
+
+/** Right-side meta: spinner, diff stats, or relative time */
+function TaskItemRightMeta({
+  isInProgress,
+  diffStats,
+  updatedAt,
+}: {
+  isInProgress: boolean;
+  diffStats?: DiffStats;
+  updatedAt?: string;
+}) {
+  if (isInProgress) {
+    return <IconLoader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+  }
+  if (diffStats) {
+    return (
+      <span className="text-[11px] font-mono text-muted-foreground">
+        <span className="text-emerald-500">+{diffStats.additions}</span>
+        {' '}
+        <span className="text-rose-500">-{diffStats.deletions}</span>
+      </span>
+    );
+  }
+  if (updatedAt) {
+    return (
+      <span className="text-[11px] text-muted-foreground/60">
+        {formatRelativeTime(updatedAt)}
+      </span>
+    );
+  }
+  return null;
+}

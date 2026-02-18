@@ -10,19 +10,22 @@ export type EditorContext =
 
 export type EditorProvider = 'monaco' | 'codemirror' | 'pierre-diffs' | 'tiptap';
 
+const MONACO: EditorProvider = 'monaco';
+const PIERRE_DIFFS: EditorProvider = 'pierre-diffs';
+
 const VALID_PROVIDERS: Record<EditorContext, EditorProvider[]> = {
-  'code-editor': ['monaco', 'codemirror'],
-  'diff-viewer': ['monaco', 'pierre-diffs'],
-  'chat-code-block': ['monaco', 'codemirror'],
-  'chat-diff': ['monaco', 'pierre-diffs'],
+  'code-editor': [MONACO, 'codemirror'],
+  'diff-viewer': [MONACO, PIERRE_DIFFS],
+  'chat-code-block': [MONACO, 'codemirror'],
+  'chat-diff': [MONACO, PIERRE_DIFFS],
   'plan-editor': ['tiptap'],
 };
 
 const DEFAULT_PROVIDERS: Record<EditorContext, EditorProvider> = {
-  'code-editor': 'monaco',
-  'diff-viewer': 'pierre-diffs',
-  'chat-code-block': 'monaco',
-  'chat-diff': 'pierre-diffs',
+  'code-editor': MONACO,
+  'diff-viewer': PIERRE_DIFFS,
+  'chat-code-block': MONACO,
+  'chat-diff': PIERRE_DIFFS,
   'plan-editor': 'tiptap',
 };
 
@@ -53,7 +56,7 @@ export const useEditorResolverStore = create<EditorResolverStore>()(
         const state = persisted as { providers: Record<EditorContext, EditorProvider> };
         return {
           ...state,
-          providers: { ...state.providers, 'diff-viewer': 'pierre-diffs', 'chat-diff': 'pierre-diffs' },
+          providers: { ...state.providers, 'diff-viewer': PIERRE_DIFFS, 'chat-diff': PIERRE_DIFFS },
         };
       },
     }

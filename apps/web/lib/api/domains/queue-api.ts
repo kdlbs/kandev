@@ -1,6 +1,8 @@
 import type { QueueStatus, QueuedMessage } from '@/lib/state/slices/session/types';
 import { getWebSocketClient } from '@/lib/ws/connection';
 
+const WS_CLIENT_UNAVAILABLE = 'WebSocket client not available';
+
 export type QueueMessageParams = {
   session_id: string;
   task_id: string;
@@ -15,7 +17,7 @@ export type QueueMessageParams = {
 export async function queueMessage(params: QueueMessageParams): Promise<QueuedMessage> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
 
   return client.request<QueuedMessage>('message.queue.add', params);
@@ -25,7 +27,7 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
 export async function cancelQueuedMessage(sessionId: string): Promise<QueuedMessage> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
 
   return client.request<QueuedMessage>('message.queue.cancel', { session_id: sessionId });
@@ -35,7 +37,7 @@ export async function cancelQueuedMessage(sessionId: string): Promise<QueuedMess
 export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
 
   return client.request<QueueStatus>('message.queue.get', { session_id: sessionId });
@@ -48,7 +50,7 @@ export async function updateQueuedMessage(
 ): Promise<QueueStatus> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
 
   return client.request<QueueStatus>('message.queue.update', { session_id: sessionId, content });

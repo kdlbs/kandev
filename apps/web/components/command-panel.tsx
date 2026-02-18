@@ -32,6 +32,7 @@ import { linkToSession } from '@/lib/links';
 import type { Task } from '@/lib/types/http';
 
 const ARCHIVED_STATES = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
+const MODE_SEARCH_TASKS: CommandPanelMode = 'search-tasks';
 
 function CommandItemRow({ cmd, onSelect }: { cmd: CommandItemType; onSelect: (cmd: CommandItemType) => void }) {
   return (
@@ -52,298 +53,206 @@ function CommandItemRow({ cmd, onSelect }: { cmd: CommandItemType; onSelect: (cm
   );
 }
 
-export function CommandPanel() {
-  const { open, setOpen } = useCommandPanelOpen();
-  const commands = useCommands();
-  const router = useRouter();
-  const { toast } = useToast();
+type TaskResultItemProps = { task: Task; stepMap: Map<string, { name: string; color: string }>; onSelect: (task: Task) => void };
+
+function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
+  const isArchived = ARCHIVED_STATES.has(task.state);
+  const step = stepMap.get(task.workflow_step_id);
+  return (
+    <CommandItem key={task.id} value={task.id} onSelect={() => onSelect(task)} className={isArchived ? 'opacity-60' : ''}>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <div className="flex items-center gap-2">
+          <IconSearch className="size-3 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium">{task.title}</span>
+          {step && <Badge variant="secondary" className="text-[0.6rem] shrink-0">{step.name}</Badge>}
+          {isArchived && <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">{task.state}</Badge>}
+        </div>
+        {task.updated_at && (
+          <div className="flex items-center gap-1.5 text-[0.6rem] text-muted-foreground pl-5">
+            <span>{formatDistanceToNow(new Date(task.updated_at), { addSuffix: true })}</span>
+          </div>
+        )}
+      </div>
+    </CommandItem>
+  );
+}
+
+type CommandsListContentProps = {
+  commands: CommandItemType[];
+  grouped: [string, CommandItemType[]][];
+  search: string;
+  onSelect: (cmd: CommandItemType) => void;
+};
+
+function CommandsListContent({ commands, grouped, search, onSelect }: CommandsListContentProps) {
+  return (
+    <>
+      <CommandEmpty>No commands found.</CommandEmpty>
+      {search.trim() ? (
+        <CommandGroup>
+          {commands.map((cmd) => <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />)}
+        </CommandGroup>
+      ) : (
+        grouped.map(([group, items]) => (
+          <CommandGroup key={group} heading={group}>
+            {items.map((cmd) => <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />)}
+          </CommandGroup>
+        ))
+      )}
+    </>
+  );
+}
+
+type SearchTasksContentProps = { isSearching: boolean; search: string; taskResults: Task[]; stepMap: Map<string, { name: string; color: string }>; onTaskSelect: (task: Task) => void };
+
+function SearchTasksContent({ isSearching, search, taskResults, stepMap, onTaskSelect }: SearchTasksContentProps) {
+  if (isSearching) return <div className="flex items-center justify-center py-6"><IconLoader2 className="size-4 animate-spin text-muted-foreground" /></div>;
+  if (search.trim() && taskResults.length === 0) return <CommandEmpty>No tasks found.</CommandEmpty>;
+  if (!search.trim()) return <CommandEmpty>Type to search tasks...</CommandEmpty>;
+  return (
+    <CommandGroup heading="Results">
+      {taskResults.map((task) => <TaskResultItem key={task.id} task={task} stepMap={stepMap} onSelect={onTaskSelect} />)}
+    </CommandGroup>
+  );
+}
+
+function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
+  if (mode === 'input') return inputCommand?.inputPlaceholder ?? 'Enter value...';
+  if (mode === MODE_SEARCH_TASKS) return 'Search for tasks...';
+  return 'Type a command...';
+}
+
+function getEnterLabel(mode: CommandPanelMode) {
+  if (mode === 'input') return 'Confirm';
+  if (mode === MODE_SEARCH_TASKS) return 'Open';
+  return 'Select';
+}
+
+function useCommandPanelState() {
   const [mode, setMode] = useState<CommandPanelMode>('commands');
   const [search, setSearch] = useState('');
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  return { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, setTaskResults, isSearching, setIsSearching };
+}
+
+function useCommandPanelEffects(
+  open: boolean,
+  state: ReturnType<typeof useCommandPanelState>,
+  workspaceId: string | null,
+) {
+  const { mode, search, setMode, setSearch, setInputCommand, setTaskResults, setIsSearching } = state;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      const t = setTimeout(() => { setMode('commands'); setSearch(''); setInputCommand(null); setTaskResults([]); }, 200);
+      return () => clearTimeout(t);
+    }
+  }, [open, setMode, setSearch, setInputCommand, setTaskResults]);
+
+  useEffect(() => {
+    if (mode !== MODE_SEARCH_TASKS) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+    if (!search.trim()) { setTaskResults([]); setIsSearching(false); return; }
+    setIsSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      if (!workspaceId) { setIsSearching(false); return; }
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const res = await listTasksByWorkspace(workspaceId, { query: search.trim(), page: 1, pageSize: 10 }, { init: { signal: controller.signal } });
+        if (!controller.signal.aborted) setTaskResults(res.tasks ?? []);
+      } catch {
+        if (!controller.signal.aborted) setTaskResults([]);
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
+      }
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); abortRef.current?.abort(); };
+  }, [search, mode, workspaceId, setTaskResults, setIsSearching]);
+}
+
+export function CommandPanel() {
+  const { open, setOpen } = useCommandPanelOpen();
+  const commands = useCommands();
+  const router = useRouter();
+  const { toast } = useToast();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
 
-  // Map step IDs to step names for display
+  const state = useCommandPanelState();
+  const { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, isSearching } = state;
+
+  useCommandPanelEffects(open, state, workspaceId);
+
   const stepMap = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
-    for (const step of kanbanSteps) {
-      map.set(step.id, { name: step.title, color: step.color });
-    }
+    for (const step of kanbanSteps) map.set(step.id, { name: step.title, color: step.color });
     return map;
   }, [kanbanSteps]);
 
-  // Toggle panel with Cmd+K, Cmd+P, or Cmd+Shift+P
   const openRef = useRef(open);
-  openRef.current = open;
+  useEffect(() => { openRef.current = open; }, [open]);
   const toggle = useCallback(() => setOpen(!openRef.current), [setOpen]);
   useKeyboardShortcut(SHORTCUTS.SEARCH, toggle);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggle);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggle);
 
-  // Reset state when panel closes
-  useEffect(() => {
-    if (!open) {
-      // Delay reset to avoid flash during close animation
-      const t = setTimeout(() => {
-        setMode('commands');
-        setSearch('');
-        setInputCommand(null);
-        setTaskResults([]);
-      }, 200);
-      return () => clearTimeout(t);
-    }
-  }, [open]);
-
-  // Debounced task search with AbortController to prevent stale results
-  const abortRef = useRef<AbortController | null>(null);
-  useEffect(() => {
-    if (mode !== 'search-tasks') return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-
-    if (!search.trim()) {
-      setTaskResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 10 },
-          { init: { signal: controller.signal } }
-        );
-        if (!controller.signal.aborted) {
-          setTaskResults(res.tasks ?? []);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setTaskResults([]);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsSearching(false);
-        }
-      }
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
-  }, [search, mode, workspaceId]);
-
-  // Group commands by group field, sorted by best (lowest) priority in each group
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItemType[]>();
-    for (const cmd of commands) {
-      const existing = map.get(cmd.group) ?? [];
-      existing.push(cmd);
-      map.set(cmd.group, existing);
-    }
-    // Sort groups by the minimum priority of their items
-    const entries = Array.from(map.entries()).sort(([, a], [, b]) => {
-      const minA = Math.min(...a.map((c) => c.priority ?? 100));
-      const minB = Math.min(...b.map((c) => c.priority ?? 100));
-      return minA - minB;
-    });
-    return entries;
+    for (const cmd of commands) { const existing = map.get(cmd.group) ?? []; existing.push(cmd); map.set(cmd.group, existing); }
+    return Array.from(map.entries()).sort(([, a], [, b]) => Math.min(...a.map((c) => c.priority ?? 100)) - Math.min(...b.map((c) => c.priority ?? 100)));
   }, [commands]);
 
-  const handleSelect = useCallback(
-    (cmd: CommandItemType) => {
-      if (cmd.enterMode) {
-        if (cmd.enterMode === 'input') setInputCommand(cmd);
-        setMode(cmd.enterMode);
-        setSearch('');
-        return;
-      }
-      if (cmd.action) {
-        setOpen(false);
-        cmd.action();
-      }
-    },
-    [setOpen]
-  );
+  const handleSelect = useCallback((cmd: CommandItemType) => {
+    if (cmd.enterMode) { if (cmd.enterMode === 'input') setInputCommand(cmd); setMode(cmd.enterMode); setSearch(''); return; }
+    if (cmd.action) { setOpen(false); cmd.action(); }
+  }, [setOpen, setMode, setSearch, setInputCommand]);
 
-  const handleTaskSelect = useCallback(
-    (task: Task) => {
-      setOpen(false);
-      if (task.primary_session_id) {
-        router.push(linkToSession(task.primary_session_id));
-      } else {
-        toast({ title: 'This task has no active session', variant: 'default' });
-      }
-    },
-    [setOpen, router, toast]
-  );
+  const handleTaskSelect = useCallback((task: Task) => {
+    setOpen(false);
+    if (task.primary_session_id) { router.push(linkToSession(task.primary_session_id)); }
+    else { toast({ title: 'This task has no active session', variant: 'default' }); }
+  }, [setOpen, router, toast]);
 
-  // Handle keyboard in sub-modes: Enter to submit, Backspace to go back
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (mode === 'input' && e.key === 'Enter' && search.trim() && inputCommand?.onInputSubmit) {
-        e.preventDefault();
-        setOpen(false);
-        inputCommand.onInputSubmit(search.trim());
-        return;
-      }
-      if (mode !== 'commands' && e.key === 'Backspace' && !search) {
-        e.preventDefault();
-        setMode('commands');
-        setSearch('');
-        setInputCommand(null);
-      }
-    },
-    [mode, search, inputCommand, setOpen]
-  );
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (mode === 'input' && e.key === 'Enter' && search.trim() && inputCommand?.onInputSubmit) {
+      e.preventDefault(); setOpen(false); inputCommand.onInputSubmit(search.trim()); return;
+    }
+    if (mode !== 'commands' && e.key === 'Backspace' && !search) {
+      e.preventDefault(); setMode('commands'); setSearch(''); setInputCommand(null);
+    }
+  }, [mode, search, inputCommand, setOpen, setMode, setSearch, setInputCommand]);
+
+  const goBack = useCallback(() => { setMode('commands'); setSearch(''); setInputCommand(null); }, [setMode, setSearch, setInputCommand]);
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} overlayClassName="supports-backdrop-filter:backdrop-blur-none!">
       <Command shouldFilter={mode === 'commands'} loop>
         <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
           {mode !== 'commands' && (
-            <button
-              onClick={() => { setMode('commands'); setSearch(''); setInputCommand(null); }}
-              className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
+            <button onClick={goBack} className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
               <span>←</span>
               <span>{mode === 'input' ? inputCommand?.label : 'Tasks'}</span>
               <span className="text-muted-foreground/50">›</span>
             </button>
           )}
-          <CommandInput
-            placeholder={
-              mode === 'input'
-                ? (inputCommand?.inputPlaceholder ?? 'Enter value...')
-                : mode === 'search-tasks'
-                  ? 'Search for tasks...'
-                  : 'Type a command...'
-            }
-            value={search}
-            onValueChange={setSearch}
-            onKeyDown={handleKeyDown}
-          />
+          <CommandInput placeholder={getInputPlaceholder(mode, inputCommand)} value={search} onValueChange={setSearch} onKeyDown={handleKeyDown} />
         </div>
-
         <CommandList>
-          {mode === 'commands' && (
-            <>
-              <CommandEmpty>No commands found.</CommandEmpty>
-              {search.trim() ? (
-                // Flat list when searching — lets cmdk rank by relevance globally
-                <CommandGroup>
-                  {commands.map((cmd) => (
-                    <CommandItemRow key={cmd.id} cmd={cmd} onSelect={handleSelect} />
-                  ))}
-                </CommandGroup>
-              ) : (
-                // Grouped by priority when browsing
-                grouped.map(([group, items]) => (
-                  <CommandGroup key={group} heading={group}>
-                    {items.map((cmd) => (
-                      <CommandItemRow key={cmd.id} cmd={cmd} onSelect={handleSelect} />
-                    ))}
-                  </CommandGroup>
-                ))
-              )}
-            </>
-          )}
-
-          {mode === 'search-tasks' && (
-            <>
-              {isSearching && (
-                <div className="flex items-center justify-center py-6">
-                  <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
-                </div>
-              )}
-              {!isSearching && search.trim() && taskResults.length === 0 && (
-                <CommandEmpty>No tasks found.</CommandEmpty>
-              )}
-              {!isSearching && !search.trim() && (
-                <CommandEmpty>Type to search tasks...</CommandEmpty>
-              )}
-              {!isSearching && taskResults.length > 0 && (
-                <CommandGroup heading="Results">
-                  {taskResults.map((task) => {
-                    const isArchived = ARCHIVED_STATES.has(task.state);
-                    const step = stepMap.get(task.workflow_step_id);
-                    return (
-                      <CommandItem
-                        key={task.id}
-                        value={task.id}
-                        onSelect={() => handleTaskSelect(task)}
-                        className={isArchived ? 'opacity-60' : ''}
-                      >
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <IconSearch className="size-3 shrink-0 text-muted-foreground" />
-                            <span className="truncate font-medium">{task.title}</span>
-                            {step && (
-                              <Badge variant="secondary" className="text-[0.6rem] shrink-0">
-                                {step.name}
-                              </Badge>
-                            )}
-                            {isArchived && (
-                              <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">
-                                {task.state}
-                              </Badge>
-                            )}
-                          </div>
-                          {task.updated_at && (
-                            <div className="flex items-center gap-1.5 text-[0.6rem] text-muted-foreground pl-5">
-                              <span>{formatDistanceToNow(new Date(task.updated_at), { addSuffix: true })}</span>
-                            </div>
-                          )}
-                        </div>
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              )}
-            </>
-          )}
-
-          {mode === 'input' && (
-            !search.trim()
-              ? <CommandEmpty>{inputCommand?.inputPlaceholder ?? 'Enter a value...'}</CommandEmpty>
-              : <CommandEmpty>Press Enter to confirm</CommandEmpty>
-          )}
+          {mode === 'commands' && <CommandsListContent commands={commands} grouped={grouped} search={search} onSelect={handleSelect} />}
+          {mode === MODE_SEARCH_TASKS && <SearchTasksContent isSearching={isSearching} search={search} taskResults={taskResults} stepMap={stepMap} onTaskSelect={handleTaskSelect} />}
+          {mode === 'input' && (!search.trim() ? <CommandEmpty>{inputCommand?.inputPlaceholder ?? 'Enter a value...'}</CommandEmpty> : <CommandEmpty>Press Enter to confirm</CommandEmpty>)}
         </CommandList>
-
-        {/* Footer bar */}
         <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
-          {mode === 'commands' && (
-            <KbdGroup>
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd>
-              <span>Navigate</span>
-            </KbdGroup>
-          )}
-          <KbdGroup>
-            <Kbd>↵</Kbd>
-            <span>{mode === 'input' ? 'Confirm' : mode === 'search-tasks' ? 'Open' : 'Select'}</span>
-          </KbdGroup>
-          {mode !== 'commands' && (
-            <KbdGroup>
-              <Kbd>⌫</Kbd>
-              <span>Back</span>
-            </KbdGroup>
-          )}
-          <KbdGroup>
-            <Kbd>esc</Kbd>
-            <span>Close</span>
-          </KbdGroup>
+          {mode === 'commands' && <KbdGroup><Kbd>↑</Kbd><Kbd>↓</Kbd><span>Navigate</span></KbdGroup>}
+          <KbdGroup><Kbd>↵</Kbd><span>{getEnterLabel(mode)}</span></KbdGroup>
+          {mode !== 'commands' && <KbdGroup><Kbd>⌫</Kbd><span>Back</span></KbdGroup>}
+          <KbdGroup><Kbd>esc</Kbd><span>Close</span></KbdGroup>
         </div>
       </Command>
     </CommandDialog>

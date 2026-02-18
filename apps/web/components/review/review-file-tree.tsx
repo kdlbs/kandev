@@ -70,111 +70,20 @@ type TreeNodeProps = {
   depth: number;
 };
 
-function TreeNode({
-  node,
-  reviewedFiles,
-  staleFiles,
-  commentCountByFile,
-  selectedFile,
-  onSelectFile,
-  onToggleReviewed,
-  depth,
-}: TreeNodeProps) {
-  const [expanded, setExpanded] = useState(true);
-
-  const handleToggle = useCallback(() => {
-    setExpanded((prev) => !prev);
-  }, []);
-
-  if (node.isDir) {
-    // Calculate aggregate stats for directory
-    const dirFiles = collectFiles(node);
-    const dirReviewed = dirFiles.filter((f) => reviewedFiles.has(f.path) && !staleFiles.has(f.path)).length;
-    const dirTotal = dirFiles.length;
-
-    return (
-      <div>
-        <button
-          type="button"
-          className="flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={handleToggle}
-        >
-          {expanded ? (
-            <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="text-xs text-muted-foreground truncate">{node.name}</span>
-          <span className="ml-auto text-[10px] text-muted-foreground/60">
-            {dirReviewed}/{dirTotal}
-          </span>
-        </button>
-        {expanded && node.children && (
-          <div>
-            {node.children.map((child) => (
-              <TreeNode
-                key={child.path}
-                node={child}
-                reviewedFiles={reviewedFiles}
-                staleFiles={staleFiles}
-                commentCountByFile={commentCountByFile}
-                selectedFile={selectedFile}
-                onSelectFile={onSelectFile}
-                onToggleReviewed={onToggleReviewed}
-                depth={depth + 1}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // File node
+function FileNode({ node, reviewedFiles, staleFiles, commentCountByFile, selectedFile, onSelectFile, onToggleReviewed, depth }: Omit<TreeNodeProps, 'node'> & { node: FileTreeNode }) {
   const file = node.file!;
   const isReviewed = reviewedFiles.has(file.path);
   const isStale = staleFiles.has(file.path);
   const commentCount = commentCountByFile[file.path] ?? 0;
   const isSelected = selectedFile === file.path;
-
   return (
-    <div
-      className={cn(
-        'flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors group',
-        isSelected ? 'bg-accent/50' : 'hover:bg-muted/50'
-      )}
-      style={{ paddingLeft: `${depth * 12 + 8}px` }}
-      onClick={() => onSelectFile(file.path)}
-    >
-      <Checkbox
-        checked={isReviewed && !isStale}
-        onCheckedChange={(checked) => {
-          onToggleReviewed(file.path, checked === true);
-        }}
-        onClick={(e) => e.stopPropagation()}
-        className="h-3.5 w-3.5"
-      />
+    <div className={cn('flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors group', isSelected ? 'bg-accent/50' : 'hover:bg-muted/50')} style={{ paddingLeft: `${depth * 12 + 8}px` }} onClick={() => onSelectFile(file.path)}>
+      <Checkbox checked={isReviewed && !isStale} onCheckedChange={(checked) => { onToggleReviewed(file.path, checked === true); }} onClick={(e) => e.stopPropagation()} className="h-3.5 w-3.5" />
       <FileIcon fileName={node.name} className="h-4 w-4 shrink-0" />
       <span className="text-xs truncate flex-1">{node.name}</span>
-
-      {/* Changed badge (stale) */}
-      {isStale && (
-        <IconAlertTriangle className="h-3 w-3 text-yellow-500 shrink-0" />
-      )}
-
-      {/* Comment count */}
-      {commentCount > 0 && (
-        <span className="flex items-center gap-0.5 text-[10px] text-blue-500">
-          <IconMessage className="h-3 w-3" />
-          {commentCount}
-        </span>
-      )}
-
-      {/* File status */}
+      {isStale && <IconAlertTriangle className="h-3 w-3 text-yellow-500 shrink-0" />}
+      {commentCount > 0 && <span className="flex items-center gap-0.5 text-[10px] text-blue-500"><IconMessage className="h-3 w-3" />{commentCount}</span>}
       <FileStatusIcon status={file.status as 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed'} />
-
-      {/* +/- stats */}
       <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap">
         {file.additions > 0 && <span className="text-emerald-500">+{file.additions}</span>}
         {file.additions > 0 && file.deletions > 0 && ' '}
@@ -182,6 +91,31 @@ function TreeNode({
       </span>
     </div>
   );
+}
+
+function TreeNode({ node, reviewedFiles, staleFiles, commentCountByFile, selectedFile, onSelectFile, onToggleReviewed, depth }: TreeNodeProps) {
+  const [expanded, setExpanded] = useState(true);
+  const handleToggle = useCallback(() => { setExpanded((prev) => !prev); }, []);
+  const sharedProps = { reviewedFiles, staleFiles, commentCountByFile, selectedFile, onSelectFile, onToggleReviewed };
+
+  if (node.isDir) {
+    const dirFiles = collectFiles(node);
+    const dirReviewed = dirFiles.filter((f) => reviewedFiles.has(f.path) && !staleFiles.has(f.path)).length;
+    return (
+      <div>
+        <button type="button" className="flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer" style={{ paddingLeft: `${depth * 12 + 8}px` }} onClick={handleToggle}>
+          {expanded ? <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+          <span className="text-xs text-muted-foreground truncate">{node.name}</span>
+          <span className="ml-auto text-[10px] text-muted-foreground/60">{dirReviewed}/{dirFiles.length}</span>
+        </button>
+        {expanded && node.children && (
+          <div>{node.children.map((child) => (<TreeNode key={child.path} node={child} {...sharedProps} depth={depth + 1} />))}</div>
+        )}
+      </div>
+    );
+  }
+
+  return <FileNode node={node} {...sharedProps} depth={depth} />;
 }
 
 /** Collect all leaf files from a tree node recursively */

@@ -96,7 +96,12 @@ export function truncateRepoPath(path: string, maxLength = 34): string {
     const normalizedPath = displayPath.replace(/\\/g, '/');
     const hasHomePrefix = normalizedPath.startsWith('~/');
     const hasRootPrefix = normalizedPath.startsWith('/');
-    const prefix = hasHomePrefix ? '~/' : hasRootPrefix ? '/' : '';
+    let prefix = '';
+    if (hasHomePrefix) {
+      prefix = '~/';
+    } else if (hasRootPrefix) {
+      prefix = '/';
+    }
     const parts = normalizedPath.replace(/^~\//, '').replace(/^\//, '').split('/').filter(Boolean);
     if (parts.length === 0) return displayPath;
     const lastThree = parts.slice(-3).join('/');

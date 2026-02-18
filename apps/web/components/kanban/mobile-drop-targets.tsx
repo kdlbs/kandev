@@ -19,11 +19,11 @@ function MobileDropTarget({ step, isCurrentStep }: MobileDropTargetProps) {
       ref={setNodeRef}
       className={cn(
         'flex items-center justify-center gap-2 px-3 py-3 rounded-lg border-2 border-dashed transition-all min-w-[100px]',
-        isOver
-          ? 'border-primary bg-primary/10 scale-105'
-          : isCurrentStep
-            ? 'border-muted-foreground/30 bg-muted/50 opacity-50'
-            : 'border-muted-foreground/40 bg-background hover:border-muted-foreground/60'
+        (() => {
+          if (isOver) return 'border-primary bg-primary/10 scale-105';
+          if (isCurrentStep) return 'border-muted-foreground/30 bg-muted/50 opacity-50';
+          return 'border-muted-foreground/40 bg-background hover:border-muted-foreground/60';
+        })()
       )}
     >
       <div className={cn('w-3 h-3 rounded-full flex-shrink-0', step.color)} />

@@ -34,7 +34,7 @@ import { ProfileFormFields, type ProfileFormData } from '@/components/settings/p
 import { profileToPermissionsMap, permissionsToProfilePatch } from '@/lib/agent-permissions';
 import { listAvailableAgents, listWorkflowTemplates } from '@/lib/api';
 import { listAgentsAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { AvailableAgent, WorkflowTemplate } from '@/lib/types/http';
+import type { AvailableAgent, WorkflowTemplate, AgentProfile } from '@/lib/types/http';
 
 interface OnboardingDialogProps {
   open: boolean;
@@ -67,6 +67,46 @@ const RUNTIMES = [
   },
 ];
 
+const STEP_TITLES = ['AI Agents', 'Environments', 'Agentic Workflows', 'Command Panel'];
+const STEP_DESCRIPTIONS = [
+  'These AI coding agents were discovered on your system.',
+  'Agents can run in different runtime environments.',
+  'Workflows define the steps and automation for your tasks.',
+  'Quick access to actions from anywhere with a keyboard shortcut.',
+];
+
+function buildAgentSettings(avail: AvailableAgent[], saved: { name: string; profiles?: { id: string; name: string; model?: string | null; cli_passthrough?: boolean | null }[] }[]): Record<string, AgentSetting> {
+  const settings: Record<string, AgentSetting> = {};
+  for (const aa of avail) {
+    const dbAgent = saved.find((a) => a.name === aa.name);
+    const profile = dbAgent?.profiles?.[0];
+    if (profile) {
+      const perms = profileToPermissionsMap(profile as Partial<Pick<AgentProfile, 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing'>>, aa.permission_settings ?? {});
+      settings[aa.name] = { profileId: profile.id, formData: { name: profile.name, model: profile.model || aa.model_config.default_model, cli_passthrough: profile.cli_passthrough ?? false, ...perms }, dirty: false };
+    }
+  }
+  return settings;
+}
+
+type OnboardingFooterProps = { step: number; onSkip: () => void; onBack: () => void; onNext: () => void; onGetStarted: () => void };
+
+function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: OnboardingFooterProps) {
+  return (
+    <DialogFooter>
+      <div className="flex w-full items-center justify-between">
+        <Button variant="ghost" size="sm" onClick={onSkip} className="cursor-pointer"><IconX className="mr-1.5 h-3.5 w-3.5" />Skip</Button>
+        <div className="flex gap-2">
+          {step > 0 && <Button variant="outline" onClick={onBack} className="cursor-pointer"><IconArrowLeft className="mr-1.5 h-4 w-4" />Back</Button>}
+          {step < TOTAL_STEPS - 1
+            ? <Button onClick={onNext} className="cursor-pointer">Next<IconArrowRight className="ml-1.5 h-4 w-4" /></Button>
+            : <Button onClick={onGetStarted} className="cursor-pointer"><IconCheck className="mr-1.5 h-4 w-4" />Get Started</Button>
+          }
+        </div>
+      </div>
+    </DialogFooter>
+  );
+}
+
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [step, setStep] = useState(0);
   const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
@@ -76,177 +116,46 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [prevOpen, setPrevOpen] = useState(false);
 
-  // Reset loading states during render when dialog opens (avoids setState in effect)
-  if (open && !prevOpen) {
-    setPrevOpen(true);
-    setLoadingAgents(true);
-    setLoadingTemplates(true);
-  } else if (!open && prevOpen) {
-    setPrevOpen(false);
-  }
+  if (open && !prevOpen) { setPrevOpen(true); setLoadingAgents(true); setLoadingTemplates(true); }
+  else if (!open && prevOpen) { setPrevOpen(false); }
 
   useEffect(() => {
     if (!open) return;
-
-    Promise.all([
-      listAvailableAgents({ cache: 'no-store' }),
-      listAgentsAction(),
-    ])
-      .then(([availRes, savedRes]) => {
-        const avail = availRes.agents ?? [];
-        const saved = savedRes.agents ?? [];
-        setAvailableAgents(avail);
-
-        // Build initial agentSettings by matching agent names
-        const settings: Record<string, AgentSetting> = {};
-        for (const aa of avail) {
-          const dbAgent = saved.find((a) => a.name === aa.name);
-          const profile = dbAgent?.profiles?.[0];
-          if (profile) {
-            const perms = profileToPermissionsMap(profile, aa.permission_settings ?? {});
-            settings[aa.name] = {
-              profileId: profile.id,
-              formData: {
-                name: profile.name,
-                model: profile.model || aa.model_config.default_model,
-                cli_passthrough: profile.cli_passthrough ?? false,
-                ...perms,
-              },
-              dirty: false,
-            };
-          }
-        }
-        setAgentSettings(settings);
-      })
-      .catch(() => { })
-      .finally(() => setLoadingAgents(false));
-
-    listWorkflowTemplates()
-      .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => { })
-      .finally(() => setLoadingTemplates(false));
+    Promise.all([listAvailableAgents({ cache: 'no-store' }), listAgentsAction()])
+      .then(([availRes, savedRes]) => { setAvailableAgents(availRes.agents ?? []); setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? [])); })
+      .catch(() => {}).finally(() => setLoadingAgents(false));
+    listWorkflowTemplates().then((res) => setTemplates(res.templates ?? [])).catch(() => {}).finally(() => setLoadingTemplates(false));
   }, [open]);
 
   const saveAgentSettings = useCallback(async () => {
-    const dirtyEntries = Object.entries(agentSettings).filter(([, s]) => s.dirty);
-    await Promise.all(
-      dirtyEntries.map(([, s]) =>
-        updateAgentProfileAction(s.profileId, {
-          model: s.formData.model,
-          ...permissionsToProfilePatch(s.formData),
-          cli_passthrough: s.formData.cli_passthrough,
-        })
-      )
-    );
+    await Promise.all(Object.values(agentSettings).filter((s) => s.dirty).map((s) => updateAgentProfileAction(s.profileId, { model: s.formData.model, ...permissionsToProfilePatch(s.formData), cli_passthrough: s.formData.cli_passthrough })));
   }, [agentSettings]);
 
-  const handleSkip = () => {
-    onComplete();
-    setStep(0);
-  };
-
-  const handleNext = async () => {
-    if (step === 0) {
-      await saveAgentSettings();
-    }
-    if (step < TOTAL_STEPS - 1) {
-      setStep(step + 1);
-    }
-  };
-
-  const handleBack = () => {
-    if (step > 0) {
-      setStep(step - 1);
-    }
-  };
-
-  const handleGetStarted = async () => {
-    await saveAgentSettings();
-    onComplete();
-    setStep(0);
-  };
-
+  const handleSkip = () => { onComplete(); setStep(0); };
+  const handleNext = async () => { if (step === 0) await saveAgentSettings(); if (step < TOTAL_STEPS - 1) setStep(step + 1); };
+  const handleBack = () => { if (step > 0) setStep(step - 1); };
+  const handleGetStarted = async () => { await saveAgentSettings(); onComplete(); setStep(0); };
   const updateSetting = (agentName: string, formPatch: Partial<ProfileFormData>) => {
-    setAgentSettings((prev) => ({
-      ...prev,
-      [agentName]: {
-        ...prev[agentName],
-        formData: { ...prev[agentName].formData, ...formPatch },
-        dirty: true,
-      },
-    }));
+    setAgentSettings((prev) => ({ ...prev, [agentName]: { ...prev[agentName], formData: { ...prev[agentName].formData, ...formPatch }, dirty: true } }));
   };
 
   return (
     <Dialog open={open} onOpenChange={() => { }}>
       <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-center text-2xl">
-            {step === 0 && 'AI Agents'}
-            {step === 1 && 'Environments'}
-            {step === 2 && 'Agentic Workflows'}
-            {step === 3 && 'Command Panel'}
-          </DialogTitle>
-          <DialogDescription className="text-center">
-            {step === 0 && 'These AI coding agents were discovered on your system.'}
-            {step === 1 && 'Agents can run in different runtime environments.'}
-            {step === 2 && 'Workflows define the steps and automation for your tasks.'}
-            {step === 3 && 'Quick access to actions from anywhere with a keyboard shortcut.'}
-          </DialogDescription>
+          <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
+          <DialogDescription className="text-center">{STEP_DESCRIPTIONS[step]}</DialogDescription>
         </DialogHeader>
-
         <div className="py-4 min-h-[220px]">
-          {step === 0 && (
-            <StepAgents
-              availableAgents={availableAgents}
-              agentSettings={agentSettings}
-              loading={loadingAgents}
-              onUpdateSetting={updateSetting}
-            />
-          )}
+          {step === 0 && <StepAgents availableAgents={availableAgents} agentSettings={agentSettings} loading={loadingAgents} onUpdateSetting={updateSetting} />}
           {step === 1 && <StepEnvironments />}
           {step === 2 && <StepWorkflows templates={templates} loading={loadingTemplates} />}
           {step === 3 && <StepCommandPanel />}
         </div>
-
-        {/* Progress dots */}
         <div className="flex justify-center gap-1.5 pb-2">
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-primary' : 'w-1.5 bg-muted-foreground/30'
-                }`}
-            />
-          ))}
+          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (<div key={i} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-primary' : 'w-1.5 bg-muted-foreground/30'}`} />))}
         </div>
-
-        <DialogFooter>
-          <div className="flex w-full items-center justify-between">
-            <Button variant="ghost" size="sm" onClick={handleSkip} className="cursor-pointer">
-              <IconX className="mr-1.5 h-3.5 w-3.5" />
-              Skip
-            </Button>
-            <div className="flex gap-2">
-              {step > 0 && (
-                <Button variant="outline" onClick={handleBack} className="cursor-pointer">
-                  <IconArrowLeft className="mr-1.5 h-4 w-4" />
-                  Back
-                </Button>
-              )}
-              {step < TOTAL_STEPS - 1 ? (
-                <Button onClick={handleNext} className="cursor-pointer">
-                  Next
-                  <IconArrowRight className="ml-1.5 h-4 w-4" />
-                </Button>
-              ) : (
-                <Button onClick={handleGetStarted} className="cursor-pointer">
-                  <IconCheck className="mr-1.5 h-4 w-4" />
-                  Get Started
-                </Button>
-              )}
-            </div>
-          </div>
-        </DialogFooter>
+        <OnboardingFooter step={step} onSkip={handleSkip} onBack={handleBack} onNext={handleNext} onGetStarted={handleGetStarted} />
       </DialogContent>
     </Dialog>
   );

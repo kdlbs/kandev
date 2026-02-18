@@ -26,6 +26,35 @@ type PermissionRequestMetadata = {
   status?: 'pending' | 'approved' | 'rejected' | 'expired';
 };
 
+function getPermissionStatusBadge(status?: 'pending' | 'approved' | 'rejected' | 'expired') {
+  switch (status) {
+    case 'approved':
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+          <IconCheck className="h-3 w-3" /> Approved
+        </span>
+      );
+    case 'rejected':
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+          <IconX className="h-3 w-3" /> Rejected
+        </span>
+      );
+    case 'expired':
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          Expired
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+          Pending Approval
+        </span>
+      );
+  }
+}
+
 type PermissionRequestMessageProps = {
   comment: Message;
 };
@@ -84,34 +113,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
     }
   }, [metadata, handleRespond]);
 
-  const getStatusBadge = () => {
-    if (metadata?.status === 'approved') {
-      return (
-        <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-          <IconCheck className="h-3 w-3" /> Approved
-        </span>
-      );
-    }
-    if (metadata?.status === 'rejected') {
-      return (
-        <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
-          <IconX className="h-3 w-3" /> Rejected
-        </span>
-      );
-    }
-    if (metadata?.status === 'expired') {
-      return (
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          Expired
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-        Pending Approval
-      </span>
-    );
-  };
+  const statusBadge = getPermissionStatusBadge(metadata?.status);
 
   return (
     <div className="w-full">
@@ -136,7 +138,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
             )}>
               {comment.content || 'Permission Required'}
             </span>
-            {getStatusBadge()}
+            {statusBadge}
           </div>
 
           {/* Approval buttons - only show when pending */}

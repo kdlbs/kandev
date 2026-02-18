@@ -111,6 +111,53 @@ export function commentsToAnnotations(
   }));
 }
 
+function isDiffHeader(line: string): boolean {
+  return line.startsWith('diff --git') || line.startsWith('---') || line.startsWith('+++');
+}
+
+function isInRange(lineNum: number, startLine: number, endLine: number): boolean {
+  return lineNum >= startLine && lineNum <= endLine;
+}
+
+type DiffLineCounters = { currentOldLine: number; currentNewLine: number };
+
+function processHunkHeader(line: string, counters: DiffLineCounters): boolean {
+  const hunkMatch = line.match(/^@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
+  if (!hunkMatch) return false;
+  counters.currentOldLine = parseInt(hunkMatch[1], 10);
+  counters.currentNewLine = parseInt(hunkMatch[2], 10);
+  return true;
+}
+
+type ProcessDiffLineParams = {
+  line: string;
+  counters: DiffLineCounters;
+  startLine: number;
+  endLine: number;
+  side: AnnotationSide;
+  resultLines: string[];
+};
+
+function processDiffLine({ line, counters, startLine, endLine, side, resultLines }: ProcessDiffLineParams): void {
+  if (line.startsWith('+')) {
+    if (side === 'additions' && isInRange(counters.currentNewLine, startLine, endLine)) {
+      resultLines.push(line.substring(1));
+    }
+    counters.currentNewLine++;
+  } else if (line.startsWith('-')) {
+    if (side === 'deletions' && isInRange(counters.currentOldLine, startLine, endLine)) {
+      resultLines.push(line.substring(1));
+    }
+    counters.currentOldLine++;
+  } else if (line.startsWith(' ') || (!line.startsWith('@') && line !== '')) {
+    const content = line.startsWith(' ') ? line.substring(1) : line;
+    const lineNum = side === 'additions' ? counters.currentNewLine : counters.currentOldLine;
+    if (isInRange(lineNum, startLine, endLine)) resultLines.push(content);
+    counters.currentOldLine++;
+    counters.currentNewLine++;
+  }
+}
+
 /**
  * Extract code content from diff for a line range
  */
@@ -122,42 +169,12 @@ export function extractCodeFromDiff(
 ): string {
   const lines = diff.split('\n');
   const resultLines: string[] = [];
-  let currentNewLine = 0;
-  let currentOldLine = 0;
+  const counters: DiffLineCounters = { currentOldLine: 0, currentNewLine: 0 };
 
   for (const line of lines) {
-    // Parse hunk header
-    const hunkMatch = line.match(/^@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
-    if (hunkMatch) {
-      currentOldLine = parseInt(hunkMatch[1], 10);
-      currentNewLine = parseInt(hunkMatch[2], 10);
-      continue;
-    }
-
-    // Skip file headers
-    if (line.startsWith('diff --git') || line.startsWith('---') || line.startsWith('+++')) {
-      continue;
-    }
-
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      if (side === 'additions' && currentNewLine >= startLine && currentNewLine <= endLine) {
-        resultLines.push(line.substring(1));
-      }
-      currentNewLine++;
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      if (side === 'deletions' && currentOldLine >= startLine && currentOldLine <= endLine) {
-        resultLines.push(line.substring(1));
-      }
-      currentOldLine++;
-    } else if (line.startsWith(' ') || (!line.startsWith('@') && line !== '')) {
-      const content = line.startsWith(' ') ? line.substring(1) : line;
-      const lineNum = side === 'additions' ? currentNewLine : currentOldLine;
-      if (lineNum >= startLine && lineNum <= endLine) {
-        resultLines.push(content);
-      }
-      currentOldLine++;
-      currentNewLine++;
-    }
+    if (processHunkHeader(line, counters)) continue;
+    if (isDiffHeader(line)) continue;
+    processDiffLine({ line, counters, startLine, endLine, side, resultLines });
   }
 
   return resultLines.join('\n');

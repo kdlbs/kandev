@@ -24,137 +24,136 @@ type KanbanHeaderProps = {
   isSearchLoading?: boolean;
 };
 
-export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban', searchQuery = '', onSearchChange, isSearchLoading = false }: KanbanHeaderProps) {
-  const router = useRouter();
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
-  const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
-  const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
+type ViewToggleItem = {
+  value: string;
+  icon: typeof IconLayoutKanban;
+  label: string;
+};
 
-  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
+  { value: 'kanban', icon: IconLayoutKanban, label: 'Kanban' },
+  { value: 'pipeline', icon: IconTimeline, label: 'Pipeline' },
+  { value: 'list', icon: IconList, label: 'List' },
+];
 
-  const toggleValue = currentPage === 'tasks' ? 'list' : (kanbanViewMode === 'graph2' ? 'pipeline' : 'kanban');
+function ViewToggleGroup({
+  toggleValue,
+  onValueChange,
+  className,
+  itemClassName,
+}: {
+  toggleValue: string;
+  onValueChange: (value: string) => void;
+  className?: string;
+  itemClassName?: string;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      value={toggleValue}
+      onValueChange={onValueChange}
+      variant="outline"
+      className={className}
+    >
+      {VIEW_TOGGLE_ITEMS.map(({ value, icon: Icon, label }) => (
+        <ToggleGroupItem
+          key={value}
+          value={value}
+          className={`cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground ${itemClassName ?? ''}`}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center justify-center">
+                <Icon className="h-4 w-4" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{label}</TooltipContent>
+          </Tooltip>
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
 
-  const handleViewChange = (value: string) => {
-    if (value === 'list') {
-      if (currentPage !== 'tasks') router.push(linkToTasks(workspaceId));
-    } else if (value === 'kanban') {
-      if (currentPage !== 'kanban') router.push('/');
-      onViewModeChange('');
-    } else if (value === 'pipeline') {
-      if (currentPage !== 'kanban') router.push('/');
-      onViewModeChange('graph2');
-    }
-  };
+function getToggleValue(currentPage: string, kanbanViewMode: string | null): string {
+  if (currentPage === 'tasks') return 'list';
+  if (kanbanViewMode === 'graph2') return 'pipeline';
+  return 'kanban';
+}
 
-  // Mobile header: Logo and Hamburger menu (Add task is a FAB)
-  if (isMobile) {
-    return (
-      <KanbanHeaderMobile
-        workspaceId={workspaceId}
-        currentPage={currentPage}
-        searchQuery={searchQuery}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading}
-      />
-    );
-  }
-
-  // Tablet header: Compact with overflow menu
-  if (isTablet) {
-    return (
-      <>
-        <header className="flex items-center justify-between p-4 pb-3 gap-3">
-          <Link href="/" className="text-xl font-bold hover:opacity-80 flex-shrink-0">
-            KanDev
-          </Link>
-          {onSearchChange && (
-            <TaskSearchInput
-              value={searchQuery}
-              onChange={onSearchChange}
-              placeholder="Search..."
-              isLoading={isSearchLoading}
-              className="flex-1 max-w-[200px]"
-            />
-          )}
-          <div className="flex items-center gap-2">
-            <Button onClick={onCreateTask} size="lg" className="cursor-pointer">
-              <IconPlus className="h-4 w-4" />
-              <span className="hidden sm:inline ml-1">Add task</span>
-            </Button>
-            <TooltipProvider>
-              <ToggleGroup
-                type="single"
-                value={toggleValue}
-                onValueChange={handleViewChange}
-                variant="outline"
-                className="h-8"
-              >
-                <ToggleGroupItem
-                  value="kanban"
-                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-center justify-center">
-                        <IconLayoutKanban className="h-4 w-4" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>Kanban</TooltipContent>
-                  </Tooltip>
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="pipeline"
-                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-center justify-center">
-                        <IconTimeline className="h-4 w-4" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>Pipeline</TooltipContent>
-                  </Tooltip>
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="list"
-                  className="cursor-pointer h-8 w-8 data-[state=on]:bg-muted data-[state=on]:text-foreground"
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-center justify-center">
-                        <IconList className="h-4 w-4" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>List</TooltipContent>
-                  </Tooltip>
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </TooltipProvider>
-            <Button
-              variant="outline"
-              size="icon-lg"
-              onClick={() => setMenuOpen(true)}
-              className="cursor-pointer"
-            >
-              <IconMenu2 className="h-4 w-4" />
-              <span className="sr-only">Open menu</span>
-            </Button>
-          </div>
-        </header>
-        <MobileMenuSheet
-          open={isMenuOpen}
-          onOpenChange={setMenuOpen}
-          workspaceId={workspaceId}
-          currentPage={currentPage}
-          searchQuery={searchQuery}
-          onSearchChange={onSearchChange}
-          isSearchLoading={isSearchLoading}
+function TabletHeader({
+  onCreateTask,
+  searchQuery,
+  onSearchChange,
+  isSearchLoading,
+  toggleValue,
+  handleViewChange,
+  setMenuOpen,
+}: {
+  onCreateTask: () => void;
+  searchQuery: string;
+  onSearchChange?: (query: string) => void;
+  isSearchLoading: boolean;
+  toggleValue: string;
+  handleViewChange: (value: string) => void;
+  setMenuOpen: (open: boolean) => void;
+}) {
+  return (
+    <header className="flex items-center justify-between p-4 pb-3 gap-3">
+      <Link href="/" className="text-xl font-bold hover:opacity-80 flex-shrink-0">
+        KanDev
+      </Link>
+      {onSearchChange && (
+        <TaskSearchInput
+          value={searchQuery}
+          onChange={onSearchChange}
+          placeholder="Search..."
+          isLoading={isSearchLoading}
+          className="flex-1 max-w-[200px]"
         />
-      </>
-    );
-  }
+      )}
+      <div className="flex items-center gap-2">
+        <Button onClick={onCreateTask} size="lg" className="cursor-pointer">
+          <IconPlus className="h-4 w-4" />
+          <span className="hidden sm:inline ml-1">Add task</span>
+        </Button>
+        <TooltipProvider>
+          <ViewToggleGroup
+            toggleValue={toggleValue}
+            onValueChange={handleViewChange}
+            className="h-8"
+            itemClassName="h-8 w-8"
+          />
+        </TooltipProvider>
+        <Button
+          variant="outline"
+          size="icon-lg"
+          onClick={() => setMenuOpen(true)}
+          className="cursor-pointer"
+        >
+          <IconMenu2 className="h-4 w-4" />
+          <span className="sr-only">Open menu</span>
+        </Button>
+      </div>
+    </header>
+  );
+}
 
-  // Desktop header: Full layout
+function DesktopHeader({
+  onCreateTask,
+  searchQuery,
+  onSearchChange,
+  isSearchLoading,
+  toggleValue,
+  handleViewChange,
+}: {
+  onCreateTask: () => void;
+  searchQuery: string;
+  onSearchChange?: (query: string) => void;
+  isSearchLoading: boolean;
+  toggleValue: string;
+  handleViewChange: (value: string) => void;
+}) {
   return (
     <header className="relative flex items-center justify-between p-4 pb-3">
       <div className="flex items-center gap-3">
@@ -178,52 +177,7 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
           Add task
         </Button>
         <TooltipProvider>
-          <ToggleGroup
-            type="single"
-            value={toggleValue}
-            onValueChange={handleViewChange}
-            variant="outline"
-          >
-            <ToggleGroupItem
-              value="kanban"
-              className="cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground"
-            >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center justify-center">
-                    <IconLayoutKanban className="h-4 w-4" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Kanban</TooltipContent>
-              </Tooltip>
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="pipeline"
-              className="cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground"
-            >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center justify-center">
-                    <IconTimeline className="h-4 w-4" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Pipeline</TooltipContent>
-              </Tooltip>
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="list"
-              className="cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground"
-            >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="flex items-center justify-center">
-                    <IconList className="h-4 w-4" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>List</TooltipContent>
-              </Tooltip>
-            </ToggleGroupItem>
-          </ToggleGroup>
+          <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="icon" asChild className="cursor-pointer">
@@ -244,5 +198,76 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
         </Link>
       </div>
     </header>
+  );
+}
+
+export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban', searchQuery = '', onSearchChange, isSearchLoading = false }: KanbanHeaderProps) {
+  const router = useRouter();
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
+  const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
+
+  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+
+  const toggleValue = getToggleValue(currentPage, kanbanViewMode);
+
+  const handleViewChange = (value: string) => {
+    if (value === 'list') {
+      if (currentPage !== 'tasks') router.push(linkToTasks(workspaceId));
+    } else if (value === 'kanban') {
+      if (currentPage !== 'kanban') router.push('/');
+      onViewModeChange('');
+    } else if (value === 'pipeline') {
+      if (currentPage !== 'kanban') router.push('/');
+      onViewModeChange('graph2');
+    }
+  };
+
+  if (isMobile) {
+    return (
+      <KanbanHeaderMobile
+        workspaceId={workspaceId}
+        currentPage={currentPage}
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading}
+      />
+    );
+  }
+
+  if (isTablet) {
+    return (
+      <>
+        <TabletHeader
+          onCreateTask={onCreateTask}
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          isSearchLoading={isSearchLoading}
+          toggleValue={toggleValue}
+          handleViewChange={handleViewChange}
+          setMenuOpen={setMenuOpen}
+        />
+        <MobileMenuSheet
+          open={isMenuOpen}
+          onOpenChange={setMenuOpen}
+          workspaceId={workspaceId}
+          currentPage={currentPage}
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          isSearchLoading={isSearchLoading}
+        />
+      </>
+    );
+  }
+
+  return (
+    <DesktopHeader
+      onCreateTask={onCreateTask}
+      searchQuery={searchQuery}
+      onSearchChange={onSearchChange}
+      isSearchLoading={isSearchLoading}
+      toggleValue={toggleValue}
+      handleViewChange={handleViewChange}
+    />
   );
 }

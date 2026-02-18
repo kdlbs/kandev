@@ -7,9 +7,11 @@ import {
   truncateRepoPath,
 } from './utils';
 
+const TILDE_PROJECTS_APP = '~/Projects/App';
+
 describe('formatUserHomePath', () => {
   it('replaces mac home path with tilde', () => {
-    expect(formatUserHomePath('/Users/alex/Projects/App')).toBe('~/Projects/App');
+    expect(formatUserHomePath('/Users/alex/Projects/App')).toBe(TILDE_PROJECTS_APP);
   });
 
   it('replaces linux home path with tilde', () => {
@@ -17,7 +19,7 @@ describe('formatUserHomePath', () => {
   });
 
   it('replaces windows home path with tilde', () => {
-    expect(formatUserHomePath('C:\\Users\\alex\\Projects\\App')).toBe('~/Projects/App');
+    expect(formatUserHomePath('C:\\Users\\alex\\Projects\\App')).toBe(TILDE_PROJECTS_APP);
   });
 
   it('leaves non-home paths unchanged', () => {
@@ -27,7 +29,7 @@ describe('formatUserHomePath', () => {
 
 describe('truncateRepoPath', () => {
   it('returns the path when under the limit', () => {
-    expect(truncateRepoPath('~/Projects/App', 40)).toBe('~/Projects/App');
+    expect(truncateRepoPath(TILDE_PROJECTS_APP, 40)).toBe(TILDE_PROJECTS_APP);
   });
 
   it('prefers last segments for long paths', () => {
@@ -95,7 +97,7 @@ describe('extractRepoName', () => {
 
 describe('getRepositoryDisplayName', () => {
   it('returns a tilde path for local repositories', () => {
-    expect(getRepositoryDisplayName('/Users/alex/Projects/App')).toBe('~/Projects/App');
+    expect(getRepositoryDisplayName('/Users/alex/Projects/App')).toBe(TILDE_PROJECTS_APP);
   });
 
   it('returns org/name for remote repositories', () => {

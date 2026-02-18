@@ -4,12 +4,103 @@ import { useCallback, useState } from 'react';
 import { IconX, IconMessageQuestion } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { getBackendConfig } from '@/lib/config';
-import type { Message, ClarificationRequestMetadata, ClarificationAnswer } from '@/lib/types/http';
+import type { Message, ClarificationRequestMetadata, ClarificationAnswer, ClarificationQuestion } from '@/lib/types/http';
+
+const RESULT_EXPIRED = 'expired';
 
 type ClarificationInputOverlayProps = {
   message: Message;
   onResolved: () => void;
 };
+
+/**
+ * Post a response to the clarification endpoint. Returns true on success.
+ */
+async function postClarificationResponse(
+  pendingId: string,
+  body: Record<string, unknown>,
+): Promise<'ok' | 'expired' | 'error'> {
+  const { apiBaseUrl } = getBackendConfig();
+  const response = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) return 'ok';
+  if (response.status === 410) {
+    const data = await response.json().catch(() => ({}));
+    console.warn('Clarification expired:', data);
+    return RESULT_EXPIRED;
+  }
+  console.error('Clarification request failed:', response.status, response.statusText);
+  return 'error';
+}
+
+function handleClarificationResult(result: 'ok' | 'expired' | 'error', onResolved: () => void) {
+  if (result === 'ok') onResolved();
+  else if (result === RESULT_EXPIRED) window.location.reload();
+}
+
+type ClarificationOptionsProps = {
+  question: ClarificationQuestion;
+  isSubmitting: boolean;
+  onSelectOption: (optionId: string) => void;
+};
+
+function ClarificationOptions({ question, isSubmitting, onSelectOption }: ClarificationOptionsProps) {
+  return (
+    <div className="space-y-0.5 mb-1.5 ml-6">
+      {question.options.map((option) => (
+        <button
+          key={option.option_id}
+          type="button"
+          onClick={() => onSelectOption(option.option_id)}
+          disabled={isSubmitting}
+          className={cn(
+            'flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors',
+            'hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400',
+            isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80 cursor-pointer'
+          )}
+        >
+          <span className="text-muted-foreground flex-shrink-0">•</span>
+          <span>{option.label}</span>
+          {option.description && (
+            <span className="text-muted-foreground/60">— {option.description}</span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type ClarificationCustomInputProps = {
+  customText: string;
+  isSubmitting: boolean;
+  onChange: (text: string) => void;
+  onSubmit: () => void;
+};
+
+function ClarificationCustomInput({ customText, isSubmitting, onChange, onSubmit }: ClarificationCustomInputProps) {
+  return (
+    <div className="flex items-center gap-2 ml-6">
+      <span className="text-muted-foreground flex-shrink-0">•</span>
+      <input
+        type="text"
+        placeholder="Type something..."
+        value={customText}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={isSubmitting}
+        className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground focus:outline-none"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey && customText.trim()) {
+            e.preventDefault();
+            onSubmit();
+          }
+        }}
+      />
+    </div>
+  );
+}
 
 /**
  * Inline clarification UI - simple numbered text options like Conductor.
@@ -23,29 +114,9 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     if (!metadata?.pending_id || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const answer: ClarificationAnswer = {
-        question_id: metadata.question.id,
-        selected_options: [optionId],
-      };
-
-      const { apiBaseUrl } = getBackendConfig();
-      const response = await fetch(`${apiBaseUrl}/api/v1/clarification/${metadata.pending_id}/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: [answer], rejected: false }),
-      });
-      if (response.ok) {
-        onResolved();
-      } else if (response.status === 410) {
-        // Clarification expired (agent timed out)
-        // Backend has marked the message as expired, so reload to clear the UI
-        const data = await response.json().catch(() => ({}));
-        console.warn('Clarification expired:', data);
-        // Force reload to fetch updated messages (clarification no longer pending)
-        window.location.reload();
-      } else {
-        console.error('Failed to submit clarification response:', response.status, response.statusText);
-      }
+      const answer: ClarificationAnswer = { question_id: metadata.question.id, selected_options: [optionId] };
+      const result = await postClarificationResponse(metadata.pending_id, { answers: [answer], rejected: false });
+      handleClarificationResult(result, onResolved);
     } catch (error) {
       console.error('Failed to submit clarification response:', error);
     } finally {
@@ -57,30 +128,9 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     if (!metadata?.pending_id || isSubmitting || !customText.trim()) return;
     setIsSubmitting(true);
     try {
-      const answer: ClarificationAnswer = {
-        question_id: metadata.question.id,
-        selected_options: [],
-        custom_text: customText.trim(),
-      };
-
-      const { apiBaseUrl } = getBackendConfig();
-      const response = await fetch(`${apiBaseUrl}/api/v1/clarification/${metadata.pending_id}/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: [answer], rejected: false }),
-      });
-      if (response.ok) {
-        onResolved();
-      } else if (response.status === 410) {
-        // Clarification expired (agent timed out)
-        // Backend has marked the message as expired, so reload to clear the UI
-        const data = await response.json().catch(() => ({}));
-        console.warn('Clarification expired:', data);
-        // Force reload to fetch updated messages (clarification no longer pending)
-        window.location.reload();
-      } else {
-        console.error('Failed to submit clarification response:', response.status, response.statusText);
-      }
+      const answer: ClarificationAnswer = { question_id: metadata.question.id, selected_options: [], custom_text: customText.trim() };
+      const result = await postClarificationResponse(metadata.pending_id, { answers: [answer], rejected: false });
+      handleClarificationResult(result, onResolved);
     } catch (error) {
       console.error('Failed to submit clarification response:', error);
     } finally {
@@ -92,22 +142,12 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     if (!metadata?.pending_id || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const { apiBaseUrl } = getBackendConfig();
-      const response = await fetch(`${apiBaseUrl}/api/v1/clarification/${metadata.pending_id}/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: [], rejected: true, reject_reason: 'User skipped' }),
-      });
-      if (response.ok) {
+      const result = await postClarificationResponse(metadata.pending_id, { answers: [], rejected: true, reject_reason: 'User skipped' });
+      if (result === 'ok') {
         onResolved();
-      } else if (response.status === 410) {
-        // Clarification expired (agent timed out)
-        const data = await response.json().catch(() => ({}));
-        console.warn('Clarification expired:', data);
+      } else if (result === RESULT_EXPIRED) {
         alert('This question has timed out. The agent has already moved on. Please refresh the page.');
-        onResolved(); // Clear the UI even though it failed
-      } else {
-        console.error('Failed to skip clarification:', response.status, response.statusText);
+        onResolved();
       }
     } catch (error) {
       console.error('Failed to skip clarification:', error);
@@ -116,15 +156,12 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     }
   }, [metadata, isSubmitting, onResolved]);
 
-  if (!metadata?.question) {
-    return null;
-  }
+  if (!metadata?.question) return null;
 
   const question = metadata.question;
 
   return (
     <div className="relative px-3 py-2">
-      {/* Close/skip button */}
       <button
         type="button"
         onClick={handleSkip}
@@ -134,57 +171,14 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
         <IconX className="h-4 w-4" />
       </button>
 
-      {/* Content */}
       <div className="pr-6">
-        {/* Question text */}
         <div className="flex items-start gap-2 mb-1">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-foreground">{question.prompt}</p>
         </div>
-
-        {/* Options with bullets - indented to align with question text */}
-        <div className="space-y-0.5 mb-1.5 ml-6">
-          {question.options.map((option) => (
-            <button
-              key={option.option_id}
-              type="button"
-              onClick={() => handleSubmitOption(option.option_id)}
-              disabled={isSubmitting}
-              className={cn(
-                'flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors',
-                'hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400',
-                isSubmitting ? 'opacity-50 cursor-not-allowed' : 'text-foreground/80 cursor-pointer'
-              )}
-            >
-              <span className="text-muted-foreground flex-shrink-0">•</span>
-              <span>{option.label}</span>
-              {option.description && (
-                <span className="text-muted-foreground/60">— {option.description}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Custom input row - indented to align with options */}
-        <div className="flex items-center gap-2 ml-6">
-          <span className="text-muted-foreground flex-shrink-0">•</span>
-          <input
-            type="text"
-            placeholder="Type something..."
-            value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
-            disabled={isSubmitting}
-            className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && customText.trim()) {
-                e.preventDefault();
-                handleSubmitCustom();
-              }
-            }}
-          />
-        </div>
+        <ClarificationOptions question={question} isSubmitting={isSubmitting} onSelectOption={handleSubmitOption} />
+        <ClarificationCustomInput customText={customText} isSubmitting={isSubmitting} onChange={setCustomText} onSubmit={handleSubmitCustom} />
       </div>
     </div>
   );
 }
-

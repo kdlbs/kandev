@@ -31,35 +31,16 @@ type ReviewDiffListProps = {
 };
 
 export const ReviewDiffList = memo(function ReviewDiffList({
-  files,
-  reviewedFiles,
-  staleFiles,
-  sessionId,
-  autoMarkOnScroll,
-  wordWrap,
-  onToggleReviewed,
-  onDiscard,
-  onOpenFile,
-  fileRefs,
+  files, reviewedFiles, staleFiles, sessionId, autoMarkOnScroll, wordWrap,
+  onToggleReviewed, onDiscard, onOpenFile, fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-
   return (
     <div ref={scrollContainerRef} className="overflow-y-auto h-full">
       {files.map((file) => (
-        <FileDiffSection
-          key={file.path}
-          file={file}
-          isReviewed={reviewedFiles.has(file.path) && !staleFiles.has(file.path)}
-          isStale={staleFiles.has(file.path)}
-          sessionId={sessionId}
-          autoMarkOnScroll={autoMarkOnScroll}
-          wordWrap={wordWrap}
-          onToggleReviewed={onToggleReviewed}
-          onDiscard={onDiscard}
-          onOpenFile={onOpenFile}
-          sectionRef={fileRefs.get(file.path)}
-          scrollContainer={scrollContainerRef}
+        <FileDiffSection key={file.path} file={file} isReviewed={reviewedFiles.has(file.path) && !staleFiles.has(file.path)} isStale={staleFiles.has(file.path)}
+          sessionId={sessionId} autoMarkOnScroll={autoMarkOnScroll} wordWrap={wordWrap} onToggleReviewed={onToggleReviewed} onDiscard={onDiscard}
+          onOpenFile={onOpenFile} sectionRef={fileRefs.get(file.path)} scrollContainer={scrollContainerRef}
         />
       ))}
     </div>
@@ -80,81 +61,80 @@ type FileDiffSectionProps = {
   scrollContainer: React.RefObject<HTMLDivElement | null>;
 };
 
-function FileDiffSection({
-  file,
-  isReviewed,
-  isStale,
-  sessionId,
-  autoMarkOnScroll,
-  wordWrap,
-  onToggleReviewed,
-  onDiscard,
-  onOpenFile,
-  sectionRef,
-  scrollContainer,
-}: FileDiffSectionProps) {
+function useLazyVisible(scrollContainer: React.RefObject<HTMLDivElement | null>) {
   const [isVisible, setIsVisible] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const autoMarkedRef = useRef(false);
-
-  // Lazy rendering: mount the diff viewer only when section becomes visible
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '200px 0px', root: scrollContainer.current }
-    );
-
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setIsVisible(true); observer.disconnect(); } }, { rootMargin: '200px 0px', root: scrollContainer.current });
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [scrollContainer]);
+  return { isVisible, sentinelRef };
+}
 
-  // Auto-mark on scroll: when the file section leaves the top of the scroll container
+type AutoMarkArgs = { autoMarkOnScroll: boolean; isReviewed: boolean; isStale: boolean; filePath: string; onToggleReviewed: (path: string, reviewed: boolean) => void; scrollContainer: React.RefObject<HTMLDivElement | null> };
+
+function useAutoMarkOnScroll({ autoMarkOnScroll, isReviewed, isStale, filePath, onToggleReviewed, scrollContainer }: AutoMarkArgs) {
   const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
-
+  const autoMarkedRef = useRef(false);
   useEffect(() => {
-    if (!autoMarkOnScroll || isReviewed || isStale) {
-      autoMarkedRef.current = false;
-      return;
-    }
-
+    if (!autoMarkOnScroll || isReviewed || isStale) { autoMarkedRef.current = false; return; }
     const sentinel = scrollSentinelRef.current;
     const root = scrollContainer.current;
     if (!sentinel || !root) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        // File has scrolled above the scroll container (not intersecting + bounding rect is above root)
-        if (!entry.isIntersecting && entry.boundingClientRect.top < root.getBoundingClientRect().top && !autoMarkedRef.current) {
-          autoMarkedRef.current = true;
-          console.debug('[review] auto-mark reviewed:', file.path);
-          onToggleReviewed(file.path, true);
-        }
-      },
-      { threshold: 0, root }
-    );
-
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting && entry.boundingClientRect.top < root.getBoundingClientRect().top && !autoMarkedRef.current) {
+        autoMarkedRef.current = true;
+        console.debug('[review] auto-mark reviewed:', filePath);
+        onToggleReviewed(filePath, true);
+      }
+    }, { threshold: 0, root });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [autoMarkOnScroll, file.path, isReviewed, isStale, onToggleReviewed, scrollContainer]);
+  }, [autoMarkOnScroll, filePath, isReviewed, isStale, onToggleReviewed, scrollContainer]);
+  return scrollSentinelRef;
+}
 
-  const handleCheckboxChange = useCallback(
-    (checked: boolean | 'indeterminate') => {
-      onToggleReviewed(file.path, checked === true);
-    },
-    [file.path, onToggleReviewed]
+type FileDiffHeaderProps = { file: ReviewFile; isReviewed: boolean; isStale: boolean; sessionId: string; onCheckboxChange: (checked: boolean | 'indeterminate') => void; onDiscard: () => void; onOpenFile?: (filePath: string) => void };
+
+function FileDiffHeader({ file, isReviewed, isStale, sessionId, onCheckboxChange, onDiscard, onOpenFile }: FileDiffHeaderProps) {
+  return (
+    <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50">
+      <Checkbox checked={isReviewed} onCheckedChange={onCheckboxChange} className="h-4 w-4 cursor-pointer" />
+      <span className="text-sm font-medium truncate">{file.path}</span>
+      <div className="flex-1" />
+      {isStale && <span className="flex items-center gap-1 text-xs text-yellow-500"><IconAlertTriangle className="h-3.5 w-3.5" />changed</span>}
+      <span className="text-xs text-muted-foreground">
+        {file.additions > 0 && <span className="text-emerald-500">+{file.additions}</span>}
+        {file.additions > 0 && file.deletions > 0 && ' / '}
+        {file.deletions > 0 && <span className="text-rose-500">-{file.deletions}</span>}
+      </span>
+      <div className="flex items-center gap-0.5">
+        {onOpenFile && (
+          <Tooltip>
+            <TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100" onClick={() => onOpenFile(file.path)}><IconPencil className="h-3.5 w-3.5" /></Button></TooltipTrigger>
+            <TooltipContent>Edit</TooltipContent>
+          </Tooltip>
+        )}
+        <FileActionsDropdown filePath={file.path} sessionId={sessionId} size="xs" />
+        {file.source === 'uncommitted' && (
+          <Tooltip>
+            <TooltipTrigger asChild><Button variant="ghost" size="sm" className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100 hover:text-destructive" onClick={onDiscard}><IconArrowBackUp className="h-3.5 w-3.5" /></Button></TooltipTrigger>
+            <TooltipContent>Revert changes</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    </div>
   );
+}
 
-  const handleDiscard = useCallback(() => {
-    onDiscard(file.path);
-  }, [file.path, onDiscard]);
+function FileDiffSection({ file, isReviewed, isStale, sessionId, autoMarkOnScroll, wordWrap, onToggleReviewed, onDiscard, onOpenFile, sectionRef, scrollContainer }: FileDiffSectionProps) {
+  const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
+  const scrollSentinelRef = useAutoMarkOnScroll({ autoMarkOnScroll, isReviewed, isStale, filePath: file.path, onToggleReviewed, scrollContainer });
+  const handleCheckboxChange = useCallback((checked: boolean | 'indeterminate') => { onToggleReviewed(file.path, checked === true); }, [file.path, onToggleReviewed]);
+  const handleDiscard = useCallback(() => { onDiscard(file.path); }, [file.path, onDiscard]);
 
   const handleRevertBlock = useCallback(async (filePath: string, info: RevertBlockInfo) => {
     const client = getWebSocketClient();
@@ -166,9 +146,7 @@ function FileDiffSection({
       const hash = await calculateHash(currentContent);
       const lines = currentContent.split('\n');
       lines.splice(info.addStart - 1, info.addCount, ...info.oldLines);
-      const newContent = lines.join('\n');
-      const diff = generateUnifiedDiff(currentContent, newContent, filePath);
-      await updateFileContent(client, sessionId, filePath, diff, hash);
+      await updateFileContent(client, sessionId, filePath, generateUnifiedDiff(currentContent, lines.join('\n'), filePath), hash);
     } catch (err) {
       console.error('Failed to revert change block:', err);
     }
@@ -176,96 +154,15 @@ function FileDiffSection({
 
   return (
     <div ref={sectionRef} className="border-b border-border">
-      {/* Sentinel for auto-mark-on-scroll */}
       <div ref={scrollSentinelRef} className="h-0" />
-
-      {/* Sticky file header */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50">
-        <Checkbox
-          checked={isReviewed}
-          onCheckedChange={handleCheckboxChange}
-          className="h-4 w-4 cursor-pointer"
-        />
-        <span className="text-sm font-medium truncate">{file.path}</span>
-
-        <div className="flex-1" />
-
-        {isStale && (
-          <span className="flex items-center gap-1 text-xs text-yellow-500">
-            <IconAlertTriangle className="h-3.5 w-3.5" />
-            changed
-          </span>
-        )}
-
-        <span className="text-xs text-muted-foreground">
-          {file.additions > 0 && <span className="text-emerald-500">+{file.additions}</span>}
-          {file.additions > 0 && file.deletions > 0 && ' / '}
-          {file.deletions > 0 && <span className="text-rose-500">-{file.deletions}</span>}
-        </span>
-
-        {/* File actions */}
-        <div className="flex items-center gap-0.5">
-          {/* Edit in editor tab */}
-          {onOpenFile && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-                  onClick={() => onOpenFile(file.path)}
-                >
-                  <IconPencil className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Edit</TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Open with external editor / copy path / open folder */}
-          <FileActionsDropdown filePath={file.path} sessionId={sessionId} size="xs" />
-
-          {/* Discard changes */}
-          {file.source === 'uncommitted' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100 hover:text-destructive"
-                  onClick={handleDiscard}
-                >
-                  <IconArrowBackUp className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Revert changes</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
-
-      {/* Sentinel for lazy loading */}
+      <FileDiffHeader file={file} isReviewed={isReviewed} isStale={isStale} sessionId={sessionId} onCheckboxChange={handleCheckboxChange} onDiscard={handleDiscard} onOpenFile={onOpenFile} />
       <div ref={sentinelRef} />
-
-      {/* Diff content (lazy rendered) */}
       {isVisible && file.diff ? (
         <div className="px-2 py-2">
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            onRevertBlock={handleRevertBlock}
-            sessionId={sessionId}
-            hideHeader
-            wordWrap={wordWrap}
-          />
+          <FileDiffViewer filePath={file.path} diff={file.diff} status={file.status} enableComments enableAcceptReject onRevertBlock={handleRevertBlock} sessionId={sessionId} hideHeader wordWrap={wordWrap} />
         </div>
       ) : (
-        <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-          Loading diff...
-        </div>
+        <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">Loading diff...</div>
       )}
     </div>
   );

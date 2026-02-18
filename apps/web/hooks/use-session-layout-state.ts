@@ -19,6 +19,33 @@ type UseSessionLayoutStateOptions = {
   sessionId?: string | null;
 };
 
+/** Handle approve action: call server action and trigger auto-start if configured. */
+async function executeApprove(
+  sessionId: string,
+  taskId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setTaskSession: (session: any) => void,
+) {
+  const response = await approveSessionAction(sessionId);
+  if (response?.session) {
+    setTaskSession(response.session);
+  }
+  if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
+    const client = getWebSocketClient();
+    if (client) {
+      client.send({
+        type: 'request',
+        action: 'orchestrator.start',
+        payload: {
+          task_id: taskId,
+          session_id: sessionId,
+          workflow_step_id: response.workflow_step.id,
+        },
+      });
+    }
+  }
+}
+
 /**
  * Shared hook for session layout state used across mobile, tablet, and desktop layouts.
  * Consolidates common state and logic to avoid duplication.
@@ -50,24 +77,14 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Diff selection state ---
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
 
-  const handleSelectDiff = useCallback((path: string, content?: string) => {
-    setSelectedDiff({ path, content });
-  }, []);
-
-  const handleClearSelectedDiff = useCallback(() => {
-    setSelectedDiff(null);
-  }, []);
+  const handleSelectDiff = useCallback((path: string, content?: string) => { setSelectedDiff({ path, content }); }, []);
+  const handleClearSelectedDiff = useCallback(() => { setSelectedDiff(null); }, []);
 
   // --- Open file request state ---
   const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
 
-  const handleOpenFile = useCallback((file: OpenFileTab) => {
-    setOpenFileRequest(file);
-  }, []);
-
-  const handleFileOpenHandled = useCallback(() => {
-    setOpenFileRequest(null);
-  }, []);
+  const handleOpenFile = useCallback((file: OpenFileTab) => { setOpenFileRequest(file); }, []);
+  const handleFileOpenHandled = useCallback(() => { setOpenFileRequest(null); }, []);
 
   // --- Git status for badges ---
   const gitStatus = useSessionGitStatus(effectiveSessionId);
@@ -112,26 +129,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   const handleApprove = useCallback(async () => {
     if (!effectiveSessionId || !activeTaskId) return;
     try {
-      const response = await approveSessionAction(effectiveSessionId);
-
-      if (response?.session) {
-        setTaskSession(response.session);
-      }
-
-      if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
-        const client = getWebSocketClient();
-        if (client) {
-          client.send({
-            type: 'request',
-            action: 'orchestrator.start',
-            payload: {
-              task_id: activeTaskId,
-              session_id: effectiveSessionId,
-              workflow_step_id: response.workflow_step.id,
-            },
-          });
-        }
-      }
+      await executeApprove(effectiveSessionId, activeTaskId, setTaskSession);
     } catch (error) {
       console.error('Failed to approve session:', error);
     }

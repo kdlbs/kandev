@@ -13,6 +13,65 @@ import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agent
 import { AgentLogo } from '@/components/agent-logo';
 import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from '@/lib/types/http';
 
+type AgentCardProps = {
+  agent: AgentDiscovery;
+  savedAgent: Agent | undefined;
+  displayName: string;
+};
+
+function AgentCard({ agent, savedAgent, displayName }: AgentCardProps) {
+  const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
+  const hasAgentRecord = Boolean(savedAgent);
+  return (
+    <Card>
+      <CardContent className="py-4 flex flex-col gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
+            <h4 className="font-medium">{displayName}</h4>
+            {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
+            {configured && <Badge variant="outline">Configured</Badge>}
+          </div>
+          {agent.matched_path && (
+            <p className="text-xs text-muted-foreground">Detected at {agent.matched_path}</p>
+          )}
+        </div>
+        <Button size="sm" className="cursor-pointer" asChild>
+          <Link href={hasAgentRecord ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create` : `/settings/agents/${encodeURIComponent(agent.name)}`}>
+            <IconSettings className="h-4 w-4 mr-2" />
+            {hasAgentRecord ? 'Create new profile' : 'Setup Profile'}
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+type ProfileListItemProps = {
+  agent: Agent;
+  profile: AgentProfile;
+};
+
+function ProfileListItem({ agent, profile }: ProfileListItemProps) {
+  const profilePath = `/settings/agents/${encodeURIComponent(agent.name)}/profiles/${profile.id}`;
+  return (
+    <Link href={profilePath} className="block">
+      <Card className="hover:bg-accent transition-colors cursor-pointer">
+        <CardContent className="py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AgentLogo agentName={agent.name} className="shrink-0" />
+            <span className="text-sm font-medium">
+              {agent.profiles[0]?.agent_display_name ?? agent.name}
+            </span>
+            {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
+            <span className="text-sm text-muted-foreground">{profile.name}</span>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
 export default function AgentsSettingsPage() {
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
   const savedAgents = useAppStore((state) => state.settingsAgents.items);
@@ -29,6 +88,9 @@ export default function AgentsSettingsPage() {
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents]
   );
+
+  const resolveDisplayName = (name: string) =>
+    availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? name;
 
   const handleRescan = async () => {
     if (rescanning) return;
@@ -61,7 +123,7 @@ export default function AgentsSettingsPage() {
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={handleRescan} disabled={rescanning}>
-            {rescanning ? 'Rescanning…' : 'Rescan'}
+            {rescanning ? 'Rescanning...' : 'Rescan'}
           </Button>
         </div>
 
@@ -77,36 +139,14 @@ export default function AgentsSettingsPage() {
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {installedAgents.map((agent: AgentDiscovery) => {
-            const savedAgent = savedAgentsByName.get(agent.name) as Agent | undefined;
-            const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
-            const hasAgentRecord = Boolean(savedAgent);
-            return (
-              <Card key={agent.name}>
-                <CardContent className="py-4 flex flex-col gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
-                      <h4 className="font-medium">
-                        {availableAgents.find((item: AvailableAgent) => item.name === agent.name)?.display_name ?? agent.name}
-                      </h4>
-                      {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
-                      {configured && <Badge variant="outline">Configured</Badge>}
-                    </div>
-                    {agent.matched_path && (
-                      <p className="text-xs text-muted-foreground">Detected at {agent.matched_path}</p>
-                    )}
-                  </div>
-                  <Button size="sm" className="cursor-pointer" asChild>
-                    <Link href={hasAgentRecord ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create` : `/settings/agents/${encodeURIComponent(agent.name)}`}>
-                      <IconSettings className="h-4 w-4 mr-2" />
-                      {hasAgentRecord ? 'Create new profile' : 'Setup Profile'}
-                    </Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
+          {installedAgents.map((agent: AgentDiscovery) => (
+            <AgentCard
+              key={agent.name}
+              agent={agent}
+              savedAgent={savedAgentsByName.get(agent.name)}
+              displayName={resolveDisplayName(agent.name)}
+            />
+          ))}
         </div>
       </div>
 
@@ -120,25 +160,9 @@ export default function AgentsSettingsPage() {
 
           <div className="space-y-2">
             {savedAgents.flatMap((agent: Agent) =>
-              agent.profiles.map((profile: AgentProfile) => {
-                const profilePath = `/settings/agents/${encodeURIComponent(agent.name)}/profiles/${profile.id}`;
-                return (
-                  <Link key={profile.id} href={profilePath} className="block">
-                    <Card className="hover:bg-accent transition-colors cursor-pointer">
-                      <CardContent className="py-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <AgentLogo agentName={agent.name} className="shrink-0" />
-                          <span className="text-sm font-medium">
-                            {agent.profiles[0]?.agent_display_name ?? agent.name}
-                          </span>
-                          {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
-                          <span className="text-sm text-muted-foreground">{profile.name}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                );
-              })
+              agent.profiles.map((profile: AgentProfile) => (
+                <ProfileListItem key={profile.id} agent={agent} profile={profile} />
+              ))
             )}
           </div>
         </div>

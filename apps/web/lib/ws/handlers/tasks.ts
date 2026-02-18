@@ -50,97 +50,72 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
   };
 }
 
+/** Upsert a task in both single-kanban and multi-kanban snapshots. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function upsertTaskInBothKanbans(state: AppState, wfId: string, payload: any): AppState {
+  let next = state;
+
+  if (state.kanban.workflowId === wfId) {
+    const existing = state.kanban.tasks.find((t) => t.id === payload.task_id);
+    const nextTask = buildTaskFromPayload(payload, existing);
+    next = { ...next, kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) } };
+  }
+
+  const snapshot = state.kanbanMulti.snapshots[wfId];
+  if (snapshot) {
+    const existing = snapshot.tasks.find((t) => t.id === payload.task_id);
+    const nextTask = buildTaskFromPayload(payload, existing);
+    next = upsertMultiTask(next, wfId, nextTask);
+  }
+
+  return next;
+}
+
+/** Remove a task from both single-kanban and multi-kanban snapshots. */
+function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string): AppState {
+  let next = state;
+  if (state.kanban.workflowId === wfId) {
+    next = { ...next, kanban: { ...next.kanban, tasks: next.kanban.tasks.filter((t) => t.id !== taskId) } };
+  }
+  const snapshot = state.kanbanMulti.snapshots[wfId];
+  if (snapshot) {
+    next = {
+      ...next,
+      kanbanMulti: {
+        ...next.kanbanMulti,
+        snapshots: {
+          ...next.kanbanMulti.snapshots,
+          [wfId]: { ...snapshot, tasks: snapshot.tasks.filter((t) => t.id !== taskId) },
+        },
+      },
+    };
+  }
+  return next;
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     'task.created': (message) => {
-      store.setState((state) => {
-        const wfId = message.payload.workflow_id;
-        let next = state;
-
-        // Update single-workflow kanban
-        if (state.kanban.workflowId === wfId) {
-          const existing = state.kanban.tasks.find((task) => task.id === message.payload.task_id);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = {
-            ...next,
-            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
-          };
-        }
-
-        // Update multi-workflow snapshots
-        const snapshot = state.kanbanMulti.snapshots[wfId];
-        if (snapshot) {
-          const existing = snapshot.tasks.find((task) => task.id === message.payload.task_id);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = upsertMultiTask(next, wfId, nextTask);
-        }
-
-        return next;
-      });
+      store.setState((state) => upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload));
     },
     'task.updated': (message) => {
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
         const taskId = message.payload.task_id;
-        let next = state;
 
-        // If the task was archived, remove it from the kanban board (like delete)
         if (message.payload.archived_at) {
-          if (state.kanban.workflowId === wfId) {
-            next = {
-              ...next,
-              kanban: {
-                ...next.kanban,
-                tasks: next.kanban.tasks.filter((t) => t.id !== taskId),
-              },
-            };
-          }
-          const snapshot = state.kanbanMulti.snapshots[wfId];
-          if (snapshot) {
-            next = {
-              ...next,
-              kanbanMulti: {
-                ...next.kanbanMulti,
-                snapshots: {
-                  ...next.kanbanMulti.snapshots,
-                  [wfId]: {
-                    ...snapshot,
-                    tasks: snapshot.tasks.filter((t) => t.id !== taskId),
-                  },
-                },
-              },
-            };
-          }
-          return next;
+          return removeTaskFromBothKanbans(state, wfId, taskId);
         }
 
-        if (state.kanban.workflowId === wfId) {
-          const existing = state.kanban.tasks.find((task) => task.id === taskId);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = {
-            ...next,
-            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
-          };
-        }
-
-        const snapshot = state.kanbanMulti.snapshots[wfId];
-        if (snapshot) {
-          const existing = snapshot.tasks.find((task) => task.id === taskId);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = upsertMultiTask(next, wfId, nextTask);
-        }
-
-        return next;
+        return upsertTaskInBothKanbans(state, wfId, message.payload);
       });
     },
     'task.deleted': (message) => {
       const deletedId = message.payload.task_id;
       const wfId = message.payload.workflow_id;
 
-      // Clean up persisted storage before removing from state
       const currentState = store.getState();
       const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map((s) => s.id);
-      // Also include primarySessionId in case sessions weren't loaded into the store
       const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
       if (task?.primarySessionId && !sessionIds.includes(task.primarySessionId)) {
         sessionIds.push(task.primarySessionId);
@@ -152,61 +127,15 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
 
       store.setState((state) => {
         const isActive = state.tasks.activeTaskId === deletedId;
-        let next: AppState = {
-          ...state,
-          kanban: {
-            ...state.kanban,
-            tasks: state.kanban.tasks.filter((t) => t.id !== deletedId),
-          },
-          tasks: isActive
-            ? { ...state.tasks, activeTaskId: null, activeSessionId: null }
-            : state.tasks,
-        };
-
-        // Also remove from multi-workflow snapshots
-        const snapshot = state.kanbanMulti.snapshots[wfId];
-        if (snapshot) {
-          next = {
-            ...next,
-            kanbanMulti: {
-              ...next.kanbanMulti,
-              snapshots: {
-                ...next.kanbanMulti.snapshots,
-                [wfId]: {
-                  ...snapshot,
-                  tasks: snapshot.tasks.filter((t) => t.id !== deletedId),
-                },
-              },
-            },
-          };
+        let next = removeTaskFromBothKanbans(state, wfId, deletedId);
+        if (isActive) {
+          next = { ...next, tasks: { ...next.tasks, activeTaskId: null, activeSessionId: null } };
         }
-
         return next;
       });
     },
     'task.state_changed': (message) => {
-      store.setState((state) => {
-        const wfId = message.payload.workflow_id;
-        let next = state;
-
-        if (state.kanban.workflowId === wfId) {
-          const existing = state.kanban.tasks.find((t) => t.id === message.payload.task_id);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = {
-            ...next,
-            kanban: { ...next.kanban, tasks: upsertTask(next.kanban.tasks, nextTask) },
-          };
-        }
-
-        const snapshot = state.kanbanMulti.snapshots[wfId];
-        if (snapshot) {
-          const existing = snapshot.tasks.find((t) => t.id === message.payload.task_id);
-          const nextTask = buildTaskFromPayload(message.payload, existing);
-          next = upsertMultiTask(next, wfId, nextTask);
-        }
-
-        return next;
-      });
+      store.setState((state) => upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload));
     },
   };
 }

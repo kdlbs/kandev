@@ -27,6 +27,72 @@ function resolveShellSelection(preferredShell: string, shellOptions: ShellOption
   return { selection: CUSTOM_SHELL, customShell: preferredShell };
 }
 
+type ShellSelectProps = {
+  shellSelection: string;
+  onSelectionChange: (value: string) => void;
+  customShell: string;
+  onCustomShellChange: (value: string) => void;
+  shellLoaded: boolean;
+  shellOptions: ShellOption[];
+};
+
+function ShellSelect({
+  shellSelection,
+  onSelectionChange,
+  customShell,
+  onCustomShellChange,
+  shellLoaded,
+  shellOptions,
+}: ShellSelectProps) {
+  return (
+    <>
+      <div className="space-y-2">
+        <Select
+          value={shellSelection}
+          onValueChange={onSelectionChange}
+          disabled={!shellLoaded || shellOptions.length === 0}
+        >
+          <SelectTrigger>
+            <SelectValue
+              placeholder={
+                shellOptions.length === 0 ? 'Shell options unavailable' : 'Select a shell'
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {shellOptions
+              .filter(
+                (option) =>
+                  option.value !== AUTO_SHELL &&
+                  option.value !== CUSTOM_SHELL &&
+                  option.value !== ''
+              )
+              .map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+            <SelectItem value={CUSTOM_SHELL}>Custom</SelectItem>
+            <SelectItem value={AUTO_SHELL}>System default</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {shellSelection === CUSTOM_SHELL && (
+        <div className="space-y-2">
+          <Input
+            value={customShell}
+            onChange={(event) => onCustomShellChange(event.target.value)}
+            placeholder="/bin/zsh"
+          />
+          <p className="text-xs text-muted-foreground">
+            Enter a shell path or command available in the agent environment.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function ShellSettingsCard() {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -79,66 +145,30 @@ export function ShellSettingsCard() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Select
-              value={shellSelection}
-              onValueChange={(value) => {
-                setShellSelection(value);
-                if (value === AUTO_SHELL) {
-                  setPreferredShell('');
-                  setCustomShell('');
-                  return;
-                }
-                if (value === CUSTOM_SHELL) {
-                  setPreferredShell(customShell);
-                  return;
-                }
-                setPreferredShell(value);
+          <ShellSelect
+            shellSelection={shellSelection}
+            onSelectionChange={(value) => {
+              setShellSelection(value);
+              if (value === AUTO_SHELL) {
+                setPreferredShell('');
                 setCustomShell('');
-              }}
-              disabled={!shellLoaded || shellOptions.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    shellOptions.length === 0 ? 'Shell options unavailable' : 'Select a shell'
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {shellOptions
-                  .filter(
-                    (option) =>
-                      option.value !== AUTO_SHELL &&
-                      option.value !== CUSTOM_SHELL &&
-                      option.value !== ''
-                  )
-                  .map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-                <SelectItem value={CUSTOM_SHELL}>Custom</SelectItem>
-                <SelectItem value={AUTO_SHELL}>System default</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {shellSelection === CUSTOM_SHELL && (
-            <div className="space-y-2">
-              <Input
-                value={customShell}
-                onChange={(event) => {
-                  const nextValue = event.target.value;
-                  setCustomShell(nextValue);
-                  setPreferredShell(nextValue);
-                }}
-                placeholder="/bin/zsh"
-              />
-              <p className="text-xs text-muted-foreground">
-                Enter a shell path or command available in the agent environment.
-              </p>
-            </div>
-          )}
+                return;
+              }
+              if (value === CUSTOM_SHELL) {
+                setPreferredShell(customShell);
+                return;
+              }
+              setPreferredShell(value);
+              setCustomShell('');
+            }}
+            customShell={customShell}
+            onCustomShellChange={(value) => {
+              setCustomShell(value);
+              setPreferredShell(value);
+            }}
+            shellLoaded={shellLoaded}
+            shellOptions={shellOptions}
+          />
           <p className="text-xs text-muted-foreground">
             New task sessions will use this shell. Existing sessions keep their current shell.
           </p>

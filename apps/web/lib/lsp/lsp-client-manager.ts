@@ -1,7 +1,8 @@
-import type { editor as monacoEditor, IDisposable, languages, MarkerSeverity as MarkerSeverityType } from 'monaco-editor';
+import type { editor as monacoEditor, IDisposable, MarkerSeverity as MarkerSeverityType } from 'monaco-editor';
 import { getBackendConfig } from '@/lib/config';
 import { getMonacoInstance } from '@/components/editors/monaco/monaco-init';
 import { setBuiltinTsSuppressed } from '@/components/editors/monaco/builtin-providers';
+import { registerLspProviders } from './lsp-providers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -133,43 +134,6 @@ function toMonacoRange(r: LspRange): { startLineNumber: number; startColumn: num
   };
 }
 
-function toLspPosition(lineNumber: number, column: number): LspPosition {
-  return { line: lineNumber - 1, character: column - 1 };
-}
-
-// LSP CompletionItemKind → Monaco CompletionItemKind
-function toMonacoCompletionKind(lspKind: number | undefined): number {
-  // Monaco CompletionItemKind values (approximate mapping)
-  const map: Record<number, number> = {
-    1: 14,  // Text → Value
-    2: 1,   // Method → Method
-    3: 0,   // Function → Function
-    4: 8,   // Constructor → Constructor
-    5: 4,   // Field → Field
-    6: 5,   // Variable → Variable
-    7: 7,   // Class → Class
-    8: 7,   // Interface → Interface (use Class icon)
-    9: 8,   // Module → Module
-    10: 9,  // Property → Property
-    11: 12, // Unit → Unit
-    12: 14, // Value → Value
-    13: 15, // Enum → Enum
-    14: 17, // Keyword → Keyword
-    15: 27, // Snippet → Snippet
-    16: 19, // Color → Color
-    17: 20, // File → File
-    18: 21, // Reference → Reference
-    19: 23, // Folder → Folder
-    20: 16, // EnumMember → EnumMember
-    21: 14, // Constant → Value
-    22: 6,  // Struct → Struct
-    23: 24, // Event → Event
-    24: 25, // Operator → Operator
-    25: 26, // TypeParameter → TypeParameter
-  };
-  return map[lspKind ?? 1] ?? 14;
-}
-
 // LSP DiagnosticSeverity → Monaco MarkerSeverity
 function toMonacoSeverity(lspSeverity: number | undefined): MarkerSeverityType {
   const monaco = getMonacoInstance();
@@ -181,23 +145,6 @@ function toMonacoSeverity(lspSeverity: number | undefined): MarkerSeverityType {
     case 4: return monaco.MarkerSeverity.Hint;
     default: return monaco.MarkerSeverity.Info;
   }
-}
-
-// Extract plaintext from LSP MarkupContent or string
-function extractHoverContents(contents: unknown): { value: string }[] {
-  if (typeof contents === 'string') return [{ value: contents }];
-  if (contents && typeof contents === 'object' && 'value' in contents) {
-    const c = contents as { kind?: string; value: string };
-    return [{ value: c.value }];
-  }
-  if (Array.isArray(contents)) {
-    return contents.map((item) => {
-      if (typeof item === 'string') return { value: item };
-      if (item && typeof item === 'object' && 'value' in item) return { value: (item as { value: string }).value };
-      return { value: String(item) };
-    });
-  }
-  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +179,64 @@ function getWsBaseUrl(): string {
     return 'ws://localhost:8080';
   }
 }
+
+/** LSP client capabilities sent during initialization. */
+const LSP_CLIENT_CAPABILITIES = {
+  textDocument: {
+    synchronization: {
+      dynamicRegistration: false, willSave: false, didSave: true, willSaveWaitUntil: false,
+    },
+    completion: {
+      dynamicRegistration: false,
+      completionItem: {
+        snippetSupport: true, commitCharactersSupport: true,
+        documentationFormat: ['markdown', 'plaintext'],
+        deprecatedSupport: true, preselectSupport: true,
+      },
+      contextSupport: true,
+    },
+    hover: { dynamicRegistration: false, contentFormat: ['markdown', 'plaintext'] },
+    definition: { dynamicRegistration: false },
+    references: { dynamicRegistration: false },
+    signatureHelp: {
+      dynamicRegistration: false,
+      signatureInformation: {
+        documentationFormat: ['markdown', 'plaintext'],
+        parameterInformation: { labelOffsetSupport: true },
+      },
+    },
+    publishDiagnostics: { relatedInformation: true },
+    semanticTokens: {
+      dynamicRegistration: false,
+      requests: { full: true },
+      tokenTypes: [
+        'namespace', 'type', 'class', 'enum', 'interface', 'struct',
+        'typeParameter', 'parameter', 'variable', 'property', 'enumMember',
+        'event', 'function', 'method', 'macro', 'keyword', 'modifier',
+        'comment', 'string', 'number', 'regexp', 'operator', 'decorator',
+      ],
+      tokenModifiers: [
+        'declaration', 'definition', 'readonly', 'static', 'deprecated',
+        'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
+      ],
+      formats: ['relative'],
+      overlappingTokenSupport: false,
+      multilineTokenSupport: false,
+    },
+  },
+  workspace: {
+    configuration: true,
+    didChangeConfiguration: { dynamicRegistration: false },
+    semanticTokens: { refreshSupport: true },
+  },
+} as const;
+
+/** Map WebSocket close codes to LSP status for pre-bridge failures. */
+const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
+  4001: (reason) => ({ state: 'unavailable', reason: reason || 'Language server not found' }),
+  4002: () => ({ state: 'unavailable', reason: 'No active workspace' }),
+  4003: (reason) => ({ state: 'error', reason: reason || 'Install failed' }),
+};
 
 class LSPClientManager {
   private connections = new Map<string, LSPConnection>();
@@ -364,20 +369,11 @@ class LSPClientManager {
       }
 
       if (!bridgeStarted) {
-        switch (event.code) {
-          case 4001:
-            this.setStatus(key, { state: 'unavailable', reason: event.reason || 'Language server not found' });
-            break;
-          case 4002:
-            this.setStatus(key, { state: 'unavailable', reason: 'No active workspace' });
-            break;
-          case 4003:
-            this.setStatus(key, { state: 'error', reason: event.reason || 'Install failed' });
-            break;
-          default:
-            if (current?.state !== 'error' && current?.state !== 'unavailable') {
-              this.setStatus(key, { state: 'error', reason: event.reason || 'Connection closed' });
-            }
+        const statusFactory = CLOSE_CODE_STATUS[event.code];
+        if (statusFactory) {
+          this.setStatus(key, statusFactory(event.reason));
+        } else if (current?.state !== 'error' && current?.state !== 'unavailable') {
+          this.setStatus(key, { state: 'error', reason: event.reason || 'Connection closed' });
         }
       }
     };
@@ -420,63 +416,7 @@ class LSPClientManager {
 
       const initResult = await rpc.sendRequest('initialize', {
         processId: null,
-        capabilities: {
-          textDocument: {
-            synchronization: {
-              dynamicRegistration: false,
-              willSave: false,
-              didSave: true,
-              willSaveWaitUntil: false,
-            },
-            completion: {
-              dynamicRegistration: false,
-              completionItem: {
-                snippetSupport: true,
-                commitCharactersSupport: true,
-                documentationFormat: ['markdown', 'plaintext'],
-                deprecatedSupport: true,
-                preselectSupport: true,
-              },
-              contextSupport: true,
-            },
-            hover: {
-              dynamicRegistration: false,
-              contentFormat: ['markdown', 'plaintext'],
-            },
-            definition: { dynamicRegistration: false },
-            references: { dynamicRegistration: false },
-            signatureHelp: {
-              dynamicRegistration: false,
-              signatureInformation: {
-                documentationFormat: ['markdown', 'plaintext'],
-                parameterInformation: { labelOffsetSupport: true },
-              },
-            },
-            publishDiagnostics: { relatedInformation: true },
-            semanticTokens: {
-              dynamicRegistration: false,
-              requests: { full: true },
-              tokenTypes: [
-                'namespace', 'type', 'class', 'enum', 'interface', 'struct',
-                'typeParameter', 'parameter', 'variable', 'property', 'enumMember',
-                'event', 'function', 'method', 'macro', 'keyword', 'modifier',
-                'comment', 'string', 'number', 'regexp', 'operator', 'decorator',
-              ],
-              tokenModifiers: [
-                'declaration', 'definition', 'readonly', 'static', 'deprecated',
-                'abstract', 'async', 'modification', 'documentation', 'defaultLibrary',
-              ],
-              formats: ['relative'],
-              overlappingTokenSupport: false,
-              multilineTokenSupport: false,
-            },
-          },
-          workspace: {
-            configuration: true,
-            didChangeConfiguration: { dynamicRegistration: false },
-            semanticTokens: { refreshSupport: true },
-          },
-        },
+        capabilities: LSP_CLIENT_CAPABILITIES,
         rootUri: workspacePath ? `file://${workspacePath}` : null,
         workspaceFolders: workspacePath
           ? [{ uri: `file://${workspacePath}`, name: workspacePath.split('/').pop() ?? 'workspace' }]
@@ -522,258 +462,20 @@ class LSPClientManager {
     }
   }
 
-  // ------- Monaco provider registration -------
+  // ------- Monaco provider registration (delegated to lsp-providers.ts) -------
 
-  private registerProviders(rpc: JsonRpcConnection, lspLanguage: string, connectionKey: string, serverCapabilities: Record<string, unknown> | null, semanticRefreshCallbacks: (() => void)[]): IDisposable[] {
-    const monaco = getMonacoInstance();
-    if (!monaco) return [];
-
-    const monacoLanguages = getMonacoLanguagesForLsp(lspLanguage);
-    const disposables: IDisposable[] = [];
-
-    for (const lang of monacoLanguages) {
-      // Completion
-      disposables.push(
-        monaco.languages.registerCompletionItemProvider(lang, {
-          triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#', ' '],
-          provideCompletionItems: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, _context: unknown, token: { isCancellationRequested: boolean }) => {
-            const uri = this.getDocumentUri(model);
-            if (!uri) return { suggestions: [] };
-            try {
-              const result = await rpc.sendRequest('textDocument/completion', {
-                textDocument: { uri },
-                position: toLspPosition(position.lineNumber, position.column),
-              });
-              if (token.isCancellationRequested) return { suggestions: [] };
-              const items = Array.isArray(result) ? result : ((result as { items?: unknown[] })?.items ?? []);
-              return {
-                suggestions: (items as Array<{
-                  label: string | { label: string; detail?: string; description?: string };
-                  kind?: number;
-                  detail?: string;
-                  documentation?: unknown;
-                  insertText?: string;
-                  insertTextFormat?: number;
-                  textEdit?: { range: LspRange; newText: string };
-                  additionalTextEdits?: Array<{ range: LspRange; newText: string }>;
-                  sortText?: string;
-                  filterText?: string;
-                }>).map((item) => {
-                  const label = typeof item.label === 'string' ? item.label : item.label.label;
-                  const insertText = item.textEdit?.newText ?? item.insertText ?? label;
-                  const isSnippet = item.insertTextFormat === 2;
-                  return {
-                    label,
-                    kind: toMonacoCompletionKind(item.kind),
-                    detail: item.detail,
-                    documentation: typeof item.documentation === 'string'
-                      ? item.documentation
-                      : item.documentation && typeof item.documentation === 'object' && 'value' in item.documentation
-                        ? { value: (item.documentation as { value: string }).value }
-                        : undefined,
-                    insertText,
-                    insertTextRules: isSnippet ? 4 /* InsertAsSnippet */ : undefined,
-                    range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : undefined,
-                    sortText: item.sortText,
-                    filterText: item.filterText,
-                    additionalTextEdits: item.additionalTextEdits?.map((e) => ({
-                      range: toMonacoRange(e.range),
-                      text: e.newText,
-                    })),
-                  } as languages.CompletionItem;
-                }),
-              };
-            } catch {
-              return { suggestions: [] };
-            }
-          },
-        })
-      );
-
-      // Hover
-      disposables.push(
-        monaco.languages.registerHoverProvider(lang, {
-          provideHover: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, token: { isCancellationRequested: boolean }) => {
-            const uri = this.getDocumentUri(model);
-            if (!uri) return null;
-            try {
-              const result = await rpc.sendRequest('textDocument/hover', {
-                textDocument: { uri },
-                position: toLspPosition(position.lineNumber, position.column),
-              }) as { contents: unknown; range?: LspRange } | null;
-              if (token.isCancellationRequested || !result) return null;
-              return {
-                range: result.range ? toMonacoRange(result.range) : undefined,
-                contents: extractHoverContents(result.contents),
-              };
-            } catch {
-              return null;
-            }
-          },
-        })
-      );
-
-      // Go to definition
-      disposables.push(
-        monaco.languages.registerDefinitionProvider(lang, {
-          provideDefinition: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, token: { isCancellationRequested: boolean }) => {
-            const uri = this.getDocumentUri(model);
-            if (!uri) return null;
-            try {
-              const result = await rpc.sendRequest('textDocument/definition', {
-                textDocument: { uri },
-                position: toLspPosition(position.lineNumber, position.column),
-              });
-              if (token.isCancellationRequested || !result) return null;
-              const defs = Array.isArray(result) ? result : [result];
-              // Pre-create placeholder models so Monaco's peek/goto doesn't crash
-              this.ensureModelsExist(
-                defs.map((d: { uri: string }) => d.uri),
-                connectionKey,
-              );
-              return defs.map((d: { uri: string; range: LspRange }) => ({
-                uri: monaco.Uri.parse(d.uri),
-                range: toMonacoRange(d.range),
-              }));
-            } catch {
-              return null;
-            }
-          },
-        })
-      );
-
-      // References
-      disposables.push(
-        monaco.languages.registerReferenceProvider(lang, {
-          provideReferences: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, context: { includeDeclaration: boolean }, token: { isCancellationRequested: boolean }) => {
-            const uri = this.getDocumentUri(model);
-            if (!uri) return null;
-            try {
-              const result = await rpc.sendRequest('textDocument/references', {
-                textDocument: { uri },
-                position: toLspPosition(position.lineNumber, position.column),
-                context: { includeDeclaration: context.includeDeclaration },
-              });
-              if (token.isCancellationRequested || !result) return null;
-              const refs = Array.isArray(result) ? result : [];
-              // Pre-create placeholder models so Monaco's peek widget can show previews
-              this.ensureModelsExist(
-                refs.map((r: { uri: string }) => r.uri),
-                connectionKey,
-              );
-              return refs.map((r: { uri: string; range: LspRange }) => ({
-                uri: monaco.Uri.parse(r.uri),
-                range: toMonacoRange(r.range),
-              }));
-            } catch {
-              return null;
-            }
-          },
-        })
-      );
-
-      // Signature help
-      disposables.push(
-        monaco.languages.registerSignatureHelpProvider(lang, {
-          signatureHelpTriggerCharacters: ['(', ','],
-          provideSignatureHelp: async (model: monacoEditor.ITextModel, position: { lineNumber: number; column: number }, _token: { isCancellationRequested: boolean }) => {
-            const uri = this.getDocumentUri(model);
-            if (!uri) return null;
-            try {
-              const result = await rpc.sendRequest('textDocument/signatureHelp', {
-                textDocument: { uri },
-                position: toLspPosition(position.lineNumber, position.column),
-              }) as { signatures: Array<{ label: string; documentation?: unknown; parameters?: Array<{ label: string | [number, number]; documentation?: unknown }> }>; activeSignature?: number; activeParameter?: number } | null;
-              if (!result || !result.signatures?.length) return null;
-              return {
-                value: {
-                  signatures: result.signatures.map((sig) => ({
-                    label: sig.label,
-                    documentation: typeof sig.documentation === 'string'
-                      ? sig.documentation
-                      : sig.documentation && typeof sig.documentation === 'object' && 'value' in sig.documentation
-                        ? { value: (sig.documentation as { value: string }).value }
-                        : undefined,
-                    parameters: (sig.parameters ?? []).map((p) => ({
-                      label: p.label,
-                      documentation: typeof p.documentation === 'string' ? p.documentation : undefined,
-                    })),
-                  })),
-                  activeSignature: result.activeSignature ?? 0,
-                  activeParameter: result.activeParameter ?? 0,
-                },
-                dispose: () => {},
-              };
-            } catch {
-              return null;
-            }
-          },
-        })
-      );
-
-      // Semantic tokens — provides rich highlighting (functions, types, variables
-      // in different colors) using data from the LSP server.
-      const semTokensCap = serverCapabilities?.semanticTokensProvider as
-        { legend?: { tokenTypes: string[]; tokenModifiers: string[] }; full?: boolean | object } | undefined;
-      if (semTokensCap?.legend && semTokensCap.full) {
-        const legend = semTokensCap.legend;
-
-        // onDidChange event: fired when the server sends workspace/semanticTokens/refresh
-        // (e.g. after gopls finishes analyzing the workspace). This tells Monaco to
-        // re-request semantic tokens from the provider.
-        const listeners = new Set<() => void>();
-        const onDidChange = (listener: () => void) => {
-          listeners.add(listener);
-          return { dispose: () => listeners.delete(listener) };
-        };
-        semanticRefreshCallbacks.push(() => {
-          for (const l of listeners) l();
-        });
-
-        // Track pending retry timers so they can be disposed
-        const retryTimers = new Set<ReturnType<typeof setTimeout>>();
-
-        disposables.push(
-          monaco.languages.registerDocumentSemanticTokensProvider(lang, {
-            onDidChange,
-            getLegend() {
-              return legend;
-            },
-            provideDocumentSemanticTokens: async (model: monacoEditor.ITextModel, lastResultId: string | null, token: { isCancellationRequested: boolean }) => {
-              const uri = this.getDocumentUri(model);
-              if (!uri) return null;
-              try {
-                const result = await rpc.sendRequest('textDocument/semanticTokens/full', {
-                  textDocument: { uri },
-                }) as { resultId?: string; data: number[] } | null;
-                if (token.isCancellationRequested) return null;
-                const dataLen = result?.data?.length ?? 0;
-                // If we got 0 tokens (server still loading/analyzing), schedule a retry
-                if (dataLen === 0) {
-                  const timer = setTimeout(() => {
-                    retryTimers.delete(timer);
-                    for (const l of listeners) l();
-                  }, 5000);
-                  retryTimers.add(timer);
-                  return null;
-                }
-                return {
-                  resultId: result!.resultId,
-                  data: new Uint32Array(result!.data),
-                };
-              } catch {
-                return null;
-              }
-            },
-            releaseDocumentSemanticTokens() {},
-          })
-        );
-        // Clean up retry timers when providers are disposed
-        disposables.push({ dispose: () => { for (const t of retryTimers) clearTimeout(t); retryTimers.clear(); } });
-      }
-    }
-
-    return disposables;
+  private registerProviders(
+    rpc: JsonRpcConnection,
+    lspLanguage: string,
+    connectionKey: string,
+    serverCapabilities: Record<string, unknown> | null,
+    semanticRefreshCallbacks: (() => void)[],
+  ): IDisposable[] {
+    return registerLspProviders({
+      rpc, lspLanguage, connectionKey, serverCapabilities, semanticRefreshCallbacks,
+      getDocumentUri: (model) => this.getDocumentUri(model),
+      ensureModelsExist: (uris, key) => this.ensureModelsExist(uris, key),
+    });
   }
 
   // ------- Placeholder models for Go-to-Definition / References -------
@@ -922,7 +624,11 @@ class LSPClientManager {
       severity: toMonacoSeverity(d.severity),
       ...toMonacoRange(d.range),
       source: d.source,
-      code: typeof d.code === 'object' && d.code !== null ? String((d.code as { value: unknown }).value) : d.code !== undefined ? String(d.code) : undefined,
+      code: (() => {
+        if (typeof d.code === 'object' && d.code !== null) return String((d.code as { value: unknown }).value);
+        if (d.code !== undefined) return String(d.code);
+        return undefined;
+      })(),
     }));
 
     monaco.editor.setModelMarkers(targetModel, 'lsp', markers);
@@ -1038,16 +744,6 @@ class LSPClientManager {
 // ---------------------------------------------------------------------------
 // Language mapping helpers
 // ---------------------------------------------------------------------------
-
-function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
-  switch (lspLanguage) {
-    case 'typescript': return ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'];
-    case 'go': return ['go'];
-    case 'rust': return ['rust'];
-    case 'python': return ['python'];
-    default: return [];
-  }
-}
 
 export function toLspLanguage(monacoLanguage: string): string | null {
   const map: Record<string, string> = {

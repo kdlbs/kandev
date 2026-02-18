@@ -18,6 +18,68 @@ type KanbanWithPreviewProps = {
   initialSessionId?: string;
 };
 
+function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string | null) {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const url = new URL(window.location.href);
+    if (selectedTaskId) {
+      url.searchParams.set('taskId', selectedTaskId);
+    } else {
+      url.searchParams.delete('taskId');
+      url.searchParams.delete('sessionId');
+    }
+
+    if (selectedTaskId && selectedTaskSessionId) {
+      url.searchParams.set('sessionId', selectedTaskSessionId);
+    }
+
+    window.history.replaceState({}, '', url.toString());
+  }, [selectedTaskId, selectedTaskSessionId]);
+}
+
+function useEscapeKey(isOpen: boolean, close: () => void) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen) {
+        close();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, close]);
+}
+
+function useResizeHandler(
+  isResizingRef: React.RefObject<boolean>,
+  previewWidthPx: number,
+  updatePreviewWidth: (width: number) => void,
+) {
+  return useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    (isResizingRef as React.MutableRefObject<boolean>).current = true;
+
+    const startX = e.clientX;
+    const startWidth = previewWidthPx;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const deltaX = startX - moveEvent.clientX;
+      updatePreviewWidth(startWidth + deltaX);
+    };
+
+    const handleMouseUp = () => {
+      (isResizingRef as React.MutableRefObject<boolean>).current = false;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }, [isResizingRef, previewWidthPx, updatePreviewWidth]);
+}
+
 export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const router = useRouter();
 
@@ -78,32 +140,10 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     [router]
   );
 
-  // Update URL query params when task selection changes
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+  useUrlSync(selectedTaskId ?? null, selectedTaskSessionId ?? null);
 
-    const url = new URL(window.location.href);
-    if (selectedTaskId) {
-      url.searchParams.set('taskId', selectedTaskId);
-    } else {
-      url.searchParams.delete('taskId');
-      url.searchParams.delete('sessionId');
-    }
-
-    // Update sessionId param when it's available
-    if (selectedTaskId && selectedTaskSessionId) {
-      url.searchParams.set('sessionId', selectedTaskSessionId);
-    }
-
-    // Use replaceState to avoid adding to browser history on every click
-    window.history.replaceState({}, '', url.toString());
-  }, [selectedTaskId, selectedTaskSessionId]);
-
-  // Preview handler - opens/toggles the preview panel
-  // Toggle behavior: clicking the same task closes the panel
   const handlePreviewTaskWithData = useCallback(
     (task: Task) => {
-      // Toggle preview: if already open for this task, close it; otherwise open
       if (isOpen && selectedTaskId === task.id) {
         close();
       } else {
@@ -113,154 +153,150 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     [isOpen, selectedTaskId, open, close]
   );
 
-  // Handle Escape key to close preview
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        close();
-      }
-    };
+  useEscapeKey(isOpen, close);
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, close]);
-
-  // Unified resize handler for both inline and floating modes
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingRef.current = true;
-
-    const startX = e.clientX;
-    const startWidth = previewWidthPx;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!isResizingRef.current) return;
-
-      // Calculate new width (moving left increases width)
-      const deltaX = startX - moveEvent.clientX;
-      const newWidth = startWidth + deltaX;
-
-      // No maximum limit - can resize all the way to the left
-      // updatePreviewWidth enforces minimum width
-      updatePreviewWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      isResizingRef.current = false;
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  }, [previewWidthPx, updatePreviewWidth]);
+  const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
   const activeSessionId = selectedTaskId ? selectedTaskSessionId : null;
 
   return (
     <div ref={containerRef} className="h-screen w-full flex flex-col bg-background relative">
       {shouldFloat ? (
-        // Floating mode: kanban at min width, preview overlays
-        <>
-          <div
-            className="flex-1 overflow-hidden"
-            style={{
-              width: `${kanbanWidth}px`,
-            }}
-          >
-            <KanbanBoard
-              onPreviewTask={handlePreviewTaskWithData}
-              onOpenTask={handleNavigateToTask}
-            />
-          </div>
-
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/30 z-30"
-            onClick={close}
-            aria-label="Close preview"
-          />
-
-          {/* Floating Panel */}
-          <div
-            className="fixed right-0 top-0 bottom-0 z-40 shadow-2xl bg-background flex"
-            style={{
-              width: `${previewWidthPx}px`,
-              maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
-            }}
-          >
-            {/* Resize handle on the left edge */}
-            <div
-              className="w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group"
-              onMouseDown={handleResizeMouseDown}
-            >
-              <div className="absolute inset-y-0 -left-2 -right-2" />
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 bg-border group-hover:bg-primary rounded-full transition-colors" />
-            </div>
-
-            {/* Panel content */}
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <TaskPreviewPanel
-                task={selectedTask}
-                sessionId={activeSessionId}
-                onClose={close}
-                onMaximize={
-                  activeSessionId
-                    ? (task) => handleNavigateToTask(task, activeSessionId)
-                    : undefined
-                }
-              />
-            </div>
-          </div>
-        </>
+        <FloatingPreviewLayout
+          kanbanWidth={kanbanWidth}
+          previewWidthPx={previewWidthPx}
+          selectedTask={selectedTask}
+          activeSessionId={activeSessionId}
+          onPreviewTask={handlePreviewTaskWithData}
+          onNavigateToTask={handleNavigateToTask}
+          onClose={close}
+          onResizeMouseDown={handleResizeMouseDown}
+        />
       ) : (
-        // Inline mode: side by side with custom resize
-        <div className="flex-1 flex overflow-hidden">
-          {/* Kanban */}
-          <div
-            className="overflow-hidden"
-            style={{
-              width: `${kanbanWidth}px`,
-            }}
-          >
-            <KanbanBoard
-              onPreviewTask={handlePreviewTaskWithData}
-              onOpenTask={handleNavigateToTask}
+        <InlinePreviewLayout
+          kanbanWidth={kanbanWidth}
+          previewWidthPx={previewWidthPx}
+          isOpen={isOpen}
+          selectedTask={selectedTask}
+          activeSessionId={activeSessionId}
+          onPreviewTask={handlePreviewTaskWithData}
+          onNavigateToTask={handleNavigateToTask}
+          onClose={close}
+          onResizeMouseDown={handleResizeMouseDown}
+        />
+      )}
+    </div>
+  );
+}
+
+function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      className="w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group"
+      onMouseDown={onMouseDown}
+    >
+      <div className="absolute inset-y-0 -left-2 -right-2" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 bg-border group-hover:bg-primary rounded-full transition-colors" />
+    </div>
+  );
+}
+
+type PreviewLayoutProps = {
+  kanbanWidth: number;
+  previewWidthPx: number;
+  selectedTask: Task | null;
+  activeSessionId: string | null;
+  onPreviewTask: (task: Task) => void;
+  onNavigateToTask: (task: Task, sessionId: string) => void;
+  onClose: () => void;
+  onResizeMouseDown: (e: React.MouseEvent) => void;
+};
+
+function FloatingPreviewLayout({
+  kanbanWidth,
+  previewWidthPx,
+  selectedTask,
+  activeSessionId,
+  onPreviewTask,
+  onNavigateToTask,
+  onClose,
+  onResizeMouseDown,
+}: PreviewLayoutProps) {
+  return (
+    <>
+      <div
+        className="flex-1 overflow-hidden"
+        style={{ width: `${kanbanWidth}px` }}
+      >
+        <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
+      </div>
+      <div
+        className="fixed inset-0 bg-black/30 z-30"
+        onClick={onClose}
+        aria-label="Close preview"
+      />
+      <div
+        className="fixed right-0 top-0 bottom-0 z-40 shadow-2xl bg-background flex"
+        style={{
+          width: `${previewWidthPx}px`,
+          maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,
+        }}
+      >
+        <ResizeHandle onMouseDown={onResizeMouseDown} />
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <TaskPreviewPanel
+            task={selectedTask}
+            sessionId={activeSessionId}
+            onClose={onClose}
+            onMaximize={
+              activeSessionId
+                ? (task) => onNavigateToTask(task, activeSessionId)
+                : undefined
+            }
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function InlinePreviewLayout({
+  kanbanWidth,
+  previewWidthPx,
+  isOpen,
+  selectedTask,
+  activeSessionId,
+  onPreviewTask,
+  onNavigateToTask,
+  onClose,
+  onResizeMouseDown,
+}: PreviewLayoutProps & { isOpen: boolean }) {
+  return (
+    <div className="flex-1 flex overflow-hidden">
+      <div
+        className="overflow-hidden"
+        style={{ width: `${kanbanWidth}px` }}
+      >
+        <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
+      </div>
+      {isOpen && (
+        <div
+          className="flex-shrink-0 border-l bg-background flex"
+          style={{ width: `${previewWidthPx}px` }}
+        >
+          <ResizeHandle onMouseDown={onResizeMouseDown} />
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <TaskPreviewPanel
+              task={selectedTask}
+              sessionId={activeSessionId}
+              onClose={onClose}
+              onMaximize={
+                activeSessionId
+                  ? (task) => onNavigateToTask(task, activeSessionId)
+                  : undefined
+              }
             />
           </div>
-
-          {/* Preview Panel */}
-          {isOpen && (
-            <div
-              className="flex-shrink-0 border-l bg-background flex"
-              style={{
-                width: `${previewWidthPx}px`,
-              }}
-            >
-              {/* Resize handle */}
-              <div
-                className="w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group"
-                onMouseDown={handleResizeMouseDown}
-              >
-                <div className="absolute inset-y-0 -left-2 -right-2" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 bg-border group-hover:bg-primary rounded-full transition-colors" />
-              </div>
-
-              {/* Panel content */}
-              <div className="flex-1 min-w-0 overflow-hidden">
-                <TaskPreviewPanel
-                  task={selectedTask}
-                  sessionId={activeSessionId}
-                  onClose={close}
-                  onMaximize={
-                    activeSessionId
-                      ? (task) => handleNavigateToTask(task, activeSessionId)
-                      : undefined
-                  }
-                />
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

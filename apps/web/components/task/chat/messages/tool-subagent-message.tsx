@@ -28,6 +28,73 @@ function arePropsEqual(
   );
 }
 
+type SubagentHeaderProps = {
+  isExpanded: boolean;
+  subagentType: string;
+  description: string;
+  isActive: boolean;
+  childCount: number;
+  onToggle: () => void;
+};
+
+function SubagentHeader({ isExpanded, subagentType, description, isActive, childCount, onToggle }: SubagentHeaderProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        'flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded',
+        'hover:bg-muted/30 transition-colors cursor-pointer'
+      )}
+    >
+      {isExpanded
+        ? <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
+        : <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
+      }
+      <span className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide">
+        {subagentType}
+      </span>
+      <span className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5">
+        {description}
+        {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
+      </span>
+      {childCount > 0 && (
+        <span className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono">
+          {childCount} tool call{childCount !== 1 ? 's' : ''}
+        </span>
+      )}
+    </button>
+  );
+}
+
+type SubagentContentProps = {
+  isExpanded: boolean;
+  childMessages: Message[];
+  isActive: boolean;
+  renderChild: (message: Message) => React.ReactNode;
+};
+
+function SubagentContent({ isExpanded, childMessages, isActive, renderChild }: SubagentContentProps) {
+  if (!isExpanded) return null;
+  if (childMessages.length > 0) {
+    return (
+      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
+        {childMessages.map((child) => (
+          <div key={child.id}>{renderChild(child)}</div>
+        ))}
+      </div>
+    );
+  }
+  if (isActive) {
+    return (
+      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1">
+        <span className="text-xs text-muted-foreground italic">Subagent working...</span>
+      </div>
+    );
+  }
+  return null;
+}
+
 export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   comment,
   childMessages,
@@ -63,49 +130,20 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
 
   return (
     <div className="w-full">
-      {/* Header */}
-      <button
-        type="button"
-        onClick={handleToggle}
-        className={cn(
-          'flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded',
-          'hover:bg-muted/30 transition-colors cursor-pointer'
-        )}
-      >
-        {isExpanded ? (
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-        ) : (
-          <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-        )}
-        <span className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide">
-          {subagentType}
-        </span>
-        <span className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5">
-          {description}
-          {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
-        </span>
-        {childCount > 0 && (
-          <span className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono">
-            {childCount} tool call{childCount !== 1 ? 's' : ''}
-          </span>
-        )}
-      </button>
-
-      {/* Expanded content */}
-      {isExpanded && childMessages.length > 0 && (
-        <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
-          {childMessages.map((child) => (
-            <div key={child.id}>{renderChild(child)}</div>
-          ))}
-        </div>
-      )}
-
-      {/* Expanded but no children yet */}
-      {isExpanded && childMessages.length === 0 && isActive && (
-        <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1">
-          <span className="text-xs text-muted-foreground italic">Subagent working...</span>
-        </div>
-      )}
+      <SubagentHeader
+        isExpanded={isExpanded}
+        subagentType={subagentType}
+        description={description}
+        isActive={isActive}
+        childCount={childCount}
+        onToggle={handleToggle}
+      />
+      <SubagentContent
+        isExpanded={isExpanded}
+        childMessages={childMessages}
+        isActive={isActive}
+        renderChild={renderChild}
+      />
     </div>
   );
 }, arePropsEqual);

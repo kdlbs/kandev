@@ -22,6 +22,97 @@ import type { Workspace, Repository } from '@/lib/types/http';
 import type { WorkflowsState } from '@/lib/state/slices';
 import { Badge } from '@kandev/ui/badge';
 
+function getRepositoryPlaceholder(repositoriesLoading: boolean, repositoriesEmpty: boolean): string {
+  if (repositoriesLoading) return 'Loading repositories...';
+  if (repositoriesEmpty) return 'No repositories';
+  return 'Select repository';
+}
+
+function WorkspaceSection({ activeWorkspaceId, workspaces, onWorkspaceChange }: {
+  activeWorkspaceId: string | null;
+  workspaces: Workspace[];
+  onWorkspaceChange: (id: string | null) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">Workspace</DropdownMenuLabel>
+      <Select
+        value={activeWorkspaceId ?? ''}
+        onValueChange={(value) => onWorkspaceChange(value || null)}
+      >
+        <SelectTrigger className="w-full border-border">
+          <SelectValue placeholder="Select workspace" />
+        </SelectTrigger>
+        <SelectContent>
+          {workspaces.map((workspace: Workspace) => (
+            <SelectItem key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function WorkflowSection({ activeWorkflowId, workflows, onWorkflowChange }: {
+  activeWorkflowId: string | null;
+  workflows: WorkflowsState['items'];
+  onWorkflowChange: (id: string | null) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">Workflow</DropdownMenuLabel>
+      <Select
+        value={activeWorkflowId ?? 'all'}
+        onValueChange={(value) => onWorkflowChange(value === 'all' ? null : value)}
+      >
+        <SelectTrigger className="w-full border-border">
+          <SelectValue placeholder="Select workflow" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Workflows</SelectItem>
+          {workflows.map((workflow: WorkflowsState['items'][number]) => (
+            <SelectItem key={workflow.id} value={workflow.id}>
+              {workflow.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function RepositorySection({ repositoryValue, repositories, repositoriesLoading, onRepositoryChange }: {
+  repositoryValue: string;
+  repositories: Repository[];
+  repositoriesLoading: boolean;
+  onRepositoryChange: (value: string | 'all') => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">Repository</DropdownMenuLabel>
+      <Select
+        value={repositoryValue}
+        onValueChange={(value) => onRepositoryChange(value as string | 'all')}
+        disabled={repositories.length === 0}
+      >
+        <SelectTrigger className="w-full border-border">
+          <SelectValue placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All repositories</SelectItem>
+          {repositories.map((repo: Repository) => (
+            <SelectItem key={repo.id} value={repo.id}>
+              {repo.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 export function KanbanDisplayDropdown() {
   const {
     workspaces,
@@ -51,73 +142,11 @@ export function KanbanDisplayDropdown() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[280px] p-3">
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0 text-foreground">Workspace</DropdownMenuLabel>
-            <Select
-              value={activeWorkspaceId ?? ''}
-              onValueChange={(value) => onWorkspaceChange(value || null)}
-            >
-              <SelectTrigger className="w-full border-border">
-                <SelectValue placeholder="Select workspace" />
-              </SelectTrigger>
-              <SelectContent>
-                {workspaces.map((workspace: Workspace) => (
-                  <SelectItem key={workspace.id} value={workspace.id}>
-                    {workspace.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <WorkspaceSection activeWorkspaceId={activeWorkspaceId} workspaces={workspaces} onWorkspaceChange={onWorkspaceChange} />
           <DropdownMenuSeparator />
-          <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0 text-foreground">Workflow</DropdownMenuLabel>
-            <Select
-              value={activeWorkflowId ?? 'all'}
-              onValueChange={(value) => onWorkflowChange(value === 'all' ? null : value)}
-            >
-              <SelectTrigger className="w-full border-border">
-                <SelectValue placeholder="Select workflow" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Workflows</SelectItem>
-                {workflows.map((workflow: WorkflowsState['items'][number]) => (
-                  <SelectItem key={workflow.id} value={workflow.id}>
-                    {workflow.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <WorkflowSection activeWorkflowId={activeWorkflowId} workflows={workflows} onWorkflowChange={onWorkflowChange} />
           <DropdownMenuSeparator />
-          <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0 text-foreground">Repository</DropdownMenuLabel>
-            <Select
-              value={repositoryValue}
-              onValueChange={(value) => onRepositoryChange(value as string | 'all')}
-              disabled={repositories.length === 0}
-            >
-              <SelectTrigger className="w-full border-border">
-                <SelectValue
-                  placeholder={
-                    repositoriesLoading
-                      ? 'Loading repositories...'
-                      : repositories.length === 0
-                        ? 'No repositories'
-                        : 'Select repository'
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All repositories</SelectItem>
-                {repositories.map((repo: Repository) => (
-                  <SelectItem key={repo.id} value={repo.id}>
-                    {repo.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <RepositorySection repositoryValue={repositoryValue} repositories={repositories} repositoriesLoading={repositoriesLoading} onRepositoryChange={onRepositoryChange} />
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
             <DropdownMenuLabel className="px-0 text-foreground">Preview Panel</DropdownMenuLabel>

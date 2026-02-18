@@ -22,6 +22,86 @@ type SessionMobileLayoutProps = {
   taskTitle?: string;
 };
 
+function MobileChatPanelContent({ activeTaskId, isPassthroughMode, effectiveSessionId, sessionId, onOpenFile }: {
+  activeTaskId: string | null;
+  isPassthroughMode: boolean;
+  effectiveSessionId: string | null;
+  sessionId?: string | null;
+  onOpenFile: (path: string) => void;
+}) {
+  if (activeTaskId && isPassthroughMode) {
+    return (
+      <div className="flex-1 min-h-0">
+        <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} mode="agent" />
+      </div>
+    );
+  }
+  if (activeTaskId) {
+    return <TaskChatPanel sessionId={sessionId} onOpenFile={onOpenFile} />;
+  }
+  return <div className="flex-1 flex items-center justify-center text-muted-foreground">No task selected</div>;
+}
+
+type MobilePanelAreaProps = {
+  currentMobilePanel: string;
+  activeTaskId: string | null;
+  isPassthroughMode: boolean;
+  effectiveSessionId: string | null;
+  sessionId?: string | null;
+  selectedDiff: { path: string; content?: string } | null;
+  handleOpenFileFromChat: (path: string) => void;
+  handleClearSelectedDiff: () => void;
+  handleSelectDiffAndSwitchPanel: (path: string, content?: string) => void;
+  handleOpenFile: (file: { path: string }) => void;
+  topNavHeight: string;
+  bottomNavHeight: string;
+};
+
+function MobilePanelArea({
+  currentMobilePanel, activeTaskId, isPassthroughMode, effectiveSessionId, sessionId,
+  selectedDiff, handleOpenFileFromChat, handleClearSelectedDiff,
+  handleSelectDiffAndSwitchPanel, handleOpenFile, topNavHeight, bottomNavHeight,
+}: MobilePanelAreaProps) {
+  return (
+    <div
+      className="flex flex-col"
+      style={{
+        paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
+        paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
+        height: '100dvh',
+      }}
+    >
+      {currentMobilePanel === 'chat' && (
+        <div className="flex-1 min-h-0 flex flex-col p-2">
+          <MobileChatPanelContent activeTaskId={activeTaskId} isPassthroughMode={isPassthroughMode} effectiveSessionId={effectiveSessionId} sessionId={sessionId} onOpenFile={handleOpenFileFromChat} />
+        </div>
+      )}
+      {currentMobilePanel === 'plan' && (
+        <div className="flex-1 min-h-0 flex flex-col p-2">
+          <TaskPlanPanel taskId={activeTaskId} visible={true} />
+        </div>
+      )}
+      {currentMobilePanel === 'changes' && (
+        <div className="flex-1 min-h-0 flex flex-col p-2">
+          <TaskChangesPanel selectedDiff={selectedDiff} onClearSelected={handleClearSelectedDiff} onOpenFile={handleOpenFileFromChat} />
+        </div>
+      )}
+      {currentMobilePanel === 'files' && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <TaskFilesPanel onSelectDiff={handleSelectDiffAndSwitchPanel} onOpenFile={handleOpenFile} />
+        </div>
+      )}
+      {currentMobilePanel === 'terminal' && (
+        <div className="flex-1 min-h-0 flex flex-col p-2">
+          <SessionPanelContent className="p-0 flex-1 min-h-0">
+            <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
+          </SessionPanelContent>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const SessionMobileLayout = memo(function SessionMobileLayout({
   workspaceId,
   workflowId,
@@ -88,68 +168,20 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
       </div>
 
       {/* Content Area - fixed height panels that manage their own scrolling */}
-      <div
-        className="flex flex-col"
-        style={{
-          paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
-          paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
-          height: '100dvh',
-        }}
-      >
-        {currentMobilePanel === 'chat' && (
-          <div className="flex-1 min-h-0 flex flex-col p-2">
-            {activeTaskId ? (
-              isPassthroughMode ? (
-                <div className="flex-1 min-h-0">
-                  <PassthroughTerminal key={effectiveSessionId} sessionId={sessionId} mode="agent" />
-                </div>
-              ) : (
-                <TaskChatPanel
-                  sessionId={sessionId}
-                  onOpenFile={handleOpenFileFromChat}
-                />
-              )
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                No task selected
-              </div>
-            )}
-          </div>
-        )}
-
-        {currentMobilePanel === 'plan' && (
-          <div className="flex-1 min-h-0 flex flex-col p-2">
-            <TaskPlanPanel taskId={activeTaskId} visible={true} />
-          </div>
-        )}
-
-        {currentMobilePanel === 'changes' && (
-          <div className="flex-1 min-h-0 flex flex-col p-2">
-            <TaskChangesPanel
-              selectedDiff={selectedDiff}
-              onClearSelected={handleClearSelectedDiff}
-              onOpenFile={handleOpenFileFromChat}
-            />
-          </div>
-        )}
-
-        {currentMobilePanel === 'files' && (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <TaskFilesPanel
-              onSelectDiff={handleSelectDiffAndSwitchPanel}
-              onOpenFile={handleOpenFile}
-            />
-          </div>
-        )}
-
-        {currentMobilePanel === 'terminal' && (
-          <div className="flex-1 min-h-0 flex flex-col p-2">
-            <SessionPanelContent className="p-0 flex-1 min-h-0">
-              <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
-            </SessionPanelContent>
-          </div>
-        )}
-      </div>
+      <MobilePanelArea
+        currentMobilePanel={currentMobilePanel}
+        activeTaskId={activeTaskId}
+        isPassthroughMode={isPassthroughMode}
+        effectiveSessionId={effectiveSessionId}
+        sessionId={sessionId}
+        selectedDiff={selectedDiff}
+        handleOpenFileFromChat={handleOpenFileFromChat}
+        handleClearSelectedDiff={handleClearSelectedDiff}
+        handleSelectDiffAndSwitchPanel={handleSelectDiffAndSwitchPanel}
+        handleOpenFile={handleOpenFile}
+        topNavHeight={topNavHeight}
+        bottomNavHeight={bottomNavHeight}
+      />
 
       {/* Fixed Bottom Navigation */}
       <SessionMobileBottomNav

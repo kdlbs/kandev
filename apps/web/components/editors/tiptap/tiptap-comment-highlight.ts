@@ -76,30 +76,31 @@ function createCommentDecorations(
       if (firstLine.length >= MIN_COMMENT_TEXT_LENGTH) {
         normalizedIndex = normalizedFullText.indexOf(firstLine);
         if (normalizedIndex !== -1) {
-          addDecorationsForRange(normalizedIndex, firstLine.length, comment, fullText, positions, decorations);
+          addDecorationsForRange({ normalizedIndex, length: firstLine.length, comment, fullText, positions, decorations });
         }
       }
       continue;
     }
 
-    addDecorationsForRange(normalizedIndex, searchText.length, comment, fullText, positions, decorations);
+    addDecorationsForRange({ normalizedIndex, length: searchText.length, comment, fullText, positions, decorations });
   }
 
   return DecorationSet.create(doc, decorations);
 }
 
-function addDecorationsForRange(
-  normalizedIndex: number,
-  length: number,
-  comment: CommentHighlight,
-  fullText: string,
-  positions: number[],
-  decorations: Decoration[]
-) {
-  const normalizedFullText = normalizeForSearch(fullText);
+interface AddDecorationsForRangeParams {
+  normalizedIndex: number;
+  length: number;
+  comment: CommentHighlight;
+  fullText: string;
+  positions: number[];
+  decorations: Decoration[];
+}
+
+/** Build a mapping from normalized character indices to original character indices. */
+function buildNormToOrigMap(fullText: string, normalizedFullText: string): number[] {
   const normalizedChars = normalizedFullText.split('');
   const origChars = fullText.split('');
-
   const normToOrig: number[] = [];
   let oi = 0;
   for (let ni = 0; ni < normalizedChars.length; ni++) {
@@ -113,6 +114,40 @@ function addDecorationsForRange(
     normToOrig[ni] = oi;
     oi++;
   }
+  return normToOrig;
+}
+
+/** Push a highlight decoration if the range is valid. */
+function pushDecoration(
+  decorations: Decoration[],
+  positions: number[],
+  fromIdx: number,
+  toIdx: number,
+  comment: CommentHighlight,
+) {
+  const fromPos = positions[fromIdx];
+  const toPos = positions[toIdx] + 1;
+  if (fromPos >= 0 && toPos > fromPos) {
+    decorations.push(
+      Decoration.inline(fromPos, toPos, {
+        class: 'comment-highlight',
+        'data-comment-id': comment.id,
+        title: comment.comment,
+      })
+    );
+  }
+}
+
+function addDecorationsForRange({
+  normalizedIndex,
+  length,
+  comment,
+  fullText,
+  positions,
+  decorations,
+}: AddDecorationsForRangeParams) {
+  const normalizedFullText = normalizeForSearch(fullText);
+  const normToOrig = buildNormToOrigMap(fullText, normalizedFullText);
 
   const startOrig = normToOrig[normalizedIndex] ?? 0;
   const endOrig = normToOrig[normalizedIndex + length - 1] ?? startOrig;
@@ -120,43 +155,19 @@ function addDecorationsForRange(
   let rangeStart = -1;
 
   for (let i = startOrig; i <= endOrig && i < positions.length; i++) {
-    const pos = positions[i];
-
-    if (pos === -1) {
+    if (positions[i] === -1) {
       if (rangeStart !== -1) {
-        const fromPos = positions[rangeStart];
-        const toPos = positions[i - 1] + 1;
-        if (fromPos >= 0 && toPos > fromPos) {
-          decorations.push(
-            Decoration.inline(fromPos, toPos, {
-              class: 'comment-highlight',
-              'data-comment-id': comment.id,
-              title: comment.comment,
-            })
-          );
-        }
+        pushDecoration(decorations, positions, rangeStart, i - 1, comment);
         rangeStart = -1;
       }
-    } else {
-      if (rangeStart === -1) {
-        rangeStart = i;
-      }
+    } else if (rangeStart === -1) {
+      rangeStart = i;
     }
   }
 
   if (rangeStart !== -1 && rangeStart < positions.length) {
-    const fromPos = positions[rangeStart];
     const lastValidIndex = Math.min(endOrig, positions.length - 1);
-    const toPos = positions[lastValidIndex] + 1;
-    if (fromPos >= 0 && toPos > fromPos) {
-      decorations.push(
-        Decoration.inline(fromPos, toPos, {
-          class: 'comment-highlight',
-          'data-comment-id': comment.id,
-          title: comment.comment,
-        })
-      );
-    }
+    pushDecoration(decorations, positions, rangeStart, lastValidIndex, comment);
   }
 }
 

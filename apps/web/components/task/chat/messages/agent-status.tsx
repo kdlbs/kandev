@@ -113,81 +113,82 @@ function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
 }
 
 
-export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
-  const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
-
-  const config = sessionState ? STATE_CONFIG[sessionState] : null;
-  const isRunning = config?.icon === 'spinner';
-
-  // Get active turn to use its started_at timestamp for the timer
+function useActiveTurn(sessionId: string | null) {
   const turns = useAppStore((state) => sessionId ? state.turns.bySession[sessionId] : undefined);
   const activeTurnId = useAppStore((state) => sessionId ? state.turns.activeBySession[sessionId] : null);
-  const activeTurn = useMemo(() => {
+  return useMemo(() => {
     if (!turns || !activeTurnId) return null;
     return turns.find((t) => t.id === activeTurnId) ?? null;
   }, [turns, activeTurnId]);
+}
 
-  // Use timer that uses the turn's started_at timestamp, so it persists across page refreshes
+function AgentErrorStatus({ config }: { config: { label: string } }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
+      role="status"
+      aria-label={config.label}
+    >
+      <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+      <span className="font-medium">{config.label}</span>
+    </div>
+  );
+}
+
+function AgentWarningStatus({ config }: { config: { label: string } }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 border border-yellow-500/20"
+      role="status"
+      aria-label={config.label}
+    >
+      <IconAlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+      <span className="font-medium">{config.label}</span>
+    </div>
+  );
+}
+
+function AgentRunningStatus({ config, elapsedSeconds, runningDuration }: { config: { label: string }; elapsedSeconds: number; runningDuration: string }) {
+  return (
+    <div className="py-2" role="status" aria-label={config.label}>
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        {config.label}
+        <GridSpinner className="text-muted-foreground" />
+        {elapsedSeconds > 0 && (
+          <span className="text-muted-foreground/60 tabular-nums">
+            {runningDuration}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function useAgentStatusData(sessionId: string | null, messages: Message[], isRunning: boolean) {
+  const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
+  const activeTurn = useActiveTurn(sessionId);
   const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(isRunning, activeTurn?.started_at ?? null);
+  const fallbackDuration = useMemo(() => {
+    if (lastTurnDuration) return null;
+    return calculateTurnDurationFromMessages(messages);
+  }, [messages, lastTurnDuration]);
+  const displayDuration = lastTurnDuration?.formatted ?? fallbackDuration;
+  return { isTurnActive, runningDuration, elapsedSeconds, displayDuration };
+}
+
+export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
+  const config = sessionState ? STATE_CONFIG[sessionState] : null;
+  const isRunning = config?.icon === 'spinner';
   const isError = config?.icon === 'error';
   const isWarning = config?.icon === 'warning';
 
-  // Calculate duration from messages as fallback
-  const fallbackDuration = useMemo(() => {
-    if (lastTurnDuration) return null; // Don't need fallback
-    return calculateTurnDurationFromMessages(messages);
-  }, [messages, lastTurnDuration]);
+  const { isTurnActive, runningDuration, elapsedSeconds, displayDuration } = useAgentStatusData(sessionId, messages, isRunning);
 
-  const displayDuration = lastTurnDuration?.formatted ?? fallbackDuration;
+  if (isError && config) return <AgentErrorStatus config={config} />;
+  if (isWarning && config) return <AgentWarningStatus config={config} />;
+  if (isRunning && config) return <AgentRunningStatus config={config} elapsedSeconds={elapsedSeconds} runningDuration={runningDuration} />;
 
-  // Error state
-  if (isError && config) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
-        role="status"
-        aria-label={config.label}
-      >
-        <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-        <span className="font-medium">{config.label}</span>
-      </div>
-    );
-  }
-
-  // Warning state
-  if (isWarning && config) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 border border-yellow-500/20"
-        role="status"
-        aria-label={config.label}
-      >
-        <IconAlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-        <span className="font-medium">{config.label}</span>
-      </div>
-    );
-  }
-
-  // Running state
-  if (isRunning && config) {
-    return (
-      <div className="py-2" role="status" aria-label={config.label}>
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-          {config.label}
-          <GridSpinner className="text-muted-foreground" />
-          {elapsedSeconds > 0 && (
-            <span className="text-muted-foreground/60 tabular-nums">
-              {runningDuration}
-            </span>
-          )}
-        </span>
-      </div>
-    );
-  }
-
-  // Completed/idle state - show duration if available
-  const showCompletedState = !isTurnActive && displayDuration;
-  if (showCompletedState) {
+  if (!isTurnActive && displayDuration) {
     return (
       <div className="flex items-center gap-2 py-2">
         <span className="inline-flex items-center gap-2 text-xs text-muted-foreground tabular-nums">

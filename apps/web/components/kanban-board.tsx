@@ -28,93 +28,77 @@ import {
 } from '@kandev/ui/alert-dialog';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
-interface KanbanBoardProps {
-  onPreviewTask?: (task: Task) => void;
-  onOpenTask?: (task: Task, sessionId: string) => void;
+function useWorkflowSelection({
+  store,
+  userSettings,
+  workspaceState,
+  workflowsState,
+  commitSettings,
+  setActiveWorkflow,
+  setWorkflows,
+}: {
+  store: ReturnType<typeof useAppStoreApi>;
+  userSettings: { workflowId?: string | null };
+  workspaceState: { activeId: string | null };
+  workflowsState: WorkflowsState;
+  commitSettings: unknown;
+  setActiveWorkflow: (id: string | null) => void;
+  setWorkflows: (workflows: WorkflowsState['items']) => void;
+}) {
+  const userSettingsRef = useRef(userSettings);
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  });
+
+  useEffect(() => {
+    const workspaceId = workspaceState.activeId;
+    if (!workspaceId) {
+      if (workflowsState.items.length || workflowsState.activeId) {
+        setWorkflows([]);
+        setActiveWorkflow(null);
+      }
+      return;
+    }
+    const settings = userSettingsRef.current;
+    const workspaceWorkflows = workflowsState.items.filter(
+      (workflow: WorkflowsState['items'][number]) => workflow.workspaceId === workspaceId
+    );
+
+    const desiredWorkflowId =
+      settings.workflowId && workspaceWorkflows.some((workflow: WorkflowsState['items'][number]) => workflow.id === settings.workflowId)
+        ? settings.workflowId
+        : null;
+    setActiveWorkflow(desiredWorkflowId);
+    if (!desiredWorkflowId) {
+      store.getState().hydrate({
+        kanban: { workflowId: null, steps: [], tasks: [] },
+      });
+    }
+  }, [
+    workflowsState.activeId,
+    workflowsState.items,
+    commitSettings,
+    setActiveWorkflow,
+    setWorkflows,
+    store,
+    workspaceState.activeId,
+  ]);
 }
 
-export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
-  // Store access
-  const store = useAppStoreApi();
-  const router = useRouter();
-  const { isMobile } = useResponsiveBreakpoint();
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // View mode from user settings
-  const kanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
-
-  // Get initial state for actions hook
-  const kanban = useAppStore((state) => state.kanban);
-  const workspaceState = useAppStore((state) => state.workspaces);
-  const workflowsState = useAppStore((state) => state.workflows);
-  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
-
-  // Load all workflow snapshots for swimlane views
-  useAllWorkflowSnapshots(workspaceState.activeId);
-
-  // Consolidated actions hook
-  const {
-    isDialogOpen,
-    editingTask,
-    setIsDialogOpen,
-    setEditingTask,
-    handleCreate,
-    handleEdit,
-    handleDelete,
-    handleDialogOpenChange,
-    handleDialogSuccess,
-    handleWorkspaceChange,
-    handleWorkflowChange,
-    deletingTaskId,
-  } = useKanbanActions({ workspaceState, workflowsState });
-
-  // Data fetching and derived state
-  const {
-    enablePreviewOnClick,
-    userSettings,
-    commitSettings,
-    activeSteps,
-    isMounted,
-    setTaskSessionAvailability,
-  } = useKanbanData({
-    onWorkspaceChange: handleWorkspaceChange,
-    onWorkflowChange: handleWorkflowChange,
-    searchQuery,
-  });
-
-  // Navigation hook
-  const { handleOpenTask, handleCardClick } = useKanbanNavigation({
-    enablePreviewOnClick,
-    isMobile,
-    onPreviewTask,
-    onOpenTask,
-    setEditingTask,
-    setIsDialogOpen,
-    setTaskSessionAvailability,
-  });
-
-  // Workflow automation state for session creation dialog
+function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
   const [workflowAutomation, setWorkflowAutomation] = useState<WorkflowAutomation | null>(null);
   const [isWorkflowDialogOpen, setIsWorkflowDialogOpen] = useState(false);
-
-  // Move error state for approval warning modal
   const [moveError, setMoveError] = useState<MoveTaskError | null>(null);
 
-  // Handle workflow automation when task is moved to auto-start step
   const handleWorkflowAutomation = useCallback((automation: WorkflowAutomation) => {
     setWorkflowAutomation(automation);
     setIsWorkflowDialogOpen(true);
   }, []);
 
-  // Handle move error - show approval warning modal
   const handleMoveError = useCallback((error: MoveTaskError) => {
     setMoveError(error);
   }, []);
 
-  // Handle navigation to task session from approval warning modal
   const handleGoToTask = useCallback(() => {
     if (moveError?.sessionId) {
       router.push(linkToSession(moveError.sessionId));
@@ -122,16 +106,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     setMoveError(null);
   }, [moveError, router]);
 
-  // Handle session creation from workflow automation dialog
   const handleWorkflowSessionCreate = useCallback(
     async (data: { prompt: string; agentProfileId: string; executorId: string; environmentId: string }) => {
       if (!workflowAutomation) return;
-
       const client = getWebSocketClient();
       if (!client) return;
-
       try {
-        // Start the task with workflow step configuration
         await client.request(
           'orchestrator.start',
           {
@@ -153,53 +133,69 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     [workflowAutomation]
   );
 
-  // Ref for userSettings to avoid reactive deps in workflow selection effect
-  const userSettingsRef = useRef(userSettings);
-  useEffect(() => {
-    userSettingsRef.current = userSettings;
+  return {
+    workflowAutomation, setWorkflowAutomation,
+    isWorkflowDialogOpen, setIsWorkflowDialogOpen,
+    moveError, setMoveError,
+    handleWorkflowAutomation, handleMoveError, handleGoToTask, handleWorkflowSessionCreate,
+  };
+}
+
+function useKanbanBoardStore() {
+  const store = useAppStoreApi();
+  const kanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
+  const kanban = useAppStore((state) => state.kanban);
+  const workspaceState = useAppStore((state) => state.workspaces);
+  const workflowsState = useAppStore((state) => state.workflows);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
+  const setWorkflows = useAppStore((state) => state.setWorkflows);
+  return { store, kanbanViewMode, kanban, workspaceState, workflowsState, setActiveWorkflow, setWorkflows };
+}
+
+interface KanbanBoardProps {
+  onPreviewTask?: (task: Task) => void;
+  onOpenTask?: (task: Task, sessionId: string) => void;
+}
+
+export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
+  const router = useRouter();
+  const { isMobile } = useResponsiveBreakpoint();
+  const [searchQuery, setSearchQuery] = useState('');
+  const { store, kanbanViewMode, kanban, workspaceState, workflowsState, setActiveWorkflow, setWorkflows } = useKanbanBoardStore();
+
+  useAllWorkflowSnapshots(workspaceState.activeId);
+
+  const {
+    isDialogOpen, editingTask, setIsDialogOpen, setEditingTask,
+    handleCreate, handleEdit, handleDelete,
+    handleDialogOpenChange, handleDialogSuccess,
+    handleWorkspaceChange, handleWorkflowChange, deletingTaskId,
+  } = useKanbanActions({ workspaceState, workflowsState });
+
+  const {
+    enablePreviewOnClick, userSettings, commitSettings,
+    activeSteps, isMounted, setTaskSessionAvailability,
+  } = useKanbanData({ onWorkspaceChange: handleWorkspaceChange, onWorkflowChange: handleWorkflowChange, searchQuery });
+
+  const { handleOpenTask, handleCardClick } = useKanbanNavigation({
+    enablePreviewOnClick, isMobile, onPreviewTask, onOpenTask,
+    setEditingTask, setIsDialogOpen, setTaskSessionAvailability,
   });
 
-  // Workflow selection effect
-  useEffect(() => {
-    const workspaceId = workspaceState.activeId;
-    if (!workspaceId) {
-      if (workflowsState.items.length || workflowsState.activeId) {
-        setWorkflows([]);
-        setActiveWorkflow(null);
-      }
-      return;
-    }
-    const settings = userSettingsRef.current;
-    const workspaceWorkflows = workflowsState.items.filter(
-      (workflow: WorkflowsState['items'][number]) => workflow.workspaceId === workspaceId
-    );
+  const {
+    workflowAutomation, setWorkflowAutomation,
+    isWorkflowDialogOpen, setIsWorkflowDialogOpen,
+    moveError, setMoveError,
+    handleWorkflowAutomation, handleMoveError, handleGoToTask, handleWorkflowSessionCreate,
+  } = useWorkflowAutomationState(router);
 
-    // Default to "All Workflows" (null) unless settings explicitly specify a workflow
-    const desiredWorkflowId =
-      settings.workflowId && workspaceWorkflows.some((workflow: WorkflowsState['items'][number]) => workflow.id === settings.workflowId)
-        ? settings.workflowId
-        : null;
-    setActiveWorkflow(desiredWorkflowId);
-    if (!desiredWorkflowId) {
-      store.getState().hydrate({
-        kanban: { workflowId: null, steps: [], tasks: [] },
-      });
-    }
-  }, [
-    workflowsState.activeId,
-    workflowsState.items,
-    commitSettings,
-    setActiveWorkflow,
-    setWorkflows,
-    store,
-    workspaceState.activeId,
-  ]);
-
-
+  useWorkflowSelection({ store, userSettings, workspaceState, workflowsState, commitSettings, setActiveWorkflow, setWorkflows });
 
   if (!isMounted) {
     return <div className="h-dvh w-full bg-background" />;
   }
+
+  const stepOptions = activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }));
 
   return (
     <div className="h-dvh w-full flex flex-col">
@@ -210,13 +206,87 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
       />
-      <TaskCreateDialog
-        open={isDialogOpen}
-        onOpenChange={handleDialogOpenChange}
+      <KanbanBoardDialogs
+        isDialogOpen={isDialogOpen}
+        handleDialogOpenChange={handleDialogOpenChange}
         workspaceId={workspaceState.activeId}
         workflowId={kanban.workflowId}
         defaultStepId={activeSteps[0]?.id ?? null}
-        steps={activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }))}
+        stepOptions={stepOptions}
+        editingTask={editingTask}
+        handleDialogSuccess={handleDialogSuccess}
+        isWorkflowDialogOpen={isWorkflowDialogOpen}
+        setIsWorkflowDialogOpen={setIsWorkflowDialogOpen}
+        setWorkflowAutomation={setWorkflowAutomation}
+        workflowAutomation={workflowAutomation}
+        handleWorkflowSessionCreate={handleWorkflowSessionCreate}
+        moveError={moveError}
+        setMoveError={setMoveError}
+        handleGoToTask={handleGoToTask}
+      />
+      <SwimlaneContainer
+        viewMode={kanbanViewMode || ''}
+        workflowFilter={workflowsState.activeId}
+        onPreviewTask={handleCardClick}
+        onOpenTask={handleOpenTask}
+        onEditTask={handleEdit}
+        onDeleteTask={handleDelete}
+        onMoveError={handleMoveError}
+        onWorkflowAutomation={handleWorkflowAutomation}
+        deletingTaskId={deletingTaskId}
+        searchQuery={searchQuery}
+        selectedRepositoryIds={userSettings.repositoryIds}
+      />
+    </div>
+  );
+}
+
+type KanbanBoardDialogsProps = {
+  isDialogOpen: boolean;
+  handleDialogOpenChange: (open: boolean) => void;
+  workspaceId: string | null;
+  workflowId: string | null;
+  defaultStepId: string | null;
+  stepOptions: Array<{ id: string; title: string; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }>;
+  editingTask: Task | null;
+  handleDialogSuccess: (task: BackendTask, mode: 'create' | 'edit') => void;
+  isWorkflowDialogOpen: boolean;
+  setIsWorkflowDialogOpen: (open: boolean) => void;
+  setWorkflowAutomation: (automation: WorkflowAutomation | null) => void;
+  workflowAutomation: WorkflowAutomation | null;
+  handleWorkflowSessionCreate: (data: { prompt: string; agentProfileId: string; executorId: string; environmentId: string }) => Promise<void>;
+  moveError: MoveTaskError | null;
+  setMoveError: (error: MoveTaskError | null) => void;
+  handleGoToTask: () => void;
+};
+
+function KanbanBoardDialogs({
+  isDialogOpen,
+  handleDialogOpenChange,
+  workspaceId,
+  workflowId,
+  defaultStepId,
+  stepOptions,
+  editingTask,
+  handleDialogSuccess,
+  isWorkflowDialogOpen,
+  setIsWorkflowDialogOpen,
+  setWorkflowAutomation,
+  workflowAutomation,
+  handleWorkflowSessionCreate,
+  moveError,
+  setMoveError,
+  handleGoToTask,
+}: KanbanBoardDialogsProps) {
+  return (
+    <>
+      <TaskCreateDialog
+        open={isDialogOpen}
+        onOpenChange={handleDialogOpenChange}
+        workspaceId={workspaceId}
+        workflowId={workflowId}
+        defaultStepId={defaultStepId}
+        steps={stepOptions}
         editingTask={
           editingTask
             ? {
@@ -242,7 +312,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         }
         mode={editingTask ? 'edit' : 'create'}
       />
-      {/* Workflow automation session creation dialog */}
       <TaskCreateDialog
         open={isWorkflowDialogOpen}
         onOpenChange={(open) => {
@@ -250,10 +319,10 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
           if (!open) setWorkflowAutomation(null);
         }}
         mode="session"
-        workspaceId={workspaceState.activeId}
-        workflowId={kanban.workflowId}
+        workspaceId={workspaceId}
+        workflowId={workflowId}
         defaultStepId={workflowAutomation?.workflowStep.id ?? null}
-        steps={activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }))}
+        steps={stepOptions}
         editingTask={null}
         onCreateSession={handleWorkflowSessionCreate}
         initialValues={{
@@ -261,41 +330,45 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
           description: workflowAutomation?.taskDescription ?? '',
         }}
       />
-      {/* Approval warning modal */}
-      <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <IconAlertTriangle className="h-5 w-5 text-amber-500" />
-              Approval Required
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {moveError?.message}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Dismiss</AlertDialogCancel>
-            {moveError?.sessionId && (
-              <AlertDialogAction onClick={handleGoToTask}>
-                Go to Task
-              </AlertDialogAction>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <SwimlaneContainer
-        viewMode={kanbanViewMode || ''}
-        workflowFilter={workflowsState.activeId}
-        onPreviewTask={handleCardClick}
-        onOpenTask={handleOpenTask}
-        onEditTask={handleEdit}
-        onDeleteTask={handleDelete}
-        onMoveError={handleMoveError}
-        onWorkflowAutomation={handleWorkflowAutomation}
-        deletingTaskId={deletingTaskId}
-        searchQuery={searchQuery}
-        selectedRepositoryIds={userSettings.repositoryIds}
+      <ApprovalWarningDialog
+        moveError={moveError}
+        setMoveError={setMoveError}
+        handleGoToTask={handleGoToTask}
       />
-    </div>
+    </>
+  );
+}
+
+function ApprovalWarningDialog({
+  moveError,
+  setMoveError,
+  handleGoToTask,
+}: {
+  moveError: MoveTaskError | null;
+  setMoveError: (error: MoveTaskError | null) => void;
+  handleGoToTask: () => void;
+}) {
+  return (
+    <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <IconAlertTriangle className="h-5 w-5 text-amber-500" />
+            Approval Required
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {moveError?.message}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Dismiss</AlertDialogCancel>
+          {moveError?.sessionId && (
+            <AlertDialogAction onClick={handleGoToTask}>
+              Go to Task
+            </AlertDialogAction>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

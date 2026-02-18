@@ -81,210 +81,144 @@ const persistState = (columnsBySessionId: Record<string, LayoutState>) => {
   setLocalStorage(STORAGE_KEY, columnsBySessionId);
 };
 
+/** Update columns for a session, persist, and detect the preset. Returns partial state update. */
+function updateColumnsAndPersist(
+  state: LayoutStateBySession,
+  sessionId: string,
+  next: LayoutState,
+): Partial<LayoutStateBySession> {
+  const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
+  persistState(newColumnsBySessionId);
+  return {
+    columnsBySessionId: newColumnsBySessionId,
+    currentPresetBySessionId: {
+      ...state.currentPresetBySessionId,
+      [sessionId]: detectPreset(next),
+    },
+  };
+}
+
+/** Restore previous layout or fall back to default. Used by closePreview and closeDocument. */
+function restoreOrDefault(
+  state: LayoutStateBySession,
+  sessionId: string,
+  overlayColumn: 'preview' | 'document',
+): Partial<LayoutStateBySession> {
+  const previous = state.previousStateBySessionId[sessionId];
+  if (previous && !previous[overlayColumn]) {
+    const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: previous };
+    persistState(newColumnsBySessionId);
+    return {
+      columnsBySessionId: newColumnsBySessionId,
+      currentPresetBySessionId: {
+        ...state.currentPresetBySessionId,
+        [sessionId]: detectPreset(previous),
+      },
+      previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
+    };
+  }
+  const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: DEFAULT_STATE };
+  persistState(newColumnsBySessionId);
+  return {
+    columnsBySessionId: newColumnsBySessionId,
+    currentPresetBySessionId: { ...state.currentPresetBySessionId, [sessionId]: 'default' },
+    previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
+  };
+}
+
+function applyPresetReducer(
+  state: LayoutStateBySession,
+  sessionId: string,
+  preset: Exclude<LayoutPreset, 'custom'>,
+): Partial<LayoutStateBySession> {
+  const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
+  const newColumnsBySessionId = {
+    ...state.columnsBySessionId,
+    [sessionId]: { ...current, ...PRESETS[preset] } as LayoutState,
+  };
+  persistState(newColumnsBySessionId);
+  return {
+    previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: { ...current } },
+    columnsBySessionId: newColumnsBySessionId,
+    currentPresetBySessionId: { ...state.currentPresetBySessionId, [sessionId]: preset },
+  };
+}
+
+function toggleRightPanelReducer(
+  state: LayoutStateBySession,
+  sessionId: string,
+): Partial<LayoutStateBySession> {
+  const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
+  const next = { ...current, right: !current.right } as LayoutState;
+  let preset: LayoutPreset;
+  if (current.preview || next.preview) {
+    preset = next.right ? 'preview-with-right' : 'preview';
+  } else if (current.document || next.document) {
+    preset = next.right ? 'document-with-right' : 'document';
+  } else {
+    preset = detectPreset(next);
+  }
+  const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
+  persistState(newColumnsBySessionId);
+  return {
+    columnsBySessionId: newColumnsBySessionId,
+    currentPresetBySessionId: { ...state.currentPresetBySessionId, [sessionId]: preset },
+  };
+}
+
 export const useLayoutStore = create<LayoutStore>((set, get) => ({
   columnsBySessionId: loadPersistedState(),
   currentPresetBySessionId: {},
   previousStateBySessionId: {},
-
   applyPreset: (sessionId, preset) => {
     if (preset === 'custom') return;
-    set((state) => {
-      const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
-      const newColumnsBySessionId = {
-        ...state.columnsBySessionId,
-        [sessionId]: { ...current, ...PRESETS[preset] } as LayoutState,
-      };
-      persistState(newColumnsBySessionId);
-      return {
-        previousStateBySessionId: {
-          ...state.previousStateBySessionId,
-          [sessionId]: {
-            left: current.left,
-            chat: current.chat,
-            right: current.right,
-            preview: current.preview,
-            document: current.document,
-          },
-        },
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: preset,
-        },
-      };
-    });
+    set((state) => applyPresetReducer(state, sessionId, preset));
   },
-
-  openPreview: (sessionId) => {
-    get().applyPreset(sessionId, 'preview-with-right');
-  },
-
-  openDocument: (sessionId) => {
-    get().applyPreset(sessionId, 'document-with-right');
-  },
-
-  closeDocument: (sessionId) => {
-    set((state) => {
-      const previous = state.previousStateBySessionId[sessionId];
-      if (previous && !previous.document) {
-        const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: previous };
-        persistState(newColumnsBySessionId);
-        return {
-          columnsBySessionId: newColumnsBySessionId,
-          currentPresetBySessionId: {
-            ...state.currentPresetBySessionId,
-            [sessionId]: detectPreset(previous),
-          },
-          previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
-        };
-      }
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: DEFAULT_STATE };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: 'default',
-        },
-        previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
-      };
-    });
-  },
-
-  closePreview: (sessionId) => {
-    set((state) => {
-      const previous = state.previousStateBySessionId[sessionId];
-      if (previous && !previous.preview) {
-        const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: previous };
-        persistState(newColumnsBySessionId);
-        return {
-          columnsBySessionId: newColumnsBySessionId,
-          currentPresetBySessionId: {
-            ...state.currentPresetBySessionId,
-            [sessionId]: detectPreset(previous),
-          },
-          previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
-        };
-      }
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: DEFAULT_STATE };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: 'default',
-        },
-        previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
-      };
-    });
-  },
-
+  openPreview: (sessionId) => { get().applyPreset(sessionId, 'preview-with-right'); },
+  openDocument: (sessionId) => { get().applyPreset(sessionId, 'document-with-right'); },
+  closeDocument: (sessionId) => { set((state) => restoreOrDefault(state, sessionId, 'document')); },
+  closePreview: (sessionId) => { set((state) => restoreOrDefault(state, sessionId, 'preview')); },
   toggleColumn: (sessionId, column) => {
     set((state) => {
       const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
-      const next = { ...current, [column]: !current[column] } as LayoutState;
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: detectPreset(next),
-        },
-      };
+      return updateColumnsAndPersist(state, sessionId, { ...current, [column]: !current[column] } as LayoutState);
     });
   },
-
   showColumn: (sessionId, column) => {
     set((state) => {
       const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
       if (current[column]) return state;
-      const next = { ...current, [column]: true } as LayoutState;
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: detectPreset(next),
-        },
-      };
+      return updateColumnsAndPersist(state, sessionId, { ...current, [column]: true } as LayoutState);
     });
   },
-
   hideColumn: (sessionId, column) => {
     set((state) => {
       const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
       if (!current[column]) return state;
-      const next = { ...current, [column]: false } as LayoutState;
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: detectPreset(next),
-        },
-      };
+      return updateColumnsAndPersist(state, sessionId, { ...current, [column]: false } as LayoutState);
     });
   },
-
   toggleRightPanel: (sessionId) => {
-    set((state) => {
-      const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
-      const next = { ...current, right: !current.right } as LayoutState;
-      let preset: LayoutPreset;
-      if (current.preview || next.preview) {
-        preset = next.right ? 'preview-with-right' : 'preview';
-      } else if (current.document || next.document) {
-        preset = next.right ? 'document-with-right' : 'document';
-      } else {
-        preset = detectPreset(next);
-      }
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: preset,
-        },
-      };
-    });
+    set((state) => toggleRightPanelReducer(state, sessionId));
   },
-
   setColumns: (sessionId, columns) => {
     set((state) => {
       const current = state.columnsBySessionId[sessionId] ?? DEFAULT_STATE;
-      const next = { ...current, ...columns } as LayoutState;
-      const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: next };
-      persistState(newColumnsBySessionId);
-      return {
-        columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: detectPreset(next),
-        },
-      };
+      return updateColumnsAndPersist(state, sessionId, { ...current, ...columns } as LayoutState);
     });
   },
-
   isVisible: (sessionId, column) => {
     const state = get().columnsBySessionId[sessionId];
     if (!state) return column !== 'preview' && column !== 'document';
     return state[column];
   },
-
   reset: (sessionId) => {
     set((state) => {
       const newColumnsBySessionId = { ...state.columnsBySessionId, [sessionId]: DEFAULT_STATE };
       persistState(newColumnsBySessionId);
       return {
         columnsBySessionId: newColumnsBySessionId,
-        currentPresetBySessionId: {
-          ...state.currentPresetBySessionId,
-          [sessionId]: 'default',
-        },
+        currentPresetBySessionId: { ...state.currentPresetBySessionId, [sessionId]: 'default' },
         previousStateBySessionId: { ...state.previousStateBySessionId, [sessionId]: null },
       };
     });

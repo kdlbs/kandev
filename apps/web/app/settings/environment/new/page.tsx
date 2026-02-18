@@ -51,6 +51,111 @@ function generateDockerfile(baseImage: BaseDocker, agents: AgentType[]) {
   ].join('\n');
 }
 
+function EnvironmentDetailsSection({
+  name,
+  onNameChange,
+  baseImage,
+  onBaseImageChange,
+  imageTag,
+  onImageTagChange,
+}: {
+  name: string;
+  onNameChange: (value: string) => void;
+  baseImage: BaseDocker;
+  onBaseImageChange: (value: BaseDocker) => void;
+  imageTag: string;
+  onImageTagChange: (value: string) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Environment Details</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="env-name">Environment name</Label>
+            <Input id="env-name" value={name} onChange={(event) => onNameChange(event.target.value)} />
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Base image</Label>
+            <Select value={baseImage} onValueChange={(value) => onBaseImageChange(value as BaseDocker)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(BASE_IMAGE_LABELS).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="image-tag">Image tag</Label>
+            <Input id="image-tag" value={imageTag} onChange={(event) => onImageTagChange(event.target.value)} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+type ImageBuildCardProps = {
+  installAgents: AgentType[];
+  onToggleAgent: (agentId: AgentType) => void;
+  onBuildImage: () => void;
+  showDockerfileEditor: boolean;
+  dockerfile: string;
+  onDockerfileChange: (value: string) => void;
+};
+
+function ImageBuildCard({
+  installAgents, onToggleAgent, onBuildImage,
+  showDockerfileEditor, dockerfile, onDockerfileChange,
+}: ImageBuildCardProps) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <IconCube className="h-4 w-4" />
+          Image Build
+        </CardTitle>
+        <CardDescription>Select agents to install in the image.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-3">
+          {AGENT_OPTIONS.map((agent) => (
+            <label key={agent.id} className="flex items-start gap-2 rounded-md border border-border/70 p-2 text-sm">
+              <input type="checkbox" className="mt-0.5" checked={installAgents.includes(agent.id)} onChange={() => onToggleAgent(agent.id)} />
+              <span>
+                <span className="font-medium block">{agent.label}</span>
+                <span className="text-xs text-muted-foreground">{agent.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">Agent folders will be mounted as volumes at runtime.</p>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-xs text-muted-foreground">Repositories are mounted into the container at runtime.</p>
+          <Button type="button" onClick={onBuildImage}>Build image</Button>
+        </div>
+        {showDockerfileEditor && (
+          <div className="space-y-2">
+            <Label htmlFor="dockerfile">Dockerfile</Label>
+            <Textarea id="dockerfile" value={dockerfile} onChange={(event) => onDockerfileChange(event.target.value)} rows={12} className="font-mono text-sm" />
+            <p className="text-xs text-muted-foreground">Edit the Dockerfile before building locally.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function EnvironmentCreatePage() {
   const router = useRouter();
   const [name, setName] = useState('Custom Image');
@@ -59,11 +164,10 @@ export default function EnvironmentCreatePage() {
   const [installAgents, setInstallAgents] = useState<AgentType[]>([]);
   const [dockerfile, setDockerfile] = useState('');
   const [showDockerfileEditor, setShowDockerfileEditor] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   const handleToggleAgent = (agentId: AgentType) => {
-    setInstallAgents((prev) =>
-      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]
-    );
+    setInstallAgents((prev) => prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId]);
   };
 
   const handleBuildImage = () => {
@@ -71,145 +175,32 @@ export default function EnvironmentCreatePage() {
     setShowDockerfileEditor(true);
   };
 
-  const [isCreating, setIsCreating] = useState(false);
-
   const handleCreate = async () => {
     setIsCreating(true);
     try {
-      const payload = {
-        name,
-        kind: 'docker_image',
-        image_tag: imageTag,
-        dockerfile,
-        build_config: {
-          base_image: baseImage,
-          install_agents: installAgents.join(','),
-        },
-      };
+      const payload = { name, kind: 'docker_image', image_tag: imageTag, dockerfile, build_config: { base_image: baseImage, install_agents: installAgents.join(',') } };
       const client = getWebSocketClient();
-      if (client) {
-        await client.request('environment.create', payload);
-      } else {
-        await createEnvironmentAction(payload);
-      }
+      if (client) { await client.request('environment.create', payload); }
+      else { await createEnvironmentAction(payload); }
       router.push('/settings/environments');
-    } finally {
-      setIsCreating(false);
-    }
+    } finally { setIsCreating(false); }
   };
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold">Create Custom Environment</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Build a Docker image tailored to your workflow.
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">Build a Docker image tailored to your workflow.</p>
       </div>
-
       <Separator />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Environment Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="env-name">Environment name</Label>
-              <Input id="env-name" value={name} onChange={(event) => setName(event.target.value)} />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Base image</Label>
-              <Select value={baseImage} onValueChange={(value) => setBaseImage(value as BaseDocker)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(BASE_IMAGE_LABELS).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="image-tag">Image tag</Label>
-              <Input id="image-tag" value={imageTag} onChange={(event) => setImageTag(event.target.value)} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <IconCube className="h-4 w-4" />
-            Image Build
-          </CardTitle>
-          <CardDescription>Select agents to install in the image.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {AGENT_OPTIONS.map((agent) => (
-              <label
-                key={agent.id}
-                className="flex items-start gap-2 rounded-md border border-border/70 p-2 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={installAgents.includes(agent.id)}
-                  onChange={() => handleToggleAgent(agent.id)}
-                />
-                <span>
-                  <span className="font-medium block">{agent.label}</span>
-                  <span className="text-xs text-muted-foreground">{agent.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Agent folders will be mounted as volumes at runtime.
-          </p>
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-muted-foreground">
-              Repositories are mounted into the container at runtime.
-            </p>
-            <Button type="button" onClick={handleBuildImage}>
-              Build image
-            </Button>
-          </div>
-
-          {showDockerfileEditor && (
-            <div className="space-y-2">
-              <Label htmlFor="dockerfile">Dockerfile</Label>
-              <Textarea
-                id="dockerfile"
-                value={dockerfile}
-                onChange={(event) => setDockerfile(event.target.value)}
-                rows={12}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Edit the Dockerfile before building locally.
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
+      <EnvironmentDetailsSection name={name} onNameChange={setName} baseImage={baseImage} onBaseImageChange={setBaseImage} imageTag={imageTag} onImageTagChange={setImageTag} />
+      <ImageBuildCard
+        installAgents={installAgents} onToggleAgent={handleToggleAgent} onBuildImage={handleBuildImage}
+        showDockerfileEditor={showDockerfileEditor} dockerfile={dockerfile} onDockerfileChange={setDockerfile}
+      />
       <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" onClick={() => router.push('/settings/environments')}>
-          Cancel
-        </Button>
-        <Button onClick={handleCreate} disabled={isCreating}>
-          {isCreating ? 'Creating...' : 'Create Environment'}
-        </Button>
+        <Button variant="outline" onClick={() => router.push('/settings/environments')}>Cancel</Button>
+        <Button onClick={handleCreate} disabled={isCreating}>{isCreating ? 'Creating...' : 'Create Environment'}</Button>
       </div>
     </div>
   );

@@ -158,133 +158,236 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     });
   }, [sessions, taskId]);
 
-  const resolveAgentLabel = (session: TaskSession) => {
-    if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
-      return agentLabelsById[session.agent_profile_id];
-    }
-    return 'Unknown agent';
-  };
+  const resolveAgentLabel = useCallback(
+    (session: TaskSession) => {
+      if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
+        return agentLabelsById[session.agent_profile_id];
+      }
+      return 'Unknown agent';
+    },
+    [agentLabelsById]
+  );
 
   return (
     <>
       <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-          >
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40">
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
               {sortedSessions.length}
             </Badge>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
-          <div className="flex items-center justify-between px-2 py-0">
-            <span className="text-xs font-medium text-muted-foreground">Sessions</span>
-            <button
-              type="button"
-              onClick={() => setShowNewSessionDialog(true)}
-              className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer"
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-              New
-            </button>
-          </div>
-          <DropdownMenuSeparator />
-          <div className="max-h-[300px] overflow-y-auto">
-            {sortedSessions.length === 0 ? (
-              <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-                No sessions yet
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                {sortedSessions.map((session, index) => {
-                  const status = mapSessionStatus(session.state);
-                  const duration = formatDuration(
-                    session.started_at,
-                    status === 'running',
-                    currentTime
-                  );
-                  const showDuration = duration !== '0s';
-                  const number = sortedSessions.length - index;
-
-                  const isPrimary = session.id === primarySessionId;
-
-                  return (
-                    <div
-                      key={session.id}
-                      onClick={() => handleSelectSession(session.id)}
-                      className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-muted/50' : ''
-                        }`}
-                    >
-                      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
-                        #{number}
-                      </span>
-
-                      <span className="text-xs text-foreground flex-1 text-left flex items-center gap-1.5">
-                        {resolveAgentLabel(session)}
-                        {isPrimary && (
-                          <IconStar className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />
-                        )}
-                      </span>
-
-                      {showDuration ?
-                        <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
-                          {duration}
-                        </span>
-                        : ''}
-
-                      {!isPrimary && onSetPrimary && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSetPrimary(session.id);
-                              }}
-                              className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
-                            >
-                              <IconStar className="h-3.5 w-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="left">Set as Primary</TooltipContent>
-                        </Tooltip>
-                      )}
-
-                      <div className="w-5 shrink-0 flex items-center justify-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
-                          </TooltipTrigger>
-                          <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </DropdownMenuContent>
+        <SessionDropdownContent
+          sortedSessions={sortedSessions}
+          activeSessionId={activeSessionId}
+          primarySessionId={primarySessionId}
+          currentTime={currentTime}
+          resolveAgentLabel={resolveAgentLabel}
+          onSelectSession={handleSelectSession}
+          onSetPrimary={onSetPrimary}
+          onNewSession={() => setShowNewSessionDialog(true)}
+        />
       </DropdownMenu>
-
-      <TaskCreateDialog
+      <NewSessionDialog
         open={showNewSessionDialog}
         onOpenChange={setShowNewSessionDialog}
-        mode="session"
-        workspaceId={null}
-        workflowId={null}
-        defaultStepId={null}
-        steps={[]}
         taskId={taskId}
-        initialValues={{
-          title: taskTitle,
-          description: taskDescription,
-        }}
+        taskTitle={taskTitle}
+        taskDescription={taskDescription}
       />
     </>
   );
 });
+
+/** Dropdown content with header and session list */
+function SessionDropdownContent({
+  sortedSessions,
+  activeSessionId,
+  primarySessionId,
+  currentTime,
+  resolveAgentLabel,
+  onSelectSession,
+  onSetPrimary,
+  onNewSession,
+}: {
+  sortedSessions: TaskSession[];
+  activeSessionId: string | null;
+  primarySessionId: string | null;
+  currentTime: number;
+  resolveAgentLabel: (session: TaskSession) => string;
+  onSelectSession: (sessionId: string) => void;
+  onSetPrimary?: (sessionId: string) => void;
+  onNewSession: () => void;
+}) {
+  return (
+    <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
+      <div className="flex items-center justify-between px-2 py-0">
+        <span className="text-xs font-medium text-muted-foreground">Sessions</span>
+        <button
+          type="button"
+          onClick={onNewSession}
+          className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer"
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+          New
+        </button>
+      </div>
+      <DropdownMenuSeparator />
+      <SessionDropdownList
+        sessions={sortedSessions}
+        activeSessionId={activeSessionId}
+        primarySessionId={primarySessionId}
+        currentTime={currentTime}
+        resolveAgentLabel={resolveAgentLabel}
+        onSelectSession={onSelectSession}
+        onSetPrimary={onSetPrimary}
+      />
+    </DropdownMenuContent>
+  );
+}
+
+/** New session dialog wrapper */
+function NewSessionDialog({
+  open,
+  onOpenChange,
+  taskId,
+  taskTitle,
+  taskDescription,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  taskId: string | null;
+  taskTitle: string;
+  taskDescription: string;
+}) {
+  return (
+    <TaskCreateDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      mode="session"
+      workspaceId={null}
+      workflowId={null}
+      defaultStepId={null}
+      steps={[]}
+      taskId={taskId}
+      initialValues={{ title: taskTitle, description: taskDescription }}
+    />
+  );
+}
+
+/** Session list inside the dropdown */
+function SessionDropdownList({
+  sessions,
+  activeSessionId,
+  primarySessionId,
+  currentTime,
+  resolveAgentLabel,
+  onSelectSession,
+  onSetPrimary,
+}: {
+  sessions: TaskSession[];
+  activeSessionId: string | null;
+  primarySessionId: string | null;
+  currentTime: number;
+  resolveAgentLabel: (session: TaskSession) => string;
+  onSelectSession: (sessionId: string) => void;
+  onSetPrimary?: (sessionId: string) => void;
+}) {
+  if (sessions.length === 0) {
+    return (
+      <div className="max-h-[300px] overflow-y-auto">
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+          No sessions yet
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="max-h-[300px] overflow-y-auto">
+      <div className="space-y-0.5">
+        {sessions.map((session, index) => (
+          <SessionRow
+            key={session.id}
+            session={session}
+            number={sessions.length - index}
+            isActive={activeSessionId === session.id}
+            isPrimary={session.id === primarySessionId}
+            currentTime={currentTime}
+            agentLabel={resolveAgentLabel(session)}
+            onSelect={onSelectSession}
+            onSetPrimary={onSetPrimary}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Individual session row in the dropdown */
+function SessionRow({
+  session,
+  number,
+  isActive,
+  isPrimary,
+  currentTime,
+  agentLabel,
+  onSelect,
+  onSetPrimary,
+}: {
+  session: TaskSession;
+  number: number;
+  isActive: boolean;
+  isPrimary: boolean;
+  currentTime: number;
+  agentLabel: string;
+  onSelect: (sessionId: string) => void;
+  onSetPrimary?: (sessionId: string) => void;
+}) {
+  const status = mapSessionStatus(session.state);
+  const duration = formatDuration(session.started_at, status === 'running', currentTime);
+  const showDuration = duration !== '0s';
+
+  return (
+    <div
+      onClick={() => onSelect(session.id)}
+      className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? 'bg-muted/50' : ''}`}
+    >
+      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
+        #{number}
+      </span>
+      <span className="text-xs text-foreground flex-1 text-left flex items-center gap-1.5">
+        {agentLabel}
+        {isPrimary && <IconStar className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />}
+      </span>
+      {showDuration && (
+        <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
+          {duration}
+        </span>
+      )}
+      {!isPrimary && onSetPrimary && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSetPrimary(session.id); }}
+              className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
+            >
+              <IconStar className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Set as Primary</TooltipContent>
+        </Tooltip>
+      )}
+      <div className="w-5 shrink-0 flex items-center justify-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
+          </TooltipTrigger>
+          <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}

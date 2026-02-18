@@ -15,44 +15,119 @@ import { useAppStore } from '@/components/state-provider';
 import { updateUserSettings } from '@/lib/api';
 import type { Theme } from '@/lib/settings/types';
 
-export function GeneralSettings() {
+function ThemeSettingsCard() {
   const { theme: currentTheme, setTheme } = useTheme();
-  const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
-  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
   const themeValue = currentTheme ?? 'system';
 
-  // User settings
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Color Theme</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Select value={themeValue} onValueChange={(value) => setTheme(value as Theme)}>
+            <SelectTrigger id="theme">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="system">System</SelectItem>
+              <SelectItem value="light">Light</SelectItem>
+              <SelectItem value="dark">Dark</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChatSubmitKeyCard() {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const [isSavingSubmitKey, setIsSavingSubmitKey] = useState(false);
 
   const handleChatSubmitKeyChange = async (value: 'enter' | 'cmd_enter') => {
     if (isSavingSubmitKey) return;
-
     setIsSavingSubmitKey(true);
     const previousValue = userSettings.chatSubmitKey;
-
     try {
-      setUserSettings({
-        ...userSettings,
-        chatSubmitKey: value,
-      });
-
+      setUserSettings({ ...userSettings, chatSubmitKey: value });
       await updateUserSettings({
         workspace_id: userSettings.workspaceId || '',
         repository_ids: userSettings.repositoryIds || [],
         chat_submit_key: value,
       });
     } catch {
-      setUserSettings({
-        ...userSettings,
-        chatSubmitKey: previousValue,
-      });
+      setUserSettings({ ...userSettings, chatSubmitKey: previousValue });
     } finally {
       setIsSavingSubmitKey(false);
     }
   };
 
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Submit Shortcut</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="chat-submit-key">Message Submit Key</Label>
+          <Select
+            value={userSettings.chatSubmitKey}
+            onValueChange={(value) => handleChatSubmitKeyChange(value as 'enter' | 'cmd_enter')}
+            disabled={isSavingSubmitKey}
+          >
+            <SelectTrigger id="chat-submit-key">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cmd_enter">Cmd/Ctrl+Enter to send</SelectItem>
+              <SelectItem value="enter">Enter to send</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {userSettings.chatSubmitKey === 'cmd_enter'
+              ? 'Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines.'
+              : 'Press Enter to send messages. Press Shift+Enter for newlines.'}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BackendConnectionCard() {
+  const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
+  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Backend Server URL</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="backend-url">Server URL</Label>
+          <Input
+            id="backend-url"
+            type="url"
+            value={displayBackendUrl}
+            readOnly
+            disabled
+            placeholder="http://localhost:8080"
+            className="cursor-default"
+          />
+          <p className="text-xs text-muted-foreground">
+            Backend URL is provided at runtime for SSR and WebSocket connections.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function GeneralSettings() {
   return (
     <div className="space-y-8">
       <div>
@@ -69,25 +144,7 @@ export function GeneralSettings() {
         title="Appearance"
         description="Customize how the application looks"
       >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Color Theme</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Select value={themeValue} onValueChange={(value) => setTheme(value as Theme)}>
-                <SelectTrigger id="theme">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="system">System</SelectItem>
-                  <SelectItem value="light">Light</SelectItem>
-                  <SelectItem value="dark">Dark</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
+        <ThemeSettingsCard />
       </SettingsSection>
 
       <Separator />
@@ -101,34 +158,7 @@ export function GeneralSettings() {
         title="Chat Input"
         description="Configure chat input behavior"
       >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Submit Shortcut</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="chat-submit-key">Message Submit Key</Label>
-              <Select
-                value={userSettings.chatSubmitKey}
-                onValueChange={(value) => handleChatSubmitKeyChange(value as 'enter' | 'cmd_enter')}
-                disabled={isSavingSubmitKey}
-              >
-                <SelectTrigger id="chat-submit-key">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cmd_enter">Cmd/Ctrl+Enter to send</SelectItem>
-                  <SelectItem value="enter">Enter to send</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {userSettings.chatSubmitKey === 'cmd_enter'
-                  ? 'Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines.'
-                  : 'Press Enter to send messages. Press Shift+Enter for newlines.'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <ChatSubmitKeyCard />
       </SettingsSection>
 
       <Separator />
@@ -138,28 +168,7 @@ export function GeneralSettings() {
         title="Backend Connection"
         description="Configure the backend server URL"
       >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Backend Server URL</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="backend-url">Server URL</Label>
-              <Input
-                id="backend-url"
-                type="url"
-                value={displayBackendUrl}
-                readOnly
-                disabled
-                placeholder="http://localhost:8080"
-                className="cursor-default"
-              />
-              <p className="text-xs text-muted-foreground">
-                Backend URL is provided at runtime for SSR and WebSocket connections.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <BackendConnectionCard />
       </SettingsSection>
     </div>
   );

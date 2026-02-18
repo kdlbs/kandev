@@ -65,49 +65,13 @@ export class WebSocketClient {
     };
 
     this.socket.onmessage = (event) => {
-      // Backend batches multiple messages with newlines, so we need to split and handle each
       const parts = (event.data as string).split('\n');
       for (const part of parts) {
         const trimmed = part.trim();
         if (!trimmed) continue;
-
         try {
           const message = JSON.parse(trimmed) as BackendMessageMap[BackendMessageType];
-          if (message.type === 'response' && (message as { id?: string }).id) {
-            const msgId = (message as { id: string }).id;
-            const pending = this.pendingRequests.get(msgId);
-            if (pending) {
-              clearTimeout(pending.timeout);
-              this.pendingRequests.delete(msgId);
-              pending.resolve(message.payload);
-            }
-            continue;
-          }
-          if (message.type === 'error' && (message as { id?: string }).id) {
-            const msgId = (message as { id: string }).id;
-            const pending = this.pendingRequests.get(msgId);
-            if (pending) {
-              clearTimeout(pending.timeout);
-              this.pendingRequests.delete(msgId);
-              const errorMessage =
-                typeof message.payload === 'object' && message.payload && 'message' in message.payload
-                  ? String((message.payload as { message?: string }).message)
-                  : 'WebSocket request failed';
-              pending.reject(new Error(errorMessage));
-            }
-            continue;
-          }
-
-          if (message.type !== 'notification') {
-            continue;
-          }
-          const action = (message as { action?: string })?.action as BackendMessageType | undefined;
-          if (!action) continue;
-          const handlers = this.handlers.get(action);
-          if (!handlers) {
-            continue;
-          }
-          handlers.forEach((handler) => handler(message));
+          this.handleParsedMessage(message);
         } catch {
           // Ignore parse errors for individual messages
         }
@@ -262,6 +226,47 @@ export class WebSocketClient {
     if (!handlers.size) {
       this.handlers.delete(type);
     }
+  }
+
+  private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
+    const msgWithId = message as { id?: string; type: string };
+
+    if (msgWithId.type === 'response' && msgWithId.id) {
+      this.resolvePendingRequest(msgWithId.id, message.payload);
+      return;
+    }
+    if (msgWithId.type === 'error' && msgWithId.id) {
+      this.rejectPendingRequest(msgWithId.id, message.payload);
+      return;
+    }
+    if (message.type !== 'notification') return;
+
+    const action = (message as { action?: string })?.action as BackendMessageType | undefined;
+    if (!action) return;
+    const handlers = this.handlers.get(action);
+    if (handlers) {
+      handlers.forEach((handler) => handler(message));
+    }
+  }
+
+  private resolvePendingRequest(msgId: string, payload: unknown) {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    this.pendingRequests.delete(msgId);
+    pending.resolve(payload);
+  }
+
+  private rejectPendingRequest(msgId: string, payload: unknown) {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    this.pendingRequests.delete(msgId);
+    const errorMessage =
+      typeof payload === 'object' && payload && 'message' in payload
+        ? String((payload as { message?: string }).message)
+        : 'WebSocket request failed';
+    pending.reject(new Error(errorMessage));
   }
 
   private handleDisconnect(event: CloseEvent) {
