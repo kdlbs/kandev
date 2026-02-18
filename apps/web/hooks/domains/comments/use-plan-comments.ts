@@ -41,23 +41,28 @@ export function usePlanComments(sessionId: string | null | undefined) {
   }, [byId, sessionIds]);
 
   const handleAddComment = useCallback(
-    (commentText: string, selectedText: string) => {
-      if (!sessionId) return;
+    (commentText: string, selectedText: string, from?: number, to?: number): string | null => {
+      if (!sessionId) return null;
 
       if (editingCommentId) {
         updateCommentInStore(editingCommentId, { text: commentText, selectedText } as Partial<PlanComment>);
         setEditingComment(null);
+        return editingCommentId;
       } else {
+        const id = crypto.randomUUID();
         const comment: PlanComment = {
-          id: crypto.randomUUID(),
+          id,
           sessionId,
           source: 'plan',
           text: commentText,
           selectedText,
+          from,
+          to,
           createdAt: new Date().toISOString(),
           status: 'pending',
         };
         addCommentToStore(comment);
+        return id;
       }
     },
     [sessionId, editingCommentId, addCommentToStore, updateCommentInStore, setEditingComment]

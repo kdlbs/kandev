@@ -18,6 +18,8 @@ export type PopupMenuProps = {
   children: ReactNode;
   emptyState?: ReactNode;
   hasItems?: boolean;
+  /** 'above' (default) positions bottom edge above cursor; 'below' positions top edge below cursor. */
+  placement?: 'above' | 'below';
 };
 
 export function PopupMenu({
@@ -29,6 +31,7 @@ export function PopupMenu({
   children,
   emptyState,
   hasItems = true,
+  placement = 'above',
 }: PopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +54,7 @@ export function PopupMenu({
     if (position) return position;
     if (clientRectFn) {
       const rect = clientRectFn();
-      if (rect) return { x: rect.left, y: rect.top };
+      if (rect) return { x: rect.left, y: placement === 'below' ? rect.bottom : rect.top };
     }
     return null;
   })();
@@ -60,14 +63,16 @@ export function PopupMenu({
     return null;
   }
 
-  // Calculate position (above cursor) with content-based width
+  // Calculate position with content-based width
   const menuStyle: React.CSSProperties = {
     position: 'fixed',
     left: Math.max(8, resolvedPosition.x),
-    bottom: window.innerHeight - resolvedPosition.y + 8,
     maxWidth: Math.min(MENU_MAX_WIDTH, window.innerWidth - resolvedPosition.x - 8),
     maxHeight: MENU_HEIGHT,
     zIndex: 50,
+    ...(placement === 'below'
+      ? { top: resolvedPosition.y + 8 }
+      : { bottom: window.innerHeight - resolvedPosition.y + 8 }),
   };
 
   const menu = (

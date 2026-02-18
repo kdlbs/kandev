@@ -1,17 +1,17 @@
 'use client';
 
-import { memo, useState, useCallback, useEffect, useRef } from 'react';
+import { memo, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { PanelRoot, PanelBody } from './panel-primitives';
 import dynamic from 'next/dynamic';
-import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick, IconMessagePlus } from '@tabler/icons-react';
+import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from '@tabler/icons-react';
 import { GridSpinner } from '@/components/grid-spinner';
 import { cn } from '@/lib/utils';
-import { Button } from '@kandev/ui/button';
 import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
 import { useAppStore } from '@/components/state-provider';
 import { PlanSelectionPopover } from './plan-selection-popover';
 import { usePlanComments } from '@/hooks/domains/comments/use-plan-comments';
-import type { TextSelection, CommentHighlight } from '@/components/editors/tiptap/tiptap-plan-editor';
+import type { TextSelection, CommentForEditor } from '@/components/editors/tiptap/tiptap-plan-editor';
+import type { Editor } from '@tiptap/core';
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -37,10 +37,28 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   const isAgentBusy = sessionState === 'STARTING' || sessionState === 'RUNNING';
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const editorInstanceRef = useRef<Editor | null>(null);
   const { draftContent, setDraftContent, editorKey, isEditorFocused, handleEmptyStateClick, hasUnsavedChanges } =
     usePlanDraft(plan, isSaving, savePlan, editorWrapperRef);
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
+
+  const handleEditorReady = useCallback((editor: Editor) => {
+    editorInstanceRef.current = editor;
+  }, []);
+
+  const handleCommentDeleted = useCallback((ids: string[]) => {
+    for (const id of ids) {
+      commentState.handleDeleteComment(id);
+    }
+  }, [commentState]);
+
+  const commentHighlights: CommentForEditor[] = useMemo(
+    () => commentState.comments.map((c) => ({
+      id: c.id, selectedText: c.selectedText, from: c.from, to: c.to,
+    })),
+    [commentState.comments],
+  );
 
   // Ctrl+S to save immediately
   useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
@@ -65,9 +83,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
   // Show loading state while agent is creating the initial plan
   const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === '';
 
-  const commentHighlights: CommentHighlight[] = commentState.comments.map((c) => ({
-    id: c.id, selectedText: c.selectedText, comment: c.text,
-  }));
   const { textSelection, setTextSelection } = selectionState;
 
   return (
@@ -85,15 +100,10 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
           onChange={setDraftContent}
           placeholder="Start typing your plan..."
           onSelectionChange={activeSessionId ? setTextSelection : undefined}
-          onSelectionEnd={activeSessionId ? selectionState.handleSelectionEnd : undefined}
           comments={commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}
-        />
-        <PlanFloatingCommentButton
-          floatingButtonPos={selectionState.floatingButtonPos}
-          textSelection={textSelection}
-          activeSessionId={activeSessionId}
-          onClick={selectionState.handleFloatingButtonClick}
+          onCommentDeleted={handleCommentDeleted}
+          onEditorReady={handleEditorReady}
         />
         <PlanCreatingOverlay isAgentCreatingPlan={isAgentCreatingPlan} />
         <PlanEmptyState
@@ -109,6 +119,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
         textSelection={textSelection}
         activeSessionId={activeSessionId}
         commentState={commentState}
+        editorRef={editorInstanceRef}
         onClose={selectionState.handleSelectionClose}
       />
     </PanelRoot>
@@ -120,60 +131,61 @@ function PlanSelectionPopoverWrapper({
   textSelection,
   activeSessionId,
   commentState,
+  editorRef,
   onClose,
 }: {
   textSelection: TextSelection | null;
   activeSessionId: string | null | undefined;
   commentState: ReturnType<typeof usePlanComments>;
+  editorRef: React.RefObject<Editor | null>;
   onClose: () => void;
 }) {
+  const handleAdd = useCallback(
+    (comment: string, selectedText: string) => {
+      const from = textSelection?.from;
+      const to = textSelection?.to;
+      const id = commentState.handleAddComment(comment, selectedText, from, to);
+      // Apply the mark to the editor at the selection position
+      const editor = editorRef.current;
+      if (id && editor && from != null && to != null) {
+        editor.chain()
+          .setTextSelection({ from, to })
+          .setMark('commentMark', { commentId: id })
+          .run();
+      }
+    },
+    [commentState, textSelection, editorRef],
+  );
+
   if (!textSelection || !activeSessionId) return null;
   const editingComment = commentState.editingCommentId
     ? commentState.comments.find(c => c.id === commentState.editingCommentId)?.text
     : undefined;
   const onDelete = commentState.editingCommentId
-    ? () => commentState.handleDeleteComment(commentState.editingCommentId!)
+    ? () => {
+        const id = commentState.editingCommentId!;
+        // Remove the mark from the editor
+        const editor = editorRef.current;
+        if (editor) {
+          const markType = editor.state.schema.marks.commentMark;
+          if (markType) {
+            const { tr } = editor.state;
+            tr.removeMark(0, editor.state.doc.content.size, markType.create({ commentId: id }));
+            editor.view.dispatch(tr);
+          }
+        }
+        commentState.handleDeleteComment(id);
+      }
     : undefined;
   return (
     <PlanSelectionPopover
       selectedText={textSelection.text}
       position={textSelection.position}
-      onAdd={commentState.handleAddComment}
+      onAdd={handleAdd}
       onClose={onClose}
       editingComment={editingComment}
       onDelete={onDelete}
     />
-  );
-}
-
-/** Floating "Comment" button when text is selected */
-function PlanFloatingCommentButton({
-  floatingButtonPos,
-  textSelection,
-  activeSessionId,
-  onClick,
-}: {
-  floatingButtonPos: { x: number; y: number } | null;
-  textSelection: TextSelection | null;
-  activeSessionId: string | null | undefined;
-  onClick: () => void;
-}) {
-  if (!floatingButtonPos || textSelection || !activeSessionId) return null;
-  return (
-    <Button
-      size="sm"
-      variant="secondary"
-      className="floating-comment-btn fixed z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-      style={{
-        left: floatingButtonPos.x + 8,
-        top: floatingButtonPos.y + 8,
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={onClick}
-    >
-      <IconMessagePlus className="h-3.5 w-3.5" />
-      Comment
-    </Button>
   );
 }
 
@@ -257,39 +269,19 @@ function usePlanDraft(
   return { draftContent, setDraftContent, editorKey, isEditorFocused, handleEmptyStateClick, hasUnsavedChanges };
 }
 
-/** Text selection and floating button state */
+/** Text selection state for comment popover */
 function usePlanSelection(
   activeSessionId: string | null | undefined,
   commentState: ReturnType<typeof usePlanComments>,
 ) {
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
-  const [floatingButtonPos, setFloatingButtonPos] = useState<{ x: number; y: number } | null>(null);
-  const [currentSelectionText, setCurrentSelectionText] = useState<string | null>(null);
-
-  const handleSelectionEnd = useCallback((selection: TextSelection | null) => {
-    if (!activeSessionId) return;
-    if (selection) {
-      setFloatingButtonPos(selection.position);
-      setCurrentSelectionText(selection.text);
-    } else {
-      setFloatingButtonPos(null);
-      setCurrentSelectionText(null);
-    }
-  }, [activeSessionId]);
-
-  const handleFloatingButtonClick = useCallback(() => {
-    if (!floatingButtonPos || !currentSelectionText) return;
-    setTextSelection({ text: currentSelectionText, position: floatingButtonPos });
-    setFloatingButtonPos(null);
-    setCurrentSelectionText(null);
-  }, [floatingButtonPos, currentSelectionText]);
 
   const handleCommentHighlightClick = useCallback(
     (id: string, position: { x: number; y: number }) => {
       const comment = commentState.comments.find((c) => c.id === id);
       if (comment) {
         commentState.setEditingCommentId(id);
-        setTextSelection({ text: comment.selectedText, position });
+        setTextSelection({ text: comment.selectedText, from: comment.from, to: comment.to, position });
       }
     },
     [commentState]
@@ -298,12 +290,10 @@ function usePlanSelection(
   const handleSelectionClose = useCallback(() => {
     setTextSelection(null);
     commentState.setEditingCommentId(null);
-    setFloatingButtonPos(null);
-    setCurrentSelectionText(null);
     window.getSelection()?.removeAllRanges();
   }, [commentState]);
 
-  return { textSelection, setTextSelection, floatingButtonPos, handleSelectionEnd, handleFloatingButtonClick, handleCommentHighlightClick, handleSelectionClose };
+  return { textSelection, setTextSelection, handleCommentHighlightClick, handleSelectionClose };
 }
 
 /** Ctrl+S save shortcut */
@@ -366,7 +356,7 @@ function PlanEmptyState({
           <div className="flex items-start gap-3">
             <IconMessage className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Select text and press <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">&#8984;I</kbd> to request changes
+              Select text and press <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">&#8984;&#8679;C</kbd> to comment
             </p>
           </div>
         </div>
