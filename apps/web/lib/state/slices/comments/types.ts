@@ -31,6 +31,8 @@ export type DiffComment = CommentBase & {
 export type PlanComment = CommentBase & {
   source: 'plan';
   selectedText: string;
+  from?: number;
+  to?: number;
 };
 
 export type FileEditorComment = CommentBase & {
