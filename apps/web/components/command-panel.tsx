@@ -30,9 +30,17 @@ import { useToast } from '@/components/toast-provider';
 import { listTasksByWorkspace } from '@/lib/api';
 import { linkToSession } from '@/lib/links';
 import type { Task } from '@/lib/types/http';
+import { getWebSocketClient } from '@/lib/ws/connection';
+import { searchWorkspaceFiles } from '@/lib/ws/workspace-files';
+import { FileIcon } from '@/components/ui/file-icon';
+import { useDockviewStore } from '@/lib/state/dockview-store';
 
 const ARCHIVED_STATES = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
 const MODE_SEARCH_TASKS: CommandPanelMode = 'search-tasks';
+
+function getFileName(filePath: string) {
+  return filePath.split('/').pop() ?? filePath;
+}
 
 function CommandItemRow({ cmd, onSelect }: { cmd: CommandItemType; onSelect: (cmd: CommandItemType) => void }) {
   return (
@@ -82,12 +90,13 @@ type CommandsListContentProps = {
   grouped: [string, CommandItemType[]][];
   search: string;
   onSelect: (cmd: CommandItemType) => void;
+  hasFileResults: boolean;
 };
 
-function CommandsListContent({ commands, grouped, search, onSelect }: CommandsListContentProps) {
+function CommandsListContent({ commands, grouped, search, onSelect, hasFileResults }: CommandsListContentProps) {
   return (
     <>
-      <CommandEmpty>No commands found.</CommandEmpty>
+      {!hasFileResults && <CommandEmpty>No commands found.</CommandEmpty>}
       {search.trim() ? (
         <CommandGroup>
           {commands.map((cmd) => <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />)}
@@ -116,6 +125,37 @@ function SearchTasksContent({ isSearching, search, taskResults, stepMap, onTaskS
   );
 }
 
+type FileSearchResultsProps = { files: string[]; isSearching: boolean; onSelect: (path: string) => void };
+
+function FileSearchResults({ files, isSearching, onSelect }: FileSearchResultsProps) {
+  if (isSearching && files.length === 0) {
+    return (
+      <CommandGroup heading="Files" forceMount>
+        <div className="flex items-center justify-center py-3">
+          <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
+        </div>
+      </CommandGroup>
+    );
+  }
+  if (files.length === 0) return null;
+  return (
+    <CommandGroup heading="Files" forceMount>
+      {files.map((filePath) => {
+        const fileName = getFileName(filePath);
+        const lastSlash = filePath.lastIndexOf('/');
+        const dir = lastSlash > 0 ? filePath.slice(0, lastSlash) : '';
+        return (
+          <CommandItem key={filePath} value={`__file:${filePath}`} onSelect={() => onSelect(filePath)} forceMount>
+            <FileIcon fileName={fileName} className="shrink-0" />
+            <span className="font-medium truncate">{fileName}</span>
+            {dir && <span className="text-muted-foreground text-xs truncate ml-1">{dir}</span>}
+          </CommandItem>
+        );
+      })}
+    </CommandGroup>
+  );
+}
+
 function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
   if (mode === 'input') return inputCommand?.inputPlaceholder ?? 'Enter value...';
   if (mode === MODE_SEARCH_TASKS) return 'Search for tasks...';
@@ -134,24 +174,29 @@ function useCommandPanelState() {
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  return { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, setTaskResults, isSearching, setIsSearching };
+  const [fileResults, setFileResults] = useState<string[]>([]);
+  const [isSearchingFiles, setIsSearchingFiles] = useState(false);
+  const [selectedValue, setSelectedValue] = useState('');
+  return { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, setTaskResults, isSearching, setIsSearching, fileResults, setFileResults, isSearchingFiles, setIsSearchingFiles, selectedValue, setSelectedValue };
 }
 
 function useCommandPanelEffects(
   open: boolean,
   state: ReturnType<typeof useCommandPanelState>,
   workspaceId: string | null,
+  activeSessionId: string | null,
 ) {
-  const { mode, search, setMode, setSearch, setInputCommand, setTaskResults, setIsSearching } = state;
+  const { mode, search, setMode, setSearch, setInputCommand, setTaskResults, setIsSearching, setFileResults, setIsSearchingFiles, setSelectedValue } = state;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!open) {
-      const t = setTimeout(() => { setMode('commands'); setSearch(''); setInputCommand(null); setTaskResults([]); }, 200);
+      const t = setTimeout(() => { setMode('commands'); setSearch(''); setInputCommand(null); setTaskResults([]); setFileResults([]); setSelectedValue(''); }, 200);
       return () => clearTimeout(t);
     }
-  }, [open, setMode, setSearch, setInputCommand, setTaskResults]);
+  }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
 
   useEffect(() => {
     if (mode !== MODE_SEARCH_TASKS) return;
@@ -174,6 +219,32 @@ function useCommandPanelEffects(
     }, 300);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); abortRef.current?.abort(); };
   }, [search, mode, workspaceId, setTaskResults, setIsSearching]);
+
+  useEffect(() => {
+    if (mode !== 'commands' || !search.trim() || !activeSessionId) {
+      setFileResults([]); setIsSearchingFiles(false); return;
+    }
+    setIsSearchingFiles(true);
+    if (fileDebounceRef.current) clearTimeout(fileDebounceRef.current);
+    let cancelled = false;
+    fileDebounceRef.current = setTimeout(async () => {
+      const client = getWebSocketClient();
+      if (!client || cancelled) { if (!cancelled) setIsSearchingFiles(false); return; }
+      try {
+        const res = await searchWorkspaceFiles(client, activeSessionId, search.trim(), 10);
+        if (!cancelled) {
+          const files = res.files ?? [];
+          setFileResults(files);
+          if (files.length > 0) setSelectedValue(`__file:${files[0]}`);
+        }
+      } catch {
+        if (!cancelled) setFileResults([]);
+      } finally {
+        if (!cancelled) setIsSearchingFiles(false);
+      }
+    }, 250);
+    return () => { cancelled = true; if (fileDebounceRef.current) clearTimeout(fileDebounceRef.current); };
+  }, [search, mode, activeSessionId, setFileResults, setIsSearchingFiles, setSelectedValue]);
 }
 
 export function CommandPanel() {
@@ -184,10 +255,12 @@ export function CommandPanel() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
 
-  const state = useCommandPanelState();
-  const { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, isSearching } = state;
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
 
-  useCommandPanelEffects(open, state, workspaceId);
+  const state = useCommandPanelState();
+  const { mode, setMode, search, setSearch, inputCommand, setInputCommand, taskResults, isSearching, fileResults, isSearchingFiles, selectedValue, setSelectedValue } = state;
+
+  useCommandPanelEffects(open, state, workspaceId, activeSessionId);
 
   const stepMap = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
@@ -219,6 +292,11 @@ export function CommandPanel() {
     else { toast({ title: 'This task has no active session', variant: 'default' }); }
   }, [setOpen, router, toast]);
 
+  const handleFileSelect = useCallback((filePath: string) => {
+    setOpen(false);
+    useDockviewStore.getState().addFileEditorPanel(filePath, getFileName(filePath));
+  }, [setOpen]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (mode === 'input' && e.key === 'Enter' && search.trim() && inputCommand?.onInputSubmit) {
       e.preventDefault(); setOpen(false); inputCommand.onInputSubmit(search.trim()); return;
@@ -232,7 +310,7 @@ export function CommandPanel() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} overlayClassName="supports-backdrop-filter:backdrop-blur-none!">
-      <Command shouldFilter={mode === 'commands'} loop>
+      <Command shouldFilter={mode === 'commands'} loop value={selectedValue} onValueChange={setSelectedValue}>
         <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
           {mode !== 'commands' && (
             <button onClick={goBack} className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
@@ -244,7 +322,12 @@ export function CommandPanel() {
           <CommandInput placeholder={getInputPlaceholder(mode, inputCommand)} value={search} onValueChange={setSearch} onKeyDown={handleKeyDown} />
         </div>
         <CommandList>
-          {mode === 'commands' && <CommandsListContent commands={commands} grouped={grouped} search={search} onSelect={handleSelect} />}
+          {mode === 'commands' && (
+            <>
+              {search.trim() && <FileSearchResults files={fileResults} isSearching={isSearchingFiles} onSelect={handleFileSelect} />}
+              <CommandsListContent commands={commands} grouped={grouped} search={search} onSelect={handleSelect} hasFileResults={fileResults.length > 0 || isSearchingFiles} />
+            </>
+          )}
           {mode === MODE_SEARCH_TASKS && <SearchTasksContent isSearching={isSearching} search={search} taskResults={taskResults} stepMap={stepMap} onTaskSelect={handleTaskSelect} />}
           {mode === 'input' && (!search.trim() ? <CommandEmpty>{inputCommand?.inputPlaceholder ?? 'Enter a value...'}</CommandEmpty> : <CommandEmpty>Press Enter to confirm</CommandEmpty>)}
         </CommandList>
