@@ -333,6 +333,14 @@ export type User = {
   updated_at: string;
 };
 
+export type SavedLayout = {
+  id: string;
+  name: string;
+  is_default: boolean;
+  layout: Record<string, unknown>;
+  created_at: string;
+};
+
 export type UserSettings = {
   user_id: string;
   workspace_id: string;
@@ -348,6 +356,7 @@ export type UserSettings = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  saved_layouts?: SavedLayout[];
   updated_at: string;
 };
 

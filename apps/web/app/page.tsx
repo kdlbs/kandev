@@ -44,7 +44,7 @@ function buildUserSettingsState(resp: UserSettingsResponse | null, workspaceId: 
     return {
       workspaceId, workflowId: null, kanbanViewMode: null, repositoryIds: [], preferredShell: null,
       shellOptions, defaultEditorId: null, enablePreviewOnClick: false, chatSubmitKey: 'cmd_enter',
-      reviewAutoMarkOnScroll: true, lspAutoStartLanguages: [], lspAutoInstallLanguages: [], lspServerConfigs: {}, loaded: false,
+      reviewAutoMarkOnScroll: true, savedLayouts: [], lspAutoStartLanguages: [], lspAutoInstallLanguages: [], lspServerConfigs: {}, loaded: false,
     };
   }
   return {
@@ -58,6 +58,7 @@ function buildUserSettingsState(resp: UserSettingsResponse | null, workspaceId: 
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
     chatSubmitKey: s.chat_submit_key ?? 'cmd_enter',
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
+    savedLayouts: s.saved_layouts ?? [],
     ...buildLspConfig(s),
     loaded: true,
   };

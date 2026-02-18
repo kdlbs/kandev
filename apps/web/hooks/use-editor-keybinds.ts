@@ -64,10 +64,44 @@ function handleTerminalToggle(
     .catch((err) => { console.warn('Failed to create terminal shell:', err); });
 }
 
+/** Returns true if the active element is a text input or contenteditable. */
+function isEditableTarget(e: KeyboardEvent): boolean {
+  const tag = (e.target as HTMLElement)?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA'
+    || (e.target as HTMLElement)?.isContentEditable === true;
+}
+
+/** Returns true if the event matches Cmd/Ctrl + key (no shift). */
+function isCmdKey(e: KeyboardEvent, code: string): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === code;
+}
+
+function handleLayoutToggle(e: KeyboardEvent): boolean {
+  if (isEditableTarget(e)) return false;
+
+  if (isCmdKey(e, 'KeyB')) {
+    e.preventDefault();
+    e.stopPropagation();
+    useDockviewStore.getState().toggleSidebar();
+    return true;
+  }
+
+  if (isCmdKey(e, 'KeyJ')) {
+    e.preventDefault();
+    e.stopPropagation();
+    useDockviewStore.getState().toggleRightPanels();
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Global editor keybinds for dockview:
  * - Cmd/Ctrl+Shift+[ / ] — navigate prev/next tab in active group
  * - Ctrl+` — toggle terminal focus
+ * - Cmd/Ctrl+B — toggle sidebar
+ * - Cmd/Ctrl+J — toggle right panels
  */
 export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
@@ -98,7 +132,10 @@ export function useEditorKeybinds() {
           previousPanelIdRef,
           () => appStore.getState().tasks.activeSessionId,
         );
+        return;
       }
+
+      handleLayoutToggle(e);
     };
 
     window.addEventListener('keydown', handler);

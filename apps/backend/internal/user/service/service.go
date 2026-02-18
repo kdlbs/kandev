@@ -39,6 +39,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages   *[]string
 	LspAutoInstallLanguages *[]string
 	LspServerConfigs        *map[string]map[string]interface{}
+	SavedLayouts            *[]models.SavedLayout
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -86,6 +87,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, err
 	}
 	if err := applyLSPSettings(settings, req); err != nil {
+		return nil, err
+	}
+	if err := applySavedLayouts(settings, req); err != nil {
 		return nil, err
 	}
 	settings.UpdatedAt = time.Now().UTC()
@@ -162,6 +166,26 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 	return nil
 }
 
+const maxSavedLayouts = 20
+
+// applySavedLayouts validates and applies the saved_layouts setting.
+func applySavedLayouts(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SavedLayouts == nil {
+		return nil
+	}
+	layouts := *req.SavedLayouts
+	if len(layouts) > maxSavedLayouts {
+		return fmt.Errorf("saved_layouts: max %d layouts allowed", maxSavedLayouts)
+	}
+	for i := range layouts {
+		if strings.TrimSpace(layouts[i].Name) == "" {
+			return errors.New("saved_layouts: layout name must not be empty")
+		}
+	}
+	settings.SavedLayouts = layouts
+	return nil
+}
+
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -181,6 +205,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_start_languages":   settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages": settings.LspAutoInstallLanguages,
 		"lsp_server_configs":         settings.LspServerConfigs,
+		"saved_layouts":              settings.SavedLayouts,
 		"updated_at":                 settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
