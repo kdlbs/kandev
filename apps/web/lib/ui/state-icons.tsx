@@ -8,27 +8,31 @@ type IconConfig = {
   className: string;
 };
 
+const STYLE_LOADING = 'text-blue-500 animate-spin';
+const STYLE_WARNING = 'text-yellow-500';
+const STYLE_ERROR = 'text-red-500';
+
 const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
-  CREATED: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  SCHEDULING: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  IN_PROGRESS: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  REVIEW: { Icon: IconCheck, className: 'text-yellow-500' },
-  BLOCKED: { Icon: IconAlertCircle, className: 'text-yellow-500' },
-  WAITING_FOR_INPUT: { Icon: IconCheck, className: 'text-yellow-500' },
+  CREATED: { Icon: IconLoader2, className: STYLE_LOADING },
+  SCHEDULING: { Icon: IconLoader2, className: STYLE_LOADING },
+  IN_PROGRESS: { Icon: IconLoader2, className: STYLE_LOADING },
+  REVIEW: { Icon: IconCheck, className: STYLE_WARNING },
+  BLOCKED: { Icon: IconAlertCircle, className: STYLE_WARNING },
+  WAITING_FOR_INPUT: { Icon: IconCheck, className: STYLE_WARNING },
   COMPLETED: { Icon: IconCheck, className: 'text-green-500' },
-  FAILED: { Icon: IconX, className: 'text-red-500' },
-  CANCELLED: { Icon: IconX, className: 'text-red-500' },
+  FAILED: { Icon: IconX, className: STYLE_ERROR },
+  CANCELLED: { Icon: IconX, className: STYLE_ERROR },
   TODO: { Icon: IconAlertCircle, className: 'text-muted-foreground' },
 };
 
 const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
-  CREATED: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  STARTING: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  RUNNING: { Icon: IconLoader2, className: 'text-blue-500 animate-spin' },
-  WAITING_FOR_INPUT: { Icon: IconCheck, className: 'text-yellow-500' },
+  CREATED: { Icon: IconLoader2, className: STYLE_LOADING },
+  STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
+  RUNNING: { Icon: IconLoader2, className: STYLE_LOADING },
+  WAITING_FOR_INPUT: { Icon: IconCheck, className: STYLE_WARNING },
   COMPLETED: { Icon: IconCheck, className: 'text-green-500' },
-  FAILED: { Icon: IconX, className: 'text-red-500' },
-  CANCELLED: { Icon: IconX, className: 'text-red-500' },
+  FAILED: { Icon: IconX, className: STYLE_ERROR },
+  CANCELLED: { Icon: IconX, className: STYLE_ERROR },
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {

@@ -20,6 +20,61 @@ const defaultState: DiffCommentsState = {
   editingCommentId: null,
 };
 
+/** Find and update a comment by ID across all sessions/files. */
+function findAndUpdateComment(
+  bySession: DiffCommentsState['bySession'],
+  commentId: string,
+  updates: Partial<DiffComment>,
+): void {
+  for (const sessionId of Object.keys(bySession)) {
+    for (const filePath of Object.keys(bySession[sessionId])) {
+      const comments = bySession[sessionId][filePath];
+      const index = comments.findIndex((c) => c.id === commentId);
+      if (index !== -1) {
+        bySession[sessionId][filePath][index] = { ...comments[index], ...updates };
+        return;
+      }
+    }
+  }
+}
+
+/** Remove comments by ID set, cleaning up empty file/session entries. */
+function removeCommentsByIds(
+  bySession: DiffCommentsState['bySession'],
+  idsToRemove: Set<string>,
+): void {
+  for (const sessionId of Object.keys(bySession)) {
+    for (const filePath of Object.keys(bySession[sessionId])) {
+      bySession[sessionId][filePath] = bySession[sessionId][filePath]
+        .filter((comment) => !idsToRemove.has(comment.id));
+      if (bySession[sessionId][filePath].length === 0) {
+        delete bySession[sessionId][filePath];
+      }
+    }
+    if (Object.keys(bySession[sessionId]).length === 0) {
+      delete bySession[sessionId];
+    }
+  }
+}
+
+/** Collect all pending DiffComment objects matching the pendingForChat IDs. */
+function collectPendingComments(
+  bySession: DiffCommentsState['bySession'],
+  pendingForChat: string[],
+): DiffComment[] {
+  const pending: DiffComment[] = [];
+  for (const sessionId of Object.keys(bySession)) {
+    for (const filePath of Object.keys(bySession[sessionId])) {
+      for (const comment of bySession[sessionId][filePath]) {
+        if (pendingForChat.includes(comment.id)) {
+          pending.push(comment);
+        }
+      }
+    }
+  }
+  return pending;
+}
+
 /**
  * Standalone Zustand store for diff comments with localStorage persistence.
  * Comments are organized by sessionId and filePath.
@@ -48,20 +103,7 @@ export const useDiffCommentsStore = create<DiffCommentsSlice>()(
 
       updateComment: (commentId: string, updates: Partial<DiffComment>) =>
         set((state) => {
-          // Find and update the comment
-          for (const sessionId of Object.keys(state.bySession)) {
-            for (const filePath of Object.keys(state.bySession[sessionId])) {
-              const comments = state.bySession[sessionId][filePath];
-              const index = comments.findIndex((c) => c.id === commentId);
-              if (index !== -1) {
-                state.bySession[sessionId][filePath][index] = {
-                  ...comments[index],
-                  ...updates,
-                };
-                return;
-              }
-            }
-          }
+          findAndUpdateComment(state.bySession, commentId, updates);
         }),
 
       removeComment: (sessionId: string, filePath: string, commentId: string) =>
@@ -109,32 +151,10 @@ export const useDiffCommentsStore = create<DiffCommentsSlice>()(
       markCommentsSent: (commentIds: string[]) =>
         set((state) => {
           const idsToRemove = new Set(commentIds);
-
-          // Remove the sent comments entirely from storage
-          for (const sessionId of Object.keys(state.bySession)) {
-            for (const filePath of Object.keys(state.bySession[sessionId])) {
-              state.bySession[sessionId][filePath] = state.bySession[sessionId][
-                filePath
-              ].filter((comment) => !idsToRemove.has(comment.id));
-
-              // Clean up empty file entries
-              if (state.bySession[sessionId][filePath].length === 0) {
-                delete state.bySession[sessionId][filePath];
-              }
-            }
-
-            // Clean up empty session entries
-            if (Object.keys(state.bySession[sessionId]).length === 0) {
-              delete state.bySession[sessionId];
-            }
-          }
-
-          // Remove from pending
+          removeCommentsByIds(state.bySession, idsToRemove);
           state.pendingForChat = state.pendingForChat.filter(
             (id) => !idsToRemove.has(id)
           );
-
-          // Clear editing if deleted
           if (state.editingCommentId && idsToRemove.has(state.editingCommentId)) {
             state.editingCommentId = null;
           }
@@ -147,17 +167,7 @@ export const useDiffCommentsStore = create<DiffCommentsSlice>()(
 
       getPendingComments: (): DiffComment[] => {
         const state = get();
-        const pending: DiffComment[] = [];
-        for (const sessionId of Object.keys(state.bySession)) {
-          for (const filePath of Object.keys(state.bySession[sessionId])) {
-            for (const comment of state.bySession[sessionId][filePath]) {
-              if (state.pendingForChat.includes(comment.id)) {
-                pending.push(comment);
-              }
-            }
-          }
-        }
-        return pending;
+        return collectPendingComments(state.bySession, state.pendingForChat);
       },
 
       clearSessionComments: (sessionId: string) =>
@@ -224,6 +234,16 @@ export function usePendingComments() {
   }, [bySession, pendingForChat]);
 }
 
+function addPendingCommentToFileMap(
+  byFile: Record<string, DiffComment[]>,
+  comment: DiffComment,
+  pendingForChat: string[],
+): void {
+  if (!pendingForChat.includes(comment.id)) return;
+  if (!byFile[comment.filePath]) byFile[comment.filePath] = [];
+  byFile[comment.filePath].push(comment);
+}
+
 /**
  * Hook to get pending comments grouped by file.
  * Uses useMemo with stable store subscriptions to prevent infinite re-renders.
@@ -238,12 +258,7 @@ export function usePendingCommentsByFile() {
     for (const sessionId of Object.keys(bySession)) {
       for (const filePath of Object.keys(bySession[sessionId])) {
         for (const comment of bySession[sessionId][filePath]) {
-          if (pendingForChat.includes(comment.id)) {
-            if (!byFile[filePath]) {
-              byFile[filePath] = [];
-            }
-            byFile[filePath].push(comment);
-          }
+          addPendingCommentToFileMap(byFile, comment, pendingForChat);
         }
       }
     }

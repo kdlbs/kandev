@@ -47,53 +47,57 @@ const collectExtensionCandidates = (fileName: string): string[] => {
   return candidates;
 };
 
-const resolveSetiIconId = (fileName: string): string | undefined => {
-  const direct = setiFileNames[fileName];
+/** Look up a key in a map, falling back to its lowercase variant. */
+const lookupWithLowerFallback = (
+  map: Record<string, string>,
+  key: string,
+): string | undefined => {
+  const direct = map[key];
   if (direct) return direct;
+  const lower = key.toLowerCase();
+  return lower !== key ? map[lower] : undefined;
+};
 
-  const lowerName = fileName.toLowerCase();
-  if (lowerName !== fileName) {
-    const lowerDirect = setiFileNames[lowerName];
-    if (lowerDirect) return lowerDirect;
+/** Search candidates against a map with case-insensitive fallback. */
+const findInCandidates = (
+  map: Record<string, string>,
+  candidates: string[],
+): string | undefined => {
+  for (const candidate of candidates) {
+    const match = lookupWithLowerFallback(map, candidate);
+    if (match) return match;
   }
+  return undefined;
+};
 
+const resolveSetiIconId = (fileName: string): string | undefined => {
+  // Direct file name match
+  const nameMatch = lookupWithLowerFallback(setiFileNames, fileName);
+  if (nameMatch) return nameMatch;
+
+  // Dotfile name without leading dot
   if (fileName.startsWith(".") && fileName.length > 1) {
-    const withoutDot = fileName.slice(1);
-    const withoutDotMatch = setiFileNames[withoutDot];
+    const withoutDotMatch = setiFileNames[fileName.slice(1)];
     if (withoutDotMatch) return withoutDotMatch;
   }
 
   const extensionCandidates = collectExtensionCandidates(fileName);
 
-  for (const candidate of extensionCandidates) {
-    const extMatch = setiFileExtensions[candidate];
-    if (extMatch) return extMatch;
+  // File extension match
+  const extMatch = findInCandidates(setiFileExtensions, extensionCandidates);
+  if (extMatch) return extMatch;
 
-    const lowerCandidate = candidate.toLowerCase();
-    if (lowerCandidate !== candidate) {
-      const lowerExtMatch = setiFileExtensions[lowerCandidate];
-      if (lowerExtMatch) return lowerExtMatch;
-    }
-  }
+  // Language ID match
+  const lowerName = fileName.toLowerCase();
+  const langMatch = setiLanguageIds[lowerName];
+  if (langMatch) return langMatch;
 
-  const languageMatch = setiLanguageIds[lowerName];
-  if (languageMatch) return languageMatch;
+  const langCandidateMatch = findInCandidates(setiLanguageIds, extensionCandidates);
+  if (langCandidateMatch) return langCandidateMatch;
 
-  for (const candidate of extensionCandidates) {
-    const languageIdMatch = setiLanguageIds[candidate];
-    if (languageIdMatch) return languageIdMatch;
-
-    const lowerCandidate = candidate.toLowerCase();
-    if (lowerCandidate !== candidate) {
-      const lowerLanguageIdMatch = setiLanguageIds[lowerCandidate];
-      if (lowerLanguageIdMatch) return lowerLanguageIdMatch;
-    }
-  }
-
+  // Dotfile language ID
   if (fileName.startsWith(".") && fileName.length > 1) {
-    const trimmedLower = fileName.slice(1).toLowerCase();
-    const trimmedLanguageMatch = setiLanguageIds[trimmedLower];
-    if (trimmedLanguageMatch) return trimmedLanguageMatch;
+    return setiLanguageIds[fileName.slice(1).toLowerCase()];
   }
 
   return undefined;

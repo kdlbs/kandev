@@ -9,6 +9,38 @@ import { PanelRoot, PanelBody, PanelHeaderBar } from './panel-primitives';
 import { useAppStore } from '@/components/state-provider';
 import { detectPreviewUrlFromOutput } from '@/lib/preview-url-detector';
 
+function BrowserPanelContent({ showIframeDelayed, effectiveUrl, refreshKey }: {
+  showIframeDelayed: string | false;
+  effectiveUrl: string;
+  refreshKey: number;
+}) {
+  if (showIframeDelayed) {
+    return (
+      <iframe
+        key={refreshKey}
+        src={effectiveUrl}
+        title="Browser Preview"
+        className="h-full w-full border-0"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  if (effectiveUrl) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <p className="text-sm">Loading preview...</p>
+      </div>
+    );
+  }
+  return (
+    <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+      <p className="text-sm">Enter a URL above or start the dev server</p>
+    </div>
+  );
+}
+
 export const BrowserPanel = memo(function BrowserPanel(
   props: IDockviewPanelProps<{ url?: string }>
 ) {
@@ -32,7 +64,7 @@ export const BrowserPanel = memo(function BrowserPanel(
   const effectiveUrl = useMemo(() => userUrl || detectedUrl || '', [userUrl, detectedUrl]);
 
   // Derive iframe visibility: show after a delay when URL is available
-  const showIframeDelayed = effectiveUrl && showIframe;
+  const showIframeDelayed: string | false = showIframe ? effectiveUrl : false;
 
   // Delay showing iframe after URL is set
   useEffect(() => {
@@ -98,25 +130,7 @@ export const BrowserPanel = memo(function BrowserPanel(
       </PanelHeaderBar>
 
       <PanelBody padding={false} scroll={false}>
-        {showIframeDelayed ? (
-          <iframe
-            key={refreshKey}
-            src={effectiveUrl}
-            title="Browser Preview"
-            className="h-full w-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            referrerPolicy="no-referrer"
-          />
-        ) : effectiveUrl ? (
-          <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            <p className="text-sm">Loading preview...</p>
-          </div>
-        ) : (
-          <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-            <p className="text-sm">Enter a URL above or start the dev server</p>
-          </div>
-        )}
+        <BrowserPanelContent showIframeDelayed={showIframeDelayed} effectiveUrl={effectiveUrl} refreshKey={refreshKey} />
       </PanelBody>
     </PanelRoot>
   );

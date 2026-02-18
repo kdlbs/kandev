@@ -5,6 +5,21 @@ import { useAppStore } from '@/components/state-provider';
 import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
 import type { WorkflowsState } from '@/lib/state/slices';
 
+type UserSettingsFields = {
+  workspaceId: string | null;
+  workflowId: string | null;
+  repositoryIds: string[];
+};
+
+/** Build the base settings payload from current user settings. */
+function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
+  return {
+    workspaceId: settings.workspaceId,
+    workflowId: settings.workflowId,
+    repositoryIds: settings.repositoryIds,
+  };
+}
+
 /**
  * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
  * This hook provides access to workspaces, workflows, repositories, and preview settings,
@@ -71,45 +86,24 @@ export function useKanbanDisplaySettings() {
 
   const handleRepositoryChange = useCallback(
     (value: string | 'all') => {
-      if (value === 'all') {
-        commitSettings({
-          workspaceId: userSettings.workspaceId,
-          workflowId: userSettings.workflowId,
-          repositoryIds: [],
-        });
-        return;
-      }
-      commitSettings({
-        workspaceId: userSettings.workspaceId,
-        workflowId: userSettings.workflowId,
-        repositoryIds: [value],
-      });
+      const base = baseSettingsPayload(userSettings);
+      commitSettings({ ...base, repositoryIds: value === 'all' ? [] : [value] });
     },
-    [commitSettings, userSettings.workspaceId, userSettings.workflowId]
+    [commitSettings, userSettings]
   );
 
   const handleTogglePreviewOnClick = useCallback(
     (enabled: boolean) => {
-      commitSettings({
-        workspaceId: userSettings.workspaceId,
-        workflowId: userSettings.workflowId,
-        repositoryIds: userSettings.repositoryIds,
-        enablePreviewOnClick: enabled,
-      });
+      commitSettings({ ...baseSettingsPayload(userSettings), enablePreviewOnClick: enabled });
     },
-    [commitSettings, userSettings.workflowId, userSettings.repositoryIds, userSettings.workspaceId]
+    [commitSettings, userSettings]
   );
 
   const handleViewModeChange = useCallback(
     (mode: string) => {
-      commitSettings({
-        workspaceId: userSettings.workspaceId,
-        workflowId: userSettings.workflowId,
-        repositoryIds: userSettings.repositoryIds,
-        kanbanViewMode: mode || null,
-      });
+      commitSettings({ ...baseSettingsPayload(userSettings), kanbanViewMode: mode || null });
     },
-    [commitSettings, userSettings.workspaceId, userSettings.workflowId, userSettings.repositoryIds]
+    [commitSettings, userSettings]
   );
 
   return {

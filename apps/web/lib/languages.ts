@@ -133,62 +133,51 @@ export function getLanguageFromPath(filePath: string): string {
 }
 
 /**
+ * Lookup map from language identifier to CodeMirror extension factory.
+ * Each entry maps a language alias to a function that creates the extension.
+ */
+const CODEMIRROR_EXTENSION_MAP: Record<string, () => Extension> = {
+  javascript: () => javascript(),
+  js: () => javascript(),
+  jsx: () => javascript({ jsx: true }),
+  typescript: () => javascript({ typescript: true }),
+  ts: () => javascript({ typescript: true }),
+  tsx: () => javascript({ jsx: true, typescript: true }),
+  python: () => python(),
+  py: () => python(),
+  go: () => go(),
+  golang: () => go(),
+  rust: () => rust(),
+  rs: () => rust(),
+  java: () => java(),
+  cpp: () => cpp(),
+  'c++': () => cpp(),
+  c: () => cpp(),
+  cc: () => cpp(),
+  cxx: () => cpp(),
+  css: () => css(),
+  scss: () => css(),
+  sass: () => css(),
+  less: () => css(),
+  html: () => html(),
+  htm: () => html(),
+  json: () => json(),
+  jsonc: () => json(),
+  markdown: () => markdown(),
+  md: () => markdown(),
+  mdx: () => markdown(),
+  yaml: () => yaml(),
+  yml: () => yaml(),
+};
+
+/**
  * Get the CodeMirror language extension for a given language identifier.
  * @param language - Language identifier (e.g., 'typescript', 'python')
  * @returns CodeMirror Extension or undefined if no extension available
  */
 export function getCodeMirrorExtension(language: string): Extension | undefined {
-  const lang = language.toLowerCase();
-
-  switch (lang) {
-    case 'javascript':
-    case 'js':
-      return javascript();
-    case 'jsx':
-      return javascript({ jsx: true });
-    case 'typescript':
-    case 'ts':
-      return javascript({ typescript: true });
-    case 'tsx':
-      return javascript({ jsx: true, typescript: true });
-    case 'python':
-    case 'py':
-      return python();
-    case 'go':
-    case 'golang':
-      return go();
-    case 'rust':
-    case 'rs':
-      return rust();
-    case 'java':
-      return java();
-    case 'cpp':
-    case 'c++':
-    case 'c':
-    case 'cc':
-    case 'cxx':
-      return cpp();
-    case 'css':
-    case 'scss':
-    case 'sass':
-    case 'less':
-      return css();
-    case 'html':
-    case 'htm':
-      return html();
-    case 'json':
-    case 'jsonc':
-      return json();
-    case 'markdown':
-    case 'md':
-    case 'mdx':
-      return markdown();
-    case 'yaml':
-    case 'yml':
-      return yaml();
-    default:
-      return undefined;
-  }
+  const factory = CODEMIRROR_EXTENSION_MAP[language.toLowerCase()];
+  return factory?.();
 }
 
 /**

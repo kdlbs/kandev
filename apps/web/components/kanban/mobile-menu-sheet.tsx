@@ -36,6 +36,114 @@ type MobileMenuSheetProps = {
   isSearchLoading?: boolean;
 };
 
+function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
+  if (loading) return 'Loading repositories...';
+  if (empty) return 'No repositories';
+  return 'Select repository';
+}
+
+type MobileDisplayOptionsProps = {
+  activeWorkspaceId: string | null;
+  workspaces: Workspace[];
+  onWorkspaceChange: (id: string | null) => void;
+  activeWorkflowId: string | null;
+  workflows: WorkflowsState['items'];
+  onWorkflowChange: (id: string | null) => void;
+  repositoryValue: string;
+  repositories: Repository[];
+  repositoriesLoading: boolean;
+  onRepositoryChange: (value: string | 'all') => void;
+  enablePreviewOnClick: boolean | undefined;
+  onTogglePreviewOnClick: ((checked: boolean) => void) | undefined;
+};
+
+function MobileDisplaySelects({ activeWorkspaceId, workspaces, onWorkspaceChange, activeWorkflowId, workflows, onWorkflowChange, repositoryValue, repositories, repositoriesLoading, onRepositoryChange }: Omit<MobileDisplayOptionsProps, 'enablePreviewOnClick' | 'onTogglePreviewOnClick'>) {
+  return (
+    <>
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground">Workspace</label>
+        <Select value={activeWorkspaceId ?? ''} onValueChange={(value) => onWorkspaceChange(value || null)}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select workspace" /></SelectTrigger>
+          <SelectContent>
+            {workspaces.map((workspace: Workspace) => (
+              <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground">Workflow</label>
+        <Select value={activeWorkflowId ?? ''} onValueChange={(value) => onWorkflowChange(value || null)}>
+          <SelectTrigger className="w-full"><SelectValue placeholder="Select workflow" /></SelectTrigger>
+          <SelectContent>
+            {workflows.map((workflow: WorkflowsState['items'][number]) => (
+              <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground">Repository</label>
+        <Select value={repositoryValue} onValueChange={(value) => onRepositoryChange(value as string | 'all')} disabled={repositories.length === 0}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All repositories</SelectItem>
+            {repositories.map((repo: Repository) => (
+              <SelectItem key={repo.id} value={repo.id}>{repo.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </>
+  );
+}
+
+function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
+  const { enablePreviewOnClick, onTogglePreviewOnClick, ...selectProps } = props;
+  return (
+    <div className="space-y-4">
+      <label className="text-sm font-medium">Display Options</label>
+      <MobileDisplaySelects {...selectProps} />
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground">Preview Panel</label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <Checkbox
+            checked={enablePreviewOnClick ?? false}
+            onCheckedChange={(checked) => { onTogglePreviewOnClick?.(!!checked); }}
+          />
+          <span className="text-sm">
+            Open preview on click{' '}
+            <Badge variant="secondary" className="ml-1">beta</Badge>
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function MobileNavLinks({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  return (
+    <div className="mt-auto space-y-2">
+      <Link href="/stats" onClick={() => onOpenChange(false)}>
+        <Button variant="outline" className="w-full cursor-pointer">
+          <IconChartBar className="h-4 w-4 mr-2" />
+          Stats
+        </Button>
+      </Link>
+      <Link href="/settings" onClick={() => onOpenChange(false)}>
+        <Button variant="outline" className="w-full cursor-pointer">
+          <IconSettings className="h-4 w-4 mr-2" />
+          Settings
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
 export function MobileMenuSheet({
   open,
   onOpenChange,
@@ -120,107 +228,22 @@ export function MobileMenuSheet({
             </ToggleGroup>
           </div>
 
-          <div className="space-y-4">
-            <label className="text-sm font-medium">Display Options</label>
+          <MobileDisplayOptions
+            activeWorkspaceId={activeWorkspaceId}
+            workspaces={workspaces}
+            onWorkspaceChange={onWorkspaceChange}
+            activeWorkflowId={activeWorkflowId}
+            workflows={workflows}
+            onWorkflowChange={onWorkflowChange}
+            repositoryValue={repositoryValue}
+            repositories={repositories}
+            repositoriesLoading={repositoriesLoading}
+            onRepositoryChange={onRepositoryChange}
+            enablePreviewOnClick={enablePreviewOnClick}
+            onTogglePreviewOnClick={onTogglePreviewOnClick}
+          />
 
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Workspace</label>
-              <Select
-                value={activeWorkspaceId ?? ''}
-                onValueChange={(value) => onWorkspaceChange(value || null)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select workspace" />
-                </SelectTrigger>
-                <SelectContent>
-                  {workspaces.map((workspace: Workspace) => (
-                    <SelectItem key={workspace.id} value={workspace.id}>
-                      {workspace.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Workflow</label>
-              <Select
-                value={activeWorkflowId ?? ''}
-                onValueChange={(value) => onWorkflowChange(value || null)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select workflow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {workflows.map((workflow: WorkflowsState['items'][number]) => (
-                    <SelectItem key={workflow.id} value={workflow.id}>
-                      {workflow.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Repository</label>
-              <Select
-                value={repositoryValue}
-                onValueChange={(value) => onRepositoryChange(value as string | 'all')}
-                disabled={repositories.length === 0}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      repositoriesLoading
-                        ? 'Loading repositories...'
-                        : repositories.length === 0
-                          ? 'No repositories'
-                          : 'Select repository'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All repositories</SelectItem>
-                  {repositories.map((repo: Repository) => (
-                    <SelectItem key={repo.id} value={repo.id}>
-                      {repo.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Preview Panel</label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={enablePreviewOnClick ?? false}
-                  onCheckedChange={(checked) => {
-                    onTogglePreviewOnClick?.(!!checked);
-                  }}
-                />
-                <span className="text-sm">
-                  Open preview on click{' '}
-                  <Badge variant="secondary" className="ml-1">beta</Badge>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div className="mt-auto space-y-2">
-            <Link href="/stats" onClick={() => onOpenChange(false)}>
-              <Button variant="outline" className="w-full cursor-pointer">
-                <IconChartBar className="h-4 w-4 mr-2" />
-                Stats
-              </Button>
-            </Link>
-            <Link href="/settings" onClick={() => onOpenChange(false)}>
-              <Button variant="outline" className="w-full cursor-pointer">
-                <IconSettings className="h-4 w-4 mr-2" />
-                Settings
-              </Button>
-            </Link>
-          </div>
+          <MobileNavLinks onOpenChange={onOpenChange} />
         </div>
       </SheetContent>
     </Sheet>

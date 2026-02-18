@@ -6,6 +6,20 @@ import type { Task } from '@/components/kanban-card';
 import type { WorkflowAutomation, MoveTaskError } from '@/hooks/use-drag-and-drop';
 import type { KanbanState } from '@/lib/state/slices/kanban/types';
 
+function hasAutoStartEvent(response: { workflow_step?: { events?: { on_enter?: Array<{ type: string }> } } }): boolean {
+  return response?.workflow_step?.events?.on_enter?.some((a) => a.type === 'auto_start_agent') ?? false;
+}
+
+async function triggerAutoStart(taskId: string, sessionId: string, workflowStepId: string): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) return;
+  try {
+    await client.request('orchestrator.start', { task_id: taskId, session_id: sessionId, workflow_step_id: workflowStepId }, 15000);
+  } catch (err) {
+    console.error('Failed to auto-start session for workflow step:', err);
+  }
+}
+
 export function useSwimlaneMove(
   workflowId: string,
   opts: {
@@ -54,25 +68,10 @@ export function useSwimlaneMove(
           position: nextPosition,
         });
 
-        if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
+        if (hasAutoStartEvent(response)) {
           const sessionId = task.primarySessionId ?? null;
           if (sessionId) {
-            const client = getWebSocketClient();
-            if (client) {
-              try {
-                await client.request(
-                  'orchestrator.start',
-                  {
-                    task_id: task.id,
-                    session_id: sessionId,
-                    workflow_step_id: response.workflow_step.id,
-                  },
-                  15000
-                );
-              } catch (err) {
-                console.error('Failed to auto-start session for workflow step:', err);
-              }
-            }
+            await triggerAutoStart(task.id, sessionId, response.workflow_step.id);
           } else {
             opts.onWorkflowAutomation?.({
               taskId: task.id,

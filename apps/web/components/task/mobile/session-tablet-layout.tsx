@@ -13,6 +13,7 @@ import { useLayoutStore } from '@/lib/state/layout-store';
 import { useSessionLayoutState } from '@/hooks/use-session-layout-state';
 import type { Repository } from '@/lib/types/http';
 import type { Layout } from 'react-resizable-panels';
+import type { OpenFileTab } from '@/lib/types/backend';
 
 const DEFAULT_TABLET_LAYOUT: Record<string, number> = {
   left: 60,
@@ -31,6 +32,54 @@ type SessionTabletLayoutProps = {
   repository?: Repository | null;
   defaultLayouts?: Record<string, Layout>;
 };
+
+type TabletLeftPanelProps = {
+  layoutStatePreview: boolean;
+  previewLayoutKey: string;
+  defaultPreviewLayout: Layout | undefined;
+  onPreviewLayoutChange: (layout: Layout) => void;
+  selectedDiff: { path: string; content?: string } | null;
+  openFileRequest: OpenFileTab | null;
+  handleClearSelectedDiff: () => void;
+  handleFileOpenHandled: () => void;
+  sessionId?: string | null;
+  sessionForPreview: string | null;
+  hasDevScript: boolean;
+};
+
+function TabletLeftPanel({
+  layoutStatePreview, previewLayoutKey, defaultPreviewLayout, onPreviewLayoutChange,
+  selectedDiff, openFileRequest, handleClearSelectedDiff, handleFileOpenHandled,
+  sessionId, sessionForPreview, hasDevScript,
+}: TabletLeftPanelProps) {
+  const centerPanel = (
+    <TaskCenterPanel
+      selectedDiff={selectedDiff}
+      openFileRequest={openFileRequest}
+      onDiffHandled={handleClearSelectedDiff}
+      onFileOpenHandled={handleFileOpenHandled}
+    />
+  );
+  if (layoutStatePreview) {
+    return (
+      <Group orientation="horizontal" className="h-full min-h-0 min-w-0" id={previewLayoutKey} key={previewLayoutKey} defaultLayout={defaultPreviewLayout} onLayoutChanged={onPreviewLayoutChange}>
+        <Panel id="chat" minSize="300px" className="min-h-0 min-w-0">{centerPanel}</Panel>
+        <Panel id="preview" minSize="300px" className="min-h-0 min-w-0">
+          <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
+        </Panel>
+      </Group>
+    );
+  }
+  return (
+    <TaskCenterPanel
+      selectedDiff={selectedDiff}
+      openFileRequest={openFileRequest}
+      onDiffHandled={handleClearSelectedDiff}
+      onFileOpenHandled={handleFileOpenHandled}
+      sessionId={sessionId}
+    />
+  );
+}
 
 export const SessionTabletLayout = memo(function SessionTabletLayout({
   workspaceId,
@@ -101,36 +150,19 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
       >
         {/* Left Panel: Chat/Plan/Changes with tabs */}
         <Panel id="left" minSize="300px" className="min-h-0 min-w-0">
-          {layoutState.preview ? (
-            <Group
-              orientation="horizontal"
-              className="h-full min-h-0 min-w-0"
-              id={previewLayoutKey}
-              key={previewLayoutKey}
-              defaultLayout={defaultPreviewLayout}
-              onLayoutChanged={onPreviewLayoutChange}
-            >
-              <Panel id="chat" minSize="300px" className="min-h-0 min-w-0">
-                <TaskCenterPanel
-                  selectedDiff={selectedDiff}
-                  openFileRequest={openFileRequest}
-                  onDiffHandled={handleClearSelectedDiff}
-                  onFileOpenHandled={handleFileOpenHandled}
-                />
-              </Panel>
-              <Panel id="preview" minSize="300px" className="min-h-0 min-w-0">
-                <PreviewPanel sessionId={sessionForPreview} hasDevScript={hasDevScript} />
-              </Panel>
-            </Group>
-          ) : (
-            <TaskCenterPanel
-              selectedDiff={selectedDiff}
-              openFileRequest={openFileRequest}
-              onDiffHandled={handleClearSelectedDiff}
-              onFileOpenHandled={handleFileOpenHandled}
-              sessionId={sessionId}
-            />
-          )}
+          <TabletLeftPanel
+            layoutStatePreview={layoutState.preview}
+            previewLayoutKey={previewLayoutKey}
+            defaultPreviewLayout={defaultPreviewLayout}
+            onPreviewLayoutChange={onPreviewLayoutChange}
+            selectedDiff={selectedDiff}
+            openFileRequest={openFileRequest}
+            handleClearSelectedDiff={handleClearSelectedDiff}
+            handleFileOpenHandled={handleFileOpenHandled}
+            sessionId={sessionId}
+            sessionForPreview={sessionForPreview}
+            hasDevScript={hasDevScript}
+          />
         </Panel>
 
         {/* Right Panel: Files + Terminal stacked */}

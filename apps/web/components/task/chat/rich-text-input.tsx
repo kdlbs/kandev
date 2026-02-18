@@ -10,6 +10,54 @@ import {
 } from 'react';
 import { cn } from '@/lib/utils';
 
+function isSubmitKeyPress(event: KeyboardEvent<HTMLTextAreaElement>, submitKey: 'enter' | 'cmd_enter'): boolean {
+  if (submitKey === 'enter') {
+    return event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey;
+  }
+  return event.key === 'Enter' && (event.metaKey || event.ctrlKey);
+}
+
+const MIRROR_STYLES = [
+  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
+  'textTransform', 'wordSpacing', 'textIndent', 'whiteSpace', 'wordWrap',
+  'wordBreak', 'overflowWrap', 'lineHeight', 'padding', 'paddingTop',
+  'paddingRight', 'paddingBottom', 'paddingLeft', 'borderWidth', 'boxSizing',
+] as const;
+
+function measureCaretRect(textarea: HTMLTextAreaElement, value: string): DOMRect {
+  const selectionStart = textarea.selectionStart;
+  const computed = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.width = `${textarea.clientWidth}px`;
+  MIRROR_STYLES.forEach((prop) => { mirror.style[prop as unknown as number] = computed[prop]; });
+
+  document.body.appendChild(mirror);
+
+  mirror.textContent = value.substring(0, selectionStart);
+  const marker = document.createElement('span');
+  marker.textContent = '\u200B';
+  mirror.appendChild(marker);
+
+  const textareaRect = textarea.getBoundingClientRect();
+  const markerRect = marker.getBoundingClientRect();
+  const mirrorRect = mirror.getBoundingClientRect();
+  const scrollTop = textarea.scrollTop;
+
+  document.body.removeChild(mirror);
+
+  return new DOMRect(
+    textareaRect.left + (markerRect.left - mirrorRect.left),
+    textareaRect.top + (markerRect.top - mirrorRect.top) - scrollTop,
+    0,
+    parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) * 1.2
+  );
+}
+
 export type RichTextInputHandle = {
   focus: () => void;
   blur: () => void;
@@ -39,19 +87,7 @@ type RichTextInputProps = {
 
 export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>(
   function RichTextInput(
-    {
-      value,
-      onChange,
-      onKeyDown,
-      onSubmit,
-      placeholder,
-      disabled = false,
-      className,
-      planModeEnabled = false,
-      submitKey = 'cmd_enter',
-      onFocus,
-      onBlur,
-    },
+    { value, onChange, onKeyDown, onSubmit, placeholder, disabled = false, className, planModeEnabled = false, submitKey = 'cmd_enter', onFocus, onBlur },
     ref
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -59,145 +95,39 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
     const getCaretRect = useCallback((): DOMRect | null => {
       const textarea = textareaRef.current;
       if (!textarea) return null;
-
-      const selectionStart = textarea.selectionStart;
-
-      // Create a mirror div to measure caret position
-      const mirror = document.createElement('div');
-      const computed = window.getComputedStyle(textarea);
-
-      // Copy styles that affect text layout
-      const stylesToCopy = [
-        'fontFamily',
-        'fontSize',
-        'fontWeight',
-        'fontStyle',
-        'letterSpacing',
-        'textTransform',
-        'wordSpacing',
-        'textIndent',
-        'whiteSpace',
-        'wordWrap',
-        'wordBreak',
-        'overflowWrap',
-        'lineHeight',
-        'padding',
-        'paddingTop',
-        'paddingRight',
-        'paddingBottom',
-        'paddingLeft',
-        'borderWidth',
-        'boxSizing',
-      ] as const;
-
-      mirror.style.position = 'absolute';
-      mirror.style.visibility = 'hidden';
-      mirror.style.whiteSpace = 'pre-wrap';
-      mirror.style.wordWrap = 'break-word';
-      mirror.style.width = `${textarea.clientWidth}px`;
-
-      stylesToCopy.forEach((prop) => {
-        mirror.style[prop as unknown as number] = computed[prop];
-      });
-
-      document.body.appendChild(mirror);
-
-      // Get text before cursor and add a span for measuring
-      const textBeforeCursor = value.substring(0, selectionStart);
-      mirror.textContent = textBeforeCursor;
-
-      // Add a marker span at the cursor position
-      const marker = document.createElement('span');
-      marker.textContent = '\u200B'; // Zero-width space
-      mirror.appendChild(marker);
-
-      // Get textarea position and marker position
-      const textareaRect = textarea.getBoundingClientRect();
-      const markerRect = marker.getBoundingClientRect();
-      const mirrorRect = mirror.getBoundingClientRect();
-
-      // Calculate position relative to viewport
-      const relativeTop = markerRect.top - mirrorRect.top;
-      const relativeLeft = markerRect.left - mirrorRect.left;
-
-      // Account for scroll position in textarea
-      const scrollTop = textarea.scrollTop;
-
-      document.body.removeChild(mirror);
-
-      return new DOMRect(
-        textareaRect.left + relativeLeft,
-        textareaRect.top + relativeTop - scrollTop,
-        0,
-        parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) * 1.2
-      );
+      return measureCaretRect(textarea, value);
     }, [value]);
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => textareaRef.current?.focus(),
-        blur: () => textareaRef.current?.blur(),
-        getSelectionStart: () => textareaRef.current?.selectionStart ?? 0,
-        getSelectionEnd: () => textareaRef.current?.selectionEnd ?? 0,
-        setSelectionRange: (start: number, end: number) => {
-          textareaRef.current?.setSelectionRange(start, end);
-        },
-        getCaretRect,
-        getValue: () => textareaRef.current?.value ?? '',
-        setValue: (newValue: string) => onChange(newValue),
-        insertText: (text: string, from: number, to: number) => {
-          const newValue = value.substring(0, from) + text + value.substring(to);
-          onChange(newValue);
-          // Set cursor position after the inserted text
-          requestAnimationFrame(() => {
-            textareaRef.current?.setSelectionRange(from + text.length, from + text.length);
-          });
-        },
-        getTextareaElement: () => textareaRef.current,
-      }),
-      [getCaretRect, onChange, value]
-    );
+    useImperativeHandle(ref, () => ({
+      focus: () => textareaRef.current?.focus(),
+      blur: () => textareaRef.current?.blur(),
+      getSelectionStart: () => textareaRef.current?.selectionStart ?? 0,
+      getSelectionEnd: () => textareaRef.current?.selectionEnd ?? 0,
+      setSelectionRange: (start: number, end: number) => { textareaRef.current?.setSelectionRange(start, end); },
+      getCaretRect,
+      getValue: () => textareaRef.current?.value ?? '',
+      setValue: (newValue: string) => onChange(newValue),
+      insertText: (text: string, from: number, to: number) => {
+        const newValue = value.substring(0, from) + text + value.substring(to);
+        onChange(newValue);
+        requestAnimationFrame(() => { textareaRef.current?.setSelectionRange(from + text.length, from + text.length); });
+      },
+      getTextareaElement: () => textareaRef.current,
+    }), [getCaretRect, onChange, value]);
 
-    const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-      onChange(event.target.value);
-    };
+    const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => { onChange(event.target.value); };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Let parent handle key events first (for menu navigation)
       if (onKeyDown) {
         onKeyDown(event);
         if (event.defaultPrevented) return;
       }
-
-      // Don't allow submission if disabled (includes when agent is busy)
+      const isSubmitKey = isSubmitKeyPress(event, submitKey);
       if (disabled) {
-        // Prevent default to avoid any action when disabled
-        if (submitKey === 'enter') {
-          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
-            event.preventDefault();
-          }
-        } else {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-          }
-        }
+        if (isSubmitKey) event.preventDefault();
         return;
       }
-
-      if (submitKey === 'enter') {
-        // Submit on Enter (unless Shift for newline)
-        if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
-          event.preventDefault();
-          onSubmit?.();
-        }
-      } else {
-        // Submit on Cmd/Ctrl+Enter (current behavior)
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-          event.preventDefault();
-          onSubmit?.();
-        }
-      }
+      if (isSubmitKey) { event.preventDefault(); onSubmit?.(); }
     };
 
     return (

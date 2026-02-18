@@ -2,127 +2,99 @@ import type { StoreApi } from 'zustand';
 import type { AppState } from '@/lib/state/store';
 import type { WsHandlers } from '@/lib/ws/handlers/types';
 import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildProfileEntry(profile: any) {
+  return {
+    id: profile.id,
+    agent_id: profile.agent_id,
+    name: profile.name,
+    agent_display_name: profile.agent_display_name,
+    model: profile.model,
+    auto_approve: profile.auto_approve,
+    dangerously_skip_permissions: profile.dangerously_skip_permissions,
+    allow_indexing: profile.allow_indexing,
+    cli_passthrough: profile.cli_passthrough ?? false,
+    plan: profile.plan,
+    created_at: profile.created_at ?? '',
+    updated_at: profile.updated_at ?? '',
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function handleProfileCreated(state: AppState, profile: any): Partial<AppState> {
+  const agent = state.settingsAgents.items.find((a) => a.id === profile.agent_id);
+  const agentStub = { id: profile.agent_id, name: agent?.name ?? '' };
+  const nextProfiles = [
+    ...state.agentProfiles.items.filter((p) => p.id !== profile.id),
+    toAgentProfileOption(agentStub, profile),
+  ];
+  const nextAgents = state.settingsAgents.items.map((item) =>
+    item.id === profile.agent_id
+      ? { ...item, profiles: [...item.profiles.filter((p) => p.id !== profile.id), buildProfileEntry(profile)] }
+      : item
+  );
+  return { agentProfiles: { ...state.agentProfiles, items: nextProfiles }, settingsAgents: { items: nextAgents } };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function handleProfileUpdated(state: AppState, profile: any): Partial<AppState> {
+  const agent = state.settingsAgents.items.find((a) => a.id === profile.agent_id);
+  const agentStub = { id: profile.agent_id, name: agent?.name ?? '' };
+  const nextProfiles = state.agentProfiles.items.map((p) =>
+    p.id === profile.id ? toAgentProfileOption(agentStub, profile) : p
+  );
+  const nextAgents = state.settingsAgents.items.map((item) =>
+    item.id === profile.agent_id
+      ? {
+          ...item,
+          profiles: item.profiles.map((p) =>
+            p.id === profile.id
+              ? { ...p, name: profile.name, agent_display_name: profile.agent_display_name, model: profile.model, auto_approve: profile.auto_approve, dangerously_skip_permissions: profile.dangerously_skip_permissions, allow_indexing: profile.allow_indexing, plan: profile.plan, updated_at: profile.updated_at ?? p.updated_at }
+              : p
+          ),
+        }
+      : item
+  );
+  return { agentProfiles: { ...state.agentProfiles, items: nextProfiles }, settingsAgents: { items: nextAgents } };
+}
+
 export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     'agent.available.updated': (message) => {
-      store.setState((state) => {
-        const availableAgents = message.payload.agents ?? [];
-        return {
-          ...state,
-          availableAgents: { items: availableAgents, loaded: true, loading: false },
-        };
-      });
+      store.setState((state) => ({
+        ...state,
+        availableAgents: { items: message.payload.agents ?? [], loaded: true, loading: false },
+      }));
     },
     'agent.updated': (message) => {
       store.setState((state) => ({
         ...state,
         agents: {
-          agents: state.agents.agents.some((agent) => agent.id === message.payload.agentId)
-            ? state.agents.agents.map((agent) =>
-                agent.id === message.payload.agentId
-                  ? { ...agent, status: message.payload.status }
-                  : agent
-              )
+          agents: state.agents.agents.some((a) => a.id === message.payload.agentId)
+            ? state.agents.agents.map((a) => a.id === message.payload.agentId ? { ...a, status: message.payload.status } : a)
             : [...state.agents.agents, { id: message.payload.agentId, status: message.payload.status }],
         },
       }));
     },
     'agent.profile.created': (message) => {
-      store.setState((state) => {
-        const agent = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id);
-        const agentStub = { id: message.payload.profile.agent_id, name: agent?.name ?? '' };
-        const nextProfiles = [
-          ...state.agentProfiles.items.filter((profile) => profile.id !== message.payload.profile.id),
-          toAgentProfileOption(agentStub, message.payload.profile),
-        ];
-        const nextAgents = state.settingsAgents.items.map((item) =>
-          item.id === message.payload.profile.agent_id
-            ? {
-                ...item,
-                profiles: [
-                  ...item.profiles.filter((profile) => profile.id !== message.payload.profile.id),
-                  {
-                    id: message.payload.profile.id,
-                    agent_id: message.payload.profile.agent_id,
-                    name: message.payload.profile.name,
-                    agent_display_name: message.payload.profile.agent_display_name,
-                    model: message.payload.profile.model,
-                    auto_approve: message.payload.profile.auto_approve,
-                    dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,
-                    allow_indexing: message.payload.profile.allow_indexing,
-                    cli_passthrough: message.payload.profile.cli_passthrough ?? false,
-                    plan: message.payload.profile.plan,
-                    created_at: message.payload.profile.created_at ?? '',
-                    updated_at: message.payload.profile.updated_at ?? '',
-                  },
-                ],
-              }
-            : item
-        );
-        return {
-          ...state,
-          agentProfiles: { ...state.agentProfiles, items: nextProfiles },
-          settingsAgents: { items: nextAgents },
-        };
-      });
+      store.setState((state) => ({ ...state, ...handleProfileCreated(state, message.payload.profile) }));
     },
     'agent.profile.updated': (message) => {
-      store.setState((state) => {
-        const agent = state.settingsAgents.items.find((a) => a.id === message.payload.profile.agent_id);
-        const agentStub = { id: message.payload.profile.agent_id, name: agent?.name ?? '' };
-        const nextProfiles = state.agentProfiles.items.map((profile) =>
-          profile.id === message.payload.profile.id
-            ? toAgentProfileOption(agentStub, message.payload.profile)
-            : profile
-        );
-        const nextAgents = state.settingsAgents.items.map((item) =>
-          item.id === message.payload.profile.agent_id
-            ? {
-                ...item,
-                profiles: item.profiles.map((profile) =>
-                  profile.id === message.payload.profile.id
-                    ? {
-                        ...profile,
-                        name: message.payload.profile.name,
-                        agent_display_name: message.payload.profile.agent_display_name,
-                        model: message.payload.profile.model,
-                        auto_approve: message.payload.profile.auto_approve,
-                        dangerously_skip_permissions: message.payload.profile.dangerously_skip_permissions,
-                        allow_indexing: message.payload.profile.allow_indexing,
-                        plan: message.payload.profile.plan,
-                        updated_at: message.payload.profile.updated_at ?? profile.updated_at,
-                      }
-                    : profile
-                ),
-              }
-            : item
-        );
-        return {
-          ...state,
-          agentProfiles: { ...state.agentProfiles, items: nextProfiles },
-          settingsAgents: { items: nextAgents },
-        };
-      });
+      store.setState((state) => ({ ...state, ...handleProfileUpdated(state, message.payload.profile) }));
     },
     'agent.profile.deleted': (message) => {
-      store.setState((state) => {
-        const nextProfiles = state.agentProfiles.items.filter(
-          (profile) => profile.id !== message.payload.profile.id
-        );
-        const nextAgents = state.settingsAgents.items.map((item) =>
-          item.id === message.payload.profile.agent_id
-            ? {
-                ...item,
-                profiles: item.profiles.filter((profile) => profile.id !== message.payload.profile.id),
-              }
-            : item
-        );
-        return {
-          ...state,
-          agentProfiles: { ...state.agentProfiles, items: nextProfiles },
-          settingsAgents: { items: nextAgents },
-        };
-      });
+      store.setState((state) => ({
+        ...state,
+        agentProfiles: { ...state.agentProfiles, items: state.agentProfiles.items.filter((p) => p.id !== message.payload.profile.id) },
+        settingsAgents: {
+          items: state.settingsAgents.items.map((item) =>
+            item.id === message.payload.profile.agent_id
+              ? { ...item, profiles: item.profiles.filter((p) => p.id !== message.payload.profile.id) }
+              : item
+          ),
+        },
+      }));
     },
   };
 }

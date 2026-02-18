@@ -21,56 +21,47 @@ export interface PreviewUrlInfo {
  * @param line - A line of process output to scan
  * @returns PreviewUrlInfo if a valid URL is found, null otherwise
  */
-export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
-  // Pattern for full URLs (e.g., http://localhost:3000, https://127.0.0.1:8080)
-  const fullUrlPattern = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s]*/gi;
+const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
-  // Pattern for host:port (e.g., localhost:3000, 0.0.0.0:8080)
+/** Try to parse a full URL match into a PreviewUrlInfo, returning null if invalid. */
+function tryParseFullUrl(match: string): PreviewUrlInfo | null {
+  try {
+    const parsed = new URL(match);
+    if (LOCALHOST_HOSTS.has(parsed.hostname) && !parsed.port) return null;
+    return {
+      url: parsed.toString(),
+      port: parsed.port ? Number(parsed.port) : undefined,
+      scheme: parsed.protocol === 'https:' ? 'https' : 'http',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Try to extract a URL from host:port pattern matches. */
+function tryParseHostPort(line: string, matches: RegExpMatchArray): PreviewUrlInfo | null {
+  const match = matches[matches.length - 1];
+  const portMatch = match.match(/:(\d{2,5})$/);
+  const port = portMatch ? Number(portMatch[1]) : undefined;
+  const scheme = /https/i.test(line) ? 'https' : 'http';
+  return { url: `${scheme}://${match}`, port, scheme };
+}
+
+export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
+  const fullUrlPattern = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s]*/gi;
   const hostPortPattern = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})/gi;
 
-  // Try to match full URLs first
   const fullUrlMatches = line.match(fullUrlPattern);
-
-  if (fullUrlMatches && fullUrlMatches.length > 0) {
-    // Filter out localhost URLs without port - they're not valid dev server URLs
+  if (fullUrlMatches) {
     for (const match of fullUrlMatches) {
-      try {
-        const parsed = new URL(match);
-        const isLocalhost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname);
-
-        // Reject localhost URLs without a port
-        if (isLocalhost && !parsed.port) {
-          continue; // Try next match or fall through to host:port pattern
-        }
-
-        return {
-          url: parsed.toString(),
-          port: parsed.port ? Number(parsed.port) : undefined,
-          scheme: parsed.protocol === 'https:' ? 'https' : 'http',
-        };
-      } catch {
-        // Invalid URL, continue to next match
-        continue;
-      }
+      const result = tryParseFullUrl(match);
+      if (result) return result;
     }
   }
 
-  // Fall back to host:port pattern
   const hostPortMatches = line.match(hostPortPattern);
-
   if (hostPortMatches && hostPortMatches.length > 0) {
-    const match = hostPortMatches[hostPortMatches.length - 1];
-    const portMatch = match.match(/:(\d{2,5})$/);
-    const port = portMatch ? Number(portMatch[1]) : undefined;
-
-    // Infer scheme from context (look for 'https' in the line)
-    const scheme = /https/i.test(line) ? 'https' : 'http';
-
-    return {
-      url: `${scheme}://${match}`,
-      port,
-      scheme,
-    };
+    return tryParseHostPort(line, hostPortMatches);
   }
 
   return null;

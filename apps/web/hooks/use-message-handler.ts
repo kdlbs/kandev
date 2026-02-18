@@ -55,19 +55,76 @@ function buildContextFilesContext(contextFiles: ContextFile[], prompts: CustomPr
   return context;
 }
 
-export function useMessageHandler(
-  resolvedSessionId: string | null,
-  taskId: string | null,
-  sessionModel: string | null,
-  activeModel: string | null,
-  planMode: boolean = false,
-  isAgentBusy: boolean = false,
-  activeDocument: ActiveDocument | null = null,
-  documentComments: DocumentComment[] = [],
-  contextFiles: ContextFile[] = [],
-  prompts: CustomPrompt[] = []
-) {
+export interface UseMessageHandlerParams {
+  resolvedSessionId: string | null;
+  taskId: string | null;
+  sessionModel: string | null;
+  activeModel: string | null;
+  planMode?: boolean;
+  isAgentBusy?: boolean;
+  activeDocument?: ActiveDocument | null;
+  documentComments?: DocumentComment[];
+  contextFiles?: ContextFile[];
+  prompts?: CustomPrompt[];
+}
+
+type SendMessagePayload = {
+  taskId: string;
+  resolvedSessionId: string;
+  finalMessage: string;
+  modelToSend: string | undefined;
+  planMode: boolean;
+  hasReviewComments?: boolean;
+  attachments?: MessageAttachment[];
+  contextFilesMeta?: Array<{ path: string; name: string }>;
+};
+
+async function sendMessageRequest(payload: SendMessagePayload): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) return;
+
+  const { taskId, resolvedSessionId, finalMessage, modelToSend, planMode, hasReviewComments, attachments, contextFilesMeta } = payload;
+  const hasAttachments = attachments && attachments.length > 0;
+
+  await client.request(
+    'message.add',
+    {
+      task_id: taskId,
+      session_id: resolvedSessionId,
+      content: finalMessage,
+      ...(modelToSend && { model: modelToSend }),
+      ...(planMode && { plan_mode: true }),
+      ...(hasReviewComments && { has_review_comments: true }),
+      ...(hasAttachments && { attachments }),
+      ...(contextFilesMeta && { context_files: contextFilesMeta }),
+    },
+    hasAttachments ? 30000 : 10000
+  );
+}
+
+export function useMessageHandler({
+  resolvedSessionId,
+  taskId,
+  sessionModel,
+  activeModel,
+  planMode = false,
+  isAgentBusy = false,
+  activeDocument = null,
+  documentComments = [],
+  contextFiles = [],
+  prompts = [],
+}: UseMessageHandlerParams) {
   const { queue } = useQueue(resolvedSessionId);
+
+  const buildFinalMessage = useCallback(
+    (message: string, inlineMentions?: ContextFile[]) => {
+      const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
+      const documentContext = buildDocumentContext(activeDocument, documentComments);
+      const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
+      return { finalMessage: message.trim() + documentContext + contextFilesContext, allContextFiles };
+    },
+    [contextFiles, activeDocument, documentComments, prompts]
+  );
 
   const handleSendMessage = useCallback(
     async (message: string, attachments?: MessageAttachment[], hasReviewComments?: boolean, inlineMentions?: ContextFile[]) => {
@@ -75,62 +132,24 @@ export function useMessageHandler(
         console.error('No active task session. Start an agent before sending a message.');
         return;
       }
-      const client = getWebSocketClient();
-      if (!client) return;
 
-      const trimmedMessage = message.trim();
-
-      // Merge stored context files with inline @mentions from the editor
-      const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
-
-      // Append document context if active
-      const documentContext = buildDocumentContext(activeDocument, documentComments);
-      const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
-      const finalMessage = trimmedMessage + documentContext + contextFilesContext;
-
-      // Include active model in the request if it differs from the session model
+      const { finalMessage, allContextFiles } = buildFinalMessage(message, inlineMentions);
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
-
-      // Build context_files metadata for the WS payload (exclude prompts and plan:context)
       const realFiles = allContextFiles.filter((f) => !f.path.startsWith('prompt:') && f.path !== 'plan:context');
-      const contextFilesMeta = realFiles.length > 0
-        ? realFiles.map((f) => ({ path: f.path, name: f.name }))
-        : undefined;
+      const contextFilesMeta = realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
 
-      // Use longer timeout when sending attachments (images can be large)
-      const hasAttachments = attachments && attachments.length > 0;
-      const timeoutMs = hasAttachments ? 30000 : 10000;
-
-      // If agent is busy, queue the message instead of sending immediately
       if (isAgentBusy) {
-        // Convert MessageAttachment[] to queue API format
-        const queueAttachments = attachments?.map(att => ({
-          type: att.type,
-          data: att.data,
-          mime_type: att.mime_type,
-        }));
-
+        const queueAttachments = attachments?.map(att => ({ type: att.type, data: att.data, mime_type: att.mime_type }));
         await queue(taskId, finalMessage, modelToSend, planMode, queueAttachments);
         return;
       }
 
-      // Agent not busy - send message normally
-      await client.request(
-        'message.add',
-        {
-          task_id: taskId,
-          session_id: resolvedSessionId,
-          content: finalMessage,
-          ...(modelToSend && { model: modelToSend }),
-          ...(planMode && { plan_mode: true }),
-          ...(hasReviewComments && { has_review_comments: true }),
-          ...(hasAttachments && { attachments }),
-          ...(contextFilesMeta && { context_files: contextFilesMeta }),
-        },
-        timeoutMs
-      );
+      await sendMessageRequest({
+        taskId, resolvedSessionId, finalMessage, modelToSend, planMode,
+        hasReviewComments, attachments, contextFilesMeta,
+      });
     },
-    [resolvedSessionId, taskId, activeModel, sessionModel, planMode, isAgentBusy, queue, activeDocument, documentComments, contextFiles, prompts]
+    [resolvedSessionId, taskId, activeModel, sessionModel, planMode, isAgentBusy, queue, buildFinalMessage]
   );
 
   return { handleSendMessage };

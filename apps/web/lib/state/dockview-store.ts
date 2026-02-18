@@ -128,16 +128,126 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
     }
 }
 
-/**
- * After fromJSON() restores a layout, apply fixups: re-lock sidebar,
- * fix old panel aliases, and return computed group IDs.
- */
-export function applyLayoutFixups(api: DockviewApi): {
+/** Build the default dockview layout with sidebar, chat, changes, files, and terminal panels. */
+function buildDefaultLayoutPanels(api: DockviewApi): {
     centerGroupId: string;
     rightTopGroupId: string;
     rightBottomGroupId: string;
     sidebarGroupId: string;
 } {
+    api.clear();
+
+    const totalWidth = api.width;
+    const sidebarWidth = Math.min(Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO), LAYOUT_SIDEBAR_MAX_PX);
+    const rightWidth = Math.min(Math.round(totalWidth * LAYOUT_RIGHT_RATIO), LAYOUT_RIGHT_MAX_PX);
+
+    api.addPanel({
+        id: 'chat',
+        component: 'chat',
+        tabComponent: 'permanentTab',
+        title: 'Agent',
+    });
+
+    const sidebarPanel = api.addPanel({
+        id: 'sidebar',
+        component: 'sidebar',
+        title: 'Sidebar',
+        position: { direction: 'left', referencePanel: 'chat' },
+        initialWidth: sidebarWidth,
+    });
+    sidebarPanel.group.locked = 'no-drop-target';
+
+    const changesPanel = api.addPanel({
+        id: 'changes',
+        component: 'changes',
+        title: 'Changes',
+        position: { direction: 'right', referencePanel: 'chat' },
+        initialWidth: rightWidth,
+    });
+
+    const rightTopGroupId = changesPanel.group.id;
+    api.addPanel({
+        id: 'files',
+        component: 'files',
+        title: 'Files',
+        position: { referenceGroup: rightTopGroupId },
+    });
+
+    api.addPanel({
+        id: 'terminal-default',
+        component: 'terminal',
+        title: 'Terminal',
+        params: { terminalId: 'shell-default' },
+        position: { direction: 'below', referencePanel: 'changes' },
+    });
+
+    const chatPanel = api.getPanel('chat');
+    const terminalPanel = api.getPanel('terminal-default');
+
+    return {
+        centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
+        rightTopGroupId: rightTopGroupId ?? RIGHT_TOP_GROUP,
+        rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
+        sidebarGroupId: sidebarPanel.group.id,
+    };
+}
+
+/** Save old session layout, restore new session layout or build default. */
+function performSessionSwitch(
+    api: DockviewApi,
+    oldSessionId: string | null,
+    newSessionId: string,
+    buildDefaultLayout: (api: DockviewApi) => void,
+): void {
+    // Save current layout for the old session
+    if (oldSessionId) {
+        try {
+            setSessionLayout(oldSessionId, api.toJSON());
+        } catch {
+            // Ignore save errors
+        }
+    }
+
+    // Try to restore the new session's layout
+    const savedLayout = getSessionLayout(newSessionId);
+    if (savedLayout) {
+        try {
+            api.fromJSON(savedLayout as SerializedDockview);
+            return;
+        } catch {
+            // Restore failed, fall through to default
+        }
+    }
+
+    buildDefaultLayout(api);
+}
+
+type LayoutGroupIds = {
+    centerGroupId: string;
+    rightTopGroupId: string;
+    rightBottomGroupId: string;
+    sidebarGroupId: string;
+};
+
+function resolveGroupIds(api: DockviewApi, sidebarPanel: ReturnType<DockviewApi['getPanel']>, oldChanges: ReturnType<DockviewApi['getPanel']>): LayoutGroupIds {
+    const chatPanel = api.getPanel('chat');
+    const changesPanel = api.getPanel('changes') ?? oldChanges;
+    const terminalPanel = api.panels.find(
+        (p) => p.id.startsWith('terminal-') || p.id === 'terminal-default'
+    );
+    return {
+        centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
+        rightTopGroupId: changesPanel?.group?.id ?? RIGHT_TOP_GROUP,
+        rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
+        sidebarGroupId: sidebarPanel?.group?.id ?? SIDEBAR_GROUP,
+    };
+}
+
+/**
+ * After fromJSON() restores a layout, apply fixups: re-lock sidebar,
+ * fix old panel aliases, and return computed group IDs.
+ */
+export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
     // Re-lock sidebar group and ensure header is visible for workspace tab
     const sidebarPanel = api.getPanel('sidebar');
     if (sidebarPanel) {
@@ -151,309 +261,131 @@ export function applyLayoutFixups(api: DockviewApi): {
     const oldFiles = api.getPanel('all-files');
     if (oldFiles) oldFiles.api.setTitle('Files');
 
-    const chatPanel = api.getPanel('chat');
-    const changesPanel = api.getPanel('changes') ?? oldChanges;
-    const terminalPanel = api.panels.find(
-        (p) => p.id.startsWith('terminal-') || p.id === 'terminal-default'
-    );
+    return resolveGroupIds(api, sidebarPanel, oldChanges);
+}
 
+type StoreGet = () => DockviewStore;
+type StoreSet = (partial: Partial<DockviewStore> | ((s: DockviewStore) => Partial<DockviewStore>)) => void;
+
+function buildFileStateActions(set: StoreSet) {
     return {
-        centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
-        rightTopGroupId: changesPanel?.group?.id ?? RIGHT_TOP_GROUP,
-        rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
-        sidebarGroupId: sidebarPanel?.group?.id ?? SIDEBAR_GROUP,
+        setFileState: (path: string, state: FileEditorState) => {
+            set((prev) => { const next = new Map(prev.openFiles); next.set(path, state); return { openFiles: next }; });
+        },
+        updateFileState: (path: string, updates: Partial<FileEditorState>) => {
+            set((prev) => {
+                const existing = prev.openFiles.get(path);
+                if (!existing) return prev;
+                const next = new Map(prev.openFiles);
+                next.set(path, { ...existing, ...updates });
+                return { openFiles: next };
+            });
+        },
+        removeFileState: (path: string) => {
+            set((prev) => { const next = new Map(prev.openFiles); next.delete(path); return { openFiles: next }; });
+        },
+        clearFileStates: () => { set({ openFiles: new Map() }); },
+    };
+}
+
+function buildPanelActions(set: StoreSet, get: StoreGet) {
+    return {
+        addChatPanel: () => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            focusOrAddPanel(api, { id: 'chat', component: 'chat', tabComponent: 'permanentTab', title: 'Agent', position: { referenceGroup: centerGroupId } });
+        },
+        addChangesPanel: (groupId?: string) => {
+            const { api, rightTopGroupId } = get();
+            if (!api) return;
+            focusOrAddPanel(api, { id: 'changes', component: 'changes', title: 'Changes', position: { referenceGroup: groupId ?? rightTopGroupId } });
+        },
+        addFilesPanel: (groupId?: string) => {
+            const { api, rightTopGroupId } = get();
+            if (!api) return;
+            focusOrAddPanel(api, { id: 'files', component: 'files', title: 'Files', position: { referenceGroup: groupId ?? rightTopGroupId } });
+        },
+        addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            if (path) set({ selectedDiff: { path, content } });
+            focusOrAddPanel(api, { id: 'diff-viewer', component: 'diff-viewer', title: 'Diff Viewer', position: { referenceGroup: groupId ?? centerGroupId } });
+        },
+        addCommitDetailPanel: (sha: string, groupId?: string) => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            focusOrAddPanel(api, { id: `commit:${sha}`, component: 'commit-detail', title: sha.slice(0, 7), params: { commitSha: sha }, position: { referenceGroup: groupId ?? centerGroupId } });
+        },
+        addFileEditorPanel: (path: string, name: string, quiet?: boolean) => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            focusOrAddPanel(api, { id: `file:${path}`, component: 'file-editor', title: name, params: { path }, position: { referenceGroup: centerGroupId } }, quiet);
+        },
+        addBrowserPanel: (url?: string, groupId?: string) => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
+            focusOrAddPanel(api, { id: browserId, component: 'browser', title: 'Browser', params: { url: url ?? '' }, position: { referenceGroup: groupId ?? centerGroupId } });
+        },
+        addPlanPanel: (groupId?: string) => {
+            const { api } = get();
+            if (!api) return;
+            const position = groupId
+                ? { referenceGroup: groupId }
+                : { referencePanel: 'chat' as const, direction: 'right' as const };
+            focusOrAddPanel(api, { id: 'plan', component: 'plan', title: 'Plan', position });
+        },
+        addTerminalPanel: (terminalId?: string, groupId?: string) => {
+            const { api, rightBottomGroupId } = get();
+            if (!api) return;
+            const id = terminalId ?? `terminal-${Date.now()}`;
+            focusOrAddPanel(api, { id, component: 'terminal', title: 'Terminal', params: { terminalId: id }, position: { referenceGroup: groupId ?? rightBottomGroupId } });
+        },
     };
 }
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
     api: null,
     setApi: (api) => set({ api }),
-
     activeGroupId: null,
-
     selectedDiff: null,
     setSelectedDiff: (diff) => set({ selectedDiff: diff }),
-
     openFiles: new Map(),
-    setFileState: (path, state) => {
-        set((prev) => {
-            const next = new Map(prev.openFiles);
-            next.set(path, state);
-            return { openFiles: next };
-        });
-    },
-    updateFileState: (path, updates) => {
-        set((prev) => {
-            const existing = prev.openFiles.get(path);
-            if (!existing) return prev;
-            const next = new Map(prev.openFiles);
-            next.set(path, { ...existing, ...updates });
-            return { openFiles: next };
-        });
-    },
-    removeFileState: (path) => {
-        set((prev) => {
-            const next = new Map(prev.openFiles);
-            next.delete(path);
-            return { openFiles: next };
-        });
-    },
-    clearFileStates: () => {
-        set({ openFiles: new Map() });
-    },
-
+    ...buildFileStateActions(set),
     centerGroupId: CENTER_GROUP,
     rightTopGroupId: RIGHT_TOP_GROUP,
     rightBottomGroupId: RIGHT_BOTTOM_GROUP,
     sidebarGroupId: SIDEBAR_GROUP,
-
     isRestoringLayout: false,
     currentLayoutSessionId: null,
-
     deferredPanelActions: [],
     queuePanelAction: (action) => set((prev) => ({
         deferredPanelActions: [...prev.deferredPanelActions, action],
     })),
-
     switchSessionLayout: (oldSessionId, newSessionId) => {
         const { api, currentLayoutSessionId } = get();
-        if (!api) return;
-        // Idempotent: skip if we already switched to this session
-        if (currentLayoutSessionId === newSessionId) return;
-
+        if (!api || currentLayoutSessionId === newSessionId) return;
         set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
-
         try {
-            // Save current layout for the old session
-            if (oldSessionId) {
-                try {
-                    setSessionLayout(oldSessionId, api.toJSON());
-                } catch {
-                    // Ignore save errors
-                }
-            }
-
-            // Try to restore the new session's layout
-            let restored = false;
-            const savedLayout = getSessionLayout(newSessionId);
-            if (savedLayout) {
-                try {
-                    api.fromJSON(savedLayout as SerializedDockview);
-                    set(applyLayoutFixups(api));
-                    restored = true;
-                } catch {
-                    // Restore failed, fall through to default
-                }
-            }
-
-            if (!restored) {
-                get().buildDefaultLayout(api);
-            }
+            performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
+            if (getSessionLayout(newSessionId)) set(applyLayoutFixups(api));
         } finally {
             set({ isRestoringLayout: false });
         }
     },
-
     buildDefaultLayout: (api) => {
-        // Clear everything
-        api.clear();
-
-        const totalWidth = api.width;
-        const sidebarWidth = Math.min(Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO), LAYOUT_SIDEBAR_MAX_PX);
-        const rightWidth = Math.min(Math.round(totalWidth * LAYOUT_RIGHT_RATIO), LAYOUT_RIGHT_MAX_PX);
-
-        // Chat panel added first (takes full width, then others split off from it)
-        api.addPanel({
-            id: 'chat',
-            component: 'chat',
-            tabComponent: 'permanentTab',
-            title: 'Agent',
-        });
-
-        // Sidebar panel — split off to the left
-        const sidebarPanel = api.addPanel({
-            id: 'sidebar',
-            component: 'sidebar',
-            title: 'Sidebar',
-            position: { direction: 'left', referencePanel: 'chat' },
-            initialWidth: sidebarWidth,
-        });
-        const sidebarGroup = sidebarPanel.group;
-        sidebarGroup.locked = 'no-drop-target';
-
-        // Changes panel (right top group seed)
-        const changesPanel = api.addPanel({
-            id: 'changes',
-            component: 'changes',
-            title: 'Changes',
-            position: { direction: 'right', referencePanel: 'chat' },
-            initialWidth: rightWidth,
-        });
-
-        // Files panel (same group as changes)
-        const rightTopGroupId = changesPanel.group.id;
-        api.addPanel({
-            id: 'files',
-            component: 'files',
-            title: 'Files',
-            position: { referenceGroup: rightTopGroupId },
-        });
-
-        // Terminal panel (right bottom group seed)
-        api.addPanel({
-            id: 'terminal-default',
-            component: 'terminal',
-            title: 'Terminal',
-            params: { terminalId: 'shell-default' },
-            position: { direction: 'below', referencePanel: 'changes' },
-        });
-
-        // Store group IDs from the actual panels
-        const chatPanel = api.getPanel('chat');
-        const terminalPanel = api.getPanel('terminal-default');
-
-        set({
-            centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
-            rightTopGroupId: rightTopGroupId ?? RIGHT_TOP_GROUP,
-            rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
-            sidebarGroupId: sidebarGroup.id,
-        });
-
-        // Apply any queued panel actions (e.g., plan panel from plan mode task creation)
+        set(buildDefaultLayoutPanels(api));
         const pending = get().deferredPanelActions;
         if (pending.length > 0) {
             set({ deferredPanelActions: [] });
             applyDeferredPanelActions(api, pending);
         }
     },
-
     resetLayout: () => {
         const { api } = get();
-        if (!api) return;
-        get().buildDefaultLayout(api);
+        if (api) get().buildDefaultLayout(api);
     },
-
-    addChatPanel: () => {
-        const { api, centerGroupId } = get();
-        if (!api) return;
-        focusOrAddPanel(api, {
-            id: 'chat',
-            component: 'chat',
-            tabComponent: 'permanentTab',
-            title: 'Agent',
-            position: { referenceGroup: centerGroupId },
-        });
-    },
-
-    addChangesPanel: (groupId) => {
-        const { api, rightTopGroupId } = get();
-        if (!api) return;
-        focusOrAddPanel(api, {
-            id: 'changes',
-            component: 'changes',
-            title: 'Changes',
-            position: { referenceGroup: groupId ?? rightTopGroupId },
-        });
-    },
-
-    addFilesPanel: (groupId) => {
-        const { api, rightTopGroupId } = get();
-        if (!api) return;
-        focusOrAddPanel(api, {
-            id: 'files',
-            component: 'files',
-            title: 'Files',
-            position: { referenceGroup: groupId ?? rightTopGroupId },
-        });
-    },
-
-    addDiffViewerPanel: (path, content, groupId) => {
-        const { api, centerGroupId } = get();
-        if (!api) return;
-        if (path) {
-            set({ selectedDiff: { path, content } });
-        }
-        focusOrAddPanel(api, {
-            id: 'diff-viewer',
-            component: 'diff-viewer',
-            title: 'Diff Viewer',
-            position: { referenceGroup: groupId ?? centerGroupId },
-        });
-    },
-
-    addCommitDetailPanel: (sha, groupId) => {
-        const { api, centerGroupId } = get();
-        if (!api) return;
-        const panelId = `commit:${sha}`;
-        focusOrAddPanel(api, {
-            id: panelId,
-            component: 'commit-detail',
-            title: sha.slice(0, 7),
-            params: { commitSha: sha },
-            position: { referenceGroup: groupId ?? centerGroupId },
-        });
-    },
-
-    addFileEditorPanel: (path, name, quiet) => {
-        const { api, centerGroupId } = get();
-        if (!api) return;
-        const panelId = `file:${path}`;
-        focusOrAddPanel(api, {
-            id: panelId,
-            component: 'file-editor',
-            title: name,
-            params: { path },
-            position: { referenceGroup: centerGroupId },
-        }, quiet);
-    },
-
-    addBrowserPanel: (url, groupId) => {
-        const { api, centerGroupId } = get();
-        if (!api) return;
-        const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
-        focusOrAddPanel(api, {
-            id: browserId,
-            component: 'browser',
-            title: 'Browser',
-            params: { url: url ?? '' },
-            position: { referenceGroup: groupId ?? centerGroupId },
-        });
-    },
-
-    addPlanPanel: (groupId) => {
-        const { api } = get();
-        if (!api) return;
-        if (groupId) {
-            // Header "+" menu: add as tab in the specified group
-            focusOrAddPanel(api, {
-                id: 'plan',
-                component: 'plan',
-                title: 'Plan',
-                position: { referenceGroup: groupId },
-            });
-        } else {
-            // Toolbar toggle: split right from the chat panel
-            focusOrAddPanel(api, {
-                id: 'plan',
-                component: 'plan',
-                title: 'Plan',
-                position: { referencePanel: 'chat', direction: 'right' },
-            });
-        }
-    },
-
-    addTerminalPanel: (terminalId, groupId) => {
-        const { api, rightBottomGroupId } = get();
-        if (!api) return;
-        const id = terminalId ?? `terminal-${Date.now()}`;
-        focusOrAddPanel(api, {
-            id,
-            component: 'terminal',
-            title: 'Terminal',
-            params: { terminalId: id },
-            position: { referenceGroup: groupId ?? rightBottomGroupId },
-        });
-    },
+    ...buildPanelActions(set, get),
 }));
 
 /**

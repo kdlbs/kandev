@@ -44,6 +44,64 @@ export type Graph2TaskPipelineProps = {
   isDeleting?: boolean;
 };
 
+function getStepPhase(index: number, currentStepIndex: number): 'past' | 'current' | 'future' {
+  if (index < currentStepIndex) return 'past';
+  if (index === currentStepIndex) return 'current';
+  return 'future';
+}
+
+function getConnectorType(phase: 'past' | 'current' | 'future', nextPhase: 'past' | 'current' | 'future'): ConnectorType {
+  if (phase === 'past' && nextPhase === 'past') return 'past';
+  if (phase === 'future' && nextPhase === 'future') return 'future';
+  return 'transition';
+}
+
+function PipelineStepNodes({
+  steps,
+  currentStepIndex,
+  task,
+  onMoveTask,
+  onPreviewTask,
+  isMoving,
+}: {
+  steps: WorkflowStep[];
+  currentStepIndex: number;
+  task: Task;
+  onMoveTask: (task: Task, targetStepId: string) => void;
+  onPreviewTask: (task: Task) => void;
+  isMoving?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-0">
+      {steps.map((step, index) => {
+        const phase = getStepPhase(index, currentStepIndex);
+        const hasConnector = index < steps.length - 1;
+        const connectorType = hasConnector
+          ? getConnectorType(phase, getStepPhase(index + 1, currentStepIndex))
+          : null;
+
+        return (
+          <div key={step.id} className="flex items-center">
+            <Graph2StepNode
+              step={step}
+              phase={phase}
+              task={task}
+              hasPrev={index > 0}
+              hasNext={index < steps.length - 1}
+              prevStepId={index > 0 ? steps[index - 1].id : undefined}
+              nextStepId={index < steps.length - 1 ? steps[index + 1].id : undefined}
+              onMoveTask={onMoveTask}
+              onPreviewTask={onPreviewTask}
+              isMoving={isMoving}
+            />
+            {connectorType && <Graph2Connector type={connectorType} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Graph2TaskPipeline({
   task,
   steps,
@@ -65,7 +123,6 @@ export function Graph2TaskPipeline({
   return (
     <div className="flex items-center justify-center rounded-lg hover:bg-muted/30 transition-colors px-3 py-2">
       <div className="flex items-center gap-3">
-        {/* Task name card */}
         <button
           type="button"
           onClick={() => onEditTask(task)}
@@ -93,55 +150,15 @@ export function Graph2TaskPipeline({
           </div>
         </button>
 
-        {/* Step nodes with connectors */}
-        <div className="flex items-center gap-0">
-          {steps.map((step, index) => {
-            const phase =
-              index < currentStepIndex
-                ? 'past'
-                : index === currentStepIndex
-                  ? 'current'
-                  : 'future';
+        <PipelineStepNodes
+          steps={steps}
+          currentStepIndex={currentStepIndex}
+          task={task}
+          onMoveTask={onMoveTask}
+          onPreviewTask={onPreviewTask}
+          isMoving={isMoving}
+        />
 
-            let connectorType: ConnectorType | null = null;
-            if (index < steps.length - 1) {
-              const nextPhase =
-                index + 1 < currentStepIndex
-                  ? 'past'
-                  : index + 1 === currentStepIndex
-                    ? 'current'
-                    : 'future';
-
-              if (phase === 'past' && nextPhase === 'past') {
-                connectorType = 'past';
-              } else if (phase === 'future' && nextPhase === 'future') {
-                connectorType = 'future';
-              } else {
-                connectorType = 'transition';
-              }
-            }
-
-            return (
-              <div key={step.id} className="flex items-center">
-                <Graph2StepNode
-                  step={step}
-                  phase={phase}
-                  task={task}
-                  hasPrev={index > 0}
-                  hasNext={index < steps.length - 1}
-                  prevStepId={index > 0 ? steps[index - 1].id : undefined}
-                  nextStepId={index < steps.length - 1 ? steps[index + 1].id : undefined}
-                  onMoveTask={onMoveTask}
-                  onPreviewTask={onPreviewTask}
-                  isMoving={isMoving}
-                />
-                {connectorType && <Graph2Connector type={connectorType} />}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Actions dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

@@ -44,15 +44,9 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
     [store]
   );
 
-  /**
-   * Remove a task from the kanban board state (both single and multi snapshots)
-   * and switch to the next available task if the removed task was active.
-   */
-  const removeTaskFromBoard = useCallback(
-    async (taskId: string) => {
-      const { setActiveSession, setActiveTask } = store.getState();
-
-      // Remove task from multi snapshots
+  /** Remove a task from both multi and single kanban snapshots. */
+  const removeTaskFromSnapshots = useCallback(
+    (taskId: string) => {
       const currentSnapshots = store.getState().kanbanMulti.snapshots;
       for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
         const hadTask = snapshot.tasks.some((t: KanbanState['tasks'][number]) => t.id === taskId);
@@ -64,7 +58,6 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         }
       }
 
-      // Also update single kanban state
       const currentKanbanTasks = store.getState().kanban.tasks;
       if (currentKanbanTasks.some((t: KanbanState['tasks'][number]) => t.id === taskId)) {
         store.setState((state) => ({
@@ -75,44 +68,64 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
           },
         }));
       }
+    },
+    [store]
+  );
+
+  /** Switch to the next available task after removal. */
+  const switchToNextTask = useCallback(
+    async (nextTask: KanbanState['tasks'][number], oldSessionId: string | null) => {
+      const { setActiveSession, setActiveTask } = store.getState();
+
+      if (nextTask.primarySessionId) {
+        setActiveSession(nextTask.id, nextTask.primarySessionId);
+        if (useLayoutSwitch) performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
+        window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
+        return;
+      }
+
+      const sessions = await loadTaskSessionsForTask(nextTask.id);
+      const sessionId = sessions[0]?.id ?? null;
+      if (sessionId) {
+        setActiveSession(nextTask.id, sessionId);
+        if (useLayoutSwitch) performLayoutSwitch(oldSessionId, sessionId);
+        window.history.replaceState({}, '', linkToSession(sessionId));
+      } else {
+        setActiveTask(nextTask.id);
+      }
+    },
+    [store, useLayoutSwitch, loadTaskSessionsForTask]
+  );
+
+  /**
+   * Remove a task from the kanban board state (both single and multi snapshots)
+   * and switch to the next available task if the removed task was active.
+   */
+  const removeTaskFromBoard = useCallback(
+    async (taskId: string) => {
+      removeTaskFromSnapshots(taskId);
 
       // Collect remaining tasks across snapshots
       const allRemainingTasks: KanbanState['tasks'] = [];
       for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
         allRemainingTasks.push(...snapshot.tasks);
       }
-      // Fallback to single kanban if no multi-snapshots
       if (allRemainingTasks.length === 0) {
         allRemainingTasks.push(...store.getState().kanban.tasks);
       }
 
       // If removed task was active, switch to another task or go home
       const currentActiveTaskId = store.getState().tasks.activeTaskId;
-      if (currentActiveTaskId === taskId) {
-        const oldSessionId = store.getState().tasks.activeSessionId;
-        if (allRemainingTasks.length > 0) {
-          const nextTask = allRemainingTasks[0];
-          if (nextTask.primarySessionId) {
-            setActiveSession(nextTask.id, nextTask.primarySessionId);
-            if (useLayoutSwitch) performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
-            window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
-          } else {
-            const sessions = await loadTaskSessionsForTask(nextTask.id);
-            const sessionId = sessions[0]?.id ?? null;
-            if (sessionId) {
-              setActiveSession(nextTask.id, sessionId);
-              if (useLayoutSwitch) performLayoutSwitch(oldSessionId, sessionId);
-              window.history.replaceState({}, '', linkToSession(sessionId));
-            } else {
-              setActiveTask(nextTask.id);
-            }
-          }
-        } else {
-          window.location.href = '/';
-        }
+      if (currentActiveTaskId !== taskId) return;
+
+      const oldSessionId = store.getState().tasks.activeSessionId;
+      if (allRemainingTasks.length > 0) {
+        await switchToNextTask(allRemainingTasks[0], oldSessionId);
+      } else {
+        window.location.href = '/';
       }
     },
-    [store, useLayoutSwitch, loadTaskSessionsForTask]
+    [store, removeTaskFromSnapshots, switchToNextTask]
   );
 
   return { removeTaskFromBoard, loadTaskSessionsForTask };

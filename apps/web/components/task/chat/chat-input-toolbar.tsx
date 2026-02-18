@@ -41,6 +41,44 @@ export type ChatInputToolbarProps = {
   onToggleFile?: (file: ContextFile) => void;
 };
 
+type SubmitButtonProps = {
+  isAgentBusy: boolean;
+  isDisabled: boolean;
+  isSending: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+};
+
+function SubmitButton({ isAgentBusy, isDisabled, isSending, onCancel, onSubmit, submitShortcut }: SubmitButtonProps) {
+  return (
+    <KeyboardShortcutTooltip shortcut={submitShortcut} enabled={!isAgentBusy && !isDisabled}>
+      {isAgentBusy ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
+          onClick={onCancel}
+        >
+          <IconPlayerPauseFilled className="h-3.5 w-3.5" />
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="default"
+          size="icon"
+          className="h-7 w-7 rounded-full cursor-pointer"
+          disabled={isDisabled}
+          onClick={onSubmit}
+        >
+          {isSending ? <GridSpinner className="text-primary-foreground" /> : <IconArrowUp className="h-4 w-4" />}
+        </Button>
+      )}
+    </KeyboardShortcutTooltip>
+  );
+}
+
 export const ChatInputToolbar = memo(function ChatInputToolbar({
   planModeEnabled,
   onPlanModeChange,
@@ -65,19 +103,14 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
 
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
-      {/* Left: Plan, Thinking, Context */}
       <div className="flex items-center gap-0.5">
-        {/* Plan mode toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className={cn(
-                'h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40',
-                planModeEnabled && 'bg-primary/15 text-primary'
-              )}
+              className={cn('h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40', planModeEnabled && 'bg-primary/15 text-primary')}
               onClick={() => onPlanModeChange(!planModeEnabled)}
             >
               <IconFileTextSpark className="h-4 w-4" />
@@ -86,17 +119,11 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
           <TooltipContent>Toggle plan mode</TooltipContent>
         </Tooltip>
 
-        {/* Context @ button */}
         <ContextPopover
           open={contextPopoverOpen}
           onOpenChange={onContextPopoverOpenChange ?? (() => {})}
           trigger={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
-            >
+            <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative">
               <IconAt className="h-4 w-4" />
               {contextCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
@@ -112,53 +139,21 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
         />
       </div>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Right: Sessions, Model, Submit */}
       <div className="flex items-center gap-0.5 shrink-0">
-        <SessionsDropdown
-          taskId={taskId}
-          activeSessionId={sessionId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
-
-        {/* Token usage display */}
+        <SessionsDropdown taskId={taskId} activeSessionId={sessionId} taskTitle={taskTitle} taskDescription={taskDescription} />
         <TokenUsageDisplay sessionId={sessionId} />
-
         <ModelSelector sessionId={sessionId} />
-
-        {/* Submit/Stop button */}
         <div className="ml-1">
-          <KeyboardShortcutTooltip shortcut={submitShortcut} enabled={!isAgentBusy && !isDisabled}>
-            {isAgentBusy ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                className="h-7 w-7 rounded-full cursor-pointer bg-destructive/10 text-destructive hover:bg-destructive/20"
-                onClick={onCancel}
-              >
-                <IconPlayerPauseFilled className="h-3.5 w-3.5" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="default"
-                size="icon"
-                className="h-7 w-7 rounded-full cursor-pointer"
-                disabled={isDisabled}
-                onClick={onSubmit}
-              >
-                {isSending ? (
-                  <GridSpinner className="text-primary-foreground" />
-                ) : (
-                  <IconArrowUp className="h-4 w-4" />
-                )}
-              </Button>
-            )}
-          </KeyboardShortcutTooltip>
+          <SubmitButton
+            isAgentBusy={isAgentBusy}
+            isDisabled={isDisabled}
+            isSending={isSending}
+            onCancel={onCancel}
+            onSubmit={onSubmit}
+            submitShortcut={submitShortcut}
+          />
         </div>
       </div>
     </div>

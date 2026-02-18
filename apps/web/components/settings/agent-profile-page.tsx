@@ -29,15 +29,125 @@ type ProfileEditorProps = {
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
-function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passthroughConfig, initialMcpConfig }: ProfileEditorProps) {
-  const { toast } = useToast();
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+type SaveStatus = 'idle' | 'loading' | 'success' | 'error';
+
+type ProfileEditorHeaderProps = {
+  agentName: string;
+  agentDisplayName: string;
+  savedProfileName: string;
+  isDirty: boolean;
+  isLoading: boolean;
+  saveStatus: SaveStatus;
+  onSave: () => void;
+};
+
+function ProfileEditorHeader({
+  agentName,
+  agentDisplayName,
+  savedProfileName,
+  isDirty,
+  isLoading,
+  saveStatus,
+  onSave,
+}: ProfileEditorHeaderProps) {
+  return (
+    <div className="flex items-start justify-between">
+      <div>
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <AgentLogo agentName={agentName} size={28} className="shrink-0" />
+          {agentDisplayName} • {savedProfileName}
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          {agentDisplayName} profile settings
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        {isDirty && <UnsavedChangesBadge />}
+        <UnsavedSaveButton
+          isDirty={isDirty}
+          isLoading={isLoading}
+          status={saveStatus}
+          onClick={onSave}
+        />
+      </div>
+    </div>
+  );
+}
+
+type DeleteProfileCardProps = {
+  onDelete: () => void;
+};
+
+function DeleteProfileCard({ onDelete }: DeleteProfileCardProps) {
+  return (
+    <Card className="border-destructive">
+      <CardHeader>
+        <CardTitle className="text-destructive">Delete profile</CardTitle>
+      </CardHeader>
+      <CardContent className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">Remove this profile</p>
+          <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
+        </div>
+        <Button variant="destructive" onClick={onDelete}>
+          <IconTrash className="h-4 w-4 mr-2" />
+          Delete
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+type ProfileSettingsCardProps = {
+  agent: Agent;
+  draft: AgentProfile;
+  onDraftChange: (patch: Partial<AgentProfile>) => void;
+  modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+};
+
+function ProfileSettingsCard({
+  agent,
+  draft,
+  onDraftChange,
+  modelConfig,
+  permissionSettings,
+  passthroughConfig,
+}: ProfileSettingsCardProps) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <span>Profile settings</span>
+          {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <ProfileFormFields
+          profile={{
+            name: draft.name,
+            model: draft.model,
+            auto_approve: draft.auto_approve,
+            dangerously_skip_permissions: draft.dangerously_skip_permissions,
+            allow_indexing: draft.allow_indexing,
+            cli_passthrough: draft.cli_passthrough,
+          }}
+          onChange={onDraftChange}
+          modelConfig={modelConfig}
+          permissionSettings={permissionSettings}
+          passthroughConfig={passthroughConfig}
+          agentName={agent.name}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function useSyncAgentsToStore() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-  const [draft, setDraft] = useState<AgentProfile>({ ...profile });
-  const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const syncAgentsToStore = (nextAgents: Agent[]) => {
+  return (nextAgents: Agent[]) => {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
       nextAgents.flatMap((agentItem) =>
@@ -51,66 +161,67 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
       )
     );
   };
+}
 
-  const isDirty = useMemo(() => {
-    return (
-      draft.name !== savedProfile.name ||
-      draft.model !== savedProfile.model ||
-      draft.auto_approve !== savedProfile.auto_approve ||
-      draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
-      draft.allow_indexing !== savedProfile.allow_indexing ||
-      draft.cli_passthrough !== savedProfile.cli_passthrough
-    );
-  }, [draft, savedProfile]);
+function useProfileEditorState(profile: AgentProfile) {
+  const [draft, setDraft] = useState<AgentProfile>({ ...profile });
+  const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
+  const isDirty = useMemo(() => (
+    draft.name !== savedProfile.name ||
+    draft.model !== savedProfile.model ||
+    draft.auto_approve !== savedProfile.auto_approve ||
+    draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
+    draft.allow_indexing !== savedProfile.allow_indexing ||
+    draft.cli_passthrough !== savedProfile.cli_passthrough
+  ), [draft, savedProfile]);
+
+  return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
+}
+
+type ProfileEditorActionsOptions = {
+  agent: Agent;
+  draft: AgentProfile;
+  setSavedProfile: (p: AgentProfile) => void;
+  setDraft: (p: AgentProfile) => void;
+  setSaveStatus: (s: SaveStatus) => void;
+  settingsAgents: Agent[];
+  syncAgentsToStore: (agents: Agent[]) => void;
+  toast: ReturnType<typeof useToast>['toast'];
+};
+
+function useProfileEditorActions({
+  agent, draft, setSavedProfile, setDraft, setSaveStatus, settingsAgents, syncAgentsToStore, toast,
+}: ProfileEditorActionsOptions) {
   const handleSave = async () => {
     if (!draft.name.trim()) {
-      toast({
-        title: 'Profile name is required',
-        description: 'Please enter a profile name before saving.',
-        variant: 'error',
-      });
+      toast({ title: 'Profile name is required', description: 'Please enter a profile name before saving.', variant: 'error' });
       return;
     }
     if (!draft.model.trim()) {
-      toast({
-        title: 'Model is required',
-        description: 'Please select a model before saving.',
-        variant: 'error',
-      });
+      toast({ title: 'Model is required', description: 'Please select a model before saving.', variant: 'error' });
       return;
     }
     setSaveStatus('loading');
     try {
       const updated = await updateAgentProfileAction(draft.id, {
-        name: draft.name,
-        model: draft.model,
-        auto_approve: draft.auto_approve,
+        name: draft.name, model: draft.model, auto_approve: draft.auto_approve,
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
-        allow_indexing: draft.allow_indexing,
-        cli_passthrough: draft.cli_passthrough,
+        allow_indexing: draft.allow_indexing, cli_passthrough: draft.cli_passthrough,
       });
       setSavedProfile(updated);
       setDraft(updated);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
-          ? {
-            ...agentItem,
-            profiles: agentItem.profiles.map((profileItem: AgentProfile) =>
-              profileItem.id === updated.id ? updated : profileItem
-            ),
-          }
+          ? { ...agentItem, profiles: agentItem.profiles.map((p: AgentProfile) => p.id === updated.id ? updated : p) }
           : agentItem
       );
       syncAgentsToStore(nextAgents);
       setSaveStatus('success');
     } catch (error) {
       setSaveStatus('error');
-      toast({
-        title: 'Failed to save profile',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
-      });
+      toast({ title: 'Failed to save profile', description: error instanceof Error ? error.message : 'Request failed', variant: 'error' });
     }
   };
 
@@ -119,73 +230,50 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
       await deleteAgentProfileAction(draft.id);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
-          ? {
-            ...agentItem,
-            profiles: agentItem.profiles.filter((profileItem: AgentProfile) => profileItem.id !== draft.id),
-          }
+          ? { ...agentItem, profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id) }
           : agentItem
       );
       syncAgentsToStore(nextAgents);
       window.location.assign('/settings/agents');
     } catch (error) {
-      toast({
-        title: 'Failed to delete profile',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
-      });
+      toast({ title: 'Failed to delete profile', description: error instanceof Error ? error.message : 'Request failed', variant: 'error' });
     }
   };
 
+  return { handleSave, handleDeleteProfile };
+}
+
+function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passthroughConfig, initialMcpConfig }: ProfileEditorProps) {
+  const { toast } = useToast();
+  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const syncAgentsToStore = useSyncAgentsToStore();
+  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } = useProfileEditorState(profile);
+  const { handleSave, handleDeleteProfile } = useProfileEditorActions({
+    agent, draft, setSavedProfile, setDraft, setSaveStatus, settingsAgents, syncAgentsToStore, toast,
+  });
+
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <AgentLogo agentName={agent.name} size={28} className="shrink-0" />
-            {profile.agent_display_name} • {savedProfile.name}
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {profile.agent_display_name} profile settings
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {isDirty && <UnsavedChangesBadge />}
-          <UnsavedSaveButton
-            isDirty={isDirty}
-            isLoading={saveStatus === 'loading'}
-            status={saveStatus}
-            onClick={handleSave}
-          />
-        </div>
-      </div>
+      <ProfileEditorHeader
+        agentName={agent.name}
+        agentDisplayName={profile.agent_display_name}
+        savedProfileName={savedProfile.name}
+        isDirty={isDirty}
+        isLoading={saveStatus === 'loading'}
+        saveStatus={saveStatus}
+        onSave={handleSave}
+      />
 
       <Separator />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <span>Profile settings</span>
-            {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ProfileFormFields
-            profile={{
-              name: draft.name,
-              model: draft.model,
-              auto_approve: draft.auto_approve,
-              dangerously_skip_permissions: draft.dangerously_skip_permissions,
-              allow_indexing: draft.allow_indexing,
-              cli_passthrough: draft.cli_passthrough,
-            }}
-            onChange={(patch) => setDraft({ ...draft, ...patch })}
-            modelConfig={modelConfig}
-            permissionSettings={permissionSettings}
-            passthroughConfig={passthroughConfig}
-            agentName={agent.name}
-          />
-        </CardContent>
-      </Card>
+      <ProfileSettingsCard
+        agent={agent}
+        draft={draft}
+        onDraftChange={(patch) => setDraft({ ...draft, ...patch })}
+        modelConfig={modelConfig}
+        permissionSettings={permissionSettings}
+        passthroughConfig={passthroughConfig}
+      />
 
       <CommandPreviewCard
         agentName={agent.name}
@@ -211,22 +299,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
         }
       />
 
-
-      <Card className="border-destructive">
-        <CardHeader>
-          <CardTitle className="text-destructive">Delete profile</CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Remove this profile</p>
-            <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
-          </div>
-          <Button variant="destructive" onClick={handleDeleteProfile}>
-            <IconTrash className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
-        </CardContent>
-      </Card>
+      <DeleteProfileCard onDelete={handleDeleteProfile} />
     </div>
   );
 }

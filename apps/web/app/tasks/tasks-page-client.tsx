@@ -25,46 +25,19 @@ interface TasksPageClientProps {
   initialTotal: number
 }
 
-export function TasksPageClient({
-  initialWorkflows,
-  initialSteps,
-  initialRepositories,
-  initialTasks,
-  initialTotal,
-}: TasksPageClientProps) {
-  const router = useRouter()
+type UseTaskOperationsParams = {
+  activeWorkspaceId: string | null;
+  pagination: PaginationState;
+  debouncedQuery: string;
+  showArchived: boolean;
+  setTasks: (tasks: Task[]) => void;
+  setTotal: (total: number) => void;
+};
+
+function useTaskOperations({ activeWorkspaceId, pagination, debouncedQuery, showArchived, setTasks, setTotal }: UseTaskOperationsParams) {
   const { toast } = useToast()
-  const {
-    activeWorkspaceId,
-    activeWorkflowId,
-    repositories: storeRepositories,
-  } = useKanbanDisplaySettings()
-
-  // For columns, we just need id and name from workflows - use initial workflows for full data
-  const [workflows] = useState(initialWorkflows)
-  const [steps] = useState(initialSteps)
-  // Use store repositories if available for filtering, but fall back to initial
-  const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories
-  const [tasks, setTasks] = useState(initialTasks)
-  const [total, setTotal] = useState(initialTotal)
   const [isLoading, setIsLoading] = useState(false)
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
-
-  // Search and filter state
-  const [searchQuery, setSearchQuery] = useState('')
-  const debouncedQuery = useDebounce(searchQuery, 300)
-  const [showArchived, setShowArchived] = useState(false)
-
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 25,
-  })
-
-  const pageCount = useMemo(
-    () => Math.ceil(total / pagination.pageSize),
-    [total, pagination.pageSize]
-  )
 
   const fetchTasks = useCallback(async () => {
     if (!activeWorkspaceId) return
@@ -76,115 +49,92 @@ export function TasksPageClient({
         query: debouncedQuery,
         includeArchived: showArchived,
       })
-
       setTasks(result.tasks)
       setTotal(result.total)
     } catch (err) {
-      toast({
-        title: "Failed to load tasks",
-        description: err instanceof Error ? err.message : "Unknown error",
-        variant: "error",
-      })
+      toast({ title: "Failed to load tasks", description: err instanceof Error ? err.message : "Unknown error", variant: "error" })
     } finally {
       setIsLoading(false)
     }
-  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, toast])
+  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, toast, setTasks, setTotal])
 
-  // Reset to page 1 when search query changes
-  useEffect(() => {
-    setPagination((prev) => ({ ...prev, pageIndex: 0 }))
-  }, [debouncedQuery])
-
-  // Refetch when workspace, pagination, or search query changes
-  useEffect(() => {
-    if (activeWorkspaceId) {
+  const handleArchive = useCallback(async (taskId: string) => {
+    try {
+      await archiveTask(taskId)
+      toast({ title: "Task archived", description: "The task has been archived successfully." })
       fetchTasks()
+    } catch (err) {
+      toast({ title: "Failed to archive task", description: err instanceof Error ? err.message : "Unknown error", variant: "error" })
     }
-  }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, fetchTasks])
+  }, [fetchTasks, toast])
 
-  const handleCreateTask = useCallback(() => {
-    setCreateDialogOpen(true)
-  }, [])
+  const handleDelete = useCallback(async (taskId: string) => {
+    setDeletingTaskId(taskId)
+    try {
+      await deleteTask(taskId)
+      toast({ title: "Task deleted", description: "The task has been deleted successfully." })
+      fetchTasks()
+    } catch (err) {
+      toast({ title: "Failed to delete task", description: err instanceof Error ? err.message : "Unknown error", variant: "error" })
+    } finally {
+      setDeletingTaskId(null)
+    }
+  }, [fetchTasks, toast])
 
-  const handleArchive = useCallback(
-    async (taskId: string) => {
-      try {
-        await archiveTask(taskId)
-        toast({
-          title: "Task archived",
-          description: "The task has been archived successfully.",
-        })
-        fetchTasks()
-      } catch (err) {
-        toast({
-          title: "Failed to archive task",
-          description: err instanceof Error ? err.message : "Unknown error",
-          variant: "error",
-        })
-      }
-    },
-    [fetchTasks, toast]
-  )
+  return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete }
+}
 
-  const handleDelete = useCallback(
-    async (taskId: string) => {
-      setDeletingTaskId(taskId)
-      try {
-        await deleteTask(taskId)
-        toast({
-          title: "Task deleted",
-          description: "The task has been deleted successfully.",
-        })
-        fetchTasks()
-      } catch (err) {
-        toast({
-          title: "Failed to delete task",
-          description: err instanceof Error ? err.message : "Unknown error",
-          variant: "error",
-        })
-      } finally {
-        setDeletingTaskId(null)
-      }
-    },
-    [fetchTasks, toast]
-  )
+export function TasksPageClient({
+  initialWorkflows,
+  initialSteps,
+  initialRepositories,
+  initialTasks,
+  initialTotal,
+}: TasksPageClientProps) {
+  const router = useRouter()
+  const { activeWorkspaceId, activeWorkflowId, repositories: storeRepositories } = useKanbanDisplaySettings()
+  const { toast } = useToast()
+
+  const [workflows] = useState(initialWorkflows)
+  const [steps] = useState(initialSteps)
+  const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories
+  const [tasks, setTasks] = useState(initialTasks)
+  const [total, setTotal] = useState(initialTotal)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const debouncedQuery = useDebounce(searchQuery, 300)
+  const [showArchived, setShowArchived] = useState(false)
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 })
+
+  const pageCount = useMemo(() => Math.ceil(total / pagination.pageSize), [total, pagination.pageSize])
+
+  const { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete } = useTaskOperations({
+    activeWorkspaceId, pagination, debouncedQuery, showArchived, setTasks, setTotal,
+  })
+
+  useEffect(() => { void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 }))) }, [debouncedQuery])
+  useEffect(() => { if (activeWorkspaceId) fetchTasks() }, [activeWorkspaceId, pagination.pageIndex, pagination.pageSize, debouncedQuery, showArchived, fetchTasks])
 
   const columns = useMemo(
-    () =>
-      getColumns({
-        workflows,
-        steps,
-        repositories,
-        onArchive: handleArchive,
-        onDelete: handleDelete,
-        deletingTaskId,
-      }),
+    () => getColumns({ workflows, steps, repositories, onArchive: handleArchive, onDelete: handleDelete, deletingTaskId }),
     [workflows, steps, repositories, handleArchive, handleDelete, deletingTaskId]
   )
 
-  const handleRowClick = useCallback(
-    (task: Task) => {
-      if (task.primary_session_id) {
-        router.push(`/s/${task.primary_session_id}`)
-      } else {
-        toast({
-          title: "No session available",
-          description: "This task has no associated session yet.",
-        })
-      }
-    },
-    [router, toast]
-  )
+  const handleRowClick = useCallback((task: Task) => {
+    if (task.primary_session_id) {
+      router.push(`/s/${task.primary_session_id}`)
+    } else {
+      toast({ title: "No session available", description: "This task has no associated session yet." })
+    }
+  }, [router, toast])
 
-  const defaultWorkflow = activeWorkflowId
-    ? workflows.find((w) => w.id === activeWorkflowId)
-    : workflows[0]
+  const defaultWorkflow = activeWorkflowId ? workflows.find((w) => w.id === activeWorkflowId) : workflows[0]
   const defaultStep = steps.find((s) => s.workflow_id === defaultWorkflow?.id)
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <KanbanHeader
-        onCreateTask={handleCreateTask}
+        onCreateTask={() => setCreateDialogOpen(true)}
         workspaceId={activeWorkspaceId ?? undefined}
         currentPage="tasks"
         searchQuery={searchQuery}
@@ -196,34 +146,16 @@ export function TasksPageClient({
           <div className="mb-5 flex items-center justify-between">
             <div>
               <h1 className="text-xl font-semibold">All Tasks</h1>
-              <p className="text-sm text-muted-foreground">
-                {total} task{total !== 1 ? 's' : ''} found
-              </p>
+              <p className="text-sm text-muted-foreground">{total} task{total !== 1 ? 's' : ''} found</p>
             </div>
             <div className="flex items-center gap-2">
-              <Checkbox
-                id="show-archived"
-                checked={showArchived}
-                onCheckedChange={(checked) => setShowArchived(checked === true)}
-              />
-              <Label htmlFor="show-archived" className="text-sm cursor-pointer">
-                Show archived
-              </Label>
+              <Checkbox id="show-archived" checked={showArchived} onCheckedChange={(checked) => setShowArchived(checked === true)} />
+              <Label htmlFor="show-archived" className="text-sm cursor-pointer">Show archived</Label>
             </div>
           </div>
-
-          <DataTable
-            columns={columns}
-            data={tasks}
-            pageCount={pageCount}
-            pagination={pagination}
-            onPaginationChange={setPagination}
-            isLoading={isLoading}
-            onRowClick={handleRowClick}
-          />
+          <DataTable columns={columns} data={tasks} pageCount={pageCount} pagination={pagination} onPaginationChange={setPagination} isLoading={isLoading} onRowClick={handleRowClick} />
         </div>
       </div>
-
       {activeWorkspaceId && defaultWorkflow && defaultStep && (
         <TaskCreateDialog
           open={createDialogOpen}
@@ -231,13 +163,8 @@ export function TasksPageClient({
           workspaceId={activeWorkspaceId}
           workflowId={defaultWorkflow.id}
           defaultStepId={defaultStep.id}
-          steps={steps
-            .filter((s) => s.workflow_id === defaultWorkflow.id)
-            .map((s) => ({ id: s.id, title: s.name, events: s.events }))}
-          onSuccess={() => {
-            setCreateDialogOpen(false)
-            fetchTasks()
-          }}
+          steps={steps.filter((s) => s.workflow_id === defaultWorkflow.id).map((s) => ({ id: s.id, title: s.name, events: s.events }))}
+          onSuccess={() => { setCreateDialogOpen(false); fetchTasks() }}
         />
       )}
     </div>

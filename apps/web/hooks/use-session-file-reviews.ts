@@ -37,6 +37,52 @@ function notifyChange() {
   window.dispatchEvent(new CustomEvent('file-reviews-change'));
 }
 
+/** Update shared cache with a new map and notify other hook instances. */
+function updateCache(sessionId: string, map: Map<string, FileReviewState>) {
+  reviewsCache[sessionId] = map;
+  notifyChange();
+}
+
+/** Create an optimistic update: clone the cache, apply mutation, update cache + local state. */
+function optimisticUpdate(
+  sessionId: string,
+  mutate: (next: Map<string, FileReviewState>) => void,
+  setReviews: (m: Map<string, FileReviewState>) => void,
+) {
+  const next = new Map(reviewsCache[sessionId] ?? new Map());
+  mutate(next);
+  reviewsCache[sessionId] = next;
+  setReviews(next);
+  notifyChange();
+}
+
+function fetchSessionReviews(
+  sessionId: string,
+  setReviews: (m: Map<string, FileReviewState>) => void,
+  setLoading: (v: boolean) => void,
+) {
+  const client = getWebSocketClient();
+  if (!client) return;
+
+  fetchedSessions.add(sessionId);
+  queueMicrotask(() => setLoading(true));
+
+  client
+    .request<{ reviews: SessionFileReview[] }>('session.file_review.get', { session_id: sessionId })
+    .then((response) => {
+      const map = new Map<string, FileReviewState>();
+      if (response?.reviews) {
+        for (const review of response.reviews) {
+          map.set(review.file_path, { reviewed: review.reviewed, diffHash: review.diff_hash });
+        }
+      }
+      updateCache(sessionId, map);
+      setReviews(map);
+    })
+    .catch(() => { /* Ignore errors - reviews are not critical */ })
+    .finally(() => { setLoading(false); });
+}
+
 export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
   const [reviews, setReviews] = useState<Map<string, FileReviewState>>(
     () => (sessionId ? reviewsCache[sessionId] ?? new Map() : new Map())
@@ -44,7 +90,6 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   const [loading, setLoading] = useState(false);
   const versionRef = useRef(cacheVersion);
 
-  // Sync local state when shared cache changes (from other hook instances)
   useEffect(() => {
     const handler = () => {
       if (!sessionId) return;
@@ -58,79 +103,27 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
     return () => window.removeEventListener('file-reviews-change', handler);
   }, [sessionId]);
 
-  // Fetch persisted reviews on mount (once per session)
   useEffect(() => {
     if (!sessionId || fetchedSessions.has(sessionId)) {
-      // Already fetched — sync from cache outside the effect's synchronous body
       if (sessionId && reviewsCache[sessionId]) {
         const cached = reviewsCache[sessionId];
         queueMicrotask(() => setReviews(cached));
       }
       return;
     }
-
-    const client = getWebSocketClient();
-    if (!client) return;
-
-    fetchedSessions.add(sessionId);
-
-    // Use startTransition-like pattern to avoid synchronous setState in effect
-    queueMicrotask(() => setLoading(true));
-
-    client
-      .request<{ reviews: SessionFileReview[] }>('session.file_review.get', {
-        session_id: sessionId,
-      })
-      .then((response) => {
-        const map = new Map<string, FileReviewState>();
-        if (response?.reviews) {
-          for (const review of response.reviews) {
-            map.set(review.file_path, {
-              reviewed: review.reviewed,
-              diffHash: review.diff_hash,
-            });
-          }
-        }
-        reviewsCache[sessionId] = map;
-        setReviews(map);
-        notifyChange();
-      })
-      .catch(() => {
-        // Ignore errors - reviews are not critical
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    fetchSessionReviews(sessionId, setReviews, setLoading);
   }, [sessionId]);
 
   const markReviewed = useCallback(
     (filePath: string, diffHash: string) => {
       if (!sessionId) return;
-
-      // Optimistic update — shared cache + local state
-      const next = new Map(reviewsCache[sessionId] ?? new Map());
-      next.set(filePath, { reviewed: true, diffHash });
-      reviewsCache[sessionId] = next;
-      setReviews(next);
-      notifyChange();
-
+      optimisticUpdate(sessionId, (next) => { next.set(filePath, { reviewed: true, diffHash }); }, setReviews);
       const client = getWebSocketClient();
       if (!client) return;
-
       client
-        .request('session.file_review.update', {
-          session_id: sessionId,
-          file_path: filePath,
-          reviewed: true,
-          diff_hash: diffHash,
-        })
+        .request('session.file_review.update', { session_id: sessionId, file_path: filePath, reviewed: true, diff_hash: diffHash })
         .catch(() => {
-          // Revert on failure
-          const reverted = new Map(reviewsCache[sessionId] ?? new Map());
-          reverted.delete(filePath);
-          reviewsCache[sessionId] = reverted;
-          setReviews(reverted);
-          notifyChange();
+          optimisticUpdate(sessionId, (reverted) => { reverted.delete(filePath); }, setReviews);
         });
     },
     [sessionId]
@@ -139,56 +132,25 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   const markUnreviewed = useCallback(
     (filePath: string) => {
       if (!sessionId) return;
-
-      // Optimistic update — shared cache + local state
-      const next = new Map(reviewsCache[sessionId] ?? new Map());
-      next.set(filePath, { reviewed: false, diffHash: '' });
-      reviewsCache[sessionId] = next;
-      setReviews(next);
-      notifyChange();
-
+      optimisticUpdate(sessionId, (next) => { next.set(filePath, { reviewed: false, diffHash: '' }); }, setReviews);
       const client = getWebSocketClient();
       if (!client) return;
-
       client
-        .request('session.file_review.update', {
-          session_id: sessionId,
-          file_path: filePath,
-          reviewed: false,
-          diff_hash: '',
-        })
-        .catch(() => {
-          // Ignore failures for unmark
-        });
+        .request('session.file_review.update', { session_id: sessionId, file_path: filePath, reviewed: false, diff_hash: '' })
+        .catch(() => { /* Ignore failures for unmark */ });
     },
     [sessionId]
   );
 
   const resetReviews = useCallback(() => {
     if (!sessionId) return;
-
-    // Optimistic update — shared cache + local state
     reviewsCache[sessionId] = new Map();
     setReviews(new Map());
     notifyChange();
-
     const client = getWebSocketClient();
     if (!client) return;
-
-    client
-      .request('session.file_review.reset', {
-        session_id: sessionId,
-      })
-      .catch(() => {
-        // Ignore failures for reset
-      });
+    client.request('session.file_review.reset', { session_id: sessionId }).catch(() => { /* Ignore */ });
   }, [sessionId]);
 
-  return {
-    reviews,
-    markReviewed,
-    markUnreviewed,
-    resetReviews,
-    loading,
-  };
+  return { reviews, markReviewed, markUnreviewed, resetReviews, loading };
 }

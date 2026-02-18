@@ -14,41 +14,23 @@ type EditorCommentPopoverProps = {
   onClose: () => void;
 };
 
-export function EditorCommentPopover({
-  selectedText,
-  lineRange,
-  position,
-  onSubmit,
-  onClose,
-}: EditorCommentPopoverProps) {
-  const [comment, setComment] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+type DragState = { startX: number; startY: number; origLeft: number; origTop: number };
 
-  // Draggable position — starts at computed initial position
-  const popoverWidth = 384;
-  const popoverHeight = 220;
+function computeInitialPos(position: { x: number; y: number }, width: number, height: number) {
+  let left = position.x;
+  let top = position.y;
+  if (left + width > window.innerWidth - 16) left = Math.max(16, window.innerWidth - width - 16);
+  if (top + height > window.innerHeight - 16) top = Math.max(16, position.y - height);
+  return { left, top };
+}
 
-  const computeInitial = () => {
-    let left = position.x;
-    let top = position.y;
-    if (left + popoverWidth > window.innerWidth - 16) {
-      left = Math.max(16, window.innerWidth - popoverWidth - 16);
-    }
-    if (top + popoverHeight > window.innerHeight - 16) {
-      top = Math.max(16, position.y - popoverHeight);
-    }
-    return { left, top };
-  };
+function useDraggablePos(position: { x: number; y: number }, width: number, height: number) {
+  const [pos, setPos] = useState(() => computeInitialPos(position, width, height));
+  const dragRef = useRef<DragState | null>(null);
 
-  const [pos, setPos] = useState(computeInitial);
-  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null);
-
-  // Drag handlers
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: pos.left, origTop: pos.top };
-
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
       const dx = ev.clientX - dragRef.current.startX;
@@ -64,63 +46,79 @@ export function EditorCommentPopover({
     document.addEventListener('mouseup', onUp);
   }, [pos.left, pos.top]);
 
-  // Focus textarea on mount
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+  return { pos, onDragStart };
+}
 
-  // Close on click outside
+function usePopoverDismiss(onClose: () => void, popoverRef: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
     };
-    // Delay adding listener to avoid immediate close from selection click
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 100);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [onClose]);
+    const timer = setTimeout(() => { document.addEventListener('mousedown', handleClickOutside); }, 100);
+    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handleClickOutside); };
+  }, [onClose, popoverRef]);
 
-  // Close on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
     };
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
+}
+
+function PopoverBody({ selectedText, comment, setComment, handleSubmit, textareaRef }: {
+  selectedText: string;
+  comment: string;
+  setComment: (v: string) => void;
+  handleSubmit: () => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const previewText = selectedText.length > 100 ? selectedText.slice(0, 100).trim() + '…' : selectedText;
+  const isDisabled = !comment.trim();
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSubmit(); }
+  }, [handleSubmit]);
+
+  return (
+    <div className="px-4 pb-4">
+      <pre className="mb-3 p-2 rounded-md bg-muted/50 text-xs text-muted-foreground font-mono line-clamp-3 overflow-hidden whitespace-pre-wrap">
+        {previewText}
+      </pre>
+      <Textarea
+        ref={textareaRef}
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Add your comment or instruction..."
+        className="min-h-[72px] resize-none text-sm border-border/50 focus:border-primary/50"
+      />
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground/70">{'\u2318'}+Enter to add</span>
+        <Button size="sm" onClick={handleSubmit} disabled={isDisabled} className="gap-1.5 cursor-pointer">
+          <IconPlus className="h-3.5 w-3.5" />
+          Add comment
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function EditorCommentPopover({ selectedText, lineRange, position, onSubmit, onClose }: EditorCommentPopoverProps) {
+  const [comment, setComment] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const { pos, onDragStart } = useDraggablePos(position, 384, 220);
+  usePopoverDismiss(onClose, popoverRef);
+
+  useEffect(() => { textareaRef.current?.focus(); }, []);
 
   const handleSubmit = useCallback(() => {
     if (!comment.trim()) return;
     onSubmit(comment.trim());
   }, [comment, onSubmit]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [handleSubmit]
-  );
-
-  const isDisabled = !comment.trim();
-
-  // Truncate code preview
-  const previewText = selectedText.length > 100
-    ? selectedText.slice(0, 100).trim() + '…'
-    : selectedText;
-
-  // Format line range
   const lineRangeText = lineRange.start === lineRange.end
     ? `Line ${lineRange.start}`
     : `Lines ${lineRange.start}-${lineRange.end}`;
@@ -134,49 +132,20 @@ export function EditorCommentPopover({
       )}
       style={{ left: pos.left, top: pos.top }}
     >
-      {/* Drag handle */}
       <div
         className="flex items-center justify-between px-4 pt-3 pb-1 cursor-grab active:cursor-grabbing select-none"
         onMouseDown={onDragStart}
       >
-        <span className="px-2 py-0.5 rounded-md bg-muted text-xs font-mono text-muted-foreground">
-          {lineRangeText}
-        </span>
+        <span className="px-2 py-0.5 rounded-md bg-muted text-xs font-mono text-muted-foreground">{lineRangeText}</span>
         <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/40" />
       </div>
-
-      <div className="px-4 pb-4">
-        {/* Code preview */}
-        <pre className="mb-3 p-2 rounded-md bg-muted/50 text-xs text-muted-foreground font-mono line-clamp-3 overflow-hidden whitespace-pre-wrap">
-          {previewText}
-        </pre>
-
-        {/* Comment input */}
-        <Textarea
-          ref={textareaRef}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Add your comment or instruction..."
-          className="min-h-[72px] resize-none text-sm border-border/50 focus:border-primary/50"
-        />
-
-        {/* Actions */}
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-xs text-muted-foreground/70">
-            {'\u2318'}+Enter to add
-          </span>
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={isDisabled}
-            className="gap-1.5 cursor-pointer"
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-            Add comment
-          </Button>
-        </div>
-      </div>
+      <PopoverBody
+        selectedText={selectedText}
+        comment={comment}
+        setComment={setComment}
+        handleSubmit={handleSubmit}
+        textareaRef={textareaRef}
+      />
     </div>
   );
 }

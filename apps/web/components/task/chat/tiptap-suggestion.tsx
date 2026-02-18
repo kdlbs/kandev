@@ -45,12 +45,12 @@ export const MentionSuggestionPluginKey = new PluginKey('mentionSuggestion');
 /**
  * Creates a mention suggestion config for TipTap.
  * `setMenuState` drives the React rendering of MentionMenu.
- * `onKeyDownRef` is a mutable ref that the parent uses to delegate keystrokes.
+ * `onKeyDown` is a stable callback the parent uses to delegate keystrokes.
  */
 export function createMentionSuggestion(
   callbacks: MentionSuggestionCallbacks,
   setMenuState: (state: MenuState<MentionItem>) => void,
-  onKeyDownRef: React.MutableRefObject<((event: KeyboardEvent) => boolean) | null>,
+  onKeyDown: (event: KeyboardEvent) => boolean,
 ): Partial<SuggestionOptions<MentionItem, { id: string; label: string; kind: MentionKind; path: string }>> {
   return {
     char: '@',
@@ -103,7 +103,7 @@ export function createMentionSuggestion(
             setMenuState(EMPTY_MENTION_STATE);
             return true;
           }
-          return onKeyDownRef.current?.(kd.event) ?? false;
+          return onKeyDown(kd.event);
         },
 
         onExit() {
@@ -123,7 +123,11 @@ function mentionItemToAttrs(item: MentionItem): { id: string; label: string; kin
     id: item.id,
     label: name,
     kind: item.kind,
-    path: item.kind === 'file' ? item.label : (item.kind === 'prompt' ? `prompt:${item.id}` : 'plan:context'),
+    path: (() => {
+      if (item.kind === 'file') return item.label;
+      if (item.kind === 'prompt') return `prompt:${item.id}`;
+      return 'plan:context';
+    })(),
   };
 }
 
@@ -139,7 +143,7 @@ export const SlashSuggestionPluginKey = new PluginKey('slashSuggestion');
 export function createSlashSuggestion(
   callbacks: SlashSuggestionCallbacks,
   setMenuState: (state: MenuState<SlashCommand>) => void,
-  onKeyDownRef: React.MutableRefObject<((event: KeyboardEvent) => boolean) | null>,
+  onKeyDown: (event: KeyboardEvent) => boolean,
 ): Partial<SuggestionOptions<SlashCommand>> {
   return {
     char: '/',
@@ -206,7 +210,7 @@ export function createSlashSuggestion(
             setMenuState(EMPTY_SLASH_STATE);
             return true;
           }
-          return onKeyDownRef.current?.(kd.event) ?? false;
+          return onKeyDown(kd.event);
         },
 
         onExit() {

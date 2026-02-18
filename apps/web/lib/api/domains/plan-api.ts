@@ -1,6 +1,8 @@
 import { getWebSocketClient } from '@/lib/ws/connection';
 import type { TaskPlan } from '@/lib/types/http';
 
+const WS_CLIENT_UNAVAILABLE = 'WebSocket client not available';
+
 /**
  * Get the task plan for a specific task.
  * Returns null if no plan exists.
@@ -8,7 +10,7 @@ import type { TaskPlan } from '@/lib/types/http';
 export async function getTaskPlan(taskId: string): Promise<TaskPlan | null> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   const response = await client.request('task.plan.get', { task_id: taskId });
 
@@ -29,7 +31,7 @@ export async function createTaskPlan(
 ): Promise<TaskPlan> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   const response = await client.request('task.plan.create', {
     task_id: taskId,
@@ -51,7 +53,7 @@ export async function updateTaskPlan(
 ): Promise<TaskPlan> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   const payload: Record<string, string> = {
     task_id: taskId,
@@ -74,7 +76,7 @@ export async function updateTaskPlan(
 export async function deleteTaskPlan(taskId: string): Promise<void> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   await client.request('task.plan.delete', { task_id: taskId });
 }

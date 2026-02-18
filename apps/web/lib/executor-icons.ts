@@ -1,6 +1,6 @@
 import { IconFolder, IconFolders, IconBrandDocker, IconCloud } from '@tabler/icons-react';
 
-const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
+export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   local: IconFolder,
   worktree: IconFolders,
   local_docker: IconBrandDocker,

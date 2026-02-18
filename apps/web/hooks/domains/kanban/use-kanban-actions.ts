@@ -12,6 +12,74 @@ type UseKanbanActionsOptions = {
   workflowsState: WorkflowsState;
 };
 
+type KanbanTask = KanbanState['tasks'][number];
+
+/** Handle creating a new task in the kanban board, merging with any WS-provided data. */
+function hydrateCreatedTask(
+  store: ReturnType<typeof useAppStoreApi>,
+  task: BackendTask,
+  currentKanban: KanbanState,
+) {
+  const repoId = task.repositories?.[0]?.repository_id ?? undefined;
+  const existing = currentKanban.tasks.find((t: KanbanTask) => t.id === task.id);
+  if (existing) {
+    if (repoId && !existing.repositoryId) {
+      store.getState().hydrate({
+        kanban: {
+          ...currentKanban,
+          tasks: currentKanban.tasks.map((t: KanbanTask) =>
+            t.id === task.id ? { ...t, repositoryId: repoId } : t
+          ),
+        },
+      });
+    }
+  } else {
+    store.getState().hydrate({
+      kanban: {
+        ...currentKanban,
+        tasks: [
+          ...currentKanban.tasks,
+          {
+            id: task.id,
+            workflowStepId: task.workflow_step_id,
+            title: task.title,
+            description: task.description ?? undefined,
+            position: task.position ?? 0,
+            state: task.state,
+            repositoryId: repoId,
+          },
+        ],
+      },
+    });
+  }
+  if (task.workspace_id) {
+    store.getState().invalidateRepositories(task.workspace_id);
+  }
+}
+
+/** Handle editing an existing task - only update dialog-editable fields. */
+function hydrateEditedTask(
+  store: ReturnType<typeof useAppStoreApi>,
+  task: BackendTask,
+  currentKanban: KanbanState,
+) {
+  store.getState().hydrate({
+    kanban: {
+      ...currentKanban,
+      tasks: currentKanban.tasks.map((item: KanbanTask) =>
+        item.id === task.id
+          ? {
+              ...item,
+              title: task.title,
+              description: task.description ?? undefined,
+              repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
+            }
+          : item
+      ),
+    },
+  });
+}
+
 export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanActionsOptions) {
   const router = useRouter();
   const store = useAppStoreApi();
@@ -36,64 +104,10 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     (task: BackendTask, mode: 'create' | 'edit') => {
       const currentKanban = store.getState().kanban;
       if (mode === 'create') {
-        const repoId = task.repositories?.[0]?.repository_id ?? undefined;
-        const existing = currentKanban.tasks.find((t: KanbanState['tasks'][number]) => t.id === task.id);
-        if (existing) {
-          // WebSocket may have added the task already but without repositoryId.
-          // Merge in any missing fields from the API response.
-          if (repoId && !existing.repositoryId) {
-            store.getState().hydrate({
-              kanban: {
-                ...currentKanban,
-                tasks: currentKanban.tasks.map((t: KanbanState['tasks'][number]) =>
-                  t.id === task.id ? { ...t, repositoryId: repoId } : t
-                ),
-              },
-            });
-          }
-        } else {
-          store.getState().hydrate({
-            kanban: {
-              ...currentKanban,
-              tasks: [
-                ...currentKanban.tasks,
-                {
-                  id: task.id,
-                  workflowStepId: task.workflow_step_id,
-                  title: task.title,
-                  description: task.description ?? undefined,
-                  position: task.position ?? 0,
-                  state: task.state,
-                  repositoryId: repoId,
-                },
-              ],
-            },
-          });
-        }
-        // Invalidate workspace repos cache so newly created repos show up in the edit dialog
-        if (task.workspace_id) {
-          store.getState().invalidateRepositories(task.workspace_id);
-        }
+        hydrateCreatedTask(store, task, currentKanban);
         return;
       }
-      // Only update fields that the edit dialog changes (title, description, repositories).
-      // State and workflowStepId are managed by the backend via WebSocket events
-      // (e.g. orchestrator.start moves the task to the auto-start column).
-      store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((item: KanbanState['tasks'][number]) =>
-            item.id === task.id
-              ? {
-                  ...item,
-                  title: task.title,
-                  description: task.description ?? undefined,
-                  repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
-                }
-              : item
-          ),
-        },
-      });
+      hydrateEditedTask(store, task, currentKanban);
     },
     [store]
   );

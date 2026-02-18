@@ -3,6 +3,8 @@ import { detectPlatform, isMac, formatShortcut, matchesShortcut, shortcutToCodeM
 import { KEYS, SHORTCUTS } from './constants';
 import type { KeyboardShortcut } from './constants';
 
+const MOZILLA_USER_AGENT = 'Mozilla/5.0';
+
 describe('detectPlatform', () => {
   beforeEach(() => {
     // Reset navigator mock before each test
@@ -12,7 +14,7 @@ describe('detectPlatform', () => {
   it('detects Mac platform from navigator.platform', () => {
     vi.stubGlobal('navigator', {
       platform: 'MacIntel',
-      userAgent: 'Mozilla/5.0',
+      userAgent: MOZILLA_USER_AGENT,
     });
     expect(detectPlatform()).toBe('mac');
   });
@@ -49,7 +51,7 @@ describe('detectPlatform', () => {
   it('returns unknown for unrecognized platform', () => {
     vi.stubGlobal('navigator', {
       platform: 'FreeBSD',
-      userAgent: 'Mozilla/5.0',
+      userAgent: MOZILLA_USER_AGENT,
     });
     expect(detectPlatform()).toBe('unknown');
   });
@@ -59,7 +61,7 @@ describe('isMac', () => {
   it('returns true on Mac platform', () => {
     vi.stubGlobal('navigator', {
       platform: 'MacIntel',
-      userAgent: 'Mozilla/5.0',
+      userAgent: MOZILLA_USER_AGENT,
     });
     expect(isMac()).toBe(true);
   });
@@ -67,7 +69,7 @@ describe('isMac', () => {
   it('returns false on Windows platform', () => {
     vi.stubGlobal('navigator', {
       platform: 'Win32',
-      userAgent: 'Mozilla/5.0',
+      userAgent: MOZILLA_USER_AGENT,
     });
     expect(isMac()).toBe(false);
   });
@@ -167,7 +169,7 @@ describe('formatShortcut', () => {
   it('uses current platform when not specified', () => {
     vi.stubGlobal('navigator', {
       platform: 'MacIntel',
-      userAgent: 'Mozilla/5.0',
+      userAgent: MOZILLA_USER_AGENT,
     });
     const shortcut: KeyboardShortcut = {
       key: KEYS.ENTER,
@@ -177,139 +179,96 @@ describe('formatShortcut', () => {
   });
 });
 
-describe('matchesShortcut', () => {
+describe('matchesShortcut - matching cases', () => {
   it('matches exact key without modifiers', () => {
     const shortcut: KeyboardShortcut = { key: KEYS.ESCAPE };
     const event = new KeyboardEvent('keydown', { key: 'Escape' });
     expect(matchesShortcut(event, shortcut)).toBe(true);
   });
 
+  it('matches ctrlOrCmd with Ctrl key', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.ENTER, modifiers: { ctrlOrCmd: true } };
+    const event = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches ctrlOrCmd with Meta key', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.ENTER, modifiers: { ctrlOrCmd: true } };
+    const event = new KeyboardEvent('keydown', { key: 'Enter', metaKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches Ctrl modifier', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { ctrl: true } };
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches Cmd modifier', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { cmd: true } };
+    const event = new KeyboardEvent('keydown', { key: 's', metaKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches Alt modifier', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.A, modifiers: { alt: true } };
+    const event = new KeyboardEvent('keydown', { key: 'a', altKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches Shift modifier', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.A, modifiers: { shift: true } };
+    const event = new KeyboardEvent('keydown', { key: 'a', shiftKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches multiple modifiers', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { ctrl: true, shift: true } };
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('matches ctrlOrCmd with additional modifiers', () => {
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { ctrlOrCmd: true, shift: true } };
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true });
+    expect(matchesShortcut(event, shortcut)).toBe(true);
+  });
+
+  it('works with predefined SHORTCUTS', () => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', metaKey: true });
+    expect(matchesShortcut(event, SHORTCUTS.SUBMIT)).toBe(true);
+  });
+});
+
+describe('matchesShortcut - non-matching cases', () => {
   it('does not match different key', () => {
     const shortcut: KeyboardShortcut = { key: KEYS.ESCAPE };
     const event = new KeyboardEvent('keydown', { key: 'Enter' });
     expect(matchesShortcut(event, shortcut)).toBe(false);
   });
 
-  it('matches ctrlOrCmd with Ctrl key', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.ENTER,
-      modifiers: { ctrlOrCmd: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
-  it('matches ctrlOrCmd with Meta key', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.ENTER,
-      modifiers: { ctrlOrCmd: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 'Enter', metaKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
   it('does not match ctrlOrCmd without modifier', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.ENTER,
-      modifiers: { ctrlOrCmd: true },
-    };
+    const shortcut: KeyboardShortcut = { key: KEYS.ENTER, modifiers: { ctrlOrCmd: true } };
     const event = new KeyboardEvent('keydown', { key: 'Enter' });
     expect(matchesShortcut(event, shortcut)).toBe(false);
   });
 
-  it('matches Ctrl modifier', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { ctrl: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
-  it('matches Cmd modifier', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { cmd: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 's', metaKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
-  it('matches Alt modifier', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.A,
-      modifiers: { alt: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 'a', altKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
-  it('matches Shift modifier', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.A,
-      modifiers: { shift: true },
-    };
-    const event = new KeyboardEvent('keydown', { key: 'a', shiftKey: true });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
-  it('matches multiple modifiers', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { ctrl: true, shift: true },
-    };
-    const event = new KeyboardEvent('keydown', {
-      key: 's',
-      ctrlKey: true,
-      shiftKey: true,
-    });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
-  });
-
   it('does not match when extra modifier is pressed', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { ctrl: true },
-    };
-    const event = new KeyboardEvent('keydown', {
-      key: 's',
-      ctrlKey: true,
-      shiftKey: true,
-    });
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { ctrl: true } };
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true });
     expect(matchesShortcut(event, shortcut)).toBe(false);
   });
 
   it('does not match when required modifier is missing', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { ctrl: true, shift: true },
-    };
+    const shortcut: KeyboardShortcut = { key: KEYS.S, modifiers: { ctrl: true, shift: true } };
     const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true });
     expect(matchesShortcut(event, shortcut)).toBe(false);
-  });
-
-  it('matches ctrlOrCmd with additional modifiers', () => {
-    const shortcut: KeyboardShortcut = {
-      key: KEYS.S,
-      modifiers: { ctrlOrCmd: true, shift: true },
-    };
-    const event = new KeyboardEvent('keydown', {
-      key: 's',
-      ctrlKey: true,
-      shiftKey: true,
-    });
-    expect(matchesShortcut(event, shortcut)).toBe(true);
   });
 
   it('does not match when no modifiers expected but some pressed', () => {
     const shortcut: KeyboardShortcut = { key: KEYS.ESCAPE };
     const event = new KeyboardEvent('keydown', { key: 'Escape', ctrlKey: true });
     expect(matchesShortcut(event, shortcut)).toBe(false);
-  });
-
-  it('works with predefined SHORTCUTS', () => {
-    const event = new KeyboardEvent('keydown', { key: 'Enter', metaKey: true });
-    expect(matchesShortcut(event, SHORTCUTS.SUBMIT)).toBe(true);
   });
 });
 

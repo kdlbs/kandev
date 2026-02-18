@@ -60,11 +60,14 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
     setIsLoading(true);
     setError(null);
 
+    // Use longer timeout for PR creation (gh cli can be slow)
+    const timeout = action === 'worktree.create_pr' ? 120000 : 60000;
+
     try {
       const result = await client.request<T>(action, {
         session_id: sessionId,
         ...payload
-      }, 60000); // 60s timeout for git operations
+      }, timeout);
 
       setLastResult(result);
       if (!result.success && result.error) {
@@ -120,39 +123,13 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
   }, [executeOperation]);
 
   const createPR = useCallback(async (title: string, body: string, baseBranch?: string, draft?: boolean): Promise<PRCreateResult> => {
-    if (!sessionId) {
-      throw new Error('No session ID provided');
-    }
-
-    const client = getWebSocketClient();
-    if (!client) {
-      throw new Error('WebSocket not connected');
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const result = await client.request<PRCreateResult>('worktree.create_pr', {
-        session_id: sessionId,
-        title,
-        body,
-        base_branch: baseBranch ?? '',
-        draft: draft ?? true,
-      }, 120000); // 2 min timeout for PR creation (gh cli can be slow)
-
-      if (!result.success && result.error) {
-        setError(result.error);
-      }
-      return result;
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : 'Operation failed';
-      setError(errorMessage);
-      throw e;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [sessionId]);
+    return executeOperation<PRCreateResult & GitOperationResult>('worktree.create_pr', {
+      title,
+      body,
+      base_branch: baseBranch ?? '',
+      draft: draft ?? true,
+    });
+  }, [executeOperation]);
 
   return {
     pull,

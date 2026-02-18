@@ -41,9 +41,12 @@ export function useKanbanLayout(isPreviewOpen: boolean, previewWidthPx: number) 
   const shouldFloat = isPreviewOpen && containerWidth > 0 && availableForKanban < minKanbanWidthPx;
 
   // Calculate kanban width - keep it at min width when floating to avoid repainting
-  const kanbanWidth = shouldFloat
-    ? minKanbanWidthPx
-    : (isPreviewOpen ? containerWidth - previewWidthPx : containerWidth);
+  let kanbanWidth = containerWidth;
+  if (shouldFloat) {
+    kanbanWidth = minKanbanWidthPx;
+  } else if (isPreviewOpen) {
+    kanbanWidth = containerWidth - previewWidthPx;
+  }
 
   return {
     containerRef,

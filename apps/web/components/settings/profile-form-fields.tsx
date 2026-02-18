@@ -27,6 +27,103 @@ export type ProfileFormFieldsProps = {
   hideNameField?: boolean;
 };
 
+type PermissionToggleProps = {
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+  variant: 'default' | 'compact';
+};
+
+function PermissionToggles({
+  profile,
+  onChange,
+  permissionSettings,
+  passthroughConfig,
+  variant,
+}: PermissionToggleProps) {
+  const isCompact = variant === 'compact';
+  const switchSize = isCompact ? ('sm' as const) : ('default' as const);
+
+  if (isCompact) {
+    return (
+      <>
+        {PERMISSION_KEYS.map((key) => {
+          const setting = permissionSettings[key];
+          if (!setting?.supported) return null;
+          return (
+            <div key={key} className="flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <Label className="text-xs">{setting.label}</Label>
+                <p className="text-[10px] text-muted-foreground leading-tight">
+                  {setting.description}
+                </p>
+              </div>
+              <Switch
+                size={switchSize}
+                checked={profile[key]}
+                onCheckedChange={(checked) => onChange({ [key]: checked })}
+              />
+            </div>
+          );
+        })}
+        {passthroughConfig?.supported && (
+          <div className="flex items-center justify-between gap-2">
+            <div className="space-y-0.5">
+              <Label className="text-xs">{passthroughConfig.label}</Label>
+              <p className="text-[10px] text-muted-foreground leading-tight">
+                {passthroughConfig.description}
+              </p>
+            </div>
+            <Switch
+              size={switchSize}
+              checked={profile.cli_passthrough}
+              onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
+            />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {PERMISSION_KEYS.map((key) => {
+        const setting = permissionSettings[key];
+        if (!setting?.supported) return null;
+        return (
+          <div key={key} className="flex items-center justify-between rounded-md border p-3">
+            <div className="space-y-1">
+              <Label>{setting.label}</Label>
+              <p className="text-xs text-muted-foreground">
+                {setting.description}
+              </p>
+            </div>
+            <Switch
+              checked={profile[key]}
+              onCheckedChange={(checked) => onChange({ [key]: checked })}
+            />
+          </div>
+        );
+      })}
+      {passthroughConfig?.supported && (
+        <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="space-y-1">
+            <Label>{passthroughConfig.label}</Label>
+            <p className="text-xs text-muted-foreground">
+              {passthroughConfig.description}
+            </p>
+          </div>
+          <Switch
+            checked={profile.cli_passthrough}
+            onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProfileFormFields({
   profile,
   onChange,
@@ -40,7 +137,6 @@ export function ProfileFormFields({
   hideNameField = false,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === 'compact';
-  const switchSize = isCompact ? ('sm' as const) : ('default' as const);
 
   return (
     <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
@@ -79,81 +175,13 @@ export function ProfileFormFields({
         />
       </div>
 
-      {isCompact ? (
-        <>
-          {PERMISSION_KEYS.map((key) => {
-            const setting = permissionSettings[key];
-            if (!setting?.supported) return null;
-            return (
-              <div key={key} className="flex items-center justify-between gap-2">
-                <div className="space-y-0.5">
-                  <Label className="text-xs">{setting.label}</Label>
-                  <p className="text-[10px] text-muted-foreground leading-tight">
-                    {setting.description}
-                  </p>
-                </div>
-                <Switch
-                  size={switchSize}
-                  checked={profile[key]}
-                  onCheckedChange={(checked) => onChange({ [key]: checked })}
-                />
-              </div>
-            );
-          })}
-
-          {passthroughConfig?.supported && (
-            <div className="flex items-center justify-between gap-2">
-              <div className="space-y-0.5">
-                <Label className="text-xs">{passthroughConfig.label}</Label>
-                <p className="text-[10px] text-muted-foreground leading-tight">
-                  {passthroughConfig.description}
-                </p>
-              </div>
-              <Switch
-                size={switchSize}
-                checked={profile.cli_passthrough}
-                onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
-              />
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {PERMISSION_KEYS.map((key) => {
-            const setting = permissionSettings[key];
-            if (!setting?.supported) return null;
-            return (
-              <div key={key} className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-1">
-                  <Label>{setting.label}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {setting.description}
-                  </p>
-                </div>
-                <Switch
-                  checked={profile[key]}
-                  onCheckedChange={(checked) => onChange({ [key]: checked })}
-                />
-              </div>
-            );
-          })}
-
-          {passthroughConfig?.supported && (
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div className="space-y-1">
-                <Label>{passthroughConfig.label}</Label>
-                <p className="text-xs text-muted-foreground">
-                  {passthroughConfig.description}
-                </p>
-              </div>
-              <Switch
-                checked={profile.cli_passthrough}
-                onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
-              />
-            </div>
-          )}
-        </div>
-      )}
+      <PermissionToggles
+        profile={profile}
+        onChange={onChange}
+        permissionSettings={permissionSettings}
+        passthroughConfig={passthroughConfig}
+        variant={variant}
+      />
     </div>
   );
 }

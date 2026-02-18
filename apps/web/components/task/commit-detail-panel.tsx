@@ -121,57 +121,82 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
     <PanelRoot>
       <PanelBody padding={false} scroll>
         <div className="p-3">
-          {/* Commit header */}
-          {commit && (
-            <div className="mb-4 pb-3 border-b border-border">
-              <div className="flex items-start gap-3">
-                {/* Author avatar */}
-                <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-semibold text-muted-foreground shrink-0">
-                  {getInitials(commit.author_name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground leading-snug">
-                    {commit.commit_message}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {commit.author_name}
-                    <span className="mx-1.5">&middot;</span>
-                    {formatRelativeTime(commit.committed_at)}
-                    <span className="mx-1.5">&middot;</span>
-                    <code className="font-mono text-[11px]">{commitSha.slice(0, 7)}</code>
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+          {commit && <CommitHeader commit={commit} commitSha={commitSha} />}
         </div>
-
-        {/* File diffs */}
-        {fileEntries.length === 0 && !loading && (
-          <div className="text-sm text-muted-foreground text-center py-8">
-            No files in this commit
-          </div>
-        )}
-
-        {fileEntries.map(([path, file]) => (
-          <div key={path} className="mb-2">
-            {file.diff ? (
-              <FileDiffViewer
-                filePath={path}
-                diff={file.diff}
-                status={file.status}
-                onOpenFile={openFile}
-              />
-            ) : (
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                {path} — binary or empty diff
-              </div>
-            )}
-          </div>
-        ))}
+        <CommitFileList fileEntries={fileEntries} loading={loading} onOpenFile={openFile} />
       </PanelBody>
     </PanelRoot>
   );
 });
+
+/** Commit metadata header with author and message */
+function CommitHeader({
+  commit,
+  commitSha,
+}: {
+  commit: { author_name: string; commit_message: string; committed_at: string };
+  commitSha: string;
+}) {
+  return (
+    <div className="mb-4 pb-3 border-b border-border">
+      <div className="flex items-start gap-3">
+        <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-semibold text-muted-foreground shrink-0">
+          {getInitials(commit.author_name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground leading-snug">
+            {commit.commit_message}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {commit.author_name}
+            <span className="mx-1.5">&middot;</span>
+            {formatRelativeTime(commit.committed_at)}
+            <span className="mx-1.5">&middot;</span>
+            <code className="font-mono text-[11px]">{commitSha.slice(0, 7)}</code>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** List of file diffs in a commit */
+function CommitFileList({
+  fileEntries,
+  loading,
+  onOpenFile,
+}: {
+  fileEntries: [string, FileInfo][];
+  loading: boolean;
+  onOpenFile: (path: string) => void;
+}) {
+  if (fileEntries.length === 0 && !loading) {
+    return (
+      <div className="text-sm text-muted-foreground text-center py-8">
+        No files in this commit
+      </div>
+    );
+  }
+  return (
+    <>
+      {fileEntries.map(([path, file]) => (
+        <div key={path} className="mb-2">
+          {file.diff ? (
+            <FileDiffViewer
+              filePath={path}
+              diff={file.diff}
+              status={file.status}
+              onOpenFile={onOpenFile}
+            />
+          ) : (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              {path} -- binary or empty diff
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
 
 export { CommitDetailPanel };

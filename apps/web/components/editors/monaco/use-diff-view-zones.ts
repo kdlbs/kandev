@@ -27,14 +27,16 @@ interface UseViewZonesParams {
   setSelectedLineRange: (v: null) => void;
 }
 
-function addZone(
-  targetEditor: monacoEditor.ICodeEditor,
-  side: 'modified' | 'original',
-  afterLine: number,
-  heightPx: number,
-  content: React.ReactNode,
-  zones: ViewZoneEntry[],
-) {
+interface AddZoneParams {
+  targetEditor: monacoEditor.ICodeEditor;
+  side: 'modified' | 'original';
+  afterLine: number;
+  heightPx: number;
+  content: React.ReactNode;
+  zones: ViewZoneEntry[];
+}
+
+function addZone({ targetEditor, side, afterLine, heightPx, content, zones }: AddZoneParams) {
   const domNode = document.createElement('div');
   domNode.style.zIndex = '10';
   const root = createRoot(domNode);
@@ -104,7 +106,7 @@ export function useViewZones({
               compact: true,
             })
           );
-      addZone(editor, side, comment.endLine, isEditing ? 120 : 32, node, newZones);
+      addZone({ targetEditor: editor, side, afterLine: comment.endLine, heightPx: isEditing ? 120 : 32, content: node, zones: newZones });
     }
 
     if (showCommentForm && selectedLineRange) {
@@ -121,7 +123,7 @@ export function useViewZones({
           },
         })
       );
-      addZone(editor, side, Math.max(selectedLineRange.start, selectedLineRange.end), 120, node, newZones);
+      addZone({ targetEditor: editor, side, afterLine: Math.max(selectedLineRange.start, selectedLineRange.end), heightPx: 120, content: node, zones: newZones });
     }
 
     viewZonesRef.current = newZones;

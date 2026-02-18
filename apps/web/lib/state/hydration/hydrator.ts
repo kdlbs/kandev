@@ -14,6 +14,100 @@ export type HydrationOptions = {
   forceMergeSessionId?: string | null;
 };
 
+/** Deep-merge a field with optional loading state preservation. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mergeWithLoading(draft: any, source: any | undefined): void {
+  if (!source) return;
+  deepMerge(draft, source);
+  mergeLoadingState(draft, source);
+}
+
+/** Hydrate kanban and workspace slices. */
+function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
+  if (state.kanban) deepMerge(draft.kanban, state.kanban);
+  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
+  if (state.workflows) deepMerge(draft.workflows, state.workflows);
+  if (state.tasks) deepMerge(draft.tasks, state.tasks);
+  if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
+  if (state.repositories) deepMerge(draft.repositories, state.repositories);
+  if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
+}
+
+/** Hydrate settings slices, preserving loading states. */
+function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void {
+  if (state.executors) deepMerge(draft.executors, state.executors);
+  if (state.environments) deepMerge(draft.environments, state.environments);
+  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
+  if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
+  mergeWithLoading(draft.availableAgents, state.availableAgents);
+  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
+  mergeWithLoading(draft.editors, state.editors);
+  mergeWithLoading(draft.prompts, state.prompts);
+  mergeWithLoading(draft.notificationProviders, state.notificationProviders);
+  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
+  if (state.userSettings && !draft.userSettings.loaded) {
+    deepMerge(draft.userSettings, state.userSettings);
+  }
+}
+
+/** Hydrate session slices, protecting active sessions. */
+function hydrateSession(
+  draft: Draft<AppState>, state: Partial<AppState>,
+  activeSessionId: string | null, forceMergeSessionId: string | null
+): void {
+  if (state.messages) {
+    if (state.messages.bySession) mergeSessionMap(draft.messages.bySession, state.messages.bySession, activeSessionId, forceMergeSessionId);
+    if (state.messages.metaBySession) mergeSessionMap(draft.messages.metaBySession, state.messages.metaBySession, activeSessionId, forceMergeSessionId);
+  }
+  if (state.turns) {
+    if (state.turns.bySession) mergeSessionMap(draft.turns.bySession, state.turns.bySession, activeSessionId, forceMergeSessionId);
+    if (state.turns.activeBySession) mergeSessionMap(draft.turns.activeBySession, state.turns.activeBySession, activeSessionId, forceMergeSessionId);
+  }
+  if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
+  if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
+  if (state.sessionAgentctl) {
+    mergeSessionMap(draft.sessionAgentctl.itemsBySessionId, state.sessionAgentctl?.itemsBySessionId, activeSessionId, forceMergeSessionId);
+  }
+  if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
+  if (state.sessionWorktreesBySessionId) deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
+  if (state.pendingModel) deepMerge(draft.pendingModel, state.pendingModel);
+  if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
+}
+
+/** Hydrate session runtime slices (volatile state). */
+function hydrateSessionRuntime(
+  draft: Draft<AppState>, state: Partial<AppState>,
+  activeSessionId: string | null, forceMergeSessionId: string | null
+): void {
+  if (state.terminal) deepMerge(draft.terminal, state.terminal);
+  if (state.shell) {
+    mergeSessionMap(draft.shell.outputs, state.shell?.outputs, activeSessionId, forceMergeSessionId);
+    mergeSessionMap(draft.shell.statuses, state.shell?.statuses, activeSessionId, forceMergeSessionId);
+  }
+  if (state.processes) deepMerge(draft.processes, state.processes);
+  if (state.gitStatus) {
+    mergeSessionMap(draft.gitStatus.bySessionId, state.gitStatus?.bySessionId, activeSessionId, forceMergeSessionId);
+  }
+  if (state.contextWindow) {
+    mergeSessionMap(draft.contextWindow.bySessionId, state.contextWindow?.bySessionId, activeSessionId, forceMergeSessionId);
+  }
+  if (state.agents) deepMerge(draft.agents, state.agents);
+}
+
+/** Hydrate UI slices without overwriting active connection state. */
+function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
+  if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
+  if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
+  if (state.diffs) deepMerge(draft.diffs, state.diffs);
+  if (state.connection) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { status: _status, ...rest } = state.connection || {};
+    if (Object.keys(rest).length > 0) {
+      Object.assign(draft.connection, rest);
+    }
+  }
+}
+
 /**
  * Hydrates the app state with SSR data using smart merge strategies.
  *
@@ -30,104 +124,13 @@ export function hydrateState(
 ): void {
   const { activeSessionId = null, skipSessionRuntime = false, forceMergeSessionId = null } = options;
 
-  // Kanban slice - always safe to hydrate
-  if (state.kanban) deepMerge(draft.kanban, state.kanban);
-  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
-  if (state.workflows) deepMerge(draft.workflows, state.workflows);
-  if (state.tasks) deepMerge(draft.tasks, state.tasks);
+  hydrateKanbanAndWorkspace(draft, state);
+  hydrateSettings(draft, state);
+  hydrateSession(draft, state, activeSessionId, forceMergeSessionId);
 
-  // Workspace slice - always safe to hydrate
-  if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
-  if (state.repositories) deepMerge(draft.repositories, state.repositories);
-  if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
-
-  // Settings slice - always safe to hydrate, but preserve loading states
-  if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.environments) deepMerge(draft.environments, state.environments);
-  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
-  if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
-  if (state.availableAgents) {
-    deepMerge(draft.availableAgents, state.availableAgents);
-    mergeLoadingState(draft.availableAgents, state.availableAgents);
-  }
-  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
-  if (state.editors) {
-    deepMerge(draft.editors, state.editors);
-    mergeLoadingState(draft.editors, state.editors);
-  }
-  if (state.prompts) {
-    deepMerge(draft.prompts, state.prompts);
-    mergeLoadingState(draft.prompts, state.prompts);
-  }
-  if (state.notificationProviders) {
-    deepMerge(draft.notificationProviders, state.notificationProviders);
-    mergeLoadingState(draft.notificationProviders, state.notificationProviders);
-  }
-  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
-  // Skip userSettings hydration if already loaded — client state is the
-  // source of truth after initial load.  Re-hydrating with SSR data causes
-  // stale workflow/workspace IDs to overwrite user actions (e.g. selecting
-  // "All workflows" triggers router.push → SSR re-fetches old settings).
-  if (state.userSettings && !draft.userSettings.loaded) {
-    deepMerge(draft.userSettings, state.userSettings);
-  }
-
-  // Session slice - careful with active sessions
-  if (state.messages) {
-    if (state.messages.bySession) {
-      mergeSessionMap(draft.messages.bySession, state.messages.bySession, activeSessionId, forceMergeSessionId);
-    }
-    if (state.messages.metaBySession) {
-      mergeSessionMap(draft.messages.metaBySession, state.messages.metaBySession, activeSessionId, forceMergeSessionId);
-    }
-  }
-  if (state.turns) {
-    if (state.turns.bySession) {
-      mergeSessionMap(draft.turns.bySession, state.turns.bySession, activeSessionId, forceMergeSessionId);
-    }
-    if (state.turns.activeBySession) {
-      mergeSessionMap(draft.turns.activeBySession, state.turns.activeBySession, activeSessionId, forceMergeSessionId);
-    }
-  }
-  if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
-  if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
-  if (state.sessionAgentctl) {
-    mergeSessionMap(draft.sessionAgentctl.itemsBySessionId, state.sessionAgentctl?.itemsBySessionId, activeSessionId, forceMergeSessionId);
-  }
-  if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
-  if (state.sessionWorktreesBySessionId) {
-    deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
-  }
-  if (state.pendingModel) deepMerge(draft.pendingModel, state.pendingModel);
-  if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
-
-  // Session Runtime slice - skip if requested (volatile state)
   if (!skipSessionRuntime) {
-    if (state.terminal) deepMerge(draft.terminal, state.terminal);
-    if (state.shell) {
-      mergeSessionMap(draft.shell.outputs, state.shell?.outputs, activeSessionId, forceMergeSessionId);
-      mergeSessionMap(draft.shell.statuses, state.shell?.statuses, activeSessionId, forceMergeSessionId);
-    }
-    if (state.processes) deepMerge(draft.processes, state.processes);
-    if (state.gitStatus) {
-      mergeSessionMap(draft.gitStatus.bySessionId, state.gitStatus?.bySessionId, activeSessionId, forceMergeSessionId);
-    }
-    if (state.contextWindow) {
-      mergeSessionMap(draft.contextWindow.bySessionId, state.contextWindow?.bySessionId, activeSessionId, forceMergeSessionId);
-    }
-    if (state.agents) deepMerge(draft.agents, state.agents);
+    hydrateSessionRuntime(draft, state, activeSessionId, forceMergeSessionId);
   }
 
-  // UI slice - merge but don't overwrite active state
-  if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
-  if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
-  if (state.diffs) deepMerge(draft.diffs, state.diffs);
-  if (state.connection) {
-    // Don't overwrite connection status from SSR - it's always stale
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { status: _status, ...rest } = state.connection || {};
-    if (Object.keys(rest).length > 0) {
-      Object.assign(draft.connection, rest);
-    }
-  }
+  hydrateUI(draft, state);
 }

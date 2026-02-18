@@ -72,6 +72,61 @@ export type Graph2StepNodeProps = {
 
 const NODE_CLASS = 'w-[130px] h-[44px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center';
 
+function PastNode({ step }: { step: WorkflowStep }) {
+  return (
+    <div className={cn(NODE_CLASS, 'border border-muted-foreground/20 bg-muted/30')}>
+      <div className="flex items-center gap-1.5 w-full">
+        <IconCheck className="h-3 w-3 text-green-500 shrink-0" />
+        <span className="text-[11px] text-muted-foreground truncate">
+          {step.title}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function FutureNode({ step }: { step: WorkflowStep }) {
+  return (
+    <div className={cn(NODE_CLASS, 'border border-dashed border-muted-foreground/20 bg-muted/10')}>
+      <div className="flex items-center gap-1.5 w-full">
+        <IconCircleDashed className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+        <span className="text-[11px] text-muted-foreground/40 truncate">
+          {step.title}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MoveButton({
+  direction,
+  isMoving,
+  onClick,
+}: {
+  direction: 'left' | 'right';
+  isMoving?: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const posClass = direction === 'left' ? '-left-3' : '-right-3';
+  const Icon = direction === 'left' ? IconChevronLeft : IconChevronRight;
+  return (
+    <button
+      type="button"
+      disabled={isMoving}
+      onClick={onClick}
+      className={cn(
+        `absolute ${posClass} top-1/2 -translate-y-1/2 z-10`,
+        'h-5 w-5 rounded-full bg-background border border-border shadow-sm',
+        'flex items-center justify-center',
+        'hover:bg-accent transition-colors cursor-pointer',
+        isMoving && 'opacity-50 cursor-not-allowed'
+      )}
+    >
+      <Icon className="h-3 w-3" />
+    </button>
+  );
+}
+
 export function Graph2StepNode({
   step,
   phase,
@@ -87,8 +142,14 @@ export function Graph2StepNode({
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
 
+  if (phase === 'past') return <PastNode step={step} />;
+  if (phase === 'future') return <FutureNode step={step} />;
+
+  // Current phase
+  const status = getStatusInfo(task);
+  const running = isRunningState(task.state);
+
   const handleClick = () => {
-    if (phase !== 'current') return;
     if (task.primarySessionId) {
       router.push(linkToSession(task.primarySessionId));
     } else {
@@ -96,64 +157,20 @@ export function Graph2StepNode({
     }
   };
 
-  if (phase === 'past') {
-    return (
-      <div className={cn(NODE_CLASS, 'border border-muted-foreground/20 bg-muted/30')}>
-        <div className="flex items-center gap-1.5 w-full">
-          <IconCheck className="h-3 w-3 text-green-500 shrink-0" />
-          <span className="text-[11px] text-muted-foreground truncate">
-            {step.title}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  if (phase === 'future') {
-    return (
-      <div className={cn(NODE_CLASS, 'border border-dashed border-muted-foreground/20 bg-muted/10')}>
-        <div className="flex items-center gap-1.5 w-full">
-          <IconCircleDashed className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-          <span className="text-[11px] text-muted-foreground/40 truncate">
-            {step.title}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // Current phase
-  const status = getStatusInfo(task);
-  const running = isRunningState(task.state);
-
   return (
     <div
       className="relative shrink-0"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Left move button */}
       {isHovered && hasPrev && prevStepId && (
-        <button
-          type="button"
-          disabled={isMoving}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMoveTask(task, prevStepId);
-          }}
-          className={cn(
-            'absolute -left-3 top-1/2 -translate-y-1/2 z-10',
-            'h-5 w-5 rounded-full bg-background border border-border shadow-sm',
-            'flex items-center justify-center',
-            'hover:bg-accent transition-colors cursor-pointer',
-            isMoving && 'opacity-50 cursor-not-allowed'
-          )}
-        >
-          <IconChevronLeft className="h-3 w-3" />
-        </button>
+        <MoveButton
+          direction="left"
+          isMoving={isMoving}
+          onClick={(e) => { e.stopPropagation(); onMoveTask(task, prevStepId); }}
+        />
       )}
 
-      {/* Current node */}
       <button
         type="button"
         onClick={handleClick}
@@ -186,25 +203,12 @@ export function Graph2StepNode({
         </span>
       </button>
 
-      {/* Right move button */}
       {isHovered && hasNext && nextStepId && (
-        <button
-          type="button"
-          disabled={isMoving}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMoveTask(task, nextStepId);
-          }}
-          className={cn(
-            'absolute -right-3 top-1/2 -translate-y-1/2 z-10',
-            'h-5 w-5 rounded-full bg-background border border-border shadow-sm',
-            'flex items-center justify-center',
-            'hover:bg-accent transition-colors cursor-pointer',
-            isMoving && 'opacity-50 cursor-not-allowed'
-          )}
-        >
-          <IconChevronRight className="h-3 w-3" />
-        </button>
+        <MoveButton
+          direction="right"
+          isMoving={isMoving}
+          onClick={(e) => { e.stopPropagation(); onMoveTask(task, nextStepId); }}
+        />
       )}
     </div>
   );

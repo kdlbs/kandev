@@ -61,6 +61,46 @@ type TaskFilesPanelProps = {
 
 
 
+type GitStatusFiles = Record<string, { diff?: string; additions?: number; deletions?: number; staged?: boolean; status?: string; old_path?: string }>;
+type CumulativeDiffFiles = Record<string, { diff?: string }>;
+type ReviewMap = Map<string, { reviewed?: boolean; diffHash?: string }>;
+
+function collectDiffPaths(gitStatusFiles: GitStatusFiles | undefined, cumulativeFiles: CumulativeDiffFiles | undefined): Set<string> {
+  const paths = new Set<string>();
+  if (gitStatusFiles) {
+    for (const [path, file] of Object.entries(gitStatusFiles)) {
+      if (file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    }
+  }
+  if (cumulativeFiles) {
+    for (const [path, file] of Object.entries(cumulativeFiles)) {
+      if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    }
+  }
+  return paths;
+}
+
+function getDiffContentForPath(path: string, gitStatusFiles: GitStatusFiles | undefined, cumulativeFiles: CumulativeDiffFiles | undefined): string {
+  const uncommittedFile = gitStatusFiles?.[path];
+  if (uncommittedFile?.diff) return normalizeDiffContent(uncommittedFile.diff);
+  const cumulativeFile = cumulativeFiles?.[path];
+  if (cumulativeFile?.diff) return normalizeDiffContent(cumulativeFile.diff);
+  return '';
+}
+
+function computeReviewProgress(gitStatusFiles: GitStatusFiles | undefined, cumulativeFiles: CumulativeDiffFiles | undefined, reviews: ReviewMap): { reviewedCount: number; totalFileCount: number } {
+  const paths = collectDiffPaths(gitStatusFiles, cumulativeFiles);
+  let reviewed = 0;
+  for (const path of paths) {
+    const state = reviews.get(path);
+    if (!state?.reviewed) continue;
+    const diffContent = getDiffContentForPath(path, gitStatusFiles, cumulativeFiles);
+    if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
+    reviewed++;
+  }
+  return { reviewedCount: reviewed, totalFileCount: paths.size };
+}
+
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf('/');
   if (lastSlash === -1) return { folder: '', file: path };
@@ -70,541 +110,419 @@ const splitPath = (path: string) => {
   };
 };
 
-const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, activeFilePath }: TaskFilesPanelProps) {
-  const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
-  const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId ?? null);
-  const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
-  const gitOps = useGitOperations(activeSessionId ?? null);
-  const { toast } = useToast();
-  const { createFile: baseCreateFile, deleteFile: hookDeleteFile } = useFileOperations(activeSessionId ?? null);
-  const { reviews } = useSessionFileReviews(activeSessionId);
-  const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
-
-  // Track if we've initialized the tab for this session
-  const hasInitializedTabRef = useRef<string | null>(null);
-  // Track whether user explicitly clicked the "files" tab (vs auto-selected)
-  const userClickedFilesTabRef = useRef(false);
-  // Track previous changed files count for auto-switch detection
-  const prevChangedCountRef = useRef(0);
-
-  // State for commit diffs
+function useCommitDiffs(activeSessionId: string | null | undefined) {
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDiffs, setCommitDiffs] = useState<Record<string, Record<string, FileInfo>>>({});
   const [loadingCommitSha, setLoadingCommitSha] = useState<string | null>(null);
-  const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
 
-  // Fetch commit diff
   const fetchCommitDiff = useCallback(async (commitSha: string) => {
     if (!activeSessionId || commitDiffs[commitSha]) return;
-
     setLoadingCommitSha(commitSha);
     try {
       const ws = getWebSocketClient();
       if (!ws) return;
-      const response = await ws.request<{ success: boolean; files: Record<string, FileInfo> }>(
-        'session.commit_diff',
-        { session_id: activeSessionId, commit_sha: commitSha },
-        10000
-      );
-      if (response?.success && response.files) {
-        setCommitDiffs((prev) => ({ ...prev, [commitSha]: response.files }));
-      }
+      const response = await ws.request<{ success: boolean; files: Record<string, FileInfo> }>('session.commit_diff', { session_id: activeSessionId, commit_sha: commitSha }, 10000);
+      if (response?.success && response.files) setCommitDiffs((prev) => ({ ...prev, [commitSha]: response.files }));
     } catch (err) {
-      toast({
-        title: 'Failed to load commit diff',
-        description: err instanceof Error ? err.message : 'An unexpected error occurred',
-        variant: 'error',
-      });
-    } finally {
-      setLoadingCommitSha(null);
-    }
+      toast({ title: 'Failed to load commit diff', description: err instanceof Error ? err.message : 'An unexpected error occurred', variant: 'error' });
+    } finally { setLoadingCommitSha(null); }
   }, [activeSessionId, commitDiffs, toast]);
 
-  // Toggle commit expansion
   const toggleCommit = useCallback((commitSha: string) => {
-    if (expandedCommit === commitSha) {
-      setExpandedCommit(null);
-    } else {
-      setExpandedCommit(commitSha);
-      void fetchCommitDiff(commitSha);
-    }
+    if (expandedCommit === commitSha) { setExpandedCommit(null); } else { setExpandedCommit(commitSha); void fetchCommitDiff(commitSha); }
   }, [expandedCommit, fetchCommitDiff]);
 
-  // Handle discard changes
-  const handleDiscardClick = useCallback((filePath: string) => {
-    setFileToDiscard(filePath);
-    setShowDiscardDialog(true);
-  }, []);
+  return { expandedCommit, commitDiffs, loadingCommitSha, toggleCommit };
+}
 
-  const handleDiscardConfirm = useCallback(async () => {
-    if (!fileToDiscard) return;
+function useGitStagingActions(activeSessionId: string | null | undefined, changedFiles: unknown[]) {
+  const gitOps = useGitOperations(activeSessionId ?? null);
+  const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
 
-    try {
-      const result = await gitOps.discard([fileToDiscard]);
-      if (!result.success) {
-        toast({
-          title: 'Failed to discard changes',
-          description: result.error || 'An unknown error occurred',
-          variant: 'error',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Failed to discard changes',
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
-        variant: 'error',
-      });
-    } finally {
-      setShowDiscardDialog(false);
-      setFileToDiscard(null);
-    }
-  }, [fileToDiscard, gitOps, toast]);
-
-  // Handle create file (wraps shared hook to also open the new file)
-  const handleCreateFile = useCallback(async (path: string): Promise<boolean> => {
-    const ok = await baseCreateFile(path);
-    if (ok) {
-      const name = path.split('/').pop() || path;
-      const { calculateHash } = await import('@/lib/utils/file-diff');
-      const hash = await calculateHash('');
-      onOpenFile({ path, name, content: '', originalContent: '', originalHash: hash, isDirty: false });
-    }
-    return ok;
-  }, [baseCreateFile, onOpenFile]);
-
-  // Convert git status files to array for display
-  const changedFiles = useMemo(() => {
-    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) {
-      return [];
-    }
-    return (Object.values(gitStatus.files) as FileInfo[]).map((file: FileInfo) => ({
-      path: file.path,
-      status: file.status,
-      staged: file.staged,
-      plus: file.additions,
-      minus: file.deletions,
-      oldPath: file.old_path,
-    }));
-  }, [gitStatus]);
-
-  // Compute review progress across all files (uncommitted + committed)
-  const { reviewedCount, totalFileCount } = useMemo(() => {
-    const paths = new Set<string>();
-
-    // Uncommitted
-    if (gitStatus?.files) {
-      for (const [path, file] of Object.entries(gitStatus.files)) {
-        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
-        if (diff) paths.add(path);
-      }
-    }
-
-    // Committed (skip duplicates)
-    if (cumulativeDiff?.files) {
-      for (const [path, file] of Object.entries(cumulativeDiff.files)) {
-        if (paths.has(path)) continue;
-        const diff = file.diff ? normalizeDiffContent(file.diff) : '';
-        if (diff) paths.add(path);
-      }
-    }
-
-    let reviewed = 0;
-    for (const path of paths) {
-      const state = reviews.get(path);
-      if (!state?.reviewed) continue;
-
-      // Check staleness: find the diff content for this path
-      let diffContent = '';
-      const uncommittedFile = gitStatus?.files?.[path];
-      if (uncommittedFile?.diff) {
-        diffContent = normalizeDiffContent(uncommittedFile.diff);
-      } else if (cumulativeDiff?.files?.[path]?.diff) {
-        diffContent = normalizeDiffContent(cumulativeDiff.files[path].diff!);
-      }
-
-      if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) {
-        continue; // stale — don't count
-      }
-      reviewed++;
-    }
-
-    return { reviewedCount: reviewed, totalFileCount: paths.size };
-  }, [gitStatus, cumulativeDiff, reviews]);
-
-  const reviewProgressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
-
-  // Clear pending stage/unstage spinners when git status updates
   useEffect(() => {
-    if (pendingStageFiles.size > 0) {
-      setPendingStageFiles(new Set());
-    }
+    if (pendingStageFiles.size > 0) setPendingStageFiles(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changedFiles]);
 
   const handleStage = useCallback(async (path: string) => {
     setPendingStageFiles((prev) => new Set(prev).add(path));
-    try {
-      await gitOps.stage([path]);
-    } catch {
-      setPendingStageFiles((prev) => {
-        const next = new Set(prev);
-        next.delete(path);
-        return next;
-      });
-    }
+    try { await gitOps.stage([path]); } catch { setPendingStageFiles((prev) => { const next = new Set(prev); next.delete(path); return next; }); }
   }, [gitOps]);
 
   const handleUnstage = useCallback(async (path: string) => {
     setPendingStageFiles((prev) => new Set(prev).add(path));
-    try {
-      await gitOps.unstage([path]);
-    } catch {
-      setPendingStageFiles((prev) => {
-        const next = new Set(prev);
-        next.delete(path);
-        return next;
-      });
-    }
+    try { await gitOps.unstage([path]); } catch { setPendingStageFiles((prev) => { const next = new Set(prev); next.delete(path); return next; }); }
   }, [gitOps]);
 
-  // Open file in editor panel
-  const { openFile: panelOpenFile } = usePanelActions();
-  const handleOpenFileInDocumentPanel = useCallback((path: string) => {
-    if (!activeSessionId) return;
-    // On desktop, this will open a file editor tab via dockview
-    panelOpenFile(path);
-  }, [activeSessionId, panelOpenFile]);
+  return { pendingStageFiles, handleStage, handleUnstage };
+}
 
-  // Smart tab selection: restore user preference or auto-select based on changes
+function useFilesPanelTab(activeSessionId: string | null | undefined, changedFilesLength: number, commitsLength: number) {
+  const [topTab, setTopTab] = useState<'diff' | 'files'>('diff');
+  const hasInitializedTabRef = useRef<string | null>(null);
+  const userClickedFilesTabRef = useRef(false);
+  const prevChangedCountRef = useRef(0);
+
   useEffect(() => {
     if (!activeSessionId) return;
-
-    // Only initialize once per session
     if (hasInitializedTabRef.current === activeSessionId) return;
     hasInitializedTabRef.current = activeSessionId;
-
-    // If user has previously selected a tab for this session, restore it
     if (hasUserSelectedFilesPanelTab(activeSessionId)) {
       const savedTab = getFilesPanelTab(activeSessionId, 'diff');
-      setTopTab(savedTab);
       userClickedFilesTabRef.current = savedTab === 'files';
+      queueMicrotask(() => setTopTab(savedTab));
       return;
     }
-
-    // Auto-select based on whether there are changes
     userClickedFilesTabRef.current = false;
-    const hasChanges = changedFiles.length > 0 || commits.length > 0;
-    const defaultTab = hasChanges ? 'diff' : 'files';
-    setTopTab(defaultTab);
-    prevChangedCountRef.current = changedFiles.length;
-  }, [activeSessionId, changedFiles.length, commits.length]);
+    const nextTab = (changedFilesLength > 0 || commitsLength > 0) ? 'diff' : 'files';
+    prevChangedCountRef.current = changedFilesLength;
+    queueMicrotask(() => setTopTab(nextTab));
+  }, [activeSessionId, changedFilesLength, commitsLength]);
 
-  // Handle tab change - save preference and mark as user-selected
+  useEffect(() => {
+    const prev = prevChangedCountRef.current;
+    prevChangedCountRef.current = changedFilesLength;
+    if (changedFilesLength !== prev) {
+      if (topTab === 'files' && userClickedFilesTabRef.current) return;
+      queueMicrotask(() => setTopTab('diff'));
+    }
+  }, [changedFilesLength, topTab]);
+
   const handleTabChange = useCallback((tab: 'diff' | 'files') => {
     setTopTab(tab);
     userClickedFilesTabRef.current = tab === 'files';
-    if (activeSessionId) {
-      setFilesPanelTab(activeSessionId, tab);
-      setUserSelectedFilesPanelTab(activeSessionId);
-    }
+    if (activeSessionId) { setFilesPanelTab(activeSessionId, tab); setUserSelectedFilesPanelTab(activeSessionId); }
   }, [activeSessionId]);
 
-  // Auto-switch to "Diff files" tab when new workspace changes appear
-  useEffect(() => {
-    const prev = prevChangedCountRef.current;
-    prevChangedCountRef.current = changedFiles.length;
+  return { topTab, handleTabChange };
+}
 
-    // Switch when change count changes (new or removed changes detected)
-    if (changedFiles.length !== prev) {
-      // Don't switch if user explicitly chose the "All files" tab
-      if (topTab === 'files' && userClickedFilesTabRef.current) return;
-      setTopTab('diff');
-    }
-  }, [changedFiles.length, topTab]);
+function useDiscardDialog(activeSessionId: string | null | undefined) {
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+  const gitOps = useGitOperations(activeSessionId ?? null);
+  const { toast } = useToast();
+
+  const handleDiscardClick = useCallback((filePath: string) => { setFileToDiscard(filePath); setShowDiscardDialog(true); }, []);
+
+  const handleDiscardConfirm = useCallback(async () => {
+    if (!fileToDiscard) return;
+    try {
+      const result = await gitOps.discard([fileToDiscard]);
+      if (!result.success) toast({ title: 'Failed to discard changes', description: result.error || 'An unknown error occurred', variant: 'error' });
+    } catch (error) { toast({ title: 'Failed to discard changes', description: error instanceof Error ? error.message : 'An unknown error occurred', variant: 'error' }); }
+    finally { setShowDiscardDialog(false); setFileToDiscard(null); }
+  }, [fileToDiscard, gitOps, toast]);
+
+  return { showDiscardDialog, setShowDiscardDialog, fileToDiscard, handleDiscardClick, handleDiscardConfirm };
+}
+
+function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const { commits } = useSessionCommits(activeSessionId ?? null);
+  const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
+  const { createFile: baseCreateFile, deleteFile: hookDeleteFile } = useFileOperations(activeSessionId ?? null);
+  const { reviews } = useSessionFileReviews(activeSessionId);
+  const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
+  const { openFile: panelOpenFile } = usePanelActions();
+
+  const changedFiles = useMemo(() => {
+    if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) return [];
+    return (Object.values(gitStatus.files) as FileInfo[]).map((file: FileInfo) => ({ path: file.path, status: file.status, staged: file.staged, plus: file.additions, minus: file.deletions, oldPath: file.old_path }));
+  }, [gitStatus]);
+
+  const { reviewedCount, totalFileCount } = useMemo(
+    () => computeReviewProgress(gitStatus?.files as GitStatusFiles | undefined, cumulativeDiff?.files as CumulativeDiffFiles | undefined, reviews as ReviewMap),
+    [gitStatus, cumulativeDiff, reviews]
+  );
+
+  const handleCreateFile = useCallback(async (path: string): Promise<boolean> => {
+    const ok = await baseCreateFile(path);
+    if (ok) { const name = path.split('/').pop() || path; const { calculateHash } = await import('@/lib/utils/file-diff'); const hash = await calculateHash(''); onOpenFile({ path, name, content: '', originalContent: '', originalHash: hash, isDirty: false }); }
+    return ok;
+  }, [baseCreateFile, onOpenFile]);
+
+  const handleOpenFileInDocumentPanel = useCallback((path: string) => { if (activeSessionId) panelOpenFile(path); }, [activeSessionId, panelOpenFile]);
+  const handleOpenInEditor = useCallback((path: string) => { if (activeSessionId) openEditor.open({ filePath: path }); }, [activeSessionId, openEditor]);
+
+  return { activeSessionId, gitStatus, commits, changedFiles, reviewedCount, totalFileCount, hookDeleteFile, handleCreateFile, handleOpenFileInDocumentPanel, handleOpenInEditor };
+}
+
+const TaskFilesPanel = memo(function TaskFilesPanel({ onSelectDiff, onOpenFile, activeFilePath }: TaskFilesPanelProps) {
+  const { activeSessionId, commits, changedFiles, reviewedCount, totalFileCount, hookDeleteFile, handleCreateFile, handleOpenFileInDocumentPanel, handleOpenInEditor } = useFilesPanelData(onOpenFile);
+  const reviewProgressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
+  const { topTab, handleTabChange } = useFilesPanelTab(activeSessionId, changedFiles.length, commits.length);
+  const { expandedCommit, commitDiffs, loadingCommitSha, toggleCommit } = useCommitDiffs(activeSessionId);
+  const { pendingStageFiles, handleStage, handleUnstage } = useGitStagingActions(activeSessionId, changedFiles);
+  const { showDiscardDialog, setShowDiscardDialog, fileToDiscard, handleDiscardClick, handleDiscardConfirm } = useDiscardDialog(activeSessionId);
 
   const tabs: SessionTab[] = [
-    {
-      id: 'diff',
-      label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ''}`,
-    },
-    {
-      id: 'files',
-      label: 'All files',
-    },
+    { id: 'diff', label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ''}` },
+    { id: 'files', label: 'All files' },
   ];
 
   return (
     <SessionPanel borderSide="left">
-      <SessionTabs
-        tabs={tabs}
-        activeTab={topTab}
-        onTabChange={(value) => handleTabChange(value as 'diff' | 'files')}
-        className="flex-1 min-h-0"
-      >
+      <SessionTabs tabs={tabs} activeTab={topTab} onTabChange={(value) => handleTabChange(value as 'diff' | 'files')} className="flex-1 min-h-0">
         <TabsContent value="diff" className="flex-1 min-h-0">
           <SessionPanelContent className="flex flex-col">
-            <div className="space-y-4">
-              {/* Uncommitted changes section */}
-              {changedFiles.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground mb-2">
-                    Uncommitted ({changedFiles.length})
-                  </div>
-                  <ul className="space-y-1">
-                    {changedFiles.map((file) => {
-                      const { folder, file: name } = splitPath(file.path);
-                      return (
-                        <li
-                          key={file.path}
-                          className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-                          onClick={() => onSelectDiff(file.path)}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {pendingStageFiles.has(file.path) ? (
-                              <div className="flex-shrink-0 flex items-center justify-center size-4">
-                                <IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                              </div>
-                            ) : file.staged ? (
-                              <button
-                                type="button"
-                                title="Unstage file"
-                                className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleUnstage(file.path);
-                                }}
-                              >
-                                <IconCheck className="h-3 w-3 group-hover/unstage:hidden" />
-                                <IconMinus className="h-2.5 w-2.5 hidden group-hover/unstage:block" />
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                title="Stage file"
-                                className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleStage(file.path);
-                                }}
-                              >
-                                <IconPlus className="h-2.5 w-2.5" />
-                              </button>
-                            )}
-                            <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
-                              <p className="flex text-foreground text-xs min-w-0">
-                                {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-                                <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
-                              </p>
-                            </button>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="text-muted-foreground hover:text-foreground cursor-pointer"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleDiscardClick(file.path);
-                                    }}
-                                  >
-                                    <IconArrowBackUp className="h-3.5 w-3.5" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Discard changes</TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="text-muted-foreground hover:text-foreground cursor-pointer"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleOpenFileInDocumentPanel(file.path);
-                                    }}
-                                  >
-                                    <IconColumns className="h-3.5 w-3.5" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Open side-by-side</TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (!activeSessionId) return;
-                                      void openEditor.open({ filePath: file.path });
-                                    }}
-                                  >
-                                    <IconExternalLink className="h-3.5 w-3.5" />
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent>Open in external editor</TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <LineStat added={file.plus} removed={file.minus} />
-                            <FileStatusIcon status={file.status} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              {/* Commits section */}
-              {commits.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground mb-2">
-                    Commits ({commits.length})
-                  </div>
-                  <ul className="space-y-1">
-                    {commits.map((commit) => {
-                      const isExpanded = expandedCommit === commit.commit_sha;
-                      const files = commitDiffs[commit.commit_sha];
-                      const isLoading = loadingCommitSha === commit.commit_sha;
-                      return (
-                        <li key={commit.commit_sha}>
-                          <button
-                            type="button"
-                            className="w-full flex items-center gap-2 text-left rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-                            onClick={() => toggleCommit(commit.commit_sha)}
-                          >
-                            <IconChevronRight
-                              className={cn(
-                                'h-3 w-3 text-muted-foreground transition-transform shrink-0',
-                                isExpanded && 'rotate-90'
-                              )}
-                            />
-                            <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs truncate">
-                                <code className="font-mono text-muted-foreground">{commit.commit_sha.slice(0, 7)}</code>
-                                {' '}
-                                <span className="text-foreground">{commit.commit_message}</span>
-                              </p>
-                            </div>
-                            <span className="text-xs shrink-0">
-                              <span className="text-emerald-500">+{commit.insertions}</span>
-                              {'/'}
-                              <span className="text-rose-500">-{commit.deletions}</span>
-                            </span>
-                            {isLoading && (
-                              <IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                            )}
-                          </button>
-                          {isExpanded && files && (
-                            <ul className="ml-6 mt-1 space-y-0.5">
-                              {Object.entries(files).map(([path, file]) => {
-                                const { folder, file: fileName } = splitPath(path);
-                                return (
-                                  <li
-                                    key={path}
-                                    className="flex items-center gap-2 text-xs rounded px-1 py-0.5 hover:bg-muted/50 cursor-pointer"
-                                    onClick={() => onSelectDiff(path, file.diff)}
-                                  >
-                                    <FileStatusIcon status={file.status} />
-                                    <span className="flex flex-1 min-w-0" title={path}>
-                                      {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-                                      <span className="text-foreground whitespace-nowrap shrink-0">{fileName}</span>
-                                    </span>
-                                    <span className="shrink-0 text-xs">
-                                      <span className="text-emerald-500">+{file.additions ?? 0}</span>
-                                      {'/'}
-                                      <span className="text-rose-500">-{file.deletions ?? 0}</span>
-                                    </span>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              {/* Empty state */}
-              {changedFiles.length === 0 && commits.length === 0 && (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                  Your changed files will appear here
-                </div>
-              )}
-            </div>
-            {/* Review progress — pushed to bottom of panel */}
-            {totalFileCount > 0 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className="mt-auto flex items-center gap-2 pt-2 cursor-pointer transition-colors"
-                    onClick={() => window.dispatchEvent(new CustomEvent('switch-to-changes-tab'))}
-                  >
-                    <div className="flex-1 h-0.5 rounded-full bg-muted-foreground/10 overflow-hidden">
-                      <div
-                        className="h-full bg-muted-foreground/25 rounded-full transition-all duration-300"
-                        style={{ width: `${reviewProgressPercent}%` }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-muted-foreground/40 whitespace-nowrap">
-                      {reviewedCount}/{totalFileCount} reviewed
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {reviewedCount} of {totalFileCount} files reviewed
-                </TooltipContent>
-              </Tooltip>
-            )}
+            <DiffTabContent
+              changedFiles={changedFiles} pendingStageFiles={pendingStageFiles} commits={commits}
+              expandedCommit={expandedCommit} commitDiffs={commitDiffs} loadingCommitSha={loadingCommitSha}
+              reviewedCount={reviewedCount} totalFileCount={totalFileCount} reviewProgressPercent={reviewProgressPercent}
+              onSelectDiff={onSelectDiff} onStage={handleStage} onUnstage={handleUnstage} onDiscard={handleDiscardClick}
+              onOpenInPanel={handleOpenFileInDocumentPanel} onOpenInEditor={handleOpenInEditor} onToggleCommit={toggleCommit}
+            />
           </SessionPanelContent>
         </TabsContent>
         <TabsContent value="files" className="flex-1 min-h-0">
           <SessionPanelContent>
             {activeSessionId ? (
-              <FileBrowser
-                sessionId={activeSessionId}
-                onOpenFile={onOpenFile}
-                onCreateFile={handleCreateFile}
-                onDeleteFile={hookDeleteFile}
-                activeFilePath={activeFilePath}
-              />
+              <FileBrowser sessionId={activeSessionId} onOpenFile={onOpenFile} onCreateFile={handleCreateFile} onDeleteFile={hookDeleteFile} activeFilePath={activeFilePath} />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                No task selected
-              </div>
+              <div className="flex items-center justify-center h-full text-muted-foreground text-xs">No task selected</div>
             )}
           </SessionPanelContent>
         </TabsContent>
       </SessionTabs>
-
-      {/* Discard confirmation dialog */}
       <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Discard changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently discard all changes to{' '}
-              <span className="font-semibold">{fileToDiscard}</span>. This action cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogDescription>This will permanently discard all changes to{' '}<span className="font-semibold">{fileToDiscard}</span>. This action cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDiscardConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Discard
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDiscardConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Discard</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </SessionPanel>
   );
 });
+
+// --- Extracted sub-components for diff tab ---
+
+type ChangedFileItem = {
+  path: string;
+  status: FileInfo['status'];
+  staged: boolean;
+  plus: number | undefined;
+  minus: number | undefined;
+  oldPath: string | undefined;
+};
+
+function DiffTabContent({
+  changedFiles, pendingStageFiles, commits, expandedCommit, commitDiffs, loadingCommitSha,
+  reviewedCount, totalFileCount, reviewProgressPercent,
+  onSelectDiff, onStage, onUnstage, onDiscard, onOpenInPanel, onOpenInEditor, onToggleCommit,
+}: {
+  changedFiles: ChangedFileItem[]; pendingStageFiles: Set<string>;
+  commits: Array<{ commit_sha: string; commit_message: string; insertions: number; deletions: number }>;
+  expandedCommit: string | null; commitDiffs: Record<string, Record<string, FileInfo>>;
+  loadingCommitSha: string | null;
+  reviewedCount: number; totalFileCount: number; reviewProgressPercent: number;
+  onSelectDiff: (path: string, content?: string) => void;
+  onStage: (path: string) => void; onUnstage: (path: string) => void;
+  onDiscard: (path: string) => void; onOpenInPanel: (path: string) => void;
+  onOpenInEditor: (path: string) => void; onToggleCommit: (sha: string) => void;
+}) {
+  return (
+    <>
+      <div className="space-y-4">
+        {changedFiles.length > 0 && (
+          <UncommittedFilesSection
+            changedFiles={changedFiles}
+            pendingStageFiles={pendingStageFiles}
+            onSelectDiff={onSelectDiff}
+            onStage={onStage}
+            onUnstage={onUnstage}
+            onDiscard={onDiscard}
+            onOpenInPanel={onOpenInPanel}
+            onOpenInEditor={onOpenInEditor}
+          />
+        )}
+        {commits.length > 0 && (
+          <CommitsExpandableSection
+            commits={commits}
+            expandedCommit={expandedCommit}
+            commitDiffs={commitDiffs}
+            loadingCommitSha={loadingCommitSha}
+            onToggleCommit={onToggleCommit}
+            onSelectDiff={onSelectDiff}
+          />
+        )}
+        {changedFiles.length === 0 && commits.length === 0 && (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+            Your changed files will appear here
+          </div>
+        )}
+      </div>
+      <FilesPanelReviewProgress reviewedCount={reviewedCount} totalFileCount={totalFileCount} reviewProgressPercent={reviewProgressPercent} />
+    </>
+  );
+}
+
+function UncommittedFilesSection({ changedFiles, pendingStageFiles, onSelectDiff, onStage, onUnstage, onDiscard, onOpenInPanel, onOpenInEditor }: {
+  changedFiles: ChangedFileItem[]; pendingStageFiles: Set<string>;
+  onSelectDiff: (path: string) => void; onStage: (path: string) => void;
+  onUnstage: (path: string) => void; onDiscard: (path: string) => void;
+  onOpenInPanel: (path: string) => void; onOpenInEditor: (path: string) => void;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-muted-foreground mb-2">Uncommitted ({changedFiles.length})</div>
+      <ul className="space-y-1">
+        {changedFiles.map((file) => (
+          <UncommittedFileRow
+            key={file.path} file={file} isPending={pendingStageFiles.has(file.path)}
+            onSelectDiff={onSelectDiff} onStage={onStage} onUnstage={onUnstage}
+            onDiscard={onDiscard} onOpenInPanel={onOpenInPanel} onOpenInEditor={onOpenInEditor}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function UncommittedFileRow({ file, isPending, onSelectDiff, onStage, onUnstage, onDiscard, onOpenInPanel, onOpenInEditor }: {
+  file: ChangedFileItem; isPending: boolean;
+  onSelectDiff: (path: string) => void; onStage: (path: string) => void;
+  onUnstage: (path: string) => void; onDiscard: (path: string) => void;
+  onOpenInPanel: (path: string) => void; onOpenInEditor: (path: string) => void;
+}) {
+  const { folder, file: name } = splitPath(file.path);
+  return (
+    <li className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer" onClick={() => onSelectDiff(file.path)}>
+      <div className="flex items-center gap-2 min-w-0">
+        <FileStageIcon isPending={isPending} staged={file.staged} path={file.path} onStage={onStage} onUnstage={onUnstage} />
+        <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
+          <p className="flex text-foreground text-xs min-w-0">
+            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
+            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
+          </p>
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <FileRowActionButtons path={file.path} onDiscard={onDiscard} onOpenInPanel={onOpenInPanel} onOpenInEditor={onOpenInEditor} />
+        <LineStat added={file.plus} removed={file.minus} />
+        <FileStatusIcon status={file.status} />
+      </div>
+    </li>
+  );
+}
+
+function FileStageIcon({ isPending, staged, path, onStage, onUnstage }: {
+  isPending: boolean; staged: boolean; path: string;
+  onStage: (path: string) => void; onUnstage: (path: string) => void;
+}) {
+  if (isPending) {
+    return <div className="flex-shrink-0 flex items-center justify-center size-4"><IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" /></div>;
+  }
+  if (staged) {
+    return (
+      <button type="button" title="Unstage file" className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer" onClick={(e) => { e.stopPropagation(); void onUnstage(path); }}>
+        <IconCheck className="h-3 w-3 group-hover/unstage:hidden" /><IconMinus className="h-2.5 w-2.5 hidden group-hover/unstage:block" />
+      </button>
+    );
+  }
+  return (
+    <button type="button" title="Stage file" className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer" onClick={(e) => { e.stopPropagation(); void onStage(path); }}>
+      <IconPlus className="h-2.5 w-2.5" />
+    </button>
+  );
+}
+
+function FileRowActionButtons({ path, onDiscard, onOpenInPanel, onOpenInEditor }: {
+  path: string; onDiscard: (p: string) => void; onOpenInPanel: (p: string) => void; onOpenInEditor: (p: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+      <Tooltip><TooltipTrigger asChild><button type="button" className="text-muted-foreground hover:text-foreground cursor-pointer" onClick={(e) => { e.stopPropagation(); onDiscard(path); }}><IconArrowBackUp className="h-3.5 w-3.5" /></button></TooltipTrigger><TooltipContent>Discard changes</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><button type="button" className="text-muted-foreground hover:text-foreground cursor-pointer" onClick={(e) => { e.stopPropagation(); onOpenInPanel(path); }}><IconColumns className="h-3.5 w-3.5" /></button></TooltipTrigger><TooltipContent>Open side-by-side</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><button type="button" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); onOpenInEditor(path); }}><IconExternalLink className="h-3.5 w-3.5" /></button></TooltipTrigger><TooltipContent>Open in external editor</TooltipContent></Tooltip>
+    </div>
+  );
+}
+
+function CommitsExpandableSection({ commits, expandedCommit, commitDiffs, loadingCommitSha, onToggleCommit, onSelectDiff }: {
+  commits: Array<{ commit_sha: string; commit_message: string; insertions: number; deletions: number }>;
+  expandedCommit: string | null; commitDiffs: Record<string, Record<string, FileInfo>>;
+  loadingCommitSha: string | null; onToggleCommit: (sha: string) => void;
+  onSelectDiff: (path: string, content?: string) => void;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-muted-foreground mb-2">Commits ({commits.length})</div>
+      <ul className="space-y-1">
+        {commits.map((commit) => (
+          <CommitRow
+            key={commit.commit_sha} commit={commit}
+            isExpanded={expandedCommit === commit.commit_sha}
+            files={commitDiffs[commit.commit_sha]}
+            isLoading={loadingCommitSha === commit.commit_sha}
+            onToggle={onToggleCommit} onSelectDiff={onSelectDiff}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CommitRow({ commit, isExpanded, files, isLoading, onToggle, onSelectDiff }: {
+  commit: { commit_sha: string; commit_message: string; insertions: number; deletions: number };
+  isExpanded: boolean; files?: Record<string, FileInfo>; isLoading: boolean;
+  onToggle: (sha: string) => void; onSelectDiff: (path: string, content?: string) => void;
+}) {
+  return (
+    <li>
+      <button type="button" className="w-full flex items-center gap-2 text-left rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer" onClick={() => onToggle(commit.commit_sha)}>
+        <IconChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform shrink-0', isExpanded && 'rotate-90')} />
+        <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+        <div className="flex-1 min-w-0"><p className="text-xs truncate"><code className="font-mono text-muted-foreground">{commit.commit_sha.slice(0, 7)}</code>{' '}<span className="text-foreground">{commit.commit_message}</span></p></div>
+        <span className="text-xs shrink-0"><span className="text-emerald-500">+{commit.insertions}</span>{'/'}<span className="text-rose-500">-{commit.deletions}</span></span>
+        {isLoading && <IconLoader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+      </button>
+      {isExpanded && files && (
+        <ul className="ml-6 mt-1 space-y-0.5">
+          {Object.entries(files).map(([path, file]) => {
+            const { folder, file: fileName } = splitPath(path);
+            return (
+              <li key={path} className="flex items-center gap-2 text-xs rounded px-1 py-0.5 hover:bg-muted/50 cursor-pointer" onClick={() => onSelectDiff(path, file.diff)}>
+                <FileStatusIcon status={file.status} />
+                <span className="flex flex-1 min-w-0" title={path}>
+                  {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
+                  <span className="text-foreground whitespace-nowrap shrink-0">{fileName}</span>
+                </span>
+                <span className="shrink-0 text-xs"><span className="text-emerald-500">+{file.additions ?? 0}</span>{'/'}<span className="text-rose-500">-{file.deletions ?? 0}</span></span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function FilesPanelReviewProgress({ reviewedCount, totalFileCount, reviewProgressPercent }: {
+  reviewedCount: number; totalFileCount: number; reviewProgressPercent: number;
+}) {
+  if (totalFileCount <= 0) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="mt-auto flex items-center gap-2 pt-2 cursor-pointer transition-colors" onClick={() => window.dispatchEvent(new CustomEvent('switch-to-changes-tab'))}>
+          <div className="flex-1 h-0.5 rounded-full bg-muted-foreground/10 overflow-hidden">
+            <div className="h-full bg-muted-foreground/25 rounded-full transition-all duration-300" style={{ width: `${reviewProgressPercent}%` }} />
+          </div>
+          <span className="text-[10px] text-muted-foreground/40 whitespace-nowrap">{reviewedCount}/{totalFileCount} reviewed</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{reviewedCount} of {totalFileCount} files reviewed</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export { TaskFilesPanel };

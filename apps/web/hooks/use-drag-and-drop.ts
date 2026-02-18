@@ -28,13 +28,49 @@ export type DragAndDropOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-/**
- * Custom hook that extracts drag-and-drop logic from the Kanban component.
- * Manages drag state and provides handlers for drag operations.
- *
- * @param options - Configuration options for drag and drop
- * @returns Object with drag state and drag operation handlers
- */
+/** Compute optimistic task list after a move. */
+function applyOptimisticMove(
+  tasks: KanbanState['tasks'],
+  taskId: string,
+  targetStepId: string,
+  nextPosition: number,
+): KanbanState['tasks'] {
+  return tasks.map((t: KanbanState['tasks'][number]) =>
+    t.id === taskId
+      ? { ...t, workflowStepId: targetStepId, position: nextPosition }
+      : t
+  );
+}
+
+/** Calculate the next position in the target column. */
+function calcNextPosition(
+  tasks: KanbanState['tasks'],
+  taskId: string,
+  targetStepId: string,
+): number {
+  return tasks
+    .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetStepId && t.id !== taskId)
+    .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position)
+    .length;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function triggerAutoStart(task: Task, response: any): Promise<void> {
+  const sessionId = task.primarySessionId ?? null;
+  if (!sessionId) return;
+  const client = getWebSocketClient();
+  if (!client) return;
+  try {
+    await client.request(
+      'orchestrator.start',
+      { task_id: task.id, session_id: sessionId, workflow_step_id: response.workflow_step.id },
+      15000
+    );
+  } catch (err) {
+    console.error('Failed to auto-start session for workflow step:', err);
+  }
+}
+
 export function useDragAndDrop({
   visibleTasks,
   onWorkflowAutomation,
@@ -46,40 +82,39 @@ export function useDragAndDrop({
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
 
-  // Use refs for callbacks to avoid stale closures in performTaskMove
   const onWorkflowAutomationRef = useRef(onWorkflowAutomation);
   const onMoveErrorRef = useRef(onMoveError);
   onWorkflowAutomationRef.current = onWorkflowAutomation;
   onMoveErrorRef.current = onMoveError;
 
-  /**
-   * Core move logic shared by both drag-and-drop and menu-based moves.
-   * Handles optimistic updates, API calls, workflow automation, and error rollback.
-   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleWorkflowAutomation = useCallback(async (task: Task, response: any) => {
+    const hasAutoStart = response.workflow_step?.events?.on_enter?.some(
+      (a: { type: string }) => a.type === 'auto_start_agent'
+    );
+    if (!hasAutoStart) return;
+    const sessionId = task.primarySessionId ?? null;
+    if (sessionId) {
+      await triggerAutoStart(task, response);
+    } else {
+      onWorkflowAutomationRef.current?.({
+        taskId: task.id, sessionId: null,
+        workflowStep: response.workflow_step,
+        taskDescription: task.description ?? '',
+      });
+    }
+  }, []);
+
   const performTaskMove = useCallback(
     async (task: Task, targetStepId: string) => {
       const currentKanban = store.getState().kanban;
       if (!currentKanban.workflowId) return;
 
-      // Calculate position in target column
-      const targetTasks = currentKanban.tasks
-        .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetStepId && t.id !== task.id)
-        .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position);
-      const nextPosition = targetTasks.length;
-
-      // Save original state for rollback
+      const nextPosition = calcNextPosition(currentKanban.tasks, task.id, targetStepId);
       const originalTasks = currentKanban.tasks;
 
-      // Optimistic update
       store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanState['tasks'][number]) =>
-            t.id === task.id
-              ? { ...t, workflowStepId: targetStepId, position: nextPosition }
-              : t
-          ),
-        },
+        kanban: { ...currentKanban, tasks: applyOptimisticMove(currentKanban.tasks, task.id, targetStepId, nextPosition) },
       });
 
       try {
@@ -89,59 +124,16 @@ export function useDragAndDrop({
           workflow_step_id: targetStepId,
           position: nextPosition,
         });
-
-        // Handle workflow automation if target step has auto_start_agent enabled
-        if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
-          const sessionId = task.primarySessionId ?? null;
-
-          if (sessionId) {
-            // Task has a session - auto-start with workflow step config
-            const client = getWebSocketClient();
-            if (client) {
-              try {
-                await client.request(
-                  'orchestrator.start',
-                  {
-                    task_id: task.id,
-                    session_id: sessionId,
-                    workflow_step_id: response.workflow_step.id,
-                  },
-                  15000
-                );
-              } catch (err) {
-                console.error('Failed to auto-start session for workflow step:', err);
-              }
-            }
-          } else {
-            // No session - notify parent to show session creation dialog
-            onWorkflowAutomationRef.current?.({
-              taskId: task.id,
-              sessionId: null,
-              workflowStep: response.workflow_step,
-              taskDescription: task.description ?? '',
-            });
-          }
-        }
+        await handleWorkflowAutomation(task, response);
       } catch (error) {
-        // Revert optimistic update on error
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: originalTasks,
-          },
-        });
-        // Show error to user with task context
+        store.getState().hydrate({ kanban: { ...store.getState().kanban, tasks: originalTasks } });
         const message = error instanceof Error ? error.message : 'Failed to move task';
-        onMoveErrorRef.current?.({
-          message,
-          taskId: task.id,
-          sessionId: task.primarySessionId ?? null,
-        });
+        onMoveErrorRef.current?.({ message, taskId: task.id, sessionId: task.primarySessionId ?? null });
       } finally {
         setIsMovingTask(false);
       }
     },
-    [moveTaskById, store]
+    [moveTaskById, store, handleWorkflowAutomation]
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -151,19 +143,13 @@ export function useDragAndDrop({
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
-
       setActiveTaskId(null);
       if (!over) return;
-
       const taskId = active.id as string;
       const targetStepId = over.id as string;
-
       if (!kanban.workflowId || isMovingTask) return;
-
-      // Find the task being moved from visibleTasks (which has session info)
       const movedTask = visibleTasks.find((t) => t.id === taskId);
       if (!movedTask) return;
-
       await performTaskMove(movedTask, targetStepId);
     },
     [kanban.workflowId, isMovingTask, visibleTasks, performTaskMove]
@@ -173,16 +159,10 @@ export function useDragAndDrop({
     setActiveTaskId(null);
   }, []);
 
-  /**
-   * Move a task to a specific step via menu action (alternative to drag and drop).
-   */
   const moveTaskToStep = useCallback(
     async (task: Task, targetStepId: string) => {
       if (!kanban.workflowId || isMovingTask) return;
-
-      // Don't move if already in target step
       if (task.workflowStepId === targetStepId) return;
-
       await performTaskMove(task, targetStepId);
     },
     [kanban.workflowId, isMovingTask, performTaskMove]
@@ -194,12 +174,7 @@ export function useDragAndDrop({
   );
 
   return {
-    activeTaskId,
-    activeTask,
-    isMovingTask,
-    handleDragStart,
-    handleDragEnd,
-    handleDragCancel,
-    moveTaskToStep,
+    activeTaskId, activeTask, isMovingTask,
+    handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep,
   };
 }

@@ -24,17 +24,107 @@ type UseProfileMcpConfigResult = {
   handleSaveMcp: () => Promise<void>;
 };
 
+const EMPTY_EXAMPLE = '{\n  "mcpServers": {}\n}';
+
+function serializeServers(config: AgentProfileMcpConfig | null): string {
+  if (!config?.servers || Object.keys(config.servers).length === 0) {
+    return EMPTY_EXAMPLE;
+  }
+  return JSON.stringify({ mcpServers: config.servers }, null, 2);
+}
+
+function normalizeServers(value: unknown): Record<string, McpServerDef> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('MCP servers config must be a JSON object');
+  }
+  if ('mcpServers' in value) {
+    const nested = (value as { mcpServers?: unknown }).mcpServers;
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
+      throw new Error('mcpServers must be a JSON object');
+    }
+    return nested as Record<string, McpServerDef>;
+  }
+  return value as Record<string, McpServerDef>;
+}
+
+function useResetOnUnsupported(
+  supportsMcp: boolean,
+  isEditableProfile: boolean,
+  setters: {
+    setMcpConfig: (v: AgentProfileMcpConfig | null) => void;
+    setMcpEnabledState: (v: boolean) => void;
+    setMcpServers: (v: string) => void;
+    setMcpDirty: (v: boolean) => void;
+    setMcpError: (v: string | null) => void;
+    setMcpStatus: (v: McpStatus) => void;
+  },
+) {
+  useEffect(() => {
+    if (supportsMcp && isEditableProfile) return;
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setters.setMcpConfig(null);
+      setters.setMcpEnabledState(false);
+      setters.setMcpServers(EMPTY_EXAMPLE);
+      setters.setMcpDirty(false);
+      setters.setMcpError(null);
+      setters.setMcpStatus('idle');
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only tracking these deps
+  }, [supportsMcp, isEditableProfile]);
+}
+
+function useFetchConfig(
+  profileId: string,
+  supportsMcp: boolean,
+  isEditableProfile: boolean,
+  hasInitialConfig: boolean,
+  setters: {
+    setMcpConfig: (v: AgentProfileMcpConfig) => void;
+    setMcpEnabledState: (v: boolean) => void;
+    setMcpServers: (v: string) => void;
+    setMcpDirty: (v: boolean) => void;
+    setMcpError: (v: string | null) => void;
+    setMcpStatus: (v: McpStatus) => void;
+  },
+) {
+  useEffect(() => {
+    if (!supportsMcp || !isEditableProfile || hasInitialConfig) return;
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setters.setMcpStatus('loading');
+    });
+    getAgentProfileMcpConfigAction(profileId)
+      .then((config) => {
+        if (!active) return;
+        setters.setMcpConfig(config);
+        setters.setMcpEnabledState(config.enabled);
+        setters.setMcpServers(serializeServers(config));
+        setters.setMcpDirty(false);
+        setters.setMcpError(null);
+        setters.setMcpStatus('idle');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setters.setMcpError(error instanceof Error ? error.message : 'Failed to load MCP config');
+        setters.setMcpStatus('error');
+      });
+
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only tracking these deps
+  }, [profileId, supportsMcp, isEditableProfile, hasInitialConfig]);
+}
+
 export function useProfileMcpConfig({
   profileId,
   supportsMcp,
   initialConfig,
   onToastError,
 }: UseProfileMcpConfigParams): UseProfileMcpConfigResult {
-  const emptyExample = '{\n  "mcpServers": {}\n}';
-  const initialServers =
-    initialConfig?.servers && Object.keys(initialConfig.servers).length > 0
-      ? JSON.stringify({ mcpServers: initialConfig.servers }, null, 2)
-      : emptyExample;
+  const initialServers = serializeServers(initialConfig ?? null);
   const [mcpConfig, setMcpConfig] = useState<AgentProfileMcpConfig | null>(
     initialConfig ?? null
   );
@@ -47,81 +137,28 @@ export function useProfileMcpConfig({
 
   const isEditableProfile = Boolean(profileId) && !profileId.startsWith('draft-');
 
-  useEffect(() => {
-    let active = true;
-    if (!supportsMcp || !isEditableProfile) {
-      Promise.resolve().then(() => {
-        if (!active) return;
-        setMcpConfig(null);
-        setMcpEnabledState(false);
-        setMcpServers(emptyExample);
-        setMcpDirty(false);
-        setMcpError(null);
-        setMcpStatus('idle');
-      });
-      return () => {
-        active = false;
-      };
-    }
-    if (hasInitialConfig) {
-      return () => {
-        active = false;
-      };
-    }
+  const stateSetters = {
+    setMcpConfig,
+    setMcpEnabledState,
+    setMcpServers,
+    setMcpDirty,
+    setMcpError,
+    setMcpStatus,
+  };
 
-    Promise.resolve().then(() => {
-      if (!active) return;
-      setMcpStatus('loading');
-    });
-    getAgentProfileMcpConfigAction(profileId)
-      .then((config) => {
-        if (!active) return;
-        setMcpConfig(config);
-        setMcpEnabledState(config.enabled);
-        const nextServers =
-          config.servers && Object.keys(config.servers).length > 0
-            ? JSON.stringify({ mcpServers: config.servers }, null, 2)
-            : emptyExample;
-        setMcpServers(nextServers);
-        setMcpDirty(false);
-        setMcpError(null);
-        setMcpStatus('idle');
-      })
-      .catch((error) => {
-        if (!active) return;
-        setMcpError(error instanceof Error ? error.message : 'Failed to load MCP config');
-        setMcpStatus('error');
-      });
+  useResetOnUnsupported(supportsMcp, isEditableProfile, stateSetters);
+  useFetchConfig(profileId, supportsMcp, isEditableProfile, hasInitialConfig, stateSetters);
 
-    return () => {
-      active = false;
-    };
-  }, [profileId, supportsMcp, isEditableProfile, hasInitialConfig]);
-
-  const isEmptyExample = (value: string) => value.trim() === emptyExample.trim();
+  const isEmptyExample = (value: string) => value.trim() === EMPTY_EXAMPLE.trim();
 
   const setMcpEnabled = (enabled: boolean) => {
     setMcpEnabledState(enabled);
     setMcpDirty(true);
   };
 
-  const normalizeServers = (value: unknown) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new Error('MCP servers config must be a JSON object');
-    }
-    if ('mcpServers' in value) {
-      const nested = (value as { mcpServers?: unknown }).mcpServers;
-      if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
-        throw new Error('mcpServers must be a JSON object');
-      }
-      return nested as Record<string, McpServerDef>;
-    }
-    return value as Record<string, McpServerDef>;
-  };
-
   const handleMcpServersChange = (value: string) => {
     if (!value.trim()) {
-      setMcpServers(emptyExample);
+      setMcpServers(EMPTY_EXAMPLE);
     } else {
       setMcpServers(value);
     }
@@ -140,10 +177,9 @@ export function useProfileMcpConfig({
   };
 
   const handleSaveMcp = async () => {
-    if (!isEditableProfile) {
-      return;
-    }
+    if (!isEditableProfile) return;
     setMcpStatus('loading');
+
     let servers: Record<string, McpServerDef> = {};
     try {
       const raw = isEmptyExample(mcpServers) ? '{}' : mcpServers;
@@ -163,11 +199,7 @@ export function useProfileMcpConfig({
       });
       setMcpConfig(updated);
       setMcpEnabledState(updated.enabled);
-      const nextServers =
-        updated.servers && Object.keys(updated.servers).length > 0
-          ? JSON.stringify({ mcpServers: updated.servers }, null, 2)
-          : emptyExample;
-      setMcpServers(nextServers);
+      setMcpServers(serializeServers(updated));
       setMcpDirty(false);
       setMcpError(null);
       setMcpStatus('success');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { IconRefresh, IconExternalLink, IconLoader2 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
 import { Input } from '@kandev/ui/input';
@@ -9,176 +9,224 @@ import { usePreviewPanel } from '@/hooks/use-preview-panel';
 import { useAppStore, useAppStoreApi } from '@/components/state-provider';
 import { ShellTerminal } from '@/components/task/shell-terminal';
 import { getLocalStorage } from '@/lib/local-storage';
+import type { PreviewViewMode, PreviewStage } from '@/lib/state/slices';
+
+type PreviewContentProps = {
+  previewView: string;
+  previewUrl: string;
+  showIframe: boolean;
+  refreshKey: number;
+  isRunning: boolean;
+  showLoadingSpinner: boolean;
+  allowManualUrl: boolean;
+  detectedUrl: string | null;
+  devOutput: string;
+  devProcessId: string | undefined;
+};
+
+function PreviewContent({
+  previewView, previewUrl, showIframe, refreshKey,
+  isRunning, showLoadingSpinner, allowManualUrl, detectedUrl,
+  devOutput, devProcessId,
+}: PreviewContentProps) {
+  if (previewView === 'output') {
+    return <ShellTerminal processOutput={devOutput} processId={devProcessId ?? null} />;
+  }
+  if (showIframe && previewUrl) {
+    return (
+      <iframe
+        key={refreshKey}
+        src={previewUrl}
+        title="Preview"
+        className="h-full w-full border-0"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  if (previewUrl && !showIframe) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <p className="text-sm">Loading preview...</p>
+      </div>
+    );
+  }
+  if (isRunning && showLoadingSpinner) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <p className="text-sm">Waiting for preview URL...</p>
+      </div>
+    );
+  }
+  if (isRunning) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+        <p className="text-sm">No preview URL detected</p>
+        {allowManualUrl && !detectedUrl && (
+          <p className="text-sm text-muted-foreground/70 mt-2 max-w-md text-center">
+            You can manually enter a URL in the input above and press Enter.
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+      Start the dev server to enable preview.
+    </div>
+  );
+}
 
 type PreviewPanelProps = {
   sessionId: string | null;
   hasDevScript: boolean;
 };
 
+function usePreviewViewSync(sessionId: string | null, setPreviewView: (sid: string, view: PreviewViewMode) => void, appStoreApi: ReturnType<typeof useAppStoreApi>) {
+  useEffect(() => {
+    if (!sessionId) return;
+    const storeView = appStoreApi.getState().previewPanel.viewBySessionId[sessionId];
+    if (storeView) return;
+    const key = `preview-view:${sessionId}`;
+    const stored = getLocalStorage(key, null as string | null);
+    if (stored === 'output' || stored === 'preview') setPreviewView(sessionId, stored);
+  }, [sessionId, appStoreApi, setPreviewView]);
+}
+
+type PreviewTimerOptions = {
+  isRunning: boolean;
+  detectedUrl: string | null;
+  sessionId: string | null;
+  previewUrl: string;
+  refreshKey: number;
+  setPreviewView: (sid: string, view: PreviewViewMode) => void;
+};
+
+function usePreviewTimers({ isRunning, detectedUrl, sessionId, previewUrl, refreshKey, setPreviewView }: PreviewTimerOptions) {
+  const [allowManualUrl, setAllowManualUrl] = useState(false);
+  const [showLoadingSpinner, setShowLoadingSpinner] = useState(true);
+  const [showIframe, setShowIframe] = useState(false);
+
+  useEffect(() => {
+    if (!isRunning || detectedUrl) {
+      const t = setTimeout(() => { setAllowManualUrl(false); setShowLoadingSpinner(true); }, 0);
+      return () => clearTimeout(t);
+    }
+    const resetTimer = setTimeout(() => setShowLoadingSpinner(true), 0);
+    const timer = setTimeout(() => {
+      setAllowManualUrl(true);
+      setShowLoadingSpinner(false);
+      if (sessionId) setPreviewView(sessionId, 'preview');
+    }, 10000);
+    return () => { clearTimeout(resetTimer); clearTimeout(timer); };
+  }, [isRunning, detectedUrl, sessionId, setPreviewView]);
+
+  useEffect(() => {
+    if (!previewUrl) {
+      const t = setTimeout(() => setShowIframe(false), 0);
+      return () => clearTimeout(t);
+    }
+    const hideTimer = setTimeout(() => setShowIframe(false), 0);
+    const showTimer = setTimeout(() => setShowIframe(true), 2000);
+    return () => { clearTimeout(hideTimer); clearTimeout(showTimer); };
+  }, [previewUrl, refreshKey]);
+
+  return { allowManualUrl, showLoadingSpinner, showIframe };
+}
+
+type PreviewActions = {
+  setPreviewOpen: (sid: string, open: boolean) => void;
+  setPreviewStage: (sid: string, stage: PreviewStage) => void;
+  setPreviewView: (sid: string, view: PreviewViewMode) => void;
+  setPreviewUrl: (sid: string, url: string) => void;
+  setPreviewUrlDraft: (sid: string, draft: string) => void;
+  clearProcessOutput: (pid: string) => void;
+  handleStop: () => Promise<void>;
+  previewUrl: string;
+  previewUrlDraft: string;
+  devProcessId: string | undefined;
+};
+
+function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
+  const { setPreviewOpen, setPreviewStage, setPreviewView, setPreviewUrl, setPreviewUrlDraft, clearProcessOutput, handleStop, previewUrl, previewUrlDraft, devProcessId } = actions;
+
+  const handleStopClick = useCallback(async () => {
+    if (!sessionId) return;
+    setPreviewOpen(sessionId, false);
+    setPreviewStage(sessionId, 'closed');
+    setPreviewView(sessionId, 'preview');
+    setPreviewUrl(sessionId, '');
+    setPreviewUrlDraft(sessionId, '');
+    if (devProcessId) clearProcessOutput(devProcessId);
+    await handleStop();
+  }, [sessionId, setPreviewOpen, setPreviewStage, setPreviewView, setPreviewUrl, setPreviewUrlDraft, devProcessId, clearProcessOutput, handleStop]);
+
+  const handleUrlSubmit = useCallback(() => {
+    if (!sessionId) return;
+    const trimmed = previewUrlDraft.trim();
+    if (trimmed) setPreviewUrl(sessionId, trimmed);
+  }, [sessionId, previewUrlDraft, setPreviewUrl]);
+
+  const handleOpenInTab = useCallback(() => {
+    if (!sessionId || !previewUrl) return;
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
+    setPreviewOpen(sessionId, false);
+    setPreviewStage(sessionId, 'closed');
+    setPreviewView(sessionId, 'preview');
+    setPreviewUrl(sessionId, '');
+    setPreviewUrlDraft(sessionId, '');
+  }, [sessionId, previewUrl, setPreviewOpen, setPreviewStage, setPreviewView, setPreviewUrl, setPreviewUrlDraft]);
+
+  return { handleStopClick, handleUrlSubmit, handleOpenInTab };
+}
+
+function resolveStopLabel(isStopping: boolean, isFailed: boolean, isExited: boolean): string {
+  if (isStopping) return 'Stopping\u2026';
+  if (isFailed || isExited) return 'Close';
+  return 'Stop';
+}
+
 export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
-  const {
-    previewUrl,
-    previewUrlDraft,
-    setPreviewUrl,
-    setPreviewUrlDraft,
-    isStopping,
-    handleStop,
-    detectedUrl,
-    isRunning,
-  } = usePreviewPanel({ sessionId, hasDevScript });
+  const { previewUrl, previewUrlDraft, setPreviewUrl, setPreviewUrlDraft, isStopping, handleStop, detectedUrl, isRunning } = usePreviewPanel({ sessionId, hasDevScript });
   const setPreviewOpen = useAppStore((state) => state.setPreviewOpen);
   const setPreviewStage = useAppStore((state) => state.setPreviewStage);
   const setPreviewView = useAppStore((state) => state.setPreviewView);
   const clearProcessOutput = useAppStore((state) => state.clearProcessOutput);
   const appStoreApi = useAppStoreApi();
+
   const previewView = useAppStore((state) => {
     if (!sessionId) return 'preview';
     const stored = state.previewPanel.viewBySessionId[sessionId];
     if (stored) return stored;
-
-    // Try to get from localStorage on first render
     const key = `preview-view:${sessionId}`;
     const localStored = getLocalStorage(key, null as string | null);
-    if (localStored === 'output' || localStored === 'preview') {
-      return localStored;
-    }
-
-    return 'preview';
+    return (localStored === 'output' || localStored === 'preview') ? localStored : 'preview';
   });
-  const devProcessId = useAppStore((state) =>
-    sessionId ? state.processes.devProcessBySessionId[sessionId] : undefined
-  );
-  const devProcess = useAppStore((state) =>
-    devProcessId ? state.processes.processesById[devProcessId] : undefined
-  );
-  const devOutput = useAppStore((state) =>
-    devProcessId ? state.processes.outputsByProcessId[devProcessId] ?? '' : ''
-  );
+
+  const devProcessId = useAppStore((state) => sessionId ? state.processes.devProcessBySessionId[sessionId] : undefined);
+  const devProcess = useAppStore((state) => devProcessId ? state.processes.processesById[devProcessId] : undefined);
+  const devOutput = useAppStore((state) => devProcessId ? state.processes.outputsByProcessId[devProcessId] ?? '' : '');
+
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showIframe, setShowIframe] = useState(false);
-  const [allowManualUrl, setAllowManualUrl] = useState(false);
-  const [showLoadingSpinner, setShowLoadingSpinner] = useState(true);
+  const isWaitingForUrl = isRunning && previewView === 'output' && !previewUrl;
 
-  const isProcessFailed = devProcess?.status === 'failed';
-  const isProcessExited = devProcess?.status === 'exited';
-
-  // Check if we're waiting for a URL (for button spinner)
-  // Show spinner on "Preview" button when on output view and waiting for URL
-  const isWaitingForUrl = isRunning && previewView === 'output' && !previewUrl && showLoadingSpinner;
-
-  // Sync the view from localStorage to store if needed
-  useEffect(() => {
-    if (!sessionId) return;
-    const storeView = appStoreApi.getState().previewPanel.viewBySessionId[sessionId];
-    if (storeView) return; // Already set in store
-
-    const key = `preview-view:${sessionId}`;
-    const stored = getLocalStorage(key, null as string | null);
-    if (stored === 'output' || stored === 'preview') {
-      setPreviewView(sessionId, stored);
-    }
-  }, [sessionId, appStoreApi, setPreviewView]);
-
-  // 10-second timeout to enable manual URL entry and stop loading spinner when no URL detected
-  useEffect(() => {
-    if (!isRunning || detectedUrl) {
-      // Clear immediately using setTimeout to avoid synchronous setState in effect
-      const immediate = setTimeout(() => {
-        setAllowManualUrl(false);
-        setShowLoadingSpinner(true);
-      }, 0);
-      return () => clearTimeout(immediate);
-    }
-
-    // Reset loading spinner when starting to wait
-    const resetTimer = setTimeout(() => setShowLoadingSpinner(true), 0);
-
-    // After 10 seconds, enable manual URL, stop showing loading spinner, and switch to preview view
-    const timer = setTimeout(() => {
-      setAllowManualUrl(true);
-      setShowLoadingSpinner(false);
-      // Switch to preview view to show the "No URL detected" message
-      if (sessionId) {
-        setPreviewView(sessionId, 'preview');
-      }
-    }, 10000);
-
-    return () => {
-      clearTimeout(resetTimer);
-      clearTimeout(timer);
-    };
-  }, [isRunning, detectedUrl, sessionId, setPreviewView]);
-
-  // 2-second delay before showing iframe after URL detection
-  useEffect(() => {
-    if (!previewUrl) {
-      // Clear immediately using setTimeout to avoid synchronous setState in effect
-      const immediate = setTimeout(() => setShowIframe(false), 0);
-      return () => clearTimeout(immediate);
-    }
-
-    // Start hidden, then show after delay
-    const hideTimer = setTimeout(() => setShowIframe(false), 0);
-    const showTimer = setTimeout(() => setShowIframe(true), 2000);
-
-    return () => {
-      clearTimeout(hideTimer);
-      clearTimeout(showTimer);
-    };
-  }, [previewUrl, refreshKey]);
+  usePreviewViewSync(sessionId, setPreviewView, appStoreApi);
+  const { allowManualUrl, showLoadingSpinner, showIframe } = usePreviewTimers({ isRunning, detectedUrl, sessionId, previewUrl, refreshKey, setPreviewView });
+  const { handleStopClick, handleUrlSubmit, handleOpenInTab } = usePreviewActions(sessionId, {
+    setPreviewOpen, setPreviewStage, setPreviewView, setPreviewUrl, setPreviewUrlDraft,
+    clearProcessOutput, handleStop, previewUrl, previewUrlDraft, devProcessId,
+  });
 
   if (!sessionId) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
-        Select a session to enable preview.
-      </div>
-    );
+    return <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">Select a session to enable preview.</div>;
   }
-
   if (!hasDevScript) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
-        Configure a dev script to use preview.
-      </div>
-    );
+    return <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">Configure a dev script to use preview.</div>;
   }
 
-  const handleStopClick = async () => {
-    if (!sessionId) return;
-    setPreviewOpen(sessionId, false);
-    setPreviewStage(sessionId, 'closed');
-    setPreviewView(sessionId, 'preview');
-    setPreviewUrl(sessionId, '');
-    setPreviewUrlDraft(sessionId, '');
-
-    if (devProcessId) {
-      clearProcessOutput(devProcessId);
-    }
-    await handleStop();
-  };
-
-  const handleUrlSubmit = () => {
-    if (!sessionId) return;
-    const trimmed = previewUrlDraft.trim();
-    if (trimmed) {
-      setPreviewUrl(sessionId, trimmed);
-    }
-  };
-
-  const handleOpenInTab = () => {
-    if (!sessionId || !previewUrl) return;
-
-    // Open URL in new tab
-    window.open(previewUrl, '_blank', 'noopener,noreferrer');
-
-    // Close the preview panel but keep dev server running
-    setPreviewOpen(sessionId, false);
-    setPreviewStage(sessionId, 'closed');
-    setPreviewView(sessionId, 'preview');
-    setPreviewUrl(sessionId, '');
-    setPreviewUrlDraft(sessionId, '');
-
-  };
+  const stopLabel = resolveStopLabel(isStopping, devProcess?.status === 'failed', devProcess?.status === 'exited');
 
   return (
     <SessionPanel margin="right">
@@ -187,98 +235,27 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
           <Input
             value={previewUrlDraft}
             onChange={(event) => setPreviewUrlDraft(sessionId, event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleUrlSubmit();
-              }
-            }}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleUrlSubmit(); } }}
             placeholder={detectedUrl || "http://localhost:3000"}
             className="h-6 flex-1 min-w-[240px]"
           />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleOpenInTab}
-            disabled={!previewUrl}
-            className="cursor-pointer"
-            title="Open in browser tab"
-          >
+          <Button size="sm" variant="outline" onClick={handleOpenInTab} disabled={!previewUrl} className="cursor-pointer" title="Open in browser tab">
             <IconExternalLink className="h-4 w-4" />
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setRefreshKey((value) => value + 1)}
-            disabled={!previewUrl}
-            className="cursor-pointer"
-            title="Refresh preview"
-          >
+          <Button size="sm" variant="outline" onClick={() => setRefreshKey((v) => v + 1)} disabled={!previewUrl} className="cursor-pointer" title="Refresh preview">
             <IconRefresh className="h-4 w-4" />
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleStopClick}
-            disabled={isStopping}
-            className="cursor-pointer"
-          >
-            {isStopping ? 'Stopping…' : (isProcessFailed || isProcessExited) ? 'Close' : 'Stop'}
+          <Button size="sm" variant="outline" onClick={handleStopClick} disabled={isStopping} className="cursor-pointer">
+            {stopLabel}
           </Button>
-          <Button
-            size="sm"
-            variant={previewView === 'output' ? 'default' : 'outline'}
-            className="cursor-pointer"
-            onClick={() =>
-              setPreviewView(sessionId, previewView === 'output' ? 'preview' : 'output')
-            }
-          >
-            {isWaitingForUrl && (
-              <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
-            )}
+          <Button size="sm" variant={previewView === 'output' ? 'default' : 'outline'} className="cursor-pointer" onClick={() => setPreviewView(sessionId, previewView === 'output' ? 'preview' : 'output')}>
+            {isWaitingForUrl && showLoadingSpinner && <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />}
             {previewView === 'output' ? 'Preview' : 'Logs'}
           </Button>
         </div>
-
         <SessionPanelContent className={previewView === 'output' || (showIframe && previewUrl) ? 'p-0' : ''}>
-          {previewView === 'output' ? (
-            <ShellTerminal processOutput={devOutput} processId={devProcessId ?? null} />
-          ) : showIframe && previewUrl ? (
-            <iframe
-              key={refreshKey}
-              src={previewUrl}
-              title="Preview"
-              className="h-full w-full border-0"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-              referrerPolicy="no-referrer"
-            />
-          ) : previewUrl && !showIframe ? (
-            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-              <p className="text-sm">Loading preview...</p>
-            </div>
-          ) : isRunning && showLoadingSpinner ? (
-            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-              <p className="text-sm">Waiting for preview URL...</p>
-            </div>
-          ) : isRunning ? (
-            <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-2">
-              <p className="text-sm">No preview URL detected</p>
-              {allowManualUrl && !detectedUrl && (
-                <p className="text-sm text-muted-foreground/70 mt-2 max-w-md text-center">
-                  You can manually enter a URL in the input above and press Enter.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="h-full w-full flex items-center justify-center text-muted-foreground">
-              Start the dev server to enable preview.
-            </div>
-          )}
+          <PreviewContent previewView={previewView} previewUrl={previewUrl} showIframe={showIframe} refreshKey={refreshKey} isRunning={isRunning} showLoadingSpinner={showLoadingSpinner} allowManualUrl={allowManualUrl} detectedUrl={detectedUrl} devOutput={devOutput} devProcessId={devProcessId} />
         </SessionPanelContent>
-
-
       </div>
     </SessionPanel>
   );
