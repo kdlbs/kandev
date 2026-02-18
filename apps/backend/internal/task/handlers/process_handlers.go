@@ -129,6 +129,51 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		return
 	}
 
+	target, ok := h.resolveScriptTarget(c, session, body, repoID, repo, sessionID)
+	if !ok {
+		return
+	}
+
+	command, portEnv, ok := h.prepareCommandWithPorts(c, sessionID, target.command)
+	if !ok {
+		return
+	}
+
+	if !h.ensureAgentctlReady(c, session, sessionID) {
+		return
+	}
+
+	switch executor.Type {
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
+		h.startLocalProcess(c, sessionID, repoID, target.kind, target.scriptName, command, target.workingDir, portEnv)
+	default:
+		h.logger.Warn("start process unsupported executor type",
+			zap.String("session_id", sessionID),
+			zap.String("executor_id", executorID),
+			zap.String("executor_type", string(executor.Type)),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "executor type not supported for process runner"})
+	}
+}
+
+// resolvedScript holds the resolved script command and metadata for a process start request.
+type resolvedScript struct {
+	command    string
+	kind       string
+	scriptName string
+	workingDir string
+}
+
+// resolveScriptTarget resolves the script command and working directory for a process start request.
+// Returns the resolved script and true on success; on failure writes the HTTP error response and returns false.
+func (h *ProcessHandlers) resolveScriptTarget(
+	c *gin.Context,
+	session *models.TaskSession,
+	body httpStartProcessRequest,
+	repoID string,
+	repo *models.Repository,
+	sessionID string,
+) (*resolvedScript, bool) {
 	command, kind, scriptName, err := resolveScriptCommand(c.Request.Context(), h.service, repo, body.Kind, body.ScriptName)
 	if err != nil {
 		h.logger.Warn("start process script resolution failed",
@@ -139,7 +184,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			zap.Error(err),
 		)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return nil, false
 	}
 	workingDir := repo.LocalPath
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreePath != "" {
@@ -153,24 +198,32 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		zap.String("working_dir", workingDir),
 		zap.String("command", command),
 	)
+	return &resolvedScript{command: command, kind: kind, scriptName: scriptName, workingDir: workingDir}, true
+}
 
-	// Transform command to replace port placeholders
-	transformedCommand, portEnv, err := portutil.TransformCommand(command)
+// prepareCommandWithPorts transforms a command by allocating port placeholders.
+// Returns the transformed command, the port environment map, and true on success.
+// On failure it writes the HTTP error response itself and returns false.
+func (h *ProcessHandlers) prepareCommandWithPorts(c *gin.Context, sessionID, command string) (string, map[string]string, bool) {
+	transformed, portEnv, err := portutil.TransformCommand(command)
 	if err != nil {
 		h.logger.Error("failed to transform command with port placeholders",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "port allocation failed"})
-		return
+		return "", nil, false
 	}
-	command = transformedCommand
-
 	if len(portEnv) > 0 {
 		h.logger.Info("allocated ports for dev process",
 			zap.String("session_id", sessionID),
 			zap.Any("ports", portEnv))
 	}
+	return transformed, portEnv, true
+}
 
+// ensureAgentctlReady ensures the workspace execution exists and agentctl is responsive.
+// Returns true when ready; on failure it writes the HTTP error response itself and returns false.
+func (h *ProcessHandlers) ensureAgentctlReady(c *gin.Context, session *models.TaskSession, sessionID string) bool {
 	if _, err := h.lifecycleMgr.EnsureWorkspaceExecutionForSession(
 		c.Request.Context(),
 		session.TaskID,
@@ -178,7 +231,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 	); err != nil {
 		h.logger.Error("failed to ensure workspace execution for process", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return false
 	}
 	readyCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
@@ -188,20 +241,9 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 			zap.Error(err),
 		)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl not ready"})
-		return
+		return false
 	}
-
-	switch executor.Type {
-	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeLocalDocker:
-		h.startLocalProcess(c, sessionID, repoID, kind, scriptName, command, workingDir, portEnv)
-	default:
-		h.logger.Warn("start process unsupported executor type",
-			zap.String("session_id", sessionID),
-			zap.String("executor_id", executorID),
-			zap.String("executor_type", string(executor.Type)),
-		)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "executor type not supported for process runner"})
-	}
+	return true
 }
 
 // resolveProcessRepository resolves the repository ID and fetches the repository for a

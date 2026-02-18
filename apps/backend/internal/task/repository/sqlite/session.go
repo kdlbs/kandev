@@ -552,72 +552,81 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*models.TaskSession, error) {
 	var result []*models.TaskSession
 	for rows.Next() {
-		session := &models.TaskSession{}
-		var state string
-		var metadataJSON string
-		var agentProfileSnapshotJSON string
-		var executorSnapshotJSON string
-		var environmentSnapshotJSON string
-		var repositorySnapshotJSON string
-		var completedAt sql.NullTime
-		var isPrimary int
-		var isPassthrough int
-		var workflowStepID sql.NullString
-		var reviewStatus sql.NullString
-
-		err := rows.Scan(
-			&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
-			&session.ExecutorID, &session.EnvironmentID,
-			&session.RepositoryID, &session.BaseBranch,
-			&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
-			&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-			&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
-		)
+		session, err := scanTaskSessionRow(rows)
 		if err != nil {
 			return nil, err
 		}
-
-		session.State = models.TaskSessionState(state)
-		session.IsPrimary = isPrimary == 1
-		session.IsPassthrough = isPassthrough == 1
-		if workflowStepID.Valid {
-			session.WorkflowStepID = &workflowStepID.String
-		}
-		if reviewStatus.Valid {
-			session.ReviewStatus = &reviewStatus.String
-		}
-		if completedAt.Valid {
-			session.CompletedAt = &completedAt.Time
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &session.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to deserialize agent session metadata: %w", err)
-			}
-		}
-		if agentProfileSnapshotJSON != "" && agentProfileSnapshotJSON != "{}" {
-			if err := json.Unmarshal([]byte(agentProfileSnapshotJSON), &session.AgentProfileSnapshot); err != nil {
-				return nil, fmt.Errorf("failed to deserialize agent profile snapshot: %w", err)
-			}
-		}
-		if executorSnapshotJSON != "" && executorSnapshotJSON != "{}" {
-			if err := json.Unmarshal([]byte(executorSnapshotJSON), &session.ExecutorSnapshot); err != nil {
-				return nil, fmt.Errorf("failed to deserialize executor snapshot: %w", err)
-			}
-		}
-		if environmentSnapshotJSON != "" && environmentSnapshotJSON != "{}" {
-			if err := json.Unmarshal([]byte(environmentSnapshotJSON), &session.EnvironmentSnapshot); err != nil {
-				return nil, fmt.Errorf("failed to deserialize environment snapshot: %w", err)
-			}
-		}
-		if repositorySnapshotJSON != "" && repositorySnapshotJSON != "{}" {
-			if err := json.Unmarshal([]byte(repositorySnapshotJSON), &session.RepositorySnapshot); err != nil {
-				return nil, fmt.Errorf("failed to deserialize repository snapshot: %w", err)
-			}
-		}
-
 		result = append(result, session)
 	}
 	return result, rows.Err()
+}
+
+// scanTaskSessionRow scans a single row into a TaskSession, applying all field mappings and JSON unmarshalling.
+func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
+	session := &models.TaskSession{}
+	var state string
+	var metadataJSON string
+	var agentProfileSnapshotJSON string
+	var executorSnapshotJSON string
+	var environmentSnapshotJSON string
+	var repositorySnapshotJSON string
+	var completedAt sql.NullTime
+	var isPrimary int
+	var isPassthrough int
+	var workflowStepID sql.NullString
+	var reviewStatus sql.NullString
+
+	err := rows.Scan(
+		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
+		&session.ExecutorID, &session.EnvironmentID,
+		&session.RepositoryID, &session.BaseBranch,
+		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
+		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
+		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	session.State = models.TaskSessionState(state)
+	session.IsPrimary = isPrimary == 1
+	session.IsPassthrough = isPassthrough == 1
+	if workflowStepID.Valid {
+		session.WorkflowStepID = &workflowStepID.String
+	}
+	if reviewStatus.Valid {
+		session.ReviewStatus = &reviewStatus.String
+	}
+	if completedAt.Valid {
+		session.CompletedAt = &completedAt.Time
+	}
+
+	if err := unmarshalSessionSnapshots(session, metadataJSON, agentProfileSnapshotJSON,
+		executorSnapshotJSON, environmentSnapshotJSON, repositorySnapshotJSON); err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+// unmarshalSessionSnapshots deserializes all JSON snapshot fields into the session struct.
+func unmarshalSessionSnapshots(
+	session *models.TaskSession,
+	metadataJSON, agentProfileSnapshotJSON, executorSnapshotJSON, environmentSnapshotJSON, repositorySnapshotJSON string,
+) error {
+	if err := unmarshalSessionJSON(metadataJSON, &session.Metadata, "agent session metadata"); err != nil {
+		return err
+	}
+	if err := unmarshalSessionJSON(agentProfileSnapshotJSON, &session.AgentProfileSnapshot, "agent profile snapshot"); err != nil {
+		return err
+	}
+	if err := unmarshalSessionJSON(executorSnapshotJSON, &session.ExecutorSnapshot, "executor snapshot"); err != nil {
+		return err
+	}
+	if err := unmarshalSessionJSON(environmentSnapshotJSON, &session.EnvironmentSnapshot, "environment snapshot"); err != nil {
+		return err
+	}
+	return unmarshalSessionJSON(repositorySnapshotJSON, &session.RepositorySnapshot, "repository snapshot")
 }
 
 // DeleteTaskSession deletes an agent session by ID
@@ -880,42 +889,6 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
 	`), now, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-	return nil
-}
-
-// UpdateSessionWorkflowStep updates the workflow step for a session
-func (r *Repository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
-	now := time.Now().UTC()
-
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET workflow_step_id = ?, updated_at = ? WHERE id = ?
-	`), stepID, now, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-	return nil
-}
-
-// UpdateSessionReviewStatus updates the review status of a session
-func (r *Repository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
-	now := time.Now().UTC()
-
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET review_status = ?, updated_at = ? WHERE id = ?
-	`), status, now, sessionID)
 	if err != nil {
 		return err
 	}

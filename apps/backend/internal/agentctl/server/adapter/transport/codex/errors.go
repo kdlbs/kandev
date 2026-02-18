@@ -26,6 +26,66 @@ type CodexParsedError struct {
 	ResetsInSeconds int64
 }
 
+// extractErrorFields extracts errorType, errorMessage, and resetsInSeconds
+// from a parsed JSON map, checking both nested "error" object and top-level fields.
+func extractErrorFields(rawData map[string]any) (errorType, errorMessage string, resetsInSeconds int64) {
+	// First, check for nested error object (standard format)
+	if errObj, ok := rawData["error"].(map[string]any); ok {
+		if t, ok := errObj["type"].(string); ok {
+			errorType = t
+		}
+		if m, ok := errObj["message"].(string); ok {
+			errorMessage = m
+		}
+		// JSON numbers are float64 in Go
+		if r, ok := errObj["resets_in_seconds"].(float64); ok {
+			resetsInSeconds = int64(r)
+		}
+	}
+
+	// Fall back to top-level fields if nested fields not found (flat error format)
+	if errorMessage == "" {
+		if m, ok := rawData["message"].(string); ok {
+			errorMessage = m
+		}
+	}
+	if errorType == "" {
+		if t, ok := rawData["type"].(string); ok {
+			errorType = t
+		}
+	}
+	return errorType, errorMessage, resetsInSeconds
+}
+
+// appendResetTime appends a human-readable reset duration to msg when resetsInSeconds > 0.
+func appendResetTime(msg string, resetsInSeconds int64) string {
+	if resetsInSeconds <= 0 {
+		return msg
+	}
+	duration := time.Duration(resetsInSeconds) * time.Second
+	switch {
+	case duration.Hours() >= 1:
+		return fmt.Sprintf("%s (resets in %.0f hours)", msg, duration.Hours())
+	case duration.Minutes() >= 1:
+		return fmt.Sprintf("%s (resets in %.0f minutes)", msg, duration.Minutes())
+	default:
+		return fmt.Sprintf("%s (resets in %d seconds)", msg, int(duration.Seconds()))
+	}
+}
+
+// buildErrorMessage constructs a user-friendly message from the parsed error fields.
+func buildErrorMessage(errorMessage, errorType, httpError string, resetsInSeconds int64, rawData map[string]any) string {
+	switch {
+	case errorMessage != "":
+		return appendResetTime(errorMessage, resetsInSeconds)
+	case errorType != "":
+		return fmt.Sprintf("Error: %s", errorType)
+	default:
+		jsonBytes, _ := json.MarshalIndent(rawData, "", "  ")
+		return fmt.Sprintf("%s\n\n%s", httpError, string(jsonBytes))
+	}
+}
+
 // ParseCodexStderrError attempts to parse a Codex stderr error line and extract
 // error information. Returns nil if parsing fails.
 //
@@ -59,68 +119,10 @@ func ParseCodexStderrError(line string) *CodexParsedError {
 
 	result.RawJSON = rawData
 
-	// Extract common fields - check both nested "error" object and top-level fields
-	var errorType, errorMessage string
-	var resetsInSeconds int64
-
-	// First, check for nested error object (standard format)
-	if errObj, ok := rawData["error"].(map[string]any); ok {
-		if t, ok := errObj["type"].(string); ok {
-			errorType = t
-		}
-		if m, ok := errObj["message"].(string); ok {
-			errorMessage = m
-		}
-		// Handle both int and float64 (JSON numbers are float64 in Go)
-		if r, ok := errObj["resets_in_seconds"].(float64); ok {
-			resetsInSeconds = int64(r)
-		}
-	}
-
-	// Fall back to top-level fields if nested fields not found (flat error format)
-	if errorMessage == "" {
-		if m, ok := rawData["message"].(string); ok {
-			errorMessage = m
-		}
-	}
-	if errorType == "" {
-		if t, ok := rawData["type"].(string); ok {
-			errorType = t
-		}
-	}
-
+	errorType, errorMessage, resetsInSeconds := extractErrorFields(rawData)
 	result.ErrorType = errorType
 	result.ResetsInSeconds = resetsInSeconds
-
-	// Build a user-friendly message from available fields
-	var msg string
-
-	switch {
-	case errorMessage != "":
-		// We have a specific error message from the API
-		msg = errorMessage
-		// Add reset time info if available
-		if resetsInSeconds > 0 {
-			duration := time.Duration(resetsInSeconds) * time.Second
-			switch {
-			case duration.Hours() >= 1:
-				msg = fmt.Sprintf("%s (resets in %.0f hours)", msg, duration.Hours())
-			case duration.Minutes() >= 1:
-				msg = fmt.Sprintf("%s (resets in %.0f minutes)", msg, duration.Minutes())
-			default:
-				msg = fmt.Sprintf("%s (resets in %d seconds)", msg, int(duration.Seconds()))
-			}
-		}
-	case errorType != "":
-		// We have an error type but no message
-		msg = fmt.Sprintf("Error: %s", errorType)
-	default:
-		// Unknown error format - show HTTP error and include JSON body
-		jsonBytes, _ := json.MarshalIndent(rawData, "", "  ")
-		msg = fmt.Sprintf("%s\n\n%s", httpError, string(jsonBytes))
-	}
-
-	result.Message = msg
+	result.Message = buildErrorMessage(errorMessage, errorType, httpError, resetsInSeconds, rawData)
 	return result
 }
 

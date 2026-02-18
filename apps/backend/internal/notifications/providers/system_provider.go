@@ -88,60 +88,109 @@ func parseSystemConfig(raw map[string]interface{}) (systemConfig, error) {
 	if raw == nil {
 		return cfg, nil
 	}
-	if value, ok := raw["sound_enabled"]; ok {
-		enabled, ok := value.(bool)
-		if !ok {
-			return cfg, fmt.Errorf("sound_enabled must be a boolean")
-		}
-		cfg.SoundEnabled = enabled
-	}
-	if value, ok := raw["sound_file"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("sound_file must be a string")
-		}
-		cfg.SoundFile = strings.TrimSpace(text)
-	}
-	if value, ok := raw["app_name"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("app_name must be a string")
-		}
-		if strings.TrimSpace(text) != "" {
-			cfg.AppName = strings.TrimSpace(text)
-		}
-	}
-	if value, ok := raw["icon_path"]; ok {
-		text, ok := value.(string)
-		if !ok {
-			return cfg, fmt.Errorf("icon_path must be a string")
-		}
-		cfg.IconPath = strings.TrimSpace(text)
-	}
-	if value, ok := raw["timeout_ms"]; ok {
-		switch v := value.(type) {
-		case float64:
-			cfg.TimeoutMS = int(v)
-		case int:
-			cfg.TimeoutMS = v
-		case int64:
-			cfg.TimeoutMS = int(v)
-		case string:
-			if strings.TrimSpace(v) != "" {
-				parsed, err := strconv.Atoi(strings.TrimSpace(v))
-				if err != nil {
-					return cfg, fmt.Errorf("timeout_ms must be a number")
-				}
-				cfg.TimeoutMS = parsed
-			}
-		default:
-			return cfg, fmt.Errorf("timeout_ms must be a number")
-		}
+	if err := applySystemConfigFields(&cfg, raw); err != nil {
+		return cfg, err
 	}
 	if cfg.TimeoutMS <= 0 {
 		cfg.TimeoutMS = 10000
 	}
 	return cfg, nil
+}
+
+func applySystemConfigFields(cfg *systemConfig, raw map[string]interface{}) error {
+	if err := parseSoundEnabled(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseSoundFile(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseAppName(cfg, raw); err != nil {
+		return err
+	}
+	if err := parseIconPath(cfg, raw); err != nil {
+		return err
+	}
+	return parseTimeoutMS(cfg, raw)
+}
+
+func parseSoundEnabled(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["sound_enabled"]
+	if !ok {
+		return nil
+	}
+	enabled, ok := value.(bool)
+	if !ok {
+		return fmt.Errorf("sound_enabled must be a boolean")
+	}
+	cfg.SoundEnabled = enabled
+	return nil
+}
+
+func parseSoundFile(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["sound_file"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("sound_file must be a string")
+	}
+	cfg.SoundFile = strings.TrimSpace(text)
+	return nil
+}
+
+func parseAppName(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["app_name"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("app_name must be a string")
+	}
+	if trimmed := strings.TrimSpace(text); trimmed != "" {
+		cfg.AppName = trimmed
+	}
+	return nil
+}
+
+func parseIconPath(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["icon_path"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("icon_path must be a string")
+	}
+	cfg.IconPath = strings.TrimSpace(text)
+	return nil
+}
+
+func parseTimeoutMS(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["timeout_ms"]
+	if !ok {
+		return nil
+	}
+	switch v := value.(type) {
+	case float64:
+		cfg.TimeoutMS = int(v)
+	case int:
+		cfg.TimeoutMS = v
+	case int64:
+		cfg.TimeoutMS = int(v)
+	case string:
+		if strings.TrimSpace(v) != "" {
+			parsed, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				return fmt.Errorf("timeout_ms must be a number")
+			}
+			cfg.TimeoutMS = parsed
+		}
+	default:
+		return fmt.Errorf("timeout_ms must be a number")
+	}
+	return nil
 }
 
 func (p *SystemProvider) sendNotification(ctx context.Context, cfg systemConfig, title, body string) error {

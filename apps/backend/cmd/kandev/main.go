@@ -22,6 +22,13 @@ import (
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+
+	// Agent infrastructure
+	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/registry"
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -31,8 +38,11 @@ import (
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 
-	// Worktree package
-	"github.com/kandev/kandev/internal/worktree"
+	// Orchestrator
+	"github.com/kandev/kandev/internal/orchestrator"
+
+	// Database
+	"github.com/jmoiron/sqlx"
 )
 
 // Command-line flags
@@ -55,24 +65,33 @@ func init() {
 	}
 }
 
+// main parses flags and delegates to realMain, using os.Exit with its return code.
+// os.Exit is only called from main() before any defers are registered, so that
+// deferred cleanup functions inside realMain() always execute.
 func main() {
+	os.Exit(realMain())
+}
+
+// realMain contains all startup logic and returns 0 on success or 1 on fatal error.
+// Deferred cleanup is registered here so it always executes before realMain returns.
+func realMain() int {
 	flag.Parse()
 
 	if *flagHelp {
 		flag.Usage()
-		os.Exit(0)
+		return 0
 	}
 
 	if *flagVersion {
 		fmt.Println("kandev version 0.1.0")
-		os.Exit(0)
+		return 0
 	}
 
 	// 1. Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Apply command-line flag overrides (flags take precedence over config/env)
@@ -90,8 +109,9 @@ func main() {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+
 	cleanups := make([]func() error, 0)
 	cleanupsRan := false
 	runCleanups := func() {
@@ -116,16 +136,27 @@ func main() {
 
 	log.Info("Starting Kandev (unified mode)...")
 
+	if !run(cfg, log, &cleanups, runCleanups) {
+		return 1
+	}
+	return 0
+}
+
+// run initializes all services and runs the server. Returns false on fatal startup error.
+func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCleanups func()) bool {
+	addCleanup := func(fn func() error) { *cleanups = append(*cleanups, fn) }
+
 	// 3. Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
-	cleanups = append(cleanups, func() error { cancel(); return nil })
+	addCleanup(func() error { cancel(); return nil })
 
 	// 4. Initialize event bus (in-memory for unified mode, or NATS if configured)
 	eventBusProvider, cleanup, err := events.Provide(cfg, log)
 	if err != nil {
-		log.Fatal("Failed to initialize event bus", zap.Error(err))
+		log.Error("Failed to initialize event bus", zap.Error(err))
+		return false
 	}
-	cleanups = append(cleanups, cleanup)
+	addCleanup(cleanup)
 	eventBus := eventBusProvider.Bus
 
 	// 5. Initialize Docker client
@@ -134,6 +165,19 @@ func main() {
 		defer func() { _ = dockerClient.Close() }()
 	}
 
+	return startServices(ctx, cfg, log, addCleanup, eventBus, dockerClient, runCleanups)
+}
+
+// startServices initializes task-level services and all downstream infrastructure.
+func startServices( //nolint:cyclop
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	addCleanup func(func() error),
+	eventBus bus.EventBus,
+	dockerClient *docker.Client,
+	runCleanups func(),
+) bool {
 	// ============================================
 	// TASK SERVICE
 	// ============================================
@@ -141,67 +185,71 @@ func main() {
 
 	dbConn, repos, repoCleanups, err := provideRepositories(cfg, log)
 	if err != nil {
-		log.Fatal("Failed to initialize repositories", zap.Error(err))
+		log.Error("Failed to initialize repositories", zap.Error(err))
+		return false
 	}
-	cleanups = append(cleanups, repoCleanups...)
+	for _, c := range repoCleanups {
+		addCleanup(c)
+	}
 
 	services, agentSettingsController, err := provideServices(cfg, log, repos, eventBus)
 	if err != nil {
-		log.Fatal("Failed to initialize services", zap.Error(err))
+		log.Error("Failed to initialize services", zap.Error(err))
+		return false
 	}
-	taskRepo := repos.Task
-	analyticsRepo := repos.Analytics
-	agentSettingsRepo := repos.AgentSettings
-	notificationRepo := repos.Notification
-	taskSvc := services.Task
-	userSvc := services.User
-	editorSvc := services.Editor
-	promptSvc := services.Prompts
 	log.Info("Task Service initialized")
 
-	userCtrl := usercontroller.NewController(userSvc)
-	var gateway *gateways.Gateway
-	var notificationCtrl *notificationcontroller.Controller
-	editorCtrl := editorcontroller.NewController(editorSvc)
-	promptCtrl := promptcontroller.NewController(promptSvc)
-
-	if err := runInitialAgentSetup(ctx, userSvc, agentSettingsController, log); err != nil {
+	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		log.Warn("Failed to run initial agent setup", zap.Error(err))
 	}
-
-	// ACP messages are now stored as comments in the task_comments table
-	// The comment system provides unified storage for all task-related communication
 	log.Info("ACP messages will be stored as comments")
 
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	var agentctlCleanup func() error
-	agentctlCleanup, err = provideAgentctlLauncher(ctx, cfg, log)
+	agentctlCleanup, err := provideAgentctlLauncher(ctx, cfg, log)
 	if err != nil {
-		log.Fatal("Failed to start agentctl subprocess", zap.Error(err))
+		log.Error("Failed to start agentctl subprocess", zap.Error(err))
+		return false
 	}
 	if agentctlCleanup != nil {
-		cleanups = append(cleanups, agentctlCleanup)
+		addCleanup(agentctlCleanup)
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("panic recovered, stopping agentctl", zap.Any("panic", r))
-				if err := agentctlCleanup(); err != nil {
-					log.Error("failed to stop agentctl on panic", zap.Error(err))
+				if stopErr := agentctlCleanup(); stopErr != nil {
+					log.Error("failed to stop agentctl on panic", zap.Error(stopErr))
 				}
 				panic(r)
 			}
 		}()
 	}
 
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbConn, repos, services, agentSettingsController, runCleanups)
+}
+
+// startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
+// gateway, and HTTP server.
+func startAgentInfrastructure(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	addCleanup func(func() error),
+	eventBus bus.EventBus,
+	dockerClient *docker.Client,
+	dbConn *sqlx.DB,
+	repos *Repositories,
+	services *Services,
+	agentSettingsController *agentsettingscontroller.Controller,
+	runCleanups func(),
+) bool {
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	// Note: MCP server is now embedded in agentctl (co-located with agents)
-	// and tunnels tool calls back to the backend via WebSocket.
-	lifecycleMgr, agentRegistry, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, agentSettingsRepo)
+	lifecycleMgr, agentRegistry, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings)
 	if err != nil {
-		log.Fatal("Failed to initialize agent manager", zap.Error(err))
+		log.Error("Failed to initialize agent manager", zap.Error(err))
+		return false
 	}
 
 	// ============================================
@@ -209,92 +257,121 @@ func main() {
 	// ============================================
 	log.Info("Initializing Worktree Manager...")
 
-	var worktreeCleanup func() error
-	var worktreeRecreator *worktree.Recreator
-	_, worktreeRecreator, worktreeCleanup, err = provideWorktreeManager(dbConn, cfg, log, lifecycleMgr, taskSvc)
+	_, worktreeRecreator, worktreeCleanup, err := provideWorktreeManager(dbConn, cfg, log, lifecycleMgr, services.Task)
 	if err != nil {
-		log.Fatal("Failed to initialize worktree manager", zap.Error(err))
+		log.Error("Failed to initialize worktree manager", zap.Error(err))
+		return false
 	}
-	cleanups = append(cleanups, worktreeCleanup)
+	addCleanup(worktreeCleanup)
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled),
 		zap.String("base_path", cfg.Worktree.BasePath))
 
-	// Set task service as workspace info provider for session recovery
-	if lifecycleMgr != nil {
-		lifecycleMgr.SetWorkspaceInfoProvider(taskSvc)
-		log.Info("Workspace info provider configured for session recovery")
-	}
+	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
+	log.Info("Workspace info provider configured for session recovery")
 
 	// ============================================
 	// ORCHESTRATOR
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, taskRepo, taskSvc, userSvc, lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator)
+	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, repos.Task, services.Task, services.User,
+		lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator)
 	if err != nil {
-		log.Fatal("Failed to initialize orchestrator", zap.Error(err))
+		log.Error("Failed to initialize orchestrator", zap.Error(err))
+		return false
 	}
 
+	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, runCleanups)
+}
+
+// startGatewayAndServe sets up the WebSocket gateway, HTTP routes, starts the server,
+// and blocks until a shutdown signal.
+func startGatewayAndServe(
+	ctx context.Context,
+	cfg *config.Config,
+	log *logger.Logger,
+	eventBus bus.EventBus,
+	repos *Repositories,
+	services *Services,
+	agentSettingsController *agentsettingscontroller.Controller,
+	lifecycleMgr *lifecycle.Manager,
+	agentRegistry *registry.Registry,
+	orchestratorSvc *orchestrator.Service,
+	msgCreator *messageCreatorAdapter,
+	runCleanups func(),
+) bool {
 	// ============================================
-	// WEBSOCKET GATEWAY (All communication via WebSocket)
+	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
-	gateway, _, notificationCtrl, err = provideGateway(
-		ctx,
-		log,
-		eventBus,
-		taskSvc,
-		userSvc,
-		orchestratorSvc,
-		lifecycleMgr,
-		agentRegistry,
-		notificationRepo,
-		taskRepo,
+	gateway, _, notificationCtrl, err := provideGateway(
+		ctx, log, eventBus, services.Task, services.User,
+		orchestratorSvc, lifecycleMgr, agentRegistry,
+		repos.Notification, repos.Task,
 	)
 	if err != nil {
-		log.Fatal("Failed to initialize WebSocket gateway", zap.Error(err))
+		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
+		return false
 	}
 
-	// Note: Hub is started and TaskNotifications/UserNotifications/TaskSessionStateChanged
-	// are already registered by provideGateway.
-	// Only register SessionStreamNotifications here as it's not part of provideGateway
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
-
-	// Set up session data provider for session subscriptions
-	// Sends initial git status when a client subscribes to a session
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(taskRepo, lifecycleMgr, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
 	if err := orchestratorSvc.Start(ctx); err != nil {
-		log.Fatal("Failed to start orchestrator", zap.Error(err))
+		log.Error("Failed to start orchestrator", zap.Error(err))
+		return false
 	}
 	log.Info("Orchestrator initialized")
 
-	// Start auto-archive background loop
-	taskSvc.StartAutoArchiveLoop(ctx)
+	services.Task.StartAutoArchiveLoop(ctx)
 
-	// Subscribe to message and session events and broadcast to WebSocket subscribers
-	if _, err = eventBus.Subscribe(events.MessageAdded, newMessageAddedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.added events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
-	}
-	if _, err = eventBus.Subscribe(events.MessageUpdated, newMessageUpdatedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
-	}
-	if _, err = eventBus.Subscribe(events.TaskSessionStateChanged, newSessionStateChangedHandler(gateway, log)); err != nil {
-		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
-	} else {
-		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
-	}
+	subscribeEventBusHandlers(eventBus, gateway, log)
 
 	// ============================================
-	// HTTP SERVER (WebSocket + HTTP endpoints)
+	// HTTP SERVER
 	// ============================================
+	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator)
+
+	port := cfg.Server.Port
+	if port == 0 {
+		port = 8080
+	}
+	go func() {
+		log.Info("WebSocket server listening", zap.Int("port", port))
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("Server listen error", zap.Error(err))
+		}
+	}()
+
+	log.Info("API configured",
+		zap.String("websocket", "/ws"),
+		zap.String("health", "/health"),
+		zap.String("http", "/api/v1"),
+	)
+
+	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	return true
+}
+
+// buildHTTPServer creates the HTTP server with all routes registered.
+func buildHTTPServer(
+	cfg *config.Config,
+	log *logger.Logger,
+	gateway *gateways.Gateway,
+	repos *Repositories,
+	services *Services,
+	agentSettingsController *agentsettingscontroller.Controller,
+	lifecycleMgr *lifecycle.Manager,
+	eventBus bus.EventBus,
+	orchestratorSvc *orchestrator.Service,
+	notificationCtrl *notificationcontroller.Controller,
+	msgCreator *messageCreatorAdapter,
+) *http.Server {
 	if cfg.Logging.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -306,49 +383,61 @@ func main() {
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
-		taskSvc:                 taskSvc,
-		taskRepo:                taskRepo,
-		analyticsRepo:           analyticsRepo,
+		taskSvc:                 services.Task,
+		taskRepo:                repos.Task,
+		analyticsRepo:           repos.Analytics,
 		orchestratorSvc:         orchestratorSvc,
 		lifecycleMgr:            lifecycleMgr,
 		eventBus:                eventBus,
 		services:                services,
 		agentSettingsController: agentSettingsController,
-		userCtrl:                userCtrl,
+		userCtrl:                usercontroller.NewController(services.User),
 		notificationCtrl:        notificationCtrl,
-		editorCtrl:              editorCtrl,
-		promptCtrl:              promptCtrl,
+		editorCtrl:              editorcontroller.NewController(services.Editor),
+		promptCtrl:              promptcontroller.NewController(services.Prompts),
 		msgCreator:              msgCreator,
 		log:                     log,
 	})
 
-	// Create HTTP server
 	port := cfg.Server.Port
 	if port == 0 {
 		port = 8080
 	}
-	server := &http.Server{
+	return &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
 	}
+}
 
-	// Start server
-	go func() {
-		log.Info("WebSocket server listening", zap.Int("port", port))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal("Failed to start server", zap.Error(err))
-		}
-	}()
+// subscribeEventBusHandlers subscribes WebSocket broadcast handlers to the event bus.
+func subscribeEventBusHandlers(eventBus bus.EventBus, gateway *gateways.Gateway, log *logger.Logger) {
+	if _, err := eventBus.Subscribe(events.MessageAdded, newMessageAddedHandler(gateway, log)); err != nil {
+		log.Error("Failed to subscribe to message.added events", zap.Error(err))
+	} else {
+		log.Debug("Subscribed to message.added events for WebSocket broadcasting")
+	}
+	if _, err := eventBus.Subscribe(events.MessageUpdated, newMessageUpdatedHandler(gateway, log)); err != nil {
+		log.Error("Failed to subscribe to message.updated events", zap.Error(err))
+	} else {
+		log.Debug("Subscribed to message.updated events for WebSocket broadcasting")
+	}
+	if _, err := eventBus.Subscribe(events.TaskSessionStateChanged, newSessionStateChangedHandler(gateway, log)); err != nil {
+		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
+	} else {
+		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
+	}
+}
 
-	// Print routes summary
-	log.Info("API configured",
-		zap.String("websocket", "/ws"),
-		zap.String("health", "/health"),
-		zap.String("http", "/api/v1"),
-	)
-
+// awaitShutdown waits for an OS signal then performs graceful shutdown.
+func awaitShutdown(
+	server *http.Server,
+	orchestratorSvc *orchestrator.Service,
+	lifecycleMgr *lifecycle.Manager,
+	runCleanups func(),
+	log *logger.Logger,
+) {
 	// ============================================
 	// GRACEFUL SHUTDOWN
 	// ============================================
@@ -365,6 +454,5 @@ func main() {
 	}()
 
 	log.Info("Received shutdown signal", zap.String("signal", sig.String()))
-	cancel()
 	runGracefulShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

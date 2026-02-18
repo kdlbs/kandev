@@ -130,6 +130,25 @@ func (h *DefaultScriptMessageHandler) executeScript(_ context.Context, req Scrip
 	exitCode, scriptErr := h.runScriptWithOutput(scriptCtx, req, msg)
 
 	// Update final status
+	applyScriptFinalStatus(msg, exitCode, scriptErr)
+
+	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if updateErr := h.taskService.UpdateMessage(scriptCtx, msg); updateErr != nil {
+		h.logger.Warn("failed to update message with final status",
+			zap.String("message_id", msg.ID),
+			zap.Error(updateErr))
+	}
+
+	h.logger.Info("script execution completed",
+		zap.String("message_id", msg.ID),
+		zap.Int("exit_code", exitCode),
+		zap.Bool("success", exitCode == 0))
+
+	return scriptExecutionError(failOnError, exitCode, scriptErr)
+}
+
+// applyScriptFinalStatus updates the message metadata and content based on script outcome.
+func applyScriptFinalStatus(msg *models.Message, exitCode int, scriptErr error) {
 	switch {
 	case scriptErr != nil:
 		msg.Metadata["status"] = "failed"
@@ -154,27 +173,19 @@ func (h *DefaultScriptMessageHandler) executeScript(_ context.Context, req Scrip
 			msg.Content += fmt.Sprintf("\n\nScript failed with exit code: %d", exitCode)
 		}
 	}
+}
 
-	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-	if updateErr := h.taskService.UpdateMessage(scriptCtx, msg); updateErr != nil {
-		h.logger.Warn("failed to update message with final status",
-			zap.String("message_id", msg.ID),
-			zap.Error(updateErr))
+// scriptExecutionError returns an error if failOnError is set and the script did not succeed.
+func scriptExecutionError(failOnError bool, exitCode int, scriptErr error) error {
+	if !failOnError {
+		return nil
 	}
-
-	h.logger.Info("script execution completed",
-		zap.String("message_id", msg.ID),
-		zap.Int("exit_code", exitCode),
-		zap.Bool("success", exitCode == 0))
-
-	// Return error if setup script failed
-	if failOnError && (scriptErr != nil || exitCode != 0) {
-		if scriptErr != nil {
-			return scriptErr
-		}
+	if scriptErr != nil {
+		return scriptErr
+	}
+	if exitCode != 0 {
 		return fmt.Errorf("script exited with code %d", exitCode)
 	}
-
 	return nil
 }
 

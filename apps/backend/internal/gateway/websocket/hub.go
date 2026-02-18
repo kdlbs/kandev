@@ -102,37 +102,39 @@ func (h *Hub) removeClient(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if _, ok := h.clients[client]; ok {
-		delete(h.clients, client)
-		client.closeSend()
-
-		// Remove from all task subscriptions
-		for taskID := range client.subscriptions {
-			if clients, ok := h.taskSubscribers[taskID]; ok {
-				delete(clients, client)
-				if len(clients) == 0 {
-					delete(h.taskSubscribers, taskID)
-				}
-			}
-		}
-		for sessionID := range client.sessionSubscriptions {
-			if clients, ok := h.sessionSubscribers[sessionID]; ok {
-				delete(clients, client)
-				if len(clients) == 0 {
-					delete(h.sessionSubscribers, sessionID)
-				}
-			}
-		}
-		for userID := range client.userSubscriptions {
-			if clients, ok := h.userSubscribers[userID]; ok {
-				delete(clients, client)
-				if len(clients) == 0 {
-					delete(h.userSubscribers, userID)
-				}
-			}
-		}
+	if _, ok := h.clients[client]; !ok {
+		h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+		return
 	}
+
+	delete(h.clients, client)
+	client.closeSend()
+
+	// Remove from all task subscriptions
+	for taskID := range client.subscriptions {
+		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
+	}
+	for sessionID := range client.sessionSubscriptions {
+		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+	}
+	for userID := range client.userSubscriptions {
+		removeClientFromSubscriberMap(h.userSubscribers, userID, client)
+	}
+
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// removeClientFromSubscriberMap removes a client from a subscriber map entry,
+// deleting the entry entirely when no subscribers remain.
+func removeClientFromSubscriberMap(subscribers map[string]map[*Client]bool, key string, client *Client) {
+	clients, ok := subscribers[key]
+	if !ok {
+		return
+	}
+	delete(clients, client)
+	if len(clients) == 0 {
+		delete(subscribers, key)
+	}
 }
 
 // broadcastMessage sends a message to relevant clients

@@ -75,24 +75,21 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 				continue
 			}
 
-			if msg.Type == ws.MessageTypeRequest {
-				m.mu.Lock()
-				m.actionLog = append(m.actionLog, msg.Action)
-				m.mu.Unlock()
+			if msg.Type != ws.MessageTypeRequest {
+				continue
+			}
 
-				var resp *ws.Message
-				if m.handler != nil {
-					resp = m.handler(msg)
-				} else {
-					resp = m.defaultHandler(msg)
-				}
+			m.mu.Lock()
+			m.actionLog = append(m.actionLog, msg.Action)
+			m.mu.Unlock()
 
-				if resp != nil {
-					data, _ := json.Marshal(resp)
-					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-						return
-					}
-				}
+			resp := m.buildResponse(msg)
+			if resp == nil {
+				continue
+			}
+			data, _ := json.Marshal(resp)
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
 			}
 		}
 	})
@@ -120,6 +117,14 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 
 	m.server = httptest.NewServer(mux)
 	return m
+}
+
+// buildResponse returns the handler or default response for a request message.
+func (m *mockAgentServer) buildResponse(msg ws.Message) *ws.Message {
+	if m.handler != nil {
+		return m.handler(msg)
+	}
+	return m.defaultHandler(msg)
 }
 
 func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {

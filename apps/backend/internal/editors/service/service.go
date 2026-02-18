@@ -98,43 +98,55 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 		return "", err
 	}
 
+	return s.dispatchEditorKind(editor, worktreePath, absPath, input.Line, input.Column)
+}
+
+func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPath string, line, column int) (string, error) {
 	switch editor.Kind {
 	case editorKindCustomRemoteSSH:
-		cfg, err := parseRemoteSSHConfig(editor.Config)
-		if err != nil {
-			return "", err
-		}
-		scheme := cfg.Scheme
-		if scheme == "" {
-			scheme = editor.Scheme
-		}
-		return buildRemoteSSHURL(scheme, cfg.User, cfg.Host, absPath, input.Line, input.Column), nil
+		return openRemoteSSHEditor(editor, absPath, line, column)
 	case editorKindCustomHostedURL:
 		cfg, err := parseHostedURLConfig(editor.Config)
 		if err != nil {
 			return "", err
 		}
-		return buildHostedURL(cfg.URL, absPath, input.Line, input.Column)
+		return buildHostedURL(cfg.URL, absPath, line, column)
 	case editorKindCustomCommand:
 		cfg, err := parseCommandConfig(editor.Config)
 		if err != nil {
 			return "", err
 		}
-		return launchCommand(cfg.Command, worktreePath, absPath, input.Line, input.Column)
+		return launchCommand(cfg.Command, worktreePath, absPath, line, column)
 	default:
-		if !editor.Installed {
-			return "", ErrEditorUnavailable
-		}
-		if editor.Command == "" {
-			return "", ErrEditorConfigInvalid
-		}
-		args := buildLocalArgs(editor.Type, absPath, input.Line, input.Column)
-		cmd := exec.Command(editor.Command, args...)
-		if err := cmd.Start(); err != nil {
-			return "", fmt.Errorf("launch failed: %w", err)
-		}
-		return "", nil
+		return openBuiltinEditor(editor, absPath, line, column)
 	}
+}
+
+func openRemoteSSHEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
+	cfg, err := parseRemoteSSHConfig(editor.Config)
+	if err != nil {
+		return "", err
+	}
+	scheme := cfg.Scheme
+	if scheme == "" {
+		scheme = editor.Scheme
+	}
+	return buildRemoteSSHURL(scheme, cfg.User, cfg.Host, absPath, line, column), nil
+}
+
+func openBuiltinEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
+	if !editor.Installed {
+		return "", ErrEditorUnavailable
+	}
+	if editor.Command == "" {
+		return "", ErrEditorConfigInvalid
+	}
+	args := buildLocalArgs(editor.Type, absPath, line, column)
+	cmd := exec.Command(editor.Command, args...)
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("launch failed: %w", err)
+	}
+	return "", nil
 }
 
 func (s *Service) OpenFolder(ctx context.Context, sessionID string) error {

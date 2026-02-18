@@ -42,28 +42,35 @@ func TestDetectShell(t *testing.T) {
 		t.Error("detectShell returned empty shell")
 	}
 
-	// Verify detected shell exists on Unix systems
-	if runtime.GOOS != "windows" {
-		if _, err := os.Stat(shell); err != nil {
-			// May be in PATH, try LookPath
-			if _, err := os.Stat(shell); err != nil && shell != os.Getenv("SHELL") {
-				t.Logf("Warning: detected shell %q may not exist: %v", shell, err)
-			}
-		}
-		// Unix shells should have -l flag for login shell
-		if len(args) > 0 && args[0] != "-l" {
-			t.Errorf("expected Unix shell args to contain '-l', got %v", args)
-		}
-	} else {
-		// Windows should detect cmd.exe, powershell.exe, or pwsh.exe
-		validShells := map[string]bool{
-			"cmd.exe":        true,
-			"powershell.exe": true,
-			"pwsh.exe":       true,
-		}
-		if !validShells[shell] {
-			t.Errorf("unexpected Windows shell: %q", shell)
-		}
+	if runtime.GOOS == "windows" {
+		assertWindowsShell(t, shell)
+		return
+	}
+	assertUnixShell(t, shell, args)
+}
+
+// assertUnixShell verifies Unix-specific shell detection results.
+func assertUnixShell(t *testing.T, shell string, args []string) {
+	t.Helper()
+	if _, err := os.Stat(shell); err != nil && shell != os.Getenv("SHELL") {
+		t.Logf("Warning: detected shell %q may not exist: %v", shell, err)
+	}
+	// Unix shells should have -l flag for login shell
+	if len(args) > 0 && args[0] != "-l" {
+		t.Errorf("expected Unix shell args to contain '-l', got %v", args)
+	}
+}
+
+// assertWindowsShell verifies Windows-specific shell detection results.
+func assertWindowsShell(t *testing.T, shell string) {
+	t.Helper()
+	validShells := map[string]bool{
+		"cmd.exe":        true,
+		"powershell.exe": true,
+		"pwsh.exe":       true,
+	}
+	if !validShells[shell] {
+		t.Errorf("unexpected Windows shell: %q", shell)
 	}
 }
 

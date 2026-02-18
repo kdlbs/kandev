@@ -23,48 +23,8 @@ func (r *Repository) ensureDefaultWorkspace() error {
 	}
 
 	if count == 0 {
-		var workflowCount int
-		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM workflows").Scan(&workflowCount); err != nil {
+		if err := r.createInitialWorkspace(ctx); err != nil {
 			return err
-		}
-		var taskCount int
-		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM tasks").Scan(&taskCount); err != nil {
-			return err
-		}
-		defaultID := uuid.New().String()
-		now := time.Now().UTC()
-		workspaceName := "Default Workspace"
-		workspaceDescription := "Default workspace"
-		if workflowCount > 0 || taskCount > 0 {
-			workspaceName = "Migrated Workspace"
-			workspaceDescription = ""
-		}
-		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO workspaces (
-				id,
-				name,
-				description,
-				owner_id,
-				default_executor_id,
-				default_environment_id,
-				default_agent_profile_id,
-				created_at,
-				updated_at
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`), defaultID, workspaceName, workspaceDescription, "", nil, nil, nil, now, now); err != nil {
-			return err
-		}
-
-		if workflowCount == 0 && taskCount == 0 {
-			workflowID := uuid.New().String()
-			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-				INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?)
-			`), workflowID, defaultID, "Development", "Default development workflow", "simple", now, now); err != nil {
-				return err
-			}
-			// Note: Workflow steps will be created by the workflow repository after it initializes
 		}
 	}
 
@@ -89,6 +49,53 @@ func (r *Repository) ensureDefaultWorkspace() error {
 		return err
 	}
 
+	return nil
+}
+
+// createInitialWorkspace inserts the first workspace and optionally a default workflow.
+func (r *Repository) createInitialWorkspace(ctx context.Context) error {
+	var workflowCount int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM workflows").Scan(&workflowCount); err != nil {
+		return err
+	}
+	var taskCount int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM tasks").Scan(&taskCount); err != nil {
+		return err
+	}
+	defaultID := uuid.New().String()
+	now := time.Now().UTC()
+	workspaceName := "Default Workspace"
+	workspaceDescription := "Default workspace"
+	if workflowCount > 0 || taskCount > 0 {
+		workspaceName = "Migrated Workspace"
+		workspaceDescription = ""
+	}
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO workspaces (
+			id,
+			name,
+			description,
+			owner_id,
+			default_executor_id,
+			default_environment_id,
+			default_agent_profile_id,
+			created_at,
+			updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), defaultID, workspaceName, workspaceDescription, "", nil, nil, nil, now, now); err != nil {
+		return err
+	}
+	if workflowCount == 0 && taskCount == 0 {
+		workflowID := uuid.New().String()
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`), workflowID, defaultID, "Development", "Default development workflow", "simple", now, now); err != nil {
+			return err
+		}
+		// Note: Workflow steps will be created by the workflow repository after it initializes
+	}
 	return nil
 }
 

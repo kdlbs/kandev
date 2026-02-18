@@ -2,23 +2,10 @@ package process
 
 import "strings"
 
-// escapeArg rewrites a command-line argument following the MSDN
-// CommandLineToArgvW parsing rules (same algorithm as Go's
-// syscall.EscapeArg on Windows):
-//
-//   - every backslash (\) is doubled, but only if immediately
-//     followed by a double quote (");
-//   - every double quote (") is escaped with a backslash (\);
-//   - finally, the argument is wrapped in double quotes only if
-//     it contains spaces or tabs.
-//   - an empty string becomes "" (two double-quote characters).
-func escapeArg(s string) string {
-	if len(s) == 0 {
-		return `""`
-	}
-
-	needsBackslash := false
-	hasSpace := false
+// scanArgChars inspects each byte of s and returns whether any character
+// requires backslash-escaping (double-quote or backslash) and whether
+// the argument contains whitespace (space or tab).
+func scanArgChars(s string) (needsBackslash, hasSpace bool) {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '"', '\\':
@@ -27,18 +14,13 @@ func escapeArg(s string) string {
 			hasSpace = true
 		}
 	}
+	return needsBackslash, hasSpace
+}
 
-	if !needsBackslash && !hasSpace {
-		return s
-	}
-	if !needsBackslash {
-		return `"` + s + `"`
-	}
-
-	var b []byte
-	if hasSpace {
-		b = append(b, '"')
-	}
+// appendEscapedBytes appends the bytes of s to b applying MSDN
+// CommandLineToArgvW backslash-doubling rules for double-quote characters.
+// Returns the updated byte slice and the trailing slash count.
+func appendEscapedBytes(b []byte, s string) ([]byte, int) {
 	slashes := 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -55,6 +37,38 @@ func escapeArg(s string) string {
 		}
 		b = append(b, c)
 	}
+	return b, slashes
+}
+
+// escapeArg rewrites a command-line argument following the MSDN
+// CommandLineToArgvW parsing rules (same algorithm as Go's
+// syscall.EscapeArg on Windows):
+//
+//   - every backslash (\) is doubled, but only if immediately
+//     followed by a double quote (");
+//   - every double quote (") is escaped with a backslash (\);
+//   - finally, the argument is wrapped in double quotes only if
+//     it contains spaces or tabs.
+//   - an empty string becomes "" (two double-quote characters).
+func escapeArg(s string) string {
+	if len(s) == 0 {
+		return `""`
+	}
+
+	needsBackslash, hasSpace := scanArgChars(s)
+
+	if !needsBackslash && !hasSpace {
+		return s
+	}
+	if !needsBackslash {
+		return `"` + s + `"`
+	}
+
+	var b []byte
+	if hasSpace {
+		b = append(b, '"')
+	}
+	b, slashes := appendEscapedBytes(b, s)
 	if hasSpace {
 		for ; slashes > 0; slashes-- {
 			b = append(b, '\\')

@@ -508,50 +508,54 @@ func (a *CopilotAdapter) handleEvent(evt copilot.SessionEvent) {
 		sessionID = *evt.Data.SessionID
 	}
 
+	if a.handleLifecycleEvent(evt, sessionID, operationID) {
+		return
+	}
+	a.handleContentEvent(evt, sessionID, operationID)
+}
+
+// handleLifecycleEvent handles session lifecycle events.
+// Returns true if the event was handled.
+func (a *CopilotAdapter) handleLifecycleEvent(evt copilot.SessionEvent, sessionID, operationID string) bool {
 	switch evt.Type {
 	case copilot.EventTypeSessionStart:
 		a.logger.Info("session started", zap.String("session_id", sessionID))
-
 	case copilot.EventTypeSessionResume:
 		a.logger.Info("session resumed", zap.String("session_id", sessionID))
-
-	case copilot.EventTypeAssistantMessage:
-		a.handleAssistantMessage(evt, sessionID, operationID)
-
-	case copilot.EventTypeAssistantMessageDelta:
-		a.handleAssistantMessageDelta(evt, sessionID, operationID)
-
-	case copilot.EventTypeAssistantReasoning, copilot.EventTypeAssistantReasoningDelta:
-		a.handleAssistantReasoning(evt, sessionID, operationID)
-
-	case copilot.EventTypeToolStart:
-		a.handleToolStart(evt, sessionID, operationID)
-
-	case copilot.EventTypeToolComplete:
-		a.handleToolComplete(evt, sessionID, operationID)
-
-	case copilot.EventTypeToolProgress:
-		a.handleToolProgress(evt, sessionID, operationID)
-
-	case copilot.EventTypeSessionIdle:
-		a.handleSessionIdle(sessionID, operationID)
-
-	case copilot.EventTypeSessionError:
-		a.handleSessionError(evt, sessionID, operationID)
-
-	case copilot.EventTypeSessionUsageInfo, copilot.EventTypeAssistantUsage:
-		a.handleUsageInfo(evt, sessionID, operationID)
-
 	case copilot.EventTypeAssistantTurnStart:
 		a.logger.Debug("turn started", zap.String("operation_id", operationID))
-
 	case copilot.EventTypeAssistantTurnEnd:
 		a.logger.Debug("turn ended", zap.String("operation_id", operationID))
-
 	case copilot.EventTypeAbort:
 		a.logger.Info("operation aborted")
 		a.signalCompletion(false, "operation aborted")
+	default:
+		return false
+	}
+	return true
+}
 
+// handleContentEvent handles content and tool events.
+func (a *CopilotAdapter) handleContentEvent(evt copilot.SessionEvent, sessionID, operationID string) {
+	switch evt.Type {
+	case copilot.EventTypeAssistantMessage:
+		a.handleAssistantMessage(evt, sessionID, operationID)
+	case copilot.EventTypeAssistantMessageDelta:
+		a.handleAssistantMessageDelta(evt, sessionID, operationID)
+	case copilot.EventTypeAssistantReasoning, copilot.EventTypeAssistantReasoningDelta:
+		a.handleAssistantReasoning(evt, sessionID, operationID)
+	case copilot.EventTypeToolStart:
+		a.handleToolStart(evt, sessionID, operationID)
+	case copilot.EventTypeToolComplete:
+		a.handleToolComplete(evt, sessionID, operationID)
+	case copilot.EventTypeToolProgress:
+		a.handleToolProgress(evt, sessionID, operationID)
+	case copilot.EventTypeSessionIdle:
+		a.handleSessionIdle(sessionID, operationID)
+	case copilot.EventTypeSessionError:
+		a.handleSessionError(evt, sessionID, operationID)
+	case copilot.EventTypeSessionUsageInfo, copilot.EventTypeAssistantUsage:
+		a.handleUsageInfo(evt, sessionID, operationID)
 	default:
 		a.logger.Debug("unhandled SDK event", zap.String("type", string(evt.Type)))
 	}

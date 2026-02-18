@@ -541,25 +541,10 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.AgentProfileID = session.AgentProfileID
 
 	// Extract resume token from executor runtime state.
-	var resumeToken string
-	if running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
-		resumeToken = running.ResumeToken
-		resp.ACPSessionID = resumeToken
-		if running.Resumable {
-			resp.IsResumable = true
-		}
-	}
+	resumeToken := s.populateResumeInfo(ctx, sessionID, &resp)
 
 	// Extract worktree info
-	if len(session.Worktrees) > 0 {
-		wt := session.Worktrees[0]
-		if wt.WorktreePath != "" {
-			resp.WorktreePath = &wt.WorktreePath
-		}
-		if wt.WorktreeBranch != "" {
-			resp.WorktreeBranch = &wt.WorktreeBranch
-		}
-	}
+	populateWorktreeInfo(session, &resp)
 
 	// 2. Check if this session's agent is running
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
@@ -577,10 +562,43 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	}
 
 	// 4. Additional validations for resumption
+	return s.validateResumeEligibility(session, resp), nil
+}
+
+// populateResumeInfo extracts resume token from executor runtime state and populates resp fields.
+// Returns the resume token (may be empty).
+func (s *Service) populateResumeInfo(ctx context.Context, sessionID string, resp *dto.TaskSessionStatusResponse) string {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil {
+		return ""
+	}
+	resp.ACPSessionID = running.ResumeToken
+	if running.Resumable {
+		resp.IsResumable = true
+	}
+	return running.ResumeToken
+}
+
+// populateWorktreeInfo copies worktree path and branch into the response if present.
+func populateWorktreeInfo(session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
+	if len(session.Worktrees) == 0 {
+		return
+	}
+	wt := session.Worktrees[0]
+	if wt.WorktreePath != "" {
+		resp.WorktreePath = &wt.WorktreePath
+	}
+	if wt.WorktreeBranch != "" {
+		resp.WorktreeBranch = &wt.WorktreeBranch
+	}
+}
+
+// validateResumeEligibility performs final checks before marking a session as resumable.
+func (s *Service) validateResumeEligibility(session *models.TaskSession, resp dto.TaskSessionStatusResponse) dto.TaskSessionStatusResponse {
 	if session.AgentProfileID == "" {
 		resp.Error = "session missing agent profile"
 		resp.IsResumable = false
-		return resp, nil
+		return resp
 	}
 
 	// Check if worktree exists (if one was used)
@@ -588,15 +606,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		if _, err := os.Stat(session.Worktrees[0].WorktreePath); err != nil {
 			resp.Error = "worktree not found"
 			resp.IsResumable = false
-			return resp, nil
+			return resp
 		}
 	}
 
 	resp.IsAgentRunning = false
 	resp.NeedsResume = true
 	resp.ResumeReason = "agent_not_running"
-
-	return resp, nil
+	return resp
 }
 
 // StopTask stops agent execution for a task (stops all active sessions for the task)

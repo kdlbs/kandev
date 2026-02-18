@@ -214,68 +214,20 @@ func normalizeRoots(roots []string) []string {
 
 func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRepository, error) {
 	repos := make([]LocalRepository, 0)
-	libraryRoot := filepath.Join(root, "Library")
-	cacheRoot := filepath.Join(root, ".cache")
+	walker := &repoWalker{
+		root:        root,
+		maxDepth:    maxDepth,
+		libraryRoot: filepath.Join(root, "Library"),
+		cacheRoot:   filepath.Join(root, ".cache"),
+		ctx:         ctx,
+	}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+		repo, walkErr := walker.visit(path, d, err)
+		if walkErr != nil {
+			return walkErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if path == root {
-			return nil
-		}
-
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		depth := strings.Count(rel, string(os.PathSeparator))
-		if d.IsDir() && depth > maxDepth {
-			return fs.SkipDir
-		}
-
-		if isWithinRoot(path, libraryRoot) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if isWithinRoot(path, cacheRoot) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-
-		name := d.Name()
-		if d.IsDir() && name == "Library" && filepath.Dir(path) == root {
-			return fs.SkipDir
-		}
-		if d.IsDir() && name == ".cache" && filepath.Dir(path) == root {
-			return fs.SkipDir
-		}
-		if d.IsDir() && strings.HasPrefix(name, ".") && name != ".git" {
-			return fs.SkipDir
-		}
-		if d.IsDir() && name == "node_modules" {
-			return fs.SkipDir
-		}
-		if name == ".git" {
-			repoPath := filepath.Dir(path)
-			repo := LocalRepository{
-				Path:          repoPath,
-				Name:          filepath.Base(repoPath),
-				DefaultBranch: "",
-			}
-			if branch, err := readGitDefaultBranch(repoPath); err == nil {
-				repo.DefaultBranch = branch
-			}
-			repos = append(repos, repo)
-			if d.IsDir() {
-				return fs.SkipDir
-			}
+		if repo != nil {
+			repos = append(repos, *repo)
 		}
 		return nil
 	})
@@ -286,6 +238,87 @@ func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRe
 		return nil, err
 	}
 	return repos, nil
+}
+
+// repoWalker holds state for the WalkDir callback used in scanRootForRepos.
+type repoWalker struct {
+	root        string
+	maxDepth    int
+	libraryRoot string
+	cacheRoot   string
+	ctx         context.Context
+}
+
+// visit is the WalkDir callback. Returns a non-nil *LocalRepository when a git repo is found.
+func (w *repoWalker) visit(path string, d fs.DirEntry, err error) (*LocalRepository, error) {
+	if err != nil {
+		return nil, nil //nolint:nilerr // skip entries that cannot be accessed
+	}
+	if w.ctx.Err() != nil {
+		return nil, w.ctx.Err()
+	}
+	if path == w.root {
+		return nil, nil
+	}
+
+	if skip := w.skipDir(path, d); skip != nil {
+		return nil, skip
+	}
+
+	if d.Name() == ".git" {
+		return w.makeRepo(path, d), nil
+	}
+	return nil, nil
+}
+
+// skipDir returns fs.SkipDir when a directory should not be traversed, or nil to continue.
+func (w *repoWalker) skipDir(path string, d fs.DirEntry) error {
+	rel, err := filepath.Rel(w.root, path)
+	if err != nil {
+		return nil
+	}
+	depth := strings.Count(rel, string(os.PathSeparator))
+	if d.IsDir() && depth > w.maxDepth {
+		return fs.SkipDir
+	}
+	if isWithinRoot(path, w.libraryRoot) || isWithinRoot(path, w.cacheRoot) {
+		if d.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
+	}
+	return w.skipByName(path, d)
+}
+
+// skipByName skips well-known directories that should never be scanned.
+func (w *repoWalker) skipByName(path string, d fs.DirEntry) error {
+	if !d.IsDir() {
+		return nil
+	}
+	name := d.Name()
+	if (name == "Library" || name == ".cache") && filepath.Dir(path) == w.root {
+		return fs.SkipDir
+	}
+	if strings.HasPrefix(name, ".") && name != ".git" {
+		return fs.SkipDir
+	}
+	if name == "node_modules" {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+// makeRepo builds a LocalRepository from a .git entry path.
+func (w *repoWalker) makeRepo(path string, d fs.DirEntry) *LocalRepository {
+	repoPath := filepath.Dir(path)
+	repo := &LocalRepository{
+		Path: repoPath,
+		Name: filepath.Base(repoPath),
+	}
+	if branch, err := readGitDefaultBranch(repoPath); err == nil {
+		repo.DefaultBranch = branch
+	}
+	return repo
 }
 
 func isPathAllowed(path string, roots []string) bool {

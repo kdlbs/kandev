@@ -75,6 +75,25 @@ func (p *EnvProvider) GetCredential(ctx context.Context, key string) (*Credentia
 	return nil, fmt.Errorf("credential not found: %s", key)
 }
 
+// isAlreadyListed returns true if key is already present in the list.
+func isAlreadyListed(key string, list []string) bool {
+	for _, existing := range list {
+		if existing == key {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAPIKeyPattern returns true if lowerKey contains any known API key sub-string.
+func matchesAPIKeyPattern(lowerKey string) bool {
+	return strings.Contains(lowerKey, "api_key") ||
+		strings.Contains(lowerKey, "apikey") ||
+		strings.Contains(lowerKey, "api-key") ||
+		strings.Contains(lowerKey, "_token") ||
+		strings.Contains(lowerKey, "_secret")
+}
+
 // ListAvailable returns list of available credential keys from environment
 func (p *EnvProvider) ListAvailable(ctx context.Context) ([]string, error) {
 	available := make([]string, 0)
@@ -102,32 +121,19 @@ func (p *EnvProvider) ListAvailable(ctx context.Context) ([]string, error) {
 
 		key := parts[0]
 
-		// Skip if already in list
-		found := false
-		for _, existing := range available {
-			if existing == key {
-				found = true
-				break
-			}
-		}
-		if found {
+		if isAlreadyListed(key, available) {
 			continue
 		}
 
-		// Check for API key patterns in environment variable names
-		lowerKey := strings.ToLower(key)
-		if strings.Contains(lowerKey, "api_key") ||
-			strings.Contains(lowerKey, "apikey") ||
-			strings.Contains(lowerKey, "api-key") ||
-			strings.Contains(lowerKey, "_token") ||
-			strings.Contains(lowerKey, "_secret") {
-
-			// Strip prefix if present
-			if p.prefix != "" && strings.HasPrefix(key, p.prefix) {
-				key = strings.TrimPrefix(key, p.prefix)
-			}
-			available = append(available, key)
+		if !matchesAPIKeyPattern(strings.ToLower(key)) {
+			continue
 		}
+
+		// Strip prefix if present
+		if p.prefix != "" && strings.HasPrefix(key, p.prefix) {
+			key = strings.TrimPrefix(key, p.prefix)
+		}
+		available = append(available, key)
 	}
 
 	return available, nil

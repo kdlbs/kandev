@@ -79,6 +79,25 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err != nil {
 		return nil, err
 	}
+	if err := applyBasicSettings(settings, req); err != nil {
+		return nil, err
+	}
+	if err := s.applyChatSubmitKey(settings, req); err != nil {
+		return nil, err
+	}
+	if err := applyLSPSettings(settings, req); err != nil {
+		return nil, err
+	}
+	settings.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+		return nil, err
+	}
+	s.publishUserSettingsEvent(ctx, settings)
+	return settings, nil
+}
+
+// applyBasicSettings copies simple (non-validated) fields from req to settings.
+func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.WorkspaceID != nil {
 		settings.WorkspaceID = *req.WorkspaceID
 	}
@@ -103,38 +122,44 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if req.EnablePreviewOnClick != nil {
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
-	if req.ChatSubmitKey != nil {
-		key := strings.TrimSpace(*req.ChatSubmitKey)
-		if key != "enter" && key != "cmd_enter" {
-			return nil, errors.New("chat_submit_key must be 'enter' or 'cmd_enter'")
-		}
-		s.logger.Info("[Settings] Setting ChatSubmitKey", zap.String("value", key))
-		settings.ChatSubmitKey = key
-	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
+	return nil
+}
+
+// applyChatSubmitKey validates and applies the chat_submit_key setting.
+func (s *Service) applyChatSubmitKey(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.ChatSubmitKey == nil {
+		return nil
+	}
+	key := strings.TrimSpace(*req.ChatSubmitKey)
+	if key != "enter" && key != "cmd_enter" {
+		return errors.New("chat_submit_key must be 'enter' or 'cmd_enter'")
+	}
+	s.logger.Info("[Settings] Setting ChatSubmitKey", zap.String("value", key))
+	settings.ChatSubmitKey = key
+	return nil
+}
+
+// applyLSPSettings validates and applies LSP-related settings.
+func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.LspAutoStartLanguages != nil {
 		if err := validateLSPLanguages(*req.LspAutoStartLanguages); err != nil {
-			return nil, fmt.Errorf("lsp_auto_start_languages: %w", err)
+			return fmt.Errorf("lsp_auto_start_languages: %w", err)
 		}
 		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
 	}
 	if req.LspAutoInstallLanguages != nil {
 		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
-			return nil, fmt.Errorf("lsp_auto_install_languages: %w", err)
+			return fmt.Errorf("lsp_auto_install_languages: %w", err)
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
 	}
 	if req.LspServerConfigs != nil {
 		settings.LspServerConfigs = *req.LspServerConfigs
 	}
-	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
-		return nil, err
-	}
-	s.publishUserSettingsEvent(ctx, settings)
-	return settings, nil
+	return nil
 }
 
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {

@@ -165,42 +165,46 @@ func (c *Client) readLoop(ctx context.Context) {
 		if len(line) == 0 {
 			continue
 		}
-
-		var msg struct {
-			ID     interface{}     `json:"id"`
-			Method string          `json:"method"`
-			Result json.RawMessage `json:"result"`
-			Error  *Error          `json:"error"`
-			Params json.RawMessage `json:"params"`
-		}
-		if err := json.Unmarshal(line, &msg); err != nil {
-			c.logger.Warn("failed to parse message", zap.Error(err))
-			continue
-		}
-
-		hasID := msg.ID != nil
-		hasMethod := msg.Method != ""
-		hasResult := msg.Result != nil
-		hasError := msg.Error != nil
-
-		c.logger.Info("codex: received message",
-			zap.Bool("hasID", hasID),
-			zap.Bool("hasMethod", hasMethod),
-			zap.String("method", msg.Method))
-
-		switch {
-		case hasID && !hasMethod && (hasResult || hasError):
-			c.handleResponse(&Response{ID: msg.ID, Result: msg.Result, Error: msg.Error})
-		case hasID && hasMethod:
-			c.logger.Info("codex: routing as request", zap.Any("id", msg.ID), zap.String("method", msg.Method))
-			c.handleRequest(msg.ID, msg.Method, msg.Params)
-		case hasMethod && !hasID:
-			c.handleNotification(msg.Method, msg.Params)
-		}
+		c.processCodexMessage(line)
 	}
 
 	if err := scanner.Err(); err != nil {
 		c.logger.Error("read loop error", zap.Error(err))
+	}
+}
+
+// processCodexMessage parses a single JSON line and routes it as a response, request, or notification.
+func (c *Client) processCodexMessage(line []byte) {
+	var msg struct {
+		ID     interface{}     `json:"id"`
+		Method string          `json:"method"`
+		Result json.RawMessage `json:"result"`
+		Error  *Error          `json:"error"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		c.logger.Warn("failed to parse message", zap.Error(err))
+		return
+	}
+
+	hasID := msg.ID != nil
+	hasMethod := msg.Method != ""
+	hasResult := msg.Result != nil
+	hasError := msg.Error != nil
+
+	c.logger.Info("codex: received message",
+		zap.Bool("hasID", hasID),
+		zap.Bool("hasMethod", hasMethod),
+		zap.String("method", msg.Method))
+
+	switch {
+	case hasID && !hasMethod && (hasResult || hasError):
+		c.handleResponse(&Response{ID: msg.ID, Result: msg.Result, Error: msg.Error})
+	case hasID && hasMethod:
+		c.logger.Info("codex: routing as request", zap.Any("id", msg.ID), zap.String("method", msg.Method))
+		c.handleRequest(msg.ID, msg.Method, msg.Params)
+	case hasMethod && !hasID:
+		c.handleNotification(msg.Method, msg.Params)
 	}
 }
 

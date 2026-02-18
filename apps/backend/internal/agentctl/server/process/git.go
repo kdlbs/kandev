@@ -672,6 +672,41 @@ type CommitDiffResult struct {
 	Error        string                 `json:"error,omitempty"`
 }
 
+// isHexChar reports whether r is a valid hexadecimal digit (0-9, a-f, A-F).
+func isHexChar(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// validateCommitSHA returns an error string if sha is not a valid hex SHA, or "" if it is valid.
+func validateCommitSHA(sha string) string {
+	if sha == "" || len(sha) > 64 {
+		return "invalid commit SHA"
+	}
+	for _, c := range sha {
+		if !isHexChar(c) {
+			return "invalid commit SHA: must be hexadecimal"
+		}
+	}
+	return ""
+}
+
+// sumFileDiffStats adds up insertions and deletions across all parsed file entries.
+func sumFileDiffStats(files map[string]interface{}) (insertions, deletions int) {
+	for _, fileInfo := range files {
+		fi, ok := fileInfo.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if additions, ok := fi["additions"].(int); ok {
+			insertions += additions
+		}
+		if dels, ok := fi["deletions"].(int); ok {
+			deletions += dels
+		}
+	}
+	return insertions, deletions
+}
+
 // ShowCommit gets the diff for a specific commit using git show.
 func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
 	result := &CommitDiffResult{
@@ -679,18 +714,9 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	}
 
 	// Validate commit SHA (basic validation - alphanumeric only)
-	if commitSHA == "" || len(commitSHA) > 64 {
-		result.Error = "invalid commit SHA"
+	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
+		result.Error = errMsg
 		return result, nil
-	}
-	for _, c := range commitSHA {
-		isDigit := c >= '0' && c <= '9'
-		isLowerHex := c >= 'a' && c <= 'f'
-		isUpperHex := c >= 'A' && c <= 'F'
-		if !isDigit && !isLowerHex && !isUpperHex {
-			result.Error = "invalid commit SHA: must be hexadecimal"
-			return result, nil
-		}
 	}
 
 	// Get commit metadata
@@ -718,18 +744,7 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	// Parse the diff output into files
 	result.Files = g.parseCommitDiff(diffOutput)
 	result.FilesChanged = len(result.Files)
-
-	// Calculate total insertions/deletions
-	for _, fileInfo := range result.Files {
-		if fi, ok := fileInfo.(map[string]interface{}); ok {
-			if additions, ok := fi["additions"].(int); ok {
-				result.Insertions += additions
-			}
-			if deletions, ok := fi["deletions"].(int); ok {
-				result.Deletions += deletions
-			}
-		}
-	}
+	result.Insertions, result.Deletions = sumFileDiffStats(result.Files)
 
 	result.Success = true
 	return result, nil

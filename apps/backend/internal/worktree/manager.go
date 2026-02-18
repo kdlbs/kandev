@@ -321,18 +321,8 @@ func (m *Manager) buildWorktreeRecord(worktreeID string, req CreateRequest, work
 // persistAndCacheWorktree saves the worktree to the store and updates the in-memory cache.
 func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req CreateRequest, worktreePath string) error {
 	if m.store != nil {
-		if req.SessionID == "" {
-			m.logger.Warn("skipping worktree persistence: missing session_id",
-				zap.String("task_id", req.TaskID),
-				zap.String("worktree_id", wt.ID))
-		} else {
-			if err := m.store.CreateWorktree(ctx, wt); err != nil {
-				// Cleanup git worktree on store failure
-				if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
-					m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
-				}
-				return fmt.Errorf("failed to persist worktree: %w", err)
-			}
+		if err := m.persistWorktree(ctx, wt, req, worktreePath); err != nil {
+			return err
 		}
 	}
 
@@ -341,6 +331,25 @@ func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req
 		m.mu.Lock()
 		m.worktrees[req.SessionID] = wt
 		m.mu.Unlock()
+	}
+	return nil
+}
+
+// persistWorktree writes the worktree to persistent storage, logging a warning when
+// session_id is missing and cleaning up the git worktree directory on failure.
+func (m *Manager) persistWorktree(ctx context.Context, wt *Worktree, req CreateRequest, worktreePath string) error {
+	if req.SessionID == "" {
+		m.logger.Warn("skipping worktree persistence: missing session_id",
+			zap.String("task_id", req.TaskID),
+			zap.String("worktree_id", wt.ID))
+		return nil
+	}
+	if err := m.store.CreateWorktree(ctx, wt); err != nil {
+		// Cleanup git worktree on store failure
+		if cleanupErr := m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath); cleanupErr != nil {
+			m.logger.Warn("failed to cleanup worktree after persist failure", zap.Error(cleanupErr))
+		}
+		return fmt.Errorf("failed to persist worktree: %w", err)
 	}
 	return nil
 }
