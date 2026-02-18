@@ -526,5 +526,6 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
     removeSessionStorage(`${OPEN_FILES_KEY}.${sessionId}`);
     removeSessionStorage(`${ACTIVE_TAB_KEY}.${sessionId}`);
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
+    removeSessionStorage(`kandev.comments.${sessionId}`);
   }
 }

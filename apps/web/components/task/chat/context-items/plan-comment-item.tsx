@@ -14,7 +14,7 @@ export const PlanCommentItem = memo(function PlanCommentItem({ item }: { item: P
               &ldquo;{comment.selectedText}&rdquo;
             </div>
           )}
-          <div className="break-words">{comment.comment}</div>
+          <div className="break-words">{comment.text}</div>
         </div>
       ))}
     </div>

@@ -91,7 +91,7 @@ function CommentItem({ comment, onDelete }: { comment: DiffComment; onDelete: (i
           {comment.codeContent}
         </pre>
       )}
-      <p className="text-xs text-foreground leading-relaxed">{comment.annotation}</p>
+      <p className="text-xs text-foreground leading-relaxed">{comment.text}</p>
     </div>
   );
 }

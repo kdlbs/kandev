@@ -84,7 +84,7 @@ export function MonacoCodeEditor({
     for (const comment of state.comments) {
       const isEditing = state.editingCommentId === comment.id;
       const node = isEditing
-        ? <div className="px-2 py-0.5" data-comment-zone><CommentForm initialContent={comment.annotation} onSubmit={(c) => state.handleCommentUpdateRef.current(comment.id, c)} onCancel={() => state.setEditingComment(null)} isEditing /></div>
+        ? <div className="px-2 py-0.5" data-comment-zone><CommentForm initialContent={comment.text} onSubmit={(c) => state.handleCommentUpdateRef.current(comment.id, c)} onCancel={() => state.setEditingComment(null)} isEditing /></div>
         : <div className="px-2 py-0.5" data-comment-zone><CommentDisplay comment={comment} onDelete={() => state.handleCommentDeleteRef.current(comment.id)} onEdit={() => state.setEditingComment(comment.id)} showCode={false} compact /></div>;
       addZone(comment.endLine, isEditing ? 120 : 32, node);
     }

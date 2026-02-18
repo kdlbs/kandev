@@ -228,16 +228,22 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Assemble final command and start the subprocess
+	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
 		return err
 	}
 
-	// Set up stdin/stdout/stderr pipes
+	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
 		return err
+	}
+
+	// Start the subprocess now that pipes are connected
+	if err := m.cmd.Start(); err != nil {
+		m.status.Store(StatusError)
+		return fmt.Errorf("failed to start agent: %w", err)
 	}
 
 	m.stopCh = make(chan struct{})
@@ -315,8 +321,8 @@ func (m *Manager) buildAdapterConfig() error {
 	return nil
 }
 
-// buildFinalCommand assembles the full command args, creates the exec.Cmd, and
-// starts the subprocess. The process group is set so child processes can be killed together.
+// buildFinalCommand assembles the full command args and creates the exec.Cmd.
+// The process group is set so child processes can be killed together.
 func (m *Manager) buildFinalCommand() error {
 	extraArgs := m.adapter.PrepareCommandArgs()
 
@@ -341,15 +347,12 @@ func (m *Manager) buildFinalCommand() error {
 	// (npx -> sh -> node -> opencode binary).
 	setProcGroup(m.cmd)
 
-	m.logger.Info("starting agent process",
+	m.logger.Info("agent command prepared",
 		zap.Strings("args", m.cfg.AgentArgs),
 		zap.Strings("extra_args", extraArgs),
 		zap.String("workdir", m.cfg.WorkDir),
 		zap.Int("env_count", len(m.cfg.AgentEnv)))
 
-	if err := m.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start agent: %w", err)
-	}
 	return nil
 }
 

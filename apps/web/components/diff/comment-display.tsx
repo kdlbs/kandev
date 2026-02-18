@@ -37,7 +37,7 @@ export function CommentDisplay({
         <div className="min-w-0 flex-1">
           <span className="text-muted-foreground">{lineRange}</span>
           <span className="mx-1 text-muted-foreground">·</span>
-          <span className="break-words">{comment.annotation}</span>
+          <span className="break-words">{comment.text}</span>
         </div>
         <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
           {onEdit && (
@@ -111,7 +111,7 @@ export function CommentDisplay({
 
       {/* Comment text */}
       <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">
-        {comment.annotation}
+        {comment.text}
       </p>
     </div>
   );

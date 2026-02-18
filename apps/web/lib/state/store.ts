@@ -219,7 +219,6 @@ export type AppState = {
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: import('./slices/ui/types').ActiveDocument | null) => void;
-  setDocumentComments: (sessionId: string, comments: import('./slices/ui/types').DocumentComment[]) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],

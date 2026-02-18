@@ -25,10 +25,10 @@ import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-sta
 import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
 import { useGitOperations } from '@/hooks/use-git-operations';
 import { useSessionFileReviews } from '@/hooks/use-session-file-reviews';
-import { useDiffCommentsStore } from '@/lib/state/slices/diff-comments/diff-comments-slice';
+import { useCommentsStore, isDiffComment } from '@/lib/state/slices/comments';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { updateUserSettings } from '@/lib/api';
-import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
+import { formatReviewCommentsAsMarkdown } from '@/lib/state/slices/comments/format';
 import { ReviewDiffList } from '@/components/review/review-diff-list';
 import type { ReviewFile } from '@/components/review/types';
 import { hashDiff, normalizeDiffContent } from '@/components/review/types';
@@ -81,7 +81,8 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
   const { reviews } = useSessionFileReviews(activeSessionId);
-  const bySession = useDiffCommentsStore((s) => s.bySession);
+  const byId = useCommentsStore((s) => s.byId);
+  const commentSessionIds = useCommentsStore((s) => activeSessionId ? s.bySession[activeSessionId] : undefined);
 
   const allFiles = useMemo<ReviewFile[]>(() => mergeReviewFiles(gitStatus, cumulativeDiff), [gitStatus, cumulativeDiff]);
 
@@ -98,11 +99,14 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   }, [allFiles, reviews]);
 
   const totalCommentCount = useMemo(() => {
-    if (!activeSessionId) return 0;
-    const sessionComments = bySession[activeSessionId];
-    if (!sessionComments) return 0;
-    return Object.values(sessionComments).reduce((sum, c) => sum + (c.length > 0 ? c.length : 0), 0);
-  }, [bySession, activeSessionId]);
+    if (!commentSessionIds || commentSessionIds.length === 0) return 0;
+    let count = 0;
+    for (const id of commentSessionIds) {
+      const comment = byId[id];
+      if (comment && isDiffComment(comment)) count++;
+    }
+    return count;
+  }, [byId, commentSessionIds]);
 
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
@@ -131,8 +135,8 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
   const userSettings = useAppStore((state) => state.userSettings);
   const { discard } = useGitOperations(activeSessionId ?? null);
   const { markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId ?? null);
-  const getPendingComments = useDiffCommentsStore((s) => s.getPendingComments);
-  const markCommentsSent = useDiffCommentsStore((s) => s.markCommentsSent);
+  const getPendingComments = useCommentsStore((s) => s.getPendingComments);
+  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { toast } = useToast();
 
   const [splitView, setSplitView] = useState(() => typeof window !== 'undefined' && localStorage.getItem('diff-view-mode') === 'split');
@@ -166,7 +170,8 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
 
   const handleFixComments = useCallback(() => {
     if (!activeSessionId || !activeTaskId) return;
-    const comments = getPendingComments();
+    const allPending = getPendingComments();
+    const comments = allPending.filter(isDiffComment);
     if (comments.length === 0) return;
     const markdown = formatReviewCommentsAsMarkdown(comments);
     if (!markdown) return;

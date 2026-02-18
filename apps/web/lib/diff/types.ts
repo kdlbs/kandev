@@ -1,25 +1,8 @@
 import type { DiffLineAnnotation } from '@pierre/diffs';
 
-/**
- * Annotation side - matches @pierre/diffs AnnotationSide
- */
-export type AnnotationSide = 'additions' | 'deletions';
-
-/**
- * Comment attached to a line range in a diff
- */
-export interface DiffComment {
-  id: string;
-  sessionId: string;
-  filePath: string;
-  startLine: number;
-  endLine: number;
-  side: AnnotationSide;
-  codeContent: string; // The actual code lines the user selected
-  annotation: string; // User's comment text
-  createdAt: string;
-  status: 'pending' | 'sent';
-}
+// Re-export DiffComment from unified comment system for backward compat
+export type { DiffComment, AnnotationSide } from '@/lib/state/slices/comments/types';
+import type { DiffComment } from '@/lib/state/slices/comments/types';
 
 /**
  * File diff data in a unified format for @pierre/diffs.
@@ -43,19 +26,18 @@ export type CommentAnnotation = DiffLineAnnotation<{
 }>;
 
 /**
- * Store state for diff comments
+ * Store state for diff comments — kept for backward compat type references.
+ * @deprecated Use CommentsState from '@/lib/state/slices/comments' instead.
  */
 export interface DiffCommentsState {
-  // Comments by session and file: sessionId -> filePath -> comments
   bySession: Record<string, Record<string, DiffComment[]>>;
-  // Comments queued for next chat message (referenced by id)
   pendingForChat: string[];
-  // Currently editing comment (null if none)
   editingCommentId: string | null;
 }
 
 /**
  * Actions for the diff comments store
+ * @deprecated Use CommentsActions from '@/lib/state/slices/comments' instead.
  */
 export interface DiffCommentsActions {
   addComment: (comment: DiffComment) => void;
@@ -73,6 +55,7 @@ export interface DiffCommentsActions {
 
 /**
  * Combined state and actions
+ * @deprecated Use CommentsSlice from '@/lib/state/slices/comments' instead.
  */
 export type DiffCommentsSlice = DiffCommentsState & DiffCommentsActions;
 

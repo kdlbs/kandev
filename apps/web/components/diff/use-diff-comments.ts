@@ -3,10 +3,8 @@
 import { useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import type { SelectedLineRange } from '@pierre/diffs';
-import {
-  useDiffCommentsStore,
-  useFileComments,
-} from '@/lib/state/slices/diff-comments';
+import { useCommentsStore } from '@/lib/state/slices/comments';
+import { useDiffFileComments } from '@/hooks/domains/comments/use-diff-comments';
 import {
   commentsToAnnotations,
   extractCodeFromDiff,
@@ -33,7 +31,7 @@ interface UseDiffCommentsReturn {
   /** Add a new comment */
   addComment: (
     range: SelectedLineRange,
-    annotation: string
+    text: string
   ) => void;
   /** Remove a comment */
   removeComment: (commentId: string) => void;
@@ -55,14 +53,14 @@ export function useDiffComments({
   newContent,
   oldContent,
 }: UseDiffCommentsOptions): UseDiffCommentsReturn {
-  const comments = useFileComments(sessionId, filePath);
-  const editingCommentId = useDiffCommentsStore(
+  const comments = useDiffFileComments(sessionId, filePath);
+  const editingCommentId = useCommentsStore(
     (state) => state.editingCommentId
   );
-  const storeAddComment = useDiffCommentsStore((state) => state.addComment);
-  const storeRemoveComment = useDiffCommentsStore((state) => state.removeComment);
-  const storeUpdateComment = useDiffCommentsStore((state) => state.updateComment);
-  const storeSetEditingComment = useDiffCommentsStore((state) => state.setEditingComment);
+  const storeAddComment = useCommentsStore((state) => state.addComment);
+  const storeRemoveComment = useCommentsStore((state) => state.removeComment);
+  const storeUpdateComment = useCommentsStore((state) => state.updateComment);
+  const storeSetEditingComment = useCommentsStore((state) => state.setEditingComment);
 
   const annotations = useMemo(
     () => commentsToAnnotations(comments),
@@ -70,7 +68,7 @@ export function useDiffComments({
   );
 
   const addComment = useCallback(
-    (range: SelectedLineRange, annotation: string) => {
+    (range: SelectedLineRange, text: string) => {
       const side = (range.side || 'additions') as AnnotationSide;
       const startLine = Math.min(range.start, range.end);
       const endLine = Math.max(range.start, range.end);
@@ -88,13 +86,14 @@ export function useDiffComments({
 
       const comment: DiffComment = {
         id: `${filePath}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        source: 'diff',
         sessionId,
         filePath,
         startLine,
         endLine,
         side,
         codeContent,
-        annotation,
+        text,
         createdAt: new Date().toISOString(),
         status: 'pending',
       };
@@ -110,9 +109,9 @@ export function useDiffComments({
 
   const removeComment = useCallback(
     (commentId: string) => {
-      storeRemoveComment(sessionId, filePath, commentId);
+      storeRemoveComment(commentId);
     },
-    [sessionId, filePath, storeRemoveComment]
+    [storeRemoveComment]
   );
 
   const updateComment = useCallback(

@@ -2,20 +2,21 @@ import { useCallback } from 'react';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { useQueue } from './domains/session/use-queue';
 import type { MessageAttachment } from '@/components/task/chat/chat-input-container';
-import type { ActiveDocument, DocumentComment } from '@/lib/state/slices/ui/types';
+import type { ActiveDocument } from '@/lib/state/slices/ui/types';
+import type { PlanComment } from '@/lib/state/slices/comments';
 import type { ContextFile } from '@/lib/state/context-files-store';
 import type { CustomPrompt } from '@/lib/types/http';
 
-function buildDocumentContext(activeDocument: ActiveDocument | null, comments?: DocumentComment[]): string {
+function buildDocumentContext(activeDocument: ActiveDocument | null, planComments?: PlanComment[]): string {
   if (!activeDocument) return '';
 
   if (activeDocument.type === 'plan') {
     let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
 
-    if (comments && comments.length > 0) {
+    if (planComments && planComments.length > 0) {
       context += `\n\nUser comments on the plan:`;
-      comments.forEach((c, i) => {
-        context += `\nComment ${i + 1}:\n- Selected text: "${c.selectedText}"\n- Comment: "${c.comment}"`;
+      planComments.forEach((c, i) => {
+        context += `\nComment ${i + 1}:\n- Selected text: "${c.selectedText}"\n- Comment: "${c.text}"`;
       });
     }
 
@@ -63,7 +64,7 @@ export interface UseMessageHandlerParams {
   planMode?: boolean;
   isAgentBusy?: boolean;
   activeDocument?: ActiveDocument | null;
-  documentComments?: DocumentComment[];
+  planComments?: PlanComment[];
   contextFiles?: ContextFile[];
   prompts?: CustomPrompt[];
 }
@@ -110,7 +111,7 @@ export function useMessageHandler({
   planMode = false,
   isAgentBusy = false,
   activeDocument = null,
-  documentComments = [],
+  planComments = [],
   contextFiles = [],
   prompts = [],
 }: UseMessageHandlerParams) {
@@ -119,11 +120,11 @@ export function useMessageHandler({
   const buildFinalMessage = useCallback(
     (message: string, inlineMentions?: ContextFile[]) => {
       const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
-      const documentContext = buildDocumentContext(activeDocument, documentComments);
+      const documentContext = buildDocumentContext(activeDocument, planComments);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
       return { finalMessage: message.trim() + documentContext + contextFilesContext, allContextFiles };
     },
-    [contextFiles, activeDocument, documentComments, prompts]
+    [contextFiles, activeDocument, planComments, prompts]
   );
 
   const handleSendMessage = useCallback(

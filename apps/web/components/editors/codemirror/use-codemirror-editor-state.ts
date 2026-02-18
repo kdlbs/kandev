@@ -4,7 +4,8 @@ import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from '@
 import type { Extension } from '@codemirror/state';
 import { Decoration, type DecorationSet } from '@codemirror/view';
 import { getCodeMirrorExtensionFromPath } from '@/lib/languages';
-import { useDiffCommentsStore, useFileComments } from '@/lib/state/slices/diff-comments/diff-comments-slice';
+import { useCommentsStore } from '@/lib/state/slices/comments';
+import { useDiffFileComments } from '@/hooks/domains/comments/use-diff-comments';
 import type { DiffComment } from '@/lib/diff/types';
 import { computeLineDiffStats } from '@/lib/diff';
 import { useToast } from '@/components/toast-provider';
@@ -187,9 +188,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const { toast } = useToast();
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
-  const addComment = useDiffCommentsStore((state) => state.addComment);
-  const removeComment = useDiffCommentsStore((state) => state.removeComment);
-  const comments = useFileComments(sessionId ?? '', path);
+  const addComment = useCommentsStore((state) => state.addComment);
+  const removeComment = useCommentsStore((state) => state.removeComment);
+  const comments = useDiffFileComments(sessionId ?? '', path);
   const langExt = getCodeMirrorExtensionFromPath(path);
 
   // Comment decorations plugin
@@ -361,9 +362,9 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     if (!textSelection || !sessionId) return;
     const comment: DiffComment = {
       id: `${path}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      sessionId, filePath: path,
+      source: 'diff', sessionId, filePath: path,
       startLine: textSelection.startLine, endLine: textSelection.endLine,
-      side: 'additions', codeContent: textSelection.text, annotation,
+      side: 'additions', codeContent: textSelection.text, text: annotation,
       createdAt: new Date().toISOString(), status: 'pending',
     };
     addComment(comment);
@@ -379,14 +380,14 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
 
   const handleDeleteComment = useCallback((commentId: string) => {
     if (!sessionId) return;
-    removeComment(sessionId, path, commentId);
+    removeComment(commentId);
     if (commentView && commentView.comments.length <= 1) {
       setCommentView(null);
     } else if (commentView) {
       setCommentView({ ...commentView, comments: commentView.comments.filter(c => c.id !== commentId) });
     }
     toast({ title: 'Comment deleted' });
-  }, [sessionId, path, removeComment, commentView, toast]);
+  }, [sessionId, removeComment, commentView, toast]);
 
   const handleCommentViewClose = useCallback(() => { setCommentView(null); }, []);
 

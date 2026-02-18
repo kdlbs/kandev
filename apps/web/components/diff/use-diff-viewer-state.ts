@@ -188,7 +188,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
           startLine: selectedLines.start,
           endLine: selectedLines.end,
           side: (selectedLines.side || 'additions') as DiffComment['side'],
-          annotation: content,
+          text: content,
         }));
       } else if (sessionId) {
         addComment(selectedLines, content);

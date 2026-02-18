@@ -8,18 +8,19 @@ export function buildDiffComment(params: {
   startLine: number;
   endLine: number;
   side: DiffComment['side'];
-  annotation: string;
+  text: string;
   codeContent?: string;
 }): DiffComment {
   return {
     id: `${params.filePath}-${Date.now()}`,
+    source: 'diff',
     sessionId: params.sessionId,
     filePath: params.filePath,
     startLine: Math.min(params.startLine, params.endLine),
     endLine: Math.max(params.startLine, params.endLine),
     side: params.side,
     codeContent: params.codeContent ?? '',
-    annotation: params.annotation,
+    text: params.text,
     createdAt: new Date().toISOString(),
     status: 'pending',
   };
@@ -63,7 +64,7 @@ export function useCommentActions(params: {
 
   const handleCommentUpdate = useCallback(
     (commentId: string, content: string) => {
-      updateComment(commentId, { annotation: content });
+      updateComment(commentId, { text: content });
       setEditingComment(null);
     },
     [updateComment, setEditingComment]
