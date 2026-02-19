@@ -9,6 +9,7 @@ import { FileBinaryViewer } from './file-binary-viewer';
 import { useAppStore } from '@/components/state-provider';
 import { useDockviewStore, type FileEditorState } from '@/lib/state/dockview-store';
 import { useFileEditors } from '@/hooks/use-file-editors';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { getFileCategory } from '@/lib/utils/file-types';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileContent } from '@/lib/ws/workspace-files';
@@ -43,7 +44,9 @@ export const FileEditorPanel = memo(function FileEditorPanel(
   const path = props.params.path;
 
   const hasFile = useDockviewStore((s) => s.openFiles.has(path));
+  const content = useDockviewStore((s) => s.openFiles.get(path)?.content ?? '');
   const isDirty = useDockviewStore((s) => s.openFiles.get(path)?.isDirty ?? false);
+  const hasRemoteUpdate = useDockviewStore((s) => s.openFiles.get(path)?.hasRemoteUpdate ?? false);
   const isBinary = useDockviewStore((s) => s.openFiles.get(path)?.isBinary ?? false);
   const originalContent = useDockviewStore((s) => s.openFiles.get(path)?.originalContent ?? '');
   const setFileState = useDockviewStore((s) => s.setFileState);
@@ -52,7 +55,9 @@ export const FileEditorPanel = memo(function FileEditorPanel(
   const activeSession = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
   );
-  const { savingFiles, handleFileChange, saveFile, deleteFile } = useFileEditors();
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const vcsDiff = gitStatus?.files?.[path]?.diff;
+  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } = useFileEditors();
 
   const loadingRef = useRef(false);
   useEffect(() => {
@@ -76,6 +81,7 @@ export const FileEditorPanel = memo(function FileEditorPanel(
 
   const onChange = useCallback((newContent: string) => handleFileChange(path, newContent), [handleFileChange, path]);
   const onSave = useCallback(() => saveFile(path), [saveFile, path]);
+  const onReloadFromAgent = useCallback(() => applyRemoteUpdate(path), [applyRemoteUpdate, path]);
   const onDelete = useCallback(() => deleteFile(path), [deleteFile, path]);
 
   if (!hasFile) {
@@ -107,10 +113,11 @@ export const FileEditorPanel = memo(function FileEditorPanel(
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
         <FileEditorContent
-          path={path} originalContent={originalContent} isDirty={isDirty}
+          path={path} content={content} originalContent={originalContent} isDirty={isDirty}
+          hasRemoteUpdate={hasRemoteUpdate} vcsDiff={vcsDiff}
           isSaving={savingFiles.has(path)} sessionId={activeSessionId || undefined}
           worktreePath={worktreePath} enableComments={!!activeSessionId}
-          onChange={onChange} onSave={onSave} onDelete={onDelete}
+          onChange={onChange} onSave={onSave} onReloadFromAgent={onReloadFromAgent} onDelete={onDelete}
         />
       </PanelBody>
     </PanelRoot>

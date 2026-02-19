@@ -188,7 +188,8 @@ type FileListSectionProps = {
   isLast: boolean;
   actionLabel: string;
   onAction: () => void;
-  onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string) => void;
+  onEditFile: (path: string) => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
   onDiscard: (path: string) => void;
@@ -201,7 +202,8 @@ export function FileListSection({
   isLast,
   actionLabel,
   onAction,
-  onOpenFile,
+  onOpenDiff,
+  onEditFile,
   onStage,
   onUnstage,
   onDiscard,
@@ -232,11 +234,11 @@ export function FileListSection({
             key={file.path}
             file={file}
             isPending={pendingStageFiles.has(file.path)}
-            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
             onStage={onStage}
             onUnstage={onUnstage}
             onDiscard={onDiscard}
-            onEditFile={onOpenFile}
+            onEditFile={onEditFile}
           />
         ))}
       </ul>

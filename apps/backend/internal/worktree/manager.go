@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+)
+
+const (
+	defaultGitFetchTimeout = 8 * time.Second
+	defaultGitPullTimeout  = 8 * time.Second
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -35,6 +41,10 @@ type Manager struct {
 	// Optional dependencies for script execution
 	repoProvider     RepositoryProvider
 	scriptMsgHandler ScriptMessageHandler
+
+	// Timeouts for best-effort remote sync before creating a worktree.
+	fetchTimeout time.Duration
+	pullTimeout  time.Duration
 }
 
 // ScriptMessageHandler provides script execution and message streaming.
@@ -83,11 +93,13 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 	}
 
 	return &Manager{
-		config:    cfg,
-		logger:    log.WithFields(zap.String("component", "worktree-manager")),
-		store:     store,
-		worktrees: make(map[string]*Worktree),
-		repoLocks: make(map[string]*repoLockEntry),
+		config:       cfg,
+		logger:       log.WithFields(zap.String("component", "worktree-manager")),
+		store:        store,
+		worktrees:    make(map[string]*Worktree),
+		repoLocks:    make(map[string]*repoLockEntry),
+		fetchTimeout: defaultGitFetchTimeout,
+		pullTimeout:  defaultGitPullTimeout,
 	}, nil
 }
 
@@ -724,6 +736,36 @@ func (m *Manager) currentBranch(repoPath string) string {
 	return strings.TrimSpace(string(output))
 }
 
+func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=Never",
+		"GIT_ASKPASS=echo",
+		"SSH_ASKPASS=/bin/false",
+		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+	)
+	return cmd
+}
+
+func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) string {
+	if errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(cmdErr, context.DeadlineExceeded) {
+		return "timeout"
+	}
+
+	out := strings.ToLower(cmdOutput)
+	if strings.Contains(out, "authentication failed") ||
+		strings.Contains(out, "terminal prompts disabled") ||
+		strings.Contains(out, "could not read username") ||
+		strings.Contains(out, "username for 'https://") ||
+		strings.Contains(out, "askpass") {
+		return "non_interactive_auth_failed"
+	}
+
+	return "git_command_failed"
+}
+
 // pullBaseBranch fetches the latest changes from origin and returns the best ref to use
 // for creating a new worktree. The function handles three scenarios:
 //
@@ -737,19 +779,20 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 	localBranch := strings.TrimPrefix(baseBranch, "origin/")
 	isRemoteRef := localBranch != baseBranch
 
-	// Fetch the branch from origin (30s timeout for fetch + potential pull)
-	fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Fetch branch from origin in non-interactive mode.
+	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), m.fetchTimeout)
+	defer cancelFetch()
 
 	fetchArgs := []string{"fetch", "origin"}
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
 	}
-	fetchCmd := exec.CommandContext(fetchCtx, "git", fetchArgs...)
-	fetchCmd.Dir = repoPath
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, fetchArgs...)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		m.logger.Error("git fetch failed before worktree creation",
+		m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
 			zap.String("branch", baseBranch),
+			zap.String("reason", classifyGitFallbackReason(err, string(output), fetchCtx.Err())),
+			zap.String("fallback_ref", baseBranch),
 			zap.String("output", string(output)),
 			zap.Error(err))
 		return baseBranch
@@ -766,11 +809,14 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 
 	if currentBranch == baseBranch {
 		// We're on the target branch - try to pull (fast-forward only)
-		pullCmd := exec.CommandContext(fetchCtx, "git", "pull", "--ff-only", "origin", baseBranch)
-		pullCmd.Dir = repoPath
+		pullCtx, cancelPull := context.WithTimeout(context.Background(), m.pullTimeout)
+		defer cancelPull()
+
+		pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
 		if output, err := pullCmd.CombinedOutput(); err != nil {
-			m.logger.Warn("git pull failed before worktree creation, falling back to remote ref",
+			m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
 				zap.String("branch", baseBranch),
+				zap.String("reason", classifyGitFallbackReason(err, string(output), pullCtx.Err())),
 				zap.String("remote_ref", remoteRef),
 				zap.String("output", string(output)),
 				zap.Error(err))

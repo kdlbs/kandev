@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ScrollArea } from '@kandev/ui/scroll-area';
 import { getWebSocketClient } from '@/lib/ws/connection';
 import { requestFileTree, requestFileContent, searchWorkspaceFiles } from '@/lib/ws/workspace-files';
 import type { FileTreeNode, FileContentResponse, OpenFileTab } from '@/lib/types/backend';
 import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { useSession } from '@/hooks/domains/session/use-session';
 import { useOpenSessionFolder } from '@/hooks/use-open-session-folder';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
@@ -369,6 +370,63 @@ async function fetchAndOpenFile(
   }
 }
 
+type FileBrowserHeaderProps = {
+  treeLoaded: boolean;
+  search: ReturnType<typeof useFileBrowserSearch>;
+  displayPath: string;
+  fullPath: string;
+  copied: boolean;
+  expandedPathsSize: number;
+  onCopyPath: (value: string) => void | Promise<void>;
+  onStartCreate?: () => void;
+  onOpenFolder: () => void;
+  onCollapseAll: () => void;
+  showCreateButton: boolean;
+};
+
+function FileBrowserHeader({
+  treeLoaded,
+  search,
+  displayPath,
+  fullPath,
+  copied,
+  expandedPathsSize,
+  onCopyPath,
+  onStartCreate,
+  onOpenFolder,
+  onCollapseAll,
+  showCreateButton,
+}: FileBrowserHeaderProps) {
+  if (!treeLoaded) return null;
+
+  if (search.isSearchActive) {
+    return (
+      <FileBrowserSearchHeader
+        isSearching={search.isSearching}
+        localSearchQuery={search.localSearchQuery}
+        searchInputRef={search.searchInputRef}
+        onSearchChange={search.handleSearchChange}
+        onCloseSearch={search.handleCloseSearch}
+      />
+    );
+  }
+
+  return (
+    <FileBrowserToolbar
+      displayPath={displayPath}
+      fullPath={fullPath}
+      copied={copied}
+      expandedPathsSize={expandedPathsSize}
+      onCopyPath={onCopyPath}
+      onStartCreate={onStartCreate}
+      onOpenFolder={onOpenFolder}
+      onStartSearch={() => search.setIsSearchActive(true)}
+      onCollapseAll={onCollapseAll}
+      showCreateButton={showCreateButton}
+    />
+  );
+}
+
 type FileBrowserProps = {
   sessionId: string;
   onOpenFile: (file: OpenFileTab) => void;
@@ -380,6 +438,7 @@ type FileBrowserProps = {
 export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile, activeFilePath }: FileBrowserProps) {
   const { toast } = useToast();
   const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const gitStatus = useSessionGitStatus(sessionId);
   const { open: openFolder } = useOpenSessionFolder(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
@@ -390,6 +449,10 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
   const treeState = useFileBrowserTree(sessionId);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
+  const fileStatuses = useMemo(
+    () => new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    [gitStatus?.files],
+  );
   // Workspace path for header
   const fullPath = session?.worktree_path ?? '';
   const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, '~/');
@@ -431,30 +494,19 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
 
   return (
     <div className="flex flex-col h-full">
-      {treeState.tree && treeState.loadState === 'loaded' && (
-        search.isSearchActive ? (
-          <FileBrowserSearchHeader
-            isSearching={search.isSearching}
-            localSearchQuery={search.localSearchQuery}
-            searchInputRef={search.searchInputRef}
-            onSearchChange={search.handleSearchChange}
-            onCloseSearch={search.handleCloseSearch}
-          />
-        ) : (
-          <FileBrowserToolbar
-            displayPath={displayPath}
-            fullPath={fullPath}
-            copied={copied}
-            expandedPathsSize={treeState.expandedPaths.size}
-            onCopyPath={copyPath}
-            onStartCreate={onCreateFile ? handleStartCreate : undefined}
-            onOpenFolder={() => openFolder()}
-            onStartSearch={() => search.setIsSearchActive(true)}
-            onCollapseAll={treeState.collapseAll}
-            showCreateButton={Boolean(onCreateFile)}
-          />
-        )
-      )}
+      <FileBrowserHeader
+        treeLoaded={Boolean(treeState.tree && treeState.loadState === 'loaded')}
+        search={search}
+        displayPath={displayPath}
+        fullPath={fullPath}
+        copied={copied}
+        expandedPathsSize={treeState.expandedPaths.size}
+        onCopyPath={copyPath}
+        onStartCreate={onCreateFile ? handleStartCreate : undefined}
+        onOpenFolder={openFolder}
+        onCollapseAll={treeState.collapseAll}
+        showCreateButton={Boolean(onCreateFile)}
+      />
 
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         <FileBrowserContentArea
@@ -467,6 +519,7 @@ export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile,
           tree={treeState.tree}
           loadError={treeState.loadError}
           creatingInPath={creatingInPath}
+          fileStatuses={fileStatuses}
           expandedPaths={treeState.expandedPaths}
           activeFolderPath={activeFolderPath}
           activeFilePath={activeFilePath}

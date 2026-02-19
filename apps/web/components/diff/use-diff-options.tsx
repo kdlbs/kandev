@@ -9,6 +9,7 @@ import type { AnnotationMetadata } from './use-diff-annotation-renderer';
 
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
+  [data-diffs],
   pre[data-diffs] {
     background-color: var(--background) !important;
     --diffs-bg: var(--background) !important;
@@ -22,6 +23,8 @@ const DIFF_UNSAFE_CSS = `
     --diffs-deletion-color-override: rgb(var(--git-deletion)) !important;
     --diffs-font-size: ${FONT.size}px !important;
     --diffs-font-family: ${FONT.mono} !important;
+    font-size: ${FONT.size}px !important;
+    font-family: ${FONT.mono} !important;
   }
   [data-change-icon] {
     width: 12px !important;

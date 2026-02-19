@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useTheme } from 'next-themes';
 import { Button } from '@kandev/ui/button';
@@ -9,7 +9,6 @@ import { getMonacoLanguage } from '@/lib/editor/language-map';
 import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from '@/lib/theme/editor-theme';
 import { CommentForm } from '@/components/diff/comment-form';
 import { CommentDisplay } from '@/components/diff/comment-display';
-import { useDockviewStore } from '@/lib/state/dockview-store';
 import { useEditorViewZoneComments } from '@/hooks/use-editor-view-zone-comments';
 import { MonacoEditorToolbar } from './monaco-editor-toolbar';
 import { useMonacoEditorComments } from './use-monaco-editor-state';
@@ -20,14 +19,18 @@ initMonacoThemes();
 
 type MonacoCodeEditorProps = {
   path: string;
+  content: string;
   originalContent: string;
   isDirty: boolean;
+  hasRemoteUpdate?: boolean;
+  vcsDiff?: string;
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
   enableComments?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
+  onReloadFromAgent?: () => void;
   onDelete?: () => void;
 };
 
@@ -55,15 +58,12 @@ const EDITOR_OPTIONS = {
 };
 
 export function MonacoCodeEditor({
-  path, originalContent, isDirty, isSaving,
+  path, content, originalContent, isDirty, hasRemoteUpdate = false, vcsDiff, isSaving,
   sessionId, worktreePath, enableComments = false,
-  onChange, onSave, onDelete,
+  onChange, onSave, onReloadFromAgent, onDelete,
 }: MonacoCodeEditorProps) {
   const { resolvedTheme } = useTheme();
-  const [initialContent] = useState(
-    () => useDockviewStore.getState().openFiles.get(path)?.content ?? ''
-  );
-  const contentRef = useRef(initialContent);
+  const contentRef = useRef(content);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
 
@@ -77,8 +77,13 @@ export function MonacoCodeEditor({
 
   const { diffStats } = useMonacoDiffDecorations({
     originalContent, isDirty, showDiffIndicators: state.showDiffIndicators,
+    vcsDiff, editorReady: state.editorInstance,
     contentRef, editorRef: state.editorRef, diffDecorationsRef: state.diffDecorationsRef,
   });
+
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
 
   useEditorViewZoneComments(state.editorInstance, [state.comments, state.formZoneRange, state.editingCommentId], (addZone) => {
     for (const comment of state.comments) {
@@ -101,16 +106,19 @@ export function MonacoCodeEditor({
         path={path} worktreePath={worktreePath} isDirty={isDirty} isSaving={isSaving}
         diffStats={diffStats} wrapEnabled={state.wrapEnabled} showDiffIndicators={state.showDiffIndicators}
         enableComments={enableComments} sessionId={sessionId} commentCount={state.comments.length}
+        hasRemoteUpdate={hasRemoteUpdate} hasVcsDiff={Boolean(vcsDiff)}
         lspStatus={lsp.lspStatus} lspLanguage={lsp.lspLanguage}
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
         onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
-        onSave={onSave} onDelete={onDelete}
+        onSave={onSave}
+        onReloadFromAgent={onReloadFromAgent}
+        onDelete={onDelete}
       />
       <div className="flex-1 overflow-hidden relative">
         <Editor
           height="100%" language={language} path={lsp.monacoPath}
-          defaultValue={initialContent}
+          value={content}
           theme={getMonacoTheme(resolvedTheme)}
           onChange={state.handleChange} onMount={state.handleEditorDidMount}
           keepCurrentModel options={options}

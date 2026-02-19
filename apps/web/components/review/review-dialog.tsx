@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useCallback, createRef, useState } from 'react';
+import { memo, useMemo, useCallback, createRef, useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@kandev/ui/dialog';
 import type { DiffComment } from '@/lib/diff/types';
 import type { FileInfo, CumulativeDiff } from '@/lib/state/slices/session-runtime/types';
@@ -100,6 +100,15 @@ export const ReviewDialog = memo(function ReviewDialog({
   const commentCountByFile = useMemo(() => computeCommentCounts(byId, sessionCommentIds), [byId, sessionCommentIds]);
   const totalCommentCount = useMemo(() => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0), [commentCountByFile]);
   const fileRefs = useMemo(() => { const refs = new Map<string, React.RefObject<HTMLDivElement | null>>(); for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>()); return refs; }, [allFiles]);
+  const prevCountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const prevCount = prevCountRef.current;
+    if (open && prevCount !== null && prevCount > 0 && allFiles.length === 0) {
+      onOpenChange(false);
+    }
+    prevCountRef.current = allFiles.length;
+  }, [open, allFiles.length, onOpenChange]);
 
   const handleToggleSplitView = useCallback((split: boolean) => {
     setSplitView(split);

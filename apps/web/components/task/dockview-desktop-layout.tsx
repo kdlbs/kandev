@@ -111,22 +111,34 @@ function ChatPanel(props: IDockviewPanelProps) {
   );
 }
 
-function DiffViewerPanelComponent() {
+function DiffViewerPanelComponent(props: IDockviewPanelProps<{ kind?: 'all' | 'file'; path?: string; content?: string }>) {
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const panelKind = props.params?.kind ?? 'all';
+  const selectedPath = panelKind === 'file' ? props.params?.path : undefined;
+  const panelSelectedDiff = panelKind === 'all' ? selectedDiff : null;
+  const handleClosePanel = useCallback(() => {
+    const dockApi = useDockviewStore.getState().api;
+    const panel = dockApi?.getPanel(props.api.id);
+    if (dockApi && panel) dockApi.removePanel(panel);
+  }, [props.api.id]);
 
   return (
     <TaskChangesPanel
-      selectedDiff={selectedDiff}
+      mode={panelKind}
+      filePath={selectedPath}
+      selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
       onOpenFile={openFile}
+      onBecameEmpty={handleClosePanel}
     />
   );
 }
 
 function ChangesPanelWrapper(props: IDockviewPanelProps) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
+  const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
   const { openFile } = useFileEditors();
 
@@ -145,9 +157,13 @@ function ChangesPanelWrapper(props: IDockviewPanelProps) {
     }
   }, [totalCount, props.api]);
 
-  const handleOpenFile = useCallback((path: string) => {
+  const handleEditFile = useCallback((path: string) => {
     openFile(path);
   }, [openFile]);
+
+  const handleOpenDiffFile = useCallback((path: string) => {
+    addFileDiffPanel(path);
+  }, [addFileDiffPanel]);
 
   const handleOpenCommitDetail = useCallback((sha: string) => {
     addCommitDetailPanel(sha);
@@ -163,7 +179,8 @@ function ChangesPanelWrapper(props: IDockviewPanelProps) {
 
   return (
     <ChangesPanel
-      onOpenFile={handleOpenFile}
+      onOpenDiffFile={handleOpenDiffFile}
+      onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}
       onOpenDiffAll={handleOpenDiffAll}
       onOpenReview={handleOpenReview}
