@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -25,10 +27,18 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	resp, err := h.controller.ListTaskSessions(ctx, dto.ListTaskSessionsRequest{TaskID: taskID})
+	sessions, err := h.service.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
+	}
+	sessionDTOs := make([]dto.TaskSessionDTO, 0, len(sessions))
+	for _, session := range sessions {
+		sessionDTOs = append(sessionDTOs, dto.FromTaskSession(session))
+	}
+	resp := dto.ListTaskSessionsResponse{
+		Sessions: sessionDTOs,
+		Total:    len(sessionDTOs),
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -46,10 +56,18 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	resp, err := h.controller.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: req.WorkflowID})
+	tasks, err := h.service.ListTasks(ctx, req.WorkflowID)
 	if err != nil {
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
+	}
+	taskDTOs := make([]dto.TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		taskDTOs = append(taskDTOs, dto.FromTask(task))
+	}
+	resp := dto.ListTasksResponse{
+		Tasks: taskDTOs,
+		Total: len(tasks),
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -104,15 +122,18 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		})
 	}
 
-	resp, err := h.controller.CreateTask(ctx, dto.CreateTaskRequest{
+	title := strings.TrimSpace(req.Title)
+	description := strings.TrimSpace(req.Description)
+
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
+		Title:          title,
+		Description:    description,
 		Priority:       req.Priority,
 		State:          req.State,
-		Repositories:   repos,
+		Repositories:   convertToServiceRepos(repos),
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 	})
@@ -121,17 +142,18 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
-	response := createTaskResponse{TaskDTO: resp}
+	taskDTO := dto.FromTask(task)
+	response := createTaskResponse{TaskDTO: taskDTO}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		// Use resp.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
-		execution, err := h.orchestrator.StartTask(ctx, resp.ID, req.AgentProfileID, req.ExecutorID, req.Priority, resp.Description, resp.WorkflowStepID, req.PlanMode)
+		// Use taskDTO.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
+		execution, err := h.orchestrator.StartTask(ctx, taskDTO.ID, req.AgentProfileID, req.ExecutorID, req.Priority, taskDTO.Description, taskDTO.WorkflowStepID, req.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
 		}
 		h.logger.Info("wsCreateTask started agent",
-			zap.String("task_id", resp.ID),
+			zap.String("task_id", taskDTO.ID),
 			zap.String("executor_id", req.ExecutorID),
 			zap.String("workflow_step_id", req.WorkflowStepID),
 			zap.String("session_id", execution.SessionID))
@@ -154,11 +176,11 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.GetTask(ctx, dto.GetTaskRequest{ID: req.ID})
+	task, err := h.service.GetTask(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 type wsUpdateTaskRequest struct {
@@ -195,13 +217,24 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	resp, err := h.controller.UpdateTask(ctx, dto.UpdateTaskRequest{
-		ID:           req.ID,
-		Title:        req.Title,
-		Description:  req.Description,
+	// Trim strings like the controller did
+	var title *string
+	if req.Title != nil {
+		trimmed := strings.TrimSpace(*req.Title)
+		title = &trimmed
+	}
+	var description *string
+	if req.Description != nil {
+		trimmed := strings.TrimSpace(*req.Description)
+		description = &trimmed
+	}
+
+	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
+		Title:        title,
+		Description:  description,
 		Priority:     req.Priority,
 		State:        req.State,
-		Repositories: repos,
+		Repositories: convertToServiceRepos(repos),
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})
@@ -209,20 +242,26 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to update task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete task",
 		func(ctx context.Context, id string) (any, error) {
-			return h.controller.DeleteTask(ctx, dto.DeleteTaskRequest{ID: id})
+			if err := h.service.DeleteTask(ctx, id); err != nil {
+				return nil, err
+			}
+			return dto.SuccessResponse{Success: true}, nil
 		})
 }
 
 func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to archive task",
 		func(ctx context.Context, id string) (any, error) {
-			return h.controller.ArchiveTask(ctx, dto.ArchiveTaskRequest{ID: id})
+			if err := h.service.ArchiveTask(ctx, id); err != nil {
+				return nil, err
+			}
+			return dto.SuccessResponse{Success: true}, nil
 		})
 }
 
@@ -248,17 +287,19 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
 
-	resp, err := h.controller.MoveTask(ctx, dto.MoveTaskRequest{
-		ID:             req.ID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Position:       req.Position,
-	})
+	result, err := h.service.MoveTask(ctx, req.ID, req.WorkflowID, req.WorkflowStepID, req.Position)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+
+	response := dto.MoveTaskResponse{
+		Task: dto.FromTask(result.Task),
+	}
+	if result.WorkflowStep != nil {
+		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 type wsUpdateTaskStateRequest struct {
@@ -278,13 +319,10 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
 
-	resp, err := h.controller.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{
-		ID:    req.ID,
-		State: v1.TaskState(req.State),
-	})
+	task, err := h.service.UpdateTaskState(ctx, req.ID, v1.TaskState(req.State))
 	if err != nil {
 		h.logger.Error("failed to update task state", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }

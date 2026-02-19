@@ -4,22 +4,32 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
-	resp, err := h.controller.ListTasks(c.Request.Context(), dto.ListTasksRequest{WorkflowID: c.Param("id")})
+	tasks, err := h.service.ListTasks(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	taskDTOs := make([]dto.TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		taskDTOs = append(taskDTOs, dto.FromTask(task))
+	}
+	c.JSON(http.StatusOK, dto.ListTasksResponse{
+		Tasks: taskDTOs,
+		Total: len(tasks),
+	})
 }
 
 func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
@@ -40,48 +50,106 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	query := c.Query("query")
 	includeArchived := c.Query("include_archived") == queryValueTrue
 
-	resp, err := h.controller.ListTasksByWorkspace(c.Request.Context(), dto.ListTasksByWorkspaceRequest{
-		WorkspaceID:     c.Param("id"),
-		Query:           query,
-		Page:            page,
-		PageSize:        pageSize,
-		IncludeArchived: includeArchived,
-	})
+	tasks, total, err := h.service.ListTasksByWorkspace(
+		c.Request.Context(), c.Param("id"), query, page, pageSize, includeArchived,
+	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+
+	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
+	if err != nil {
+		h.logger.Error("failed to enrich tasks with session info", zap.Error(err))
+		handleNotFound(c, h.logger, err, "tasks not found")
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.ListTasksResponse{
+		Tasks: taskDTOs,
+		Total: total,
+	})
+}
+
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
+// session counts, and review status using bulk queries.
+func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
+	if len(tasks) == 0 {
+		return []dto.TaskDTO{}, nil
+	}
+	taskIDs := make([]string, len(tasks))
+	for i, t := range tasks {
+		taskIDs[i] = t.ID
+	}
+	primarySessionMap, err := svc.GetPrimarySessionIDsForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	sessionCountMap, err := svc.GetSessionCountsForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		var primarySessionID *string
+		if sid, ok := primarySessionMap[task.ID]; ok {
+			primarySessionID = &sid
+		}
+		var sessionCount *int
+		if count, ok := sessionCountMap[task.ID]; ok {
+			sessionCount = &count
+		}
+		var reviewStatus *string
+		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
+			reviewStatus = sessionInfo.ReviewStatus
+		}
+		result = append(result, dto.FromTaskWithSessionInfo(task, primarySessionID, sessionCount, reviewStatus))
+	}
+	return result, nil
+}
+
+func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
-	resp, err := h.controller.GetTask(c.Request.Context(), dto.GetTaskRequest{ID: c.Param("id")})
+	task, err := h.service.GetTask(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
-	resp, err := h.controller.ListTaskSessions(c.Request.Context(), dto.ListTaskSessionsRequest{TaskID: c.Param("id")})
+	sessions, err := h.service.ListTaskSessions(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	sessionDTOs := make([]dto.TaskSessionDTO, 0, len(sessions))
+	for _, session := range sessions {
+		sessionDTOs = append(sessionDTOs, dto.FromTaskSession(session))
+	}
+	c.JSON(http.StatusOK, dto.ListTaskSessionsResponse{
+		Sessions: sessionDTOs,
+		Total:    len(sessionDTOs),
+	})
 }
 
 func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
-	resp, err := h.controller.GetTaskSession(
-		c.Request.Context(),
-		dto.GetTaskSessionRequest{TaskSessionID: c.Param("id")},
-	)
+	session, err := h.service.GetTaskSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
+		Session: dto.FromTaskSession(session),
+	})
 }
 
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
@@ -108,36 +176,41 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
-	resp, err := h.controller.ApproveSession(
-		c.Request.Context(),
-		dto.ApproveSessionRequest{SessionID: c.Param("id")},
-	)
+	result, err := h.service.ApproveSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to approve session", zap.String("session_id", c.Param("id")), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	resp := dto.ApproveSessionResponse{
+		Success: true,
+		Session: dto.FromTaskSession(result.Session),
+	}
+	if result.WorkflowStep != nil {
+		resp.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
+	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
-	resp, err := h.controller.CountTasksByWorkflow(c.Request.Context(), c.Param("id"))
+	count, err := h.service.CountTasksByWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by workflow", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count tasks"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.TaskCountResponse{TaskCount: count})
 }
 
 func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
-	resp, err := h.controller.CountTasksByWorkflowStep(c.Request.Context(), c.Param("id"))
+	count, err := h.service.CountTasksByWorkflowStep(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by step", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count tasks"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.TaskCountResponse{TaskCount: count})
 }
 
 type httpBulkMoveTasksRequest struct {
@@ -157,18 +230,17 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "source_workflow_id, target_workflow_id, and target_step_id are required"})
 		return
 	}
-	resp, err := h.controller.BulkMoveTasks(c.Request.Context(), dto.BulkMoveTasksRequest{
-		SourceWorkflowID: body.SourceWorkflowID,
-		SourceStepID:     body.SourceStepID,
-		TargetWorkflowID: body.TargetWorkflowID,
-		TargetStepID:     body.TargetStepID,
-	})
+	result, err := h.service.BulkMoveTasks(
+		c.Request.Context(),
+		body.SourceWorkflowID, body.SourceStepID,
+		body.TargetWorkflowID, body.TargetStepID,
+	)
 	if err != nil {
 		h.logger.Error("failed to bulk move tasks", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to bulk move tasks"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.BulkMoveTasksResponse{MovedCount: result.MovedCount})
 }
 
 type httpTaskRepositoryInput struct {
@@ -223,15 +295,18 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.controller.CreateTask(c.Request.Context(), dto.CreateTaskRequest{
+	title := strings.TrimSpace(body.Title)
+	description := strings.TrimSpace(body.Description)
+
+	task, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
 		WorkflowID:     body.WorkflowID,
 		WorkflowStepID: body.WorkflowStepID,
-		Title:          body.Title,
-		Description:    body.Description,
+		Title:          title,
+		Description:    description,
 		Priority:       body.Priority,
 		State:          body.State,
-		Repositories:   repos,
+		Repositories:   convertToServiceRepos(repos),
 		Position:       body.Position,
 		Metadata:       body.Metadata,
 	})
@@ -240,10 +315,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 
-	response := createTaskResponse{TaskDTO: resp}
+	taskDTO := dto.FromTask(task)
+	response := createTaskResponse{TaskDTO: taskDTO}
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
-	resolvedStepID := resp.WorkflowStepID
-	h.handlePostCreateTaskSession(c, &response, resp.ID, resp.Description, body, resolvedStepID)
+	resolvedStepID := taskDTO.WorkflowStepID
+	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID)
 
 	c.JSON(http.StatusOK, response)
 }
@@ -367,13 +443,24 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		}
 	}
 
-	resp, err := h.controller.UpdateTask(c.Request.Context(), dto.UpdateTaskRequest{
-		ID:           c.Param("id"),
-		Title:        body.Title,
-		Description:  body.Description,
+	// Trim strings like the controller did
+	var title *string
+	if body.Title != nil {
+		trimmed := strings.TrimSpace(*body.Title)
+		title = &trimmed
+	}
+	var description *string
+	if body.Description != nil {
+		trimmed := strings.TrimSpace(*body.Description)
+		description = &trimmed
+	}
+
+	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
+		Title:        title,
+		Description:  description,
 		Priority:     body.Priority,
 		State:        body.State,
-		Repositories: repos,
+		Repositories: convertToServiceRepos(repos),
 		Position:     body.Position,
 		Metadata:     body.Metadata,
 	})
@@ -381,7 +468,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not updated")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 type httpMoveTaskRequest struct {
@@ -400,35 +487,38 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and workflow_step_id are required"})
 		return
 	}
-	resp, err := h.controller.MoveTask(c.Request.Context(), dto.MoveTaskRequest{
-		ID:             c.Param("id"),
-		WorkflowID:     body.WorkflowID,
-		WorkflowStepID: body.WorkflowStepID,
-		Position:       body.Position,
-	})
+	result, err := h.service.MoveTask(
+		c.Request.Context(), c.Param("id"),
+		body.WorkflowID, body.WorkflowStepID, body.Position,
+	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not moved")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+
+	response := dto.MoveTaskResponse{
+		Task: dto.FromTask(result.Task),
+	}
+	if result.WorkflowStep != nil {
+		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
-	resp, err := h.controller.DeleteTask(deleteCtx, dto.DeleteTaskRequest{ID: c.Param("id")})
-	if err != nil {
+	if err := h.service.DeleteTask(deleteCtx, c.Param("id")); err != nil {
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
-	resp, err := h.controller.ArchiveTask(c.Request.Context(), dto.ArchiveTaskRequest{ID: c.Param("id")})
-	if err != nil {
+	if err := h.service.ArchiveTask(c.Request.Context(), c.Param("id")); err != nil {
 		handleNotFound(c, h.logger, err, "task not archived")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }

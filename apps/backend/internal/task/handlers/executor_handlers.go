@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -17,16 +16,16 @@ import (
 )
 
 type ExecutorHandlers struct {
-	controller *controller.ExecutorController
-	logger     *logger.Logger
+	service *service.Service
+	logger  *logger.Logger
 }
 
-func NewExecutorHandlers(ctrl *controller.ExecutorController, log *logger.Logger) *ExecutorHandlers {
-	return &ExecutorHandlers{controller: ctrl, logger: log}
+func NewExecutorHandlers(svc *service.Service, log *logger.Logger) *ExecutorHandlers {
+	return &ExecutorHandlers{service: svc, logger: log}
 }
 
-func RegisterExecutorRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.ExecutorController, log *logger.Logger) {
-	handlers := NewExecutorHandlers(ctrl, log)
+func RegisterExecutorRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, log *logger.Logger) {
+	handlers := NewExecutorHandlers(svc, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -48,8 +47,23 @@ func (h *ExecutorHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionExecutorDelete, h.wsDeleteExecutor)
 }
 
+func (h *ExecutorHandlers) listExecutors(ctx context.Context) (dto.ListExecutorsResponse, error) {
+	executors, err := h.service.ListExecutors(ctx)
+	if err != nil {
+		return dto.ListExecutorsResponse{}, err
+	}
+	resp := dto.ListExecutorsResponse{
+		Executors: make([]dto.ExecutorDTO, 0, len(executors)),
+		Total:     len(executors),
+	}
+	for _, executor := range executors {
+		resp.Executors = append(resp.Executors, dto.FromExecutor(executor))
+	}
+	return resp, nil
+}
+
 func (h *ExecutorHandlers) httpListExecutors(c *gin.Context) {
-	resp, err := h.controller.ListExecutors(c.Request.Context(), dto.ListExecutorsRequest{})
+	resp, err := h.listExecutors(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list executors", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list executors"})
@@ -85,7 +99,7 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 	if body.Resumable != nil {
 		resumable = *body.Resumable
 	}
-	resp, err := h.controller.CreateExecutor(c.Request.Context(), dto.CreateExecutorRequest{
+	executor, err := h.service.CreateExecutor(c.Request.Context(), &service.CreateExecutorRequest{
 		Name:      body.Name,
 		Type:      models.ExecutorType(body.Type),
 		Status:    models.ExecutorStatus(status),
@@ -102,17 +116,17 @@ func (h *ExecutorHandlers) httpCreateExecutor(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "executor not created"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromExecutor(executor))
 }
 
 func (h *ExecutorHandlers) httpGetExecutor(c *gin.Context) {
-	resp, err := h.controller.GetExecutor(c.Request.Context(), dto.GetExecutorRequest{ID: c.Param("id")})
+	executor, err := h.service.GetExecutor(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to get executor", zap.Error(err))
 		c.JSON(http.StatusNotFound, gin.H{"error": "executor not found"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromExecutor(executor))
 }
 
 type httpUpdateExecutorRequest struct {
@@ -139,8 +153,7 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		value := models.ExecutorStatus(*body.Status)
 		execStatus = &value
 	}
-	resp, err := h.controller.UpdateExecutor(c.Request.Context(), dto.UpdateExecutorRequest{
-		ID:        c.Param("id"),
+	executor, err := h.service.UpdateExecutor(c.Request.Context(), c.Param("id"), &service.UpdateExecutorRequest{
 		Name:      body.Name,
 		Type:      execType,
 		Status:    execStatus,
@@ -156,13 +169,12 @@ func (h *ExecutorHandlers) httpUpdateExecutor(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "executor not updated"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromExecutor(executor))
 }
 
 func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
-	resp, err := h.controller.DeleteExecutor(c.Request.Context(), dto.DeleteExecutorRequest{ID: c.Param("id")})
-	if err != nil {
-		if errors.Is(err, controller.ErrActiveTaskSessions) {
+	if err := h.service.DeleteExecutor(c.Request.Context(), c.Param("id")); err != nil {
+		if errors.Is(err, service.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "executor is used by an active agent session"})
 			return
 		}
@@ -170,11 +182,11 @@ func (h *ExecutorHandlers) httpDeleteExecutor(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "executor not deleted"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 func (h *ExecutorHandlers) wsListExecutors(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.controller.ListExecutors(ctx, dto.ListExecutorsRequest{})
+	resp, err := h.listExecutors(ctx)
 	if err != nil {
 		h.logger.Error("failed to list executors", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list executors", nil)
@@ -207,7 +219,7 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 	if req.Resumable != nil {
 		resumable = *req.Resumable
 	}
-	resp, err := h.controller.CreateExecutor(ctx, dto.CreateExecutorRequest{
+	executor, err := h.service.CreateExecutor(ctx, &service.CreateExecutorRequest{
 		Name:      req.Name,
 		Type:      models.ExecutorType(req.Type),
 		Status:    models.ExecutorStatus(status),
@@ -222,7 +234,7 @@ func (h *ExecutorHandlers) wsCreateExecutor(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create executor", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromExecutor(executor))
 }
 
 type wsGetExecutorRequest struct {
@@ -237,11 +249,11 @@ func (h *ExecutorHandlers) wsGetExecutor(ctx context.Context, msg *ws.Message) (
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	resp, err := h.controller.GetExecutor(ctx, dto.GetExecutorRequest{ID: req.ID})
+	executor, err := h.service.GetExecutor(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Executor not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromExecutor(executor))
 }
 
 type wsUpdateExecutorRequest struct {
@@ -271,8 +283,7 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		value := models.ExecutorStatus(*req.Status)
 		execStatus = &value
 	}
-	resp, err := h.controller.UpdateExecutor(ctx, dto.UpdateExecutorRequest{
-		ID:        req.ID,
+	executor, err := h.service.UpdateExecutor(ctx, req.ID, &service.UpdateExecutorRequest{
 		Name:      req.Name,
 		Type:      execType,
 		Status:    execStatus,
@@ -286,13 +297,9 @@ func (h *ExecutorHandlers) wsUpdateExecutor(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update executor", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromExecutor(executor))
 }
 
 func (h *ExecutorHandlers) wsDeleteExecutor(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsHandleIDRequestActiveCheck(ctx, msg, h.logger,
-		"failed to delete executor", "executor is used by an active agent session",
-		func(ctx context.Context, id string) (any, error) {
-			return h.controller.DeleteExecutor(ctx, dto.DeleteExecutorRequest{ID: id})
-		})
+	return wsDeleteWithActiveSessionCheck(ctx, msg, h.logger, "executor", h.service.DeleteExecutor)
 }

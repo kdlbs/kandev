@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
@@ -52,8 +51,7 @@ func newTestMessageHandlers(t *testing.T, repo *sessionStateSequencer) *MessageH
 	})
 	require.NoError(t, err)
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
-	taskCtrl := controller.NewTaskController(svc)
-	return NewMessageHandlers(nil, taskCtrl, nil, log)
+	return NewMessageHandlers(svc, nil, log)
 }
 
 func TestWaitForSessionReady_ImmediatelyReady(t *testing.T) {

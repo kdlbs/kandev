@@ -15,9 +15,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -32,25 +32,23 @@ type OrchestratorService interface {
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	messageController *controller.MessageController
-	taskController    *controller.TaskController
-	orchestrator      OrchestratorService
-	logger            *logger.Logger
+	service      *service.Service
+	orchestrator OrchestratorService
+	logger       *logger.Logger
 }
 
 // NewMessageHandlers creates a new MessageHandlers instance
-func NewMessageHandlers(messageCtrl *controller.MessageController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) *MessageHandlers {
+func NewMessageHandlers(svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) *MessageHandlers {
 	return &MessageHandlers{
-		messageController: messageCtrl,
-		taskController:    taskCtrl,
-		orchestrator:      orchestrator,
-		logger:            log.WithFields(zap.String("component", "task-message-handlers")),
+		service:      svc,
+		orchestrator: orchestrator,
+		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
 	}
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
-func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, messageCtrl *controller.MessageController, taskCtrl *controller.TaskController, orchestrator OrchestratorService, log *logger.Logger) {
-	handlers := NewMessageHandlers(messageCtrl, taskCtrl, orchestrator, log)
+func RegisterMessageRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorService, log *logger.Logger) {
+	handlers := NewMessageHandlers(svc, orchestrator, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -66,20 +64,26 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 }
 
-func (h *MessageHandlers) httpListMessages(c *gin.Context) {
-	sessionID := c.Param("id")
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "task session id is required"})
-		return
-	}
+type listMessagesParams struct {
+	before    string
+	after     string
+	sort      string
+	limit     int
+	paginated bool
+}
+
+func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesParams, bool) {
 	before := c.Query("before")
 	after := c.Query("after")
 	sort := strings.ToLower(strings.TrimSpace(c.Query("sort")))
 	limitProvided := strings.TrimSpace(c.Query("limit")) != ""
-	paginated := limitProvided || before != "" || after != "" || sort != ""
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
-		return
+		return listMessagesParams{}, false
+	}
+	if sort != "" && sort != "asc" && sort != "desc" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+		return listMessagesParams{}, false
 	}
 	limit := 0
 	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
@@ -87,26 +91,78 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 			limit = parsed
 		}
 	}
-	if sort != "" && sort != "asc" && sort != "desc" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+	return listMessagesParams{
+		before:    before,
+		after:     after,
+		sort:      sort,
+		limit:     limit,
+		paginated: limitProvided || before != "" || after != "" || sort != "",
+	}, true
+}
+
+func (h *MessageHandlers) fetchMessages(
+	ctx context.Context,
+	sessionID string,
+	params listMessagesParams,
+) (dto.ListMessagesResponse, error) {
+	if params.paginated {
+		return h.fetchMessagesPaginated(ctx, sessionID, params)
+	}
+	messages, err := h.service.ListMessages(ctx, sessionID)
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
+	return dto.ListMessagesResponse{Messages: result, Total: len(result)}, nil
+}
+
+func (h *MessageHandlers) fetchMessagesPaginated(
+	ctx context.Context,
+	sessionID string,
+	params listMessagesParams,
+) (dto.ListMessagesResponse, error) {
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+		TaskSessionID: sessionID,
+		Limit:         params.limit,
+		Before:        params.before,
+		After:         params.after,
+		Sort:          params.sort,
+	})
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
+	cursor := ""
+	if len(result) > 0 {
+		cursor = result[len(result)-1].ID
+	}
+	return dto.ListMessagesResponse{
+		Messages: result,
+		Total:    len(result),
+		HasMore:  hasMore,
+		Cursor:   cursor,
+	}, nil
+}
+
+func messagesToAPI(messages []*models.Message) []*v1.Message {
+	result := make([]*v1.Message, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, message.ToAPI())
+	}
+	return result
+}
+
+func (h *MessageHandlers) httpListMessages(c *gin.Context) {
+	sessionID := c.Param("id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task session id is required"})
 		return
 	}
-
-	var (
-		resp dto.ListMessagesResponse
-		err  error
-	)
-	if paginated {
-		resp, err = h.messageController.ListMessages(c.Request.Context(), dto.ListMessagesRequest{
-			TaskSessionID: sessionID,
-			Limit:         limit,
-			Before:        before,
-			After:         after,
-			Sort:          sort,
-		})
-	} else {
-		resp, err = h.messageController.ListAllMessages(c.Request.Context(), sessionID)
+	params, ok := h.parseListMessageParams(c)
+	if !ok {
+		return
 	}
+	resp, err := h.fetchMessages(c.Request.Context(), sessionID, params)
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
@@ -160,7 +216,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		WithAttachments(req.Attachments).
 		WithContextFiles(req.ContextFiles)
 
-	message, err := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
 		Content:       req.Content,
@@ -173,7 +229,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 
-	response, err := ws.NewResponse(msg.ID, msg.Action, message)
+	apiMsg := message.ToAPI()
+	response, err := ws.NewResponse(msg.ID, msg.Action, apiMsg)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
 	}
@@ -206,37 +263,39 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 // checkSessionStateForMessage loads the session and returns an error WS message if the
 // session is in a state that blocks new messages (running, failed, cancelled).
 func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *ws.Message, sessionID string) (*dto.GetTaskSessionResponse, *ws.Message) {
-	sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: sessionID})
+	session, err := h.service.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		h.logger.Error("failed to get task session", zap.String("session_id", sessionID), zap.Error(err))
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
 		return nil, wsErr
 	}
-	switch sessionResp.Session.State {
+	sessionDTO := dto.FromTaskSession(session)
+	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
+	switch sessionDTO.State {
 	case models.TaskSessionStateRunning:
 		h.logger.Warn("rejected message submission while agent is busy",
 			zap.String("session_id", sessionID),
-			zap.String("session_state", string(sessionResp.Session.State)))
+			zap.String("session_state", string(sessionDTO.State)))
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 		return nil, wsErr
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Session has ended. Please create a new session to continue.", nil)
 		return nil, wsErr
 	}
-	return &sessionResp, nil
+	return resp, nil
 }
 
 // ensureTaskInProgress fetches the task and transitions it from REVIEW → IN_PROGRESS if needed.
 // Returns an error only when the task cannot be fetched.
 func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID string) error {
-	task, err := h.taskController.GetTask(ctx, dto.GetTaskRequest{ID: taskID})
+	task, err := h.service.GetTask(ctx, taskID)
 	if err != nil {
 		return err
 	}
 	if task.State != v1.TaskStateReview {
 		return nil
 	}
-	if _, err := h.taskController.UpdateTaskState(ctx, dto.UpdateTaskStateRequest{ID: taskID, State: v1.TaskStateInProgress}); err != nil {
+	if _, err := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
 			zap.String("task_id", taskID),
 			zap.Error(err))
@@ -292,7 +351,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 				zap.Error(err))
 
 			errorMsg := "Failed to start agent"
-			if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+			if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 				TaskSessionID: sessionID,
 				TaskID:        taskID,
 				Content:       errorMsg,
@@ -367,7 +426,7 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 		errorMsg = "Agent is not running. Please restart the session."
 	}
 
-	if _, createErr := h.messageController.CreateMessage(ctx, dto.CreateMessageRequest{
+	if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		Content:       errorMsg,
@@ -402,21 +461,21 @@ func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID str
 			return ctx.Err()
 		case <-time.After(pollInterval):
 		}
-		sessionResp, err := h.taskController.GetTaskSession(ctx, dto.GetTaskSessionRequest{TaskSessionID: sessionID})
+		session, err := h.service.GetTaskSession(ctx, sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to check session state: %w", err)
 		}
-		switch sessionResp.Session.State {
+		switch session.State {
 		case models.TaskSessionStateWaitingForInput:
 			return nil
 		case models.TaskSessionStateFailed:
-			errMsg := sessionResp.Session.ErrorMessage
+			errMsg := session.ErrorMessage
 			if errMsg == "" {
 				errMsg = "session failed during resume"
 			}
 			return fmt.Errorf("session failed after resume: %s", errMsg)
 		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
-			return fmt.Errorf("session in unexpected state after resume: %s", sessionResp.Session.State)
+			return fmt.Errorf("session in unexpected state after resume: %s", session.State)
 		default:
 			// STARTING or RUNNING — keep polling
 		}
@@ -446,7 +505,7 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sort must be asc or desc", nil)
 	}
 
-	resp, err := h.messageController.ListMessages(ctx, dto.ListMessagesRequest{
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
 		Limit:         req.Limit,
 		Before:        req.Before,
@@ -456,6 +515,20 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list messages", nil)
+	}
+	result := make([]*v1.Message, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, message.ToAPI())
+	}
+	cursor := ""
+	if len(result) > 0 {
+		cursor = result[len(result)-1].ID
+	}
+	resp := dto.ListMessagesResponse{
+		Messages: result,
+		Total:    len(result),
+		HasMore:  hasMore,
+		Cursor:   cursor,
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

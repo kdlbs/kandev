@@ -8,27 +8,27 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 type RepositoryHandlers struct {
-	controller *controller.RepositoryController
-	logger     *logger.Logger
+	service *service.Service
+	logger  *logger.Logger
 }
 
-func NewRepositoryHandlers(ctrl *controller.RepositoryController, log *logger.Logger) *RepositoryHandlers {
+func NewRepositoryHandlers(svc *service.Service, log *logger.Logger) *RepositoryHandlers {
 	return &RepositoryHandlers{
-		controller: ctrl,
-		logger:     log.WithFields(zap.String("component", "task-repository-handlers")),
+		service: svc,
+		logger:  log.WithFields(zap.String("component", "task-repository-handlers")),
 	}
 }
 
-func RegisterRepositoryRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.RepositoryController, log *logger.Logger) {
-	handlers := NewRepositoryHandlers(ctrl, log)
+func RegisterRepositoryRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, log *logger.Logger) {
+	handlers := NewRepositoryHandlers(svc, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -67,25 +67,39 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 // HTTP handlers
 
 func (h *RepositoryHandlers) httpListRepositories(c *gin.Context) {
+	workspaceID := c.Param("id")
 	includeScripts := c.Query("include_scripts") == queryValueTrue
-	resp, err := h.controller.ListRepositories(c.Request.Context(), dto.ListRepositoriesRequest{
-		WorkspaceID:    c.Param("id"),
-		IncludeScripts: includeScripts,
-	})
+
+	repositories, err := h.service.ListRepositories(c.Request.Context(), workspaceID)
 	if err != nil {
 		h.logger.Error("failed to list repositories", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repositories"})
 		return
+	}
+
+	resp := dto.ListRepositoriesResponse{
+		Repositories: make([]dto.RepositoryDTO, 0, len(repositories)),
+		Total:        len(repositories),
+	}
+	for _, repository := range repositories {
+		repoDTO := dto.FromRepository(repository)
+		if includeScripts {
+			scripts, scriptsErr := h.service.ListRepositoryScripts(c.Request.Context(), repository.ID)
+			if scriptsErr == nil {
+				repoDTO.Scripts = make([]dto.RepositoryScriptDTO, 0, len(scripts))
+				for _, script := range scripts {
+					repoDTO.Scripts = append(repoDTO.Scripts, dto.FromRepositoryScript(script))
+				}
+			}
+		}
+		resp.Repositories = append(resp.Repositories, repoDTO)
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
 func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 	root := c.Query("root")
-	resp, err := h.controller.DiscoverRepositories(c.Request.Context(), dto.DiscoverRepositoriesRequest{
-		WorkspaceID: c.Param("id"),
-		Root:        root,
-	})
+	result, err := h.service.DiscoverLocalRepositories(c.Request.Context(), root)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "root is not within allowed paths"})
@@ -94,6 +108,15 @@ func (h *RepositoryHandlers) httpDiscoverRepositories(c *gin.Context) {
 		h.logger.Error("failed to discover repositories", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to discover repositories"})
 		return
+	}
+
+	resp := dto.RepositoryDiscoveryResponse{
+		Roots:        result.Roots,
+		Repositories: make([]dto.LocalRepositoryDTO, 0, len(result.Repositories)),
+		Total:        len(result.Repositories),
+	}
+	for _, repo := range result.Repositories {
+		resp.Repositories = append(resp.Repositories, dto.FromLocalRepository(repo))
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -104,16 +127,20 @@ func (h *RepositoryHandlers) httpValidateRepositoryPath(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
 		return
 	}
-	resp, err := h.controller.ValidateRepositoryPath(c.Request.Context(), dto.ValidateRepositoryPathRequest{
-		WorkspaceID: c.Param("id"),
-		Path:        path,
-	})
+	result, err := h.service.ValidateLocalRepositoryPath(c.Request.Context(), path)
 	if err != nil {
 		h.logger.Error("failed to validate repository path", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate repository path"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.RepositoryPathValidationResponse{
+		Path:          result.Path,
+		Exists:        result.Exists,
+		IsGitRepo:     result.IsGitRepo,
+		Allowed:       result.Allowed,
+		DefaultBranch: result.DefaultBranch,
+		Message:       result.Message,
+	})
 }
 
 func (h *RepositoryHandlers) httpListLocalRepositoryBranches(c *gin.Context) {
@@ -122,10 +149,7 @@ func (h *RepositoryHandlers) httpListLocalRepositoryBranches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
 		return
 	}
-	resp, err := h.controller.ListLocalRepositoryBranches(c.Request.Context(), dto.ListLocalRepositoryBranchesRequest{
-		WorkspaceID: c.Param("id"),
-		Path:        path,
-	})
+	branches, err := h.service.ListLocalRepositoryBranches(c.Request.Context(), path)
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "path is not within allowed roots"})
@@ -135,7 +159,14 @@ func (h *RepositoryHandlers) httpListLocalRepositoryBranches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list local repository branches"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	dtoBranches := make([]dto.BranchDTO, len(branches))
+	for i, branch := range branches {
+		dtoBranches[i] = dto.FromBranch(branch)
+	}
+	c.JSON(http.StatusOK, dto.RepositoryBranchesResponse{
+		Branches: dtoBranches,
+		Total:    len(dtoBranches),
+	})
 }
 
 type httpCreateRepositoryRequest struct {
@@ -164,7 +195,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
-	resp, err := h.controller.CreateRepository(c.Request.Context(), dto.CreateRepositoryRequest{
+	repository, err := h.service.CreateRepository(c.Request.Context(), &service.CreateRepositoryRequest{
 		WorkspaceID:          c.Param("id"),
 		Name:                 body.Name,
 		SourceType:           body.SourceType,
@@ -189,20 +220,20 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create repository"})
 		return
 	}
-	c.JSON(http.StatusCreated, resp)
+	c.JSON(http.StatusCreated, dto.FromRepository(repository))
 }
 
 func (h *RepositoryHandlers) httpGetRepository(c *gin.Context) {
-	resp, err := h.controller.GetRepository(c.Request.Context(), dto.GetRepositoryRequest{ID: c.Param("id")})
+	repository, err := h.service.GetRepository(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "repository not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromRepository(repository))
 }
 
 func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
-	resp, err := h.controller.ListRepositoryBranches(c.Request.Context(), dto.ListRepositoryBranchesRequest{ID: c.Param("id")})
+	branches, err := h.service.ListRepositoryBranches(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		if errors.Is(err, service.ErrPathNotAllowed) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "repository path is not allowed"})
@@ -212,7 +243,14 @@ func (h *RepositoryHandlers) httpListRepositoryBranches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository branches"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	dtoBranches := make([]dto.BranchDTO, len(branches))
+	for i, branch := range branches {
+		dtoBranches[i] = dto.FromBranch(branch)
+	}
+	c.JSON(http.StatusOK, dto.RepositoryBranchesResponse{
+		Branches: dtoBranches,
+		Total:    len(dtoBranches),
+	})
 }
 
 type httpUpdateRepositoryRequest struct {
@@ -237,8 +275,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	resp, err := h.controller.UpdateRepository(c.Request.Context(), dto.UpdateRepositoryRequest{
-		ID:                   c.Param("id"),
+	repository, err := h.service.UpdateRepository(c.Request.Context(), c.Param("id"), &service.UpdateRepositoryRequest{
 		Name:                 body.Name,
 		SourceType:           body.SourceType,
 		LocalPath:            body.LocalPath,
@@ -261,12 +298,12 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "repository not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromRepository(repository))
 }
 
 func (h *RepositoryHandlers) httpDeleteRepository(c *gin.Context) {
-	if _, err := h.controller.DeleteRepository(c.Request.Context(), dto.DeleteRepositoryRequest{ID: c.Param("id")}); err != nil {
-		if errors.Is(err, controller.ErrActiveTaskSessions) {
+	if err := h.service.DeleteRepository(c.Request.Context(), c.Param("id")); err != nil {
+		if errors.Is(err, service.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "repository is used by an active agent session"})
 			return
 		}
@@ -276,89 +313,18 @@ func (h *RepositoryHandlers) httpDeleteRepository(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h *RepositoryHandlers) httpListRepositoryScripts(c *gin.Context) {
-	resp, err := h.controller.ListRepositoryScripts(c.Request.Context(), dto.ListRepositoryScriptsRequest{RepositoryID: c.Param("id")})
-	if err != nil {
-		h.logger.Error("failed to list repository scripts", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repository scripts"})
-		return
-	}
-	c.JSON(http.StatusOK, resp)
-}
-
-type httpCreateRepositoryScriptRequest struct {
-	Name     string `json:"name"`
-	Command  string `json:"command"`
-	Position int    `json:"position"`
-}
-
-func (h *RepositoryHandlers) httpCreateRepositoryScript(c *gin.Context) {
-	var body httpCreateRepositoryScriptRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	if body.Name == "" || body.Command == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name and command are required"})
-		return
-	}
-	resp, err := h.controller.CreateRepositoryScript(c.Request.Context(), dto.CreateRepositoryScriptRequest{
-		RepositoryID: c.Param("id"),
-		Name:         body.Name,
-		Command:      body.Command,
-		Position:     body.Position,
-	})
-	if err != nil {
-		h.logger.Error("failed to create repository script", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create repository script"})
-		return
-	}
-	c.JSON(http.StatusCreated, resp)
-}
-
-func (h *RepositoryHandlers) httpGetRepositoryScript(c *gin.Context) {
-	resp, err := h.controller.GetRepositoryScript(c.Request.Context(), dto.GetRepositoryScriptRequest{ID: c.Param("id")})
-	if err != nil {
-		handleNotFound(c, h.logger, err, "repository script not found")
-		return
-	}
-	c.JSON(http.StatusOK, resp)
-}
-
-type httpUpdateRepositoryScriptRequest struct {
-	Name     *string `json:"name"`
-	Command  *string `json:"command"`
-	Position *int    `json:"position"`
-}
-
-func (h *RepositoryHandlers) httpUpdateRepositoryScript(c *gin.Context) {
-	var body httpUpdateRepositoryScriptRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	resp, err := h.controller.UpdateRepositoryScript(c.Request.Context(), dto.UpdateRepositoryScriptRequest{
-		ID:       c.Param("id"),
-		Name:     body.Name,
-		Command:  body.Command,
-		Position: body.Position,
-	})
-	if err != nil {
-		handleNotFound(c, h.logger, err, "repository script not found")
-		return
-	}
-	c.JSON(http.StatusOK, resp)
-}
-
-func (h *RepositoryHandlers) httpDeleteRepositoryScript(c *gin.Context) {
-	if _, err := h.controller.DeleteRepositoryScript(c.Request.Context(), dto.DeleteRepositoryScriptRequest{ID: c.Param("id")}); err != nil {
-		handleNotFound(c, h.logger, err, "repository script not found")
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
 // WS handlers
+
+func reposToListResponse(repositories []*models.Repository) dto.ListRepositoriesResponse {
+	resp := dto.ListRepositoriesResponse{
+		Repositories: make([]dto.RepositoryDTO, 0, len(repositories)),
+		Total:        len(repositories),
+	}
+	for _, repository := range repositories {
+		resp.Repositories = append(resp.Repositories, dto.FromRepository(repository))
+	}
+	return resp
+}
 
 func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
@@ -367,12 +333,12 @@ func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Mes
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	resp, err := h.controller.ListRepositories(ctx, dto.ListRepositoriesRequest{WorkspaceID: req.WorkspaceID})
+	repositories, err := h.service.ListRepositories(ctx, req.WorkspaceID)
 	if err != nil {
 		h.logger.Error("failed to list repositories", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repositories", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, reposToListResponse(repositories))
 }
 
 type wsCreateRepositoryRequest struct {
@@ -399,7 +365,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 	if req.WorkspaceID == "" || req.Name == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id and name are required", nil)
 	}
-	resp, err := h.controller.CreateRepository(ctx, dto.CreateRepositoryRequest{
+	repository, err := h.service.CreateRepository(ctx, &service.CreateRepositoryRequest{
 		WorkspaceID:          req.WorkspaceID,
 		Name:                 req.Name,
 		SourceType:           req.SourceType,
@@ -421,7 +387,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		h.logger.Error("failed to create repository", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create repository", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromRepository(repository))
 }
 
 type wsGetRepositoryRequest struct {
@@ -436,11 +402,11 @@ func (h *RepositoryHandlers) wsGetRepository(ctx context.Context, msg *ws.Messag
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	resp, err := h.controller.GetRepository(ctx, dto.GetRepositoryRequest{ID: req.ID})
+	repository, err := h.service.GetRepository(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromRepository(repository))
 }
 
 type wsUpdateRepositoryRequest struct {
@@ -467,8 +433,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	resp, err := h.controller.UpdateRepository(ctx, dto.UpdateRepositoryRequest{
-		ID:                   req.ID,
+	repository, err := h.service.UpdateRepository(ctx, req.ID, &service.UpdateRepositoryRequest{
 		Name:                 req.Name,
 		SourceType:           req.SourceType,
 		LocalPath:            req.LocalPath,
@@ -489,7 +454,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		h.logger.Error("failed to update repository", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update repository", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromRepository(repository))
 }
 
 type wsDeleteRepositoryRequest struct {
@@ -504,121 +469,12 @@ func (h *RepositoryHandlers) wsDeleteRepository(ctx context.Context, msg *ws.Mes
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	if _, err := h.controller.DeleteRepository(ctx, dto.DeleteRepositoryRequest{ID: req.ID}); err != nil {
+	if err := h.service.DeleteRepository(ctx, req.ID); err != nil {
 		h.logger.Error("failed to delete repository", zap.Error(err))
-		if errors.Is(err, controller.ErrActiveTaskSessions) {
+		if errors.Is(err, service.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository is used by an active agent session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository not found", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, gin.H{"deleted": true})
-}
-
-func (h *RepositoryHandlers) wsListRepositoryScripts(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		RepositoryID string `json:"repository_id"`
-	}
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	resp, err := h.controller.ListRepositoryScripts(ctx, dto.ListRepositoryScriptsRequest{RepositoryID: req.RepositoryID})
-	if err != nil {
-		h.logger.Error("failed to list repository scripts", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repository scripts", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsCreateRepositoryScriptRequest struct {
-	RepositoryID string `json:"repository_id"`
-	Name         string `json:"name"`
-	Command      string `json:"command"`
-	Position     int    `json:"position"`
-}
-
-func (h *RepositoryHandlers) wsCreateRepositoryScript(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsCreateRepositoryScriptRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.RepositoryID == "" || req.Name == "" || req.Command == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id, name, and command are required", nil)
-	}
-	resp, err := h.controller.CreateRepositoryScript(ctx, dto.CreateRepositoryScriptRequest{
-		RepositoryID: req.RepositoryID,
-		Name:         req.Name,
-		Command:      req.Command,
-		Position:     req.Position,
-	})
-	if err != nil {
-		h.logger.Error("failed to create repository script", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create repository script", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsGetRepositoryScriptRequest struct {
-	ID string `json:"id"`
-}
-
-func (h *RepositoryHandlers) wsGetRepositoryScript(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetRepositoryScriptRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	resp, err := h.controller.GetRepositoryScript(ctx, dto.GetRepositoryScriptRequest{ID: req.ID})
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository script not found", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsUpdateRepositoryScriptRequest struct {
-	ID       string  `json:"id"`
-	Name     *string `json:"name,omitempty"`
-	Command  *string `json:"command,omitempty"`
-	Position *int    `json:"position,omitempty"`
-}
-
-func (h *RepositoryHandlers) wsUpdateRepositoryScript(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsUpdateRepositoryScriptRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	resp, err := h.controller.UpdateRepositoryScript(ctx, dto.UpdateRepositoryScriptRequest{
-		ID:       req.ID,
-		Name:     req.Name,
-		Command:  req.Command,
-		Position: req.Position,
-	})
-	if err != nil {
-		h.logger.Error("failed to update repository script", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update repository script", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
-}
-
-type wsDeleteRepositoryScriptRequest struct {
-	ID string `json:"id"`
-}
-
-func (h *RepositoryHandlers) wsDeleteRepositoryScript(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsDeleteRepositoryScriptRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	if _, err := h.controller.DeleteRepositoryScript(ctx, dto.DeleteRepositoryScriptRequest{ID: req.ID}); err != nil {
-		h.logger.Error("failed to delete repository script", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Repository script not found", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, gin.H{"deleted": true})
 }

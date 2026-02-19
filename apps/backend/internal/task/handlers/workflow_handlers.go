@@ -2,31 +2,47 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
-type WorkflowHandlers struct {
-	controller *controller.WorkflowController
-	logger     *logger.Logger
+// WorkflowStepLister provides access to workflow steps.
+type WorkflowStepLister interface {
+	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*workflowmodels.WorkflowStep, error)
 }
 
-func NewWorkflowHandlers(svc *controller.WorkflowController, log *logger.Logger) *WorkflowHandlers {
+type WorkflowHandlers struct {
+	service            *service.Service
+	workflowStepLister WorkflowStepLister
+	logger             *logger.Logger
+}
+
+func NewWorkflowHandlers(svc *service.Service, stepLister WorkflowStepLister, log *logger.Logger) *WorkflowHandlers {
 	return &WorkflowHandlers{
-		controller: svc,
-		logger:     log.WithFields(zap.String("component", "task-workflow-handlers")),
+		service:            svc,
+		workflowStepLister: stepLister,
+		logger:             log.WithFields(zap.String("component", "task-workflow-handlers")),
 	}
 }
 
-func RegisterWorkflowRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.WorkflowController, log *logger.Logger) {
-	handlers := NewWorkflowHandlers(ctrl, log)
+func RegisterWorkflowRoutes(
+	router *gin.Engine,
+	dispatcher *ws.Dispatcher,
+	svc *service.Service,
+	stepLister WorkflowStepLister,
+	log *logger.Logger,
+) {
+	handlers := NewWorkflowHandlers(svc, stepLister, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -51,12 +67,26 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionWorkflowDelete, h.wsDeleteWorkflow)
 }
 
+func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string) (dto.ListWorkflowsResponse, error) {
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+	if err != nil {
+		return dto.ListWorkflowsResponse{}, err
+	}
+	result := dto.ListWorkflowsResponse{
+		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
+		Total:     len(workflows),
+	}
+	for _, w := range workflows {
+		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
+	}
+	return result, nil
+}
+
 // HTTP handlers
 
 func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
-	resp, err := h.controller.ListWorkflows(c.Request.Context(), dto.ListWorkflowsRequest{
-		WorkspaceID: c.Query("workspace_id"),
-	})
+	workspaceID := c.Query("workspace_id")
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -66,9 +96,8 @@ func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 }
 
 func (h *WorkflowHandlers) httpListWorkflowsByWorkspace(c *gin.Context) {
-	resp, err := h.controller.ListWorkflows(c.Request.Context(), dto.ListWorkflowsRequest{
-		WorkspaceID: c.Param("id"),
-	})
+	workspaceID := c.Param("id")
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
@@ -78,12 +107,12 @@ func (h *WorkflowHandlers) httpListWorkflowsByWorkspace(c *gin.Context) {
 }
 
 func (h *WorkflowHandlers) httpGetWorkflow(c *gin.Context) {
-	resp, err := h.controller.GetWorkflow(c.Request.Context(), dto.GetWorkflowRequest{ID: c.Param("id")})
+	workflow, err := h.service.GetWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromWorkflow(workflow))
 }
 
 type httpCreateWorkflowRequest struct {
@@ -103,7 +132,7 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
 		return
 	}
-	resp, err := h.controller.CreateWorkflow(c.Request.Context(), dto.CreateWorkflowRequest{
+	workflow, err := h.service.CreateWorkflow(c.Request.Context(), &service.CreateWorkflowRequest{
 		WorkspaceID:        body.WorkspaceID,
 		Name:               body.Name,
 		Description:        body.Description,
@@ -114,7 +143,7 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workflow"})
 		return
 	}
-	c.JSON(http.StatusCreated, resp)
+	c.JSON(http.StatusCreated, dto.FromWorkflow(workflow))
 }
 
 type httpUpdateWorkflowRequest struct {
@@ -128,8 +157,8 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	resp, err := h.controller.UpdateWorkflow(c.Request.Context(), dto.UpdateWorkflowRequest{
-		ID:          c.Param("id"),
+	id := c.Param("id")
+	workflow, err := h.service.UpdateWorkflow(c.Request.Context(), id, &service.UpdateWorkflowRequest{
 		Name:        body.Name,
 		Description: body.Description,
 	})
@@ -137,25 +166,50 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromWorkflow(workflow))
 }
 
 func (h *WorkflowHandlers) httpDeleteWorkflow(c *gin.Context) {
-	resp, err := h.controller.DeleteWorkflow(c.Request.Context(), dto.DeleteWorkflowRequest{ID: c.Param("id")})
-	if err != nil {
+	id := c.Param("id")
+	if err := h.service.DeleteWorkflow(c.Request.Context(), id); err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
-	resp, err := h.controller.GetSnapshot(c.Request.Context(), dto.GetWorkflowSnapshotRequest{WorkflowID: c.Param("id")})
+	workflowID := c.Param("id")
+
+	workflow, err := h.service.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+
+	steps, err := h.getStepsForWorkflow(c.Request.Context(), workflow)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	tasks, err := h.service.ListTasks(c.Request.Context(), workflowID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
+		Workflow: dto.FromWorkflow(workflow),
+		Steps:   steps,
+		Tasks:   taskDTOs,
+	})
 }
 
 func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
@@ -164,16 +218,58 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace id is required"})
 		return
 	}
+
 	workflowID := c.Query("workflow_id")
-	resp, err := h.controller.GetWorkspaceSnapshot(c.Request.Context(), dto.GetWorkspaceSnapshotRequest{
-		WorkspaceID: workspaceID,
-		WorkflowID:  workflowID,
-	})
+	if workflowID == "" {
+		workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID)
+		if err != nil {
+			handleNotFound(c, h.logger, err, "workflow not found")
+			return
+		}
+		if len(workflows) == 0 {
+			handleNotFound(c, h.logger,
+				fmt.Errorf("no workflows found for workspace: %s", workspaceID),
+				"workflow not found")
+			return
+		}
+		workflowID = workflows[0].ID
+	}
+
+	workflow, err := h.service.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	if workflow.WorkspaceID != workspaceID {
+		handleNotFound(c, h.logger,
+			fmt.Errorf("workflow does not belong to workspace: %s", workspaceID),
+			"workflow not found")
+		return
+	}
+
+	steps, err := h.getStepsForWorkflow(c.Request.Context(), workflow)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	tasks, err := h.service.ListTasks(c.Request.Context(), workflowID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
+		Workflow: dto.FromWorkflow(workflow),
+		Steps:   steps,
+		Tasks:   taskDTOs,
+	})
 }
 
 // WS handlers
@@ -187,12 +283,19 @@ func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		}
 	}
-	resp, err := h.controller.ListWorkflows(ctx, dto.ListWorkflowsRequest{WorkspaceID: req.WorkspaceID})
+	workflows, err := h.service.ListWorkflows(ctx, req.WorkspaceID)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	result := dto.ListWorkflowsResponse{
+		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
+		Total:     len(workflows),
+	}
+	for _, w := range workflows {
+		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 type wsCreateWorkflowRequest struct {
@@ -214,7 +317,7 @@ func (h *WorkflowHandlers) wsCreateWorkflow(ctx context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
 
-	resp, err := h.controller.CreateWorkflow(ctx, dto.CreateWorkflowRequest{
+	workflow, err := h.service.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
@@ -224,7 +327,7 @@ func (h *WorkflowHandlers) wsCreateWorkflow(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to create workflow", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkflow(workflow))
 }
 
 type wsGetWorkflowRequest struct {
@@ -240,11 +343,11 @@ func (h *WorkflowHandlers) wsGetWorkflow(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.GetWorkflow(ctx, dto.GetWorkflowRequest{ID: req.ID})
+	workflow, err := h.service.GetWorkflow(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workflow not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkflow(workflow))
 }
 
 type wsUpdateWorkflowRequest struct {
@@ -262,8 +365,7 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.controller.UpdateWorkflow(ctx, dto.UpdateWorkflowRequest{
-		ID:          req.ID,
+	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
 		Name:        req.Name,
 		Description: req.Description,
 	})
@@ -271,12 +373,42 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		h.logger.Error("failed to update workflow", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkflow(workflow))
 }
 
 func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workflow",
 		func(ctx context.Context, id string) (any, error) {
-			return h.controller.DeleteWorkflow(ctx, dto.DeleteWorkflowRequest{ID: id})
+			if err := h.service.DeleteWorkflow(ctx, id); err != nil {
+				return nil, err
+			}
+			return dto.SuccessResponse{Success: true}, nil
 		})
+}
+
+// getStepsForWorkflow returns workflow steps for a workflow as DTOs.
+func (h *WorkflowHandlers) getStepsForWorkflow(
+	ctx context.Context,
+	workflow *models.Workflow,
+) ([]dto.WorkflowStepDTO, error) {
+	if h.workflowStepLister == nil {
+		return nil, fmt.Errorf("workflow step lister not configured")
+	}
+	steps, err := h.workflowStepLister.ListStepsByWorkflow(ctx, workflow.ID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.WorkflowStepDTO, 0, len(steps))
+	for _, step := range steps {
+		result = append(result, dto.FromWorkflowStepWithTimestamps(step))
+	}
+	return result, nil
+}
+
+// convertTasksWithPrimarySessions converts task models to DTOs with primary session IDs.
+func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
+	ctx context.Context,
+	tasks []*models.Task,
+) ([]dto.TaskDTO, error) {
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
 }

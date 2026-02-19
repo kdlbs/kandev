@@ -106,7 +106,7 @@ export async function runStart({
     ports,
     logLevel: debug ? "debug" : verbose ? "info" : "warn",
     extra: {
-      KANDEV_DB_PATH: dbPath,
+      KANDEV_DATABASE_PATH: dbPath,
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
     },
   });

@@ -7,7 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/task/controller"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -15,7 +15,7 @@ import (
 )
 
 type TaskHandlers struct {
-	controller   *controller.TaskController
+	service      *service.Service
 	orchestrator OrchestratorStarter
 	repo         repository.Repository
 	planService  *service.PlanService
@@ -35,9 +35,9 @@ type OrchestratorStarter interface {
 	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }
 
-func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
+func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	return &TaskHandlers{
-		controller:   ctrl,
+		service:      svc,
 		orchestrator: orchestrator,
 		repo:         repo,
 		planService:  planService,
@@ -45,8 +45,8 @@ func NewTaskHandlers(ctrl *controller.TaskController, orchestrator OrchestratorS
 	}
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.TaskController, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) {
-	handlers := NewTaskHandlers(ctrl, orchestrator, repo, planService, log)
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) {
+	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -96,4 +96,19 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanGet, h.wsGetTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanUpdate, h.wsUpdateTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanDelete, h.wsDeleteTaskPlan)
+}
+
+// convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.
+func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
+	result := make([]service.TaskRepositoryInput, len(repos))
+	for i, r := range repos {
+		result[i] = service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		}
+	}
+	return result
 }
