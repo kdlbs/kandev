@@ -82,7 +82,7 @@ async function prepareReleaseBundle({
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
-    KANDEV_DB_PATH: dbPath,
+    KANDEV_DATABASE_PATH: dbPath,
     KANDEV_LOG_LEVEL: "warn",
   };
 
