@@ -8,7 +8,9 @@ import { requestFileContent, updateFileContent, deleteFile } from '@/lib/ws/work
 import { getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
 import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
 import { useToast } from '@/components/toast-provider';
+import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import type { FileContentResponse } from '@/lib/types/backend';
+import type { FileInfo } from '@/lib/state/store';
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
@@ -54,6 +56,74 @@ function updatePanelAfterSave(path: string, name: string) {
   if (panel) {
     panel.api.updateParameters({ isDirty: false });
     panel.setTitle(name);
+  }
+}
+
+function buildGitFileSignature(file: FileInfo | undefined): string {
+  if (!file) return '__clean__';
+  return [
+    file.status ?? '',
+    file.staged ? '1' : '0',
+    String(file.additions ?? 0),
+    String(file.deletions ?? 0),
+    file.old_path ?? '',
+    file.diff ?? '',
+  ].join('|');
+}
+
+type SyncOpenFileArgs = {
+  client: ReturnType<typeof getWebSocketClient>;
+  sessionId: string;
+  path: string;
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+};
+
+async function syncOpenFileFromWorkspace({ client, sessionId, path, updateFileState }: SyncOpenFileArgs): Promise<void> {
+  if (!client) return;
+  try {
+    const response = await requestFileContent(client, sessionId, path);
+    const latest = getOpenFiles().get(path);
+    if (!latest) return;
+    const remoteHash = await calculateHash(response.content);
+
+    if (latest.isDirty) {
+      if (response.content === latest.content) {
+        updateFileState(path, {
+          originalContent: response.content,
+          originalHash: remoteHash,
+          isDirty: false,
+          hasRemoteUpdate: false,
+          remoteContent: undefined,
+          remoteOriginalHash: undefined,
+        });
+        updatePanelAfterSave(path, latest.name);
+        return;
+      }
+      if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
+      updateFileState(path, {
+        hasRemoteUpdate: true,
+        remoteContent: response.content,
+        remoteOriginalHash: remoteHash,
+      });
+      return;
+    }
+
+    if (latest.content === response.content && latest.originalHash === remoteHash && !latest.hasRemoteUpdate) {
+      return;
+    }
+
+    updateFileState(path, {
+      content: response.content,
+      originalContent: response.content,
+      originalHash: remoteHash,
+      isDirty: false,
+      isBinary: response.is_binary,
+      hasRemoteUpdate: false,
+      remoteContent: undefined,
+      remoteOriginalHash: undefined,
+    });
+  } catch {
+    // Ignore sync failures; user can continue editing.
   }
 }
 
@@ -155,23 +225,67 @@ function useFileEditorEffects({
   }, [api, removeFileState]);
 }
 
-export function useFileEditors() {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { toast } = useToast();
-  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
+type OpenFileWorkspaceSyncParams = {
+  gitStatus: ReturnType<typeof useSessionGitStatus>;
+  openFiles: ReturnType<typeof useDockviewStore.getState>['openFiles'];
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  activeSessionIdRef: React.MutableRefObject<string | null>;
+  gitFileSignaturesRef: React.MutableRefObject<Map<string, string>>;
+};
 
-  const setFileState = useDockviewStore((s) => s.setFileState);
-  const updateFileState = useDockviewStore((s) => s.updateFileState);
-  const removeFileState = useDockviewStore((s) => s.removeFileState);
-  const clearFileStates = useDockviewStore((s) => s.clearFileStates);
-  const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
-  const api = useDockviewStore((s) => s.api);
+function useOpenFileWorkspaceSync({
+  gitStatus,
+  openFiles,
+  updateFileState,
+  activeSessionIdRef,
+  gitFileSignaturesRef,
+}: OpenFileWorkspaceSyncParams) {
+  useEffect(() => {
+    const sigMap = gitFileSignaturesRef.current;
+    for (const path of Array.from(sigMap.keys())) {
+      if (!openFiles.has(path)) sigMap.delete(path);
+    }
+  }, [openFiles, gitFileSignaturesRef]);
 
-  const activeSessionIdRef = useRef(activeSessionId);
-  activeSessionIdRef.current = activeSessionId;
+  useEffect(() => {
+    const client = getWebSocketClient();
+    const sessionId = activeSessionIdRef.current;
+    if (!client || !sessionId) return;
 
-  useFileEditorEffects({ activeSessionId, activeSessionIdRef, setFileState, addFileEditorPanel, clearFileStates, removeFileState, api });
+    const gitFiles = gitStatus?.files ?? {};
+    const sigMap = gitFileSignaturesRef.current;
+    for (const path of openFiles.keys()) {
+      const nextSignature = buildGitFileSignature(gitFiles[path] as FileInfo | undefined);
+      const prevSignature = sigMap.get(path);
+      if (prevSignature === undefined) {
+        sigMap.set(path, nextSignature);
+        continue;
+      }
+      if (prevSignature === nextSignature) continue;
 
+      sigMap.set(path, nextSignature);
+      void syncOpenFileFromWorkspace({ client, sessionId, path, updateFileState });
+    }
+  }, [gitStatus, openFiles, updateFileState, activeSessionIdRef, gitFileSignaturesRef]);
+}
+
+type FileEditorActionsParams = {
+  activeSessionIdRef: React.MutableRefObject<string | null>;
+  setFileState: (path: string, state: FileEditorState) => void;
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
+  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  toast: ReturnType<typeof useToast>['toast'];
+};
+
+function useFileEditorActions({
+  activeSessionIdRef,
+  setFileState,
+  updateFileState,
+  addFileEditorPanel,
+  setSavingFiles,
+  toast,
+}: FileEditorActionsParams) {
   const openFile = useCallback(async (filePath: string) => {
     const client = getWebSocketClient();
     const currentSessionId = activeSessionIdRef.current;
@@ -189,7 +303,7 @@ export function useFileEditors() {
     } catch (error) {
       toast({ title: 'Failed to open file', description: error instanceof Error ? error.message : 'Unknown error', variant: 'error' });
     }
-  }, [setFileState, addFileEditorPanel, toast]);
+  }, [activeSessionIdRef, addFileEditorPanel, setFileState, toast]);
 
   const handleFileChange = useCallback((path: string, newContent: string) => {
     const file = getOpenFiles().get(path);
@@ -208,7 +322,14 @@ export function useFileEditors() {
       const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
       const response = await updateFileContent(client, currentSessionId, path, diff, file.originalHash);
       if (response.success && response.new_hash) {
-        updateFileState(path, { originalContent: file.content, originalHash: response.new_hash, isDirty: false });
+        updateFileState(path, {
+          originalContent: file.content,
+          originalHash: response.new_hash,
+          isDirty: false,
+          hasRemoteUpdate: false,
+          remoteContent: undefined,
+          remoteOriginalHash: undefined,
+        });
         updatePanelAfterSave(path, file.name);
       } else {
         toast({ title: 'Save failed', description: response.error || 'Failed to save file', variant: 'error' });
@@ -218,7 +339,7 @@ export function useFileEditors() {
     } finally {
       setSavingFiles((prev) => { const next = new Set(prev); next.delete(path); return next; });
     }
-  }, [updateFileState, toast]);
+  }, [activeSessionIdRef, setSavingFiles, toast, updateFileState]);
 
   const deleteFileAction = useCallback(async (path: string) => {
     const client = getWebSocketClient();
@@ -235,7 +356,63 @@ export function useFileEditors() {
     } catch (error) {
       toast({ title: 'Delete failed', description: error instanceof Error ? error.message : 'An error occurred while deleting the file', variant: 'error' });
     }
-  }, [toast]);
+  }, [activeSessionIdRef, toast]);
 
-  return { savingFiles, openFile, saveFile, deleteFile: deleteFileAction, handleFileChange };
+  const applyRemoteUpdate = useCallback(async (path: string) => {
+    const file = getOpenFiles().get(path);
+    if (!file || !file.hasRemoteUpdate || file.remoteContent === undefined) return;
+    const remoteHash = file.remoteOriginalHash ?? await calculateHash(file.remoteContent);
+    updateFileState(path, {
+      content: file.remoteContent,
+      originalContent: file.remoteContent,
+      originalHash: remoteHash,
+      isDirty: false,
+      hasRemoteUpdate: false,
+      remoteContent: undefined,
+      remoteOriginalHash: undefined,
+    });
+    updatePanelAfterSave(path, file.name);
+  }, [updateFileState]);
+
+  return { openFile, handleFileChange, saveFile, deleteFileAction, applyRemoteUpdate };
+}
+
+export function useFileEditors() {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const { toast } = useToast();
+  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
+
+  const setFileState = useDockviewStore((s) => s.setFileState);
+  const updateFileState = useDockviewStore((s) => s.updateFileState);
+  const removeFileState = useDockviewStore((s) => s.removeFileState);
+  const clearFileStates = useDockviewStore((s) => s.clearFileStates);
+  const addFileEditorPanel = useDockviewStore((s) => s.addFileEditorPanel);
+  const openFiles = useDockviewStore((s) => s.openFiles);
+  const api = useDockviewStore((s) => s.api);
+  const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
+
+  const activeSessionIdRef = useRef(activeSessionId);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useFileEditorEffects({ activeSessionId, activeSessionIdRef, setFileState, addFileEditorPanel, clearFileStates, removeFileState, api });
+  useOpenFileWorkspaceSync({ gitStatus, openFiles, updateFileState, activeSessionIdRef, gitFileSignaturesRef });
+  const {
+    openFile,
+    handleFileChange,
+    saveFile,
+    deleteFileAction,
+    applyRemoteUpdate,
+  } = useFileEditorActions({
+    activeSessionIdRef,
+    setFileState,
+    updateFileState,
+    addFileEditorPanel,
+    setSavingFiles,
+    toast,
+  });
+
+  return { savingFiles, openFile, saveFile, deleteFile: deleteFileAction, handleFileChange, applyRemoteUpdate };
 }

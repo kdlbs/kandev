@@ -440,6 +440,7 @@ function FileTabContent({
       {category === 'text' && (
         <FileEditorContent
           path={tab.path}
+          content={tab.content}
           originalContent={tab.originalContent}
           isDirty={tab.isDirty}
           isSaving={isSaving}

@@ -22,6 +22,9 @@ export type FileEditorState = {
     originalHash: string;
     isDirty: boolean;
     isBinary?: boolean;
+    hasRemoteUpdate?: boolean;
+    remoteContent?: string;
+    remoteOriginalHash?: string;
 };
 
 /** Direction relative to a reference panel or group. */
@@ -60,6 +63,7 @@ type DockviewStore = {
     addChangesPanel: (groupId?: string) => void;
     addFilesPanel: (groupId?: string) => void;
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => void;
+    addFileDiffPanel: (path: string, content?: string, groupId?: string) => void;
     addCommitDetailPanel: (sha: string, groupId?: string) => void;
     addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
     addBrowserPanel: (url?: string, groupId?: string) => void;
@@ -273,6 +277,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
 }
 
 function buildPanelActions(set: StoreSet, get: StoreGet) {
+    const getFileName = (path: string) => path.split('/').pop() || path;
+
     return {
         addChatPanel: () => {
             const { api, centerGroupId } = get();
@@ -293,7 +299,25 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
             const { api, centerGroupId } = get();
             if (!api) return;
             if (path) set({ selectedDiff: { path, content } });
-            focusOrAddPanel(api, { id: 'diff-viewer', component: 'diff-viewer', title: 'Diff Viewer', position: { referenceGroup: groupId ?? centerGroupId } });
+            focusOrAddPanel(api, {
+                id: 'diff-viewer',
+                component: 'diff-viewer',
+                title: 'Diff Viewer',
+                params: { kind: 'all' },
+                position: { referenceGroup: groupId ?? centerGroupId },
+            });
+        },
+        addFileDiffPanel: (path: string, content?: string, groupId?: string) => {
+            const { api, centerGroupId } = get();
+            if (!api) return;
+            const id = `diff:file:${path}`;
+            focusOrAddPanel(api, {
+                id,
+                component: 'diff-viewer',
+                title: `Diff [${getFileName(path)}]`,
+                params: { kind: 'file', path, content },
+                position: { referenceGroup: groupId ?? centerGroupId },
+            });
         },
         addCommitDetailPanel: (sha: string, groupId?: string) => {
             const { api, centerGroupId } = get();

@@ -34,7 +34,8 @@ import { DiscardDialog, CommitDialog, PRDialog } from './changes-panel-dialogs';
 import { FileListSection, CommitsSection, ActionButtonsSection, ReviewProgressBar } from './changes-panel-timeline';
 
 type ChangesPanelProps = {
-  onOpenFile: (path: string) => void;
+  onOpenDiffFile: (path: string) => void;
+  onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
@@ -237,7 +238,7 @@ function useChangesPanelStoreData() {
   return { activeSessionId, taskTitle, baseBranch, displayBranch };
 }
 
-const ChangesPanel = memo(function ChangesPanel({ onOpenFile, onOpenCommitDetail, onOpenDiffAll, onOpenReview }: ChangesPanelProps) {
+const ChangesPanel = memo(function ChangesPanel({ onOpenDiffFile, onEditFile, onOpenCommitDetail, onOpenDiffAll, onOpenReview }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const { activeSessionId, taskTitle, baseBranch, displayBranch } = useChangesPanelStoreData();
 
@@ -279,8 +280,8 @@ const ChangesPanel = memo(function ChangesPanel({ onOpenFile, onOpenCommitDetail
           {!hasAnything && <div className="flex items-center justify-center h-full text-muted-foreground text-xs">Your changed files will appear here</div>}
           {hasAnything && (
             <div className="flex flex-col">
-              {hasUnstaged && <FileListSection variant="unstaged" files={unstagedFiles} pendingStageFiles={pendingStageFiles} isLast={lastTimelineSection === 'unstaged'} actionLabel="Stage all" onAction={handleStageAll} onOpenFile={onOpenFile} onStage={handleStage} onUnstage={handleUnstage} onDiscard={dialogs.handleDiscardClick} />}
-              {hasStaged && <FileListSection variant="staged" files={stagedFiles} pendingStageFiles={pendingStageFiles} isLast={lastTimelineSection === 'staged'} actionLabel="Commit" onAction={dialogs.handleOpenCommitDialog} onOpenFile={onOpenFile} onStage={handleStage} onUnstage={handleUnstage} onDiscard={dialogs.handleDiscardClick} />}
+              {hasUnstaged && <FileListSection variant="unstaged" files={unstagedFiles} pendingStageFiles={pendingStageFiles} isLast={lastTimelineSection === 'unstaged'} actionLabel="Stage all" onAction={handleStageAll} onOpenDiff={onOpenDiffFile} onEditFile={onEditFile} onStage={handleStage} onUnstage={handleUnstage} onDiscard={dialogs.handleDiscardClick} />}
+              {hasStaged && <FileListSection variant="staged" files={stagedFiles} pendingStageFiles={pendingStageFiles} isLast={lastTimelineSection === 'staged'} actionLabel="Commit" onAction={dialogs.handleOpenCommitDialog} onOpenDiff={onOpenDiffFile} onEditFile={onEditFile} onStage={handleStage} onUnstage={handleUnstage} onDiscard={dialogs.handleDiscardClick} />}
               {hasCommits && <CommitsSection commits={commits} isLast={!hasCommits} onOpenCommitDetail={onOpenCommitDetail} />}
               {hasCommits && <ActionButtonsSection onOpenPRDialog={dialogs.handleOpenPRDialog} onPush={handlePush} isLoading={gitOps.isLoading} aheadCount={aheadCount} />}
             </div>

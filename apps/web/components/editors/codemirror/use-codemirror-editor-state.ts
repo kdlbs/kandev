@@ -164,7 +164,7 @@ export const cmEditorTheme = EditorView.theme({
 type UseCodeMirrorEditorStateOpts = {
   path: string;
   originalContent: string;
-  initialContent: string;
+  content: string;
   isDirty: boolean;
   isSaving: boolean;
   sessionId?: string;
@@ -184,7 +184,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   const [currentSelection, setCurrentSelection] = useState<{ text: string; startLine: number; endLine: number } | null>(null);
   const [commentView, setCommentView] = useState<CommentViewState>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const contentRef = useRef(opts.initialContent);
+  const contentRef = useRef(opts.content);
   const { toast } = useToast();
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
@@ -276,6 +276,10 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
     setDiffStats(computeLineDiffStats(originalContent, contentRef.current));
   }, [isDirty, originalContent]);
   useEffect(() => { computeDiffStats(); }, [computeDiffStats]);
+
+  useEffect(() => {
+    contentRef.current = opts.content;
+  }, [opts.content]);
 
   // Cmd+I to open comment popover
   useEffect(() => {

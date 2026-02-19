@@ -7,14 +7,18 @@ import { CodeMirrorCodeEditor } from '@/components/editors/codemirror/codemirror
 
 export type FileEditorContentProps = {
   path: string;
+  content: string;
   originalContent: string;
   isDirty: boolean;
+  hasRemoteUpdate?: boolean;
+  vcsDiff?: string;
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
   enableComments?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
+  onReloadFromAgent?: () => void;
   onDelete?: () => void;
 };
 

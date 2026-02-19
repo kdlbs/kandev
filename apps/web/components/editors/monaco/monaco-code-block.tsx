@@ -65,13 +65,14 @@ export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
           glyphMargin: false,
           folding: false,
           renderLineHighlight: 'none',
-          scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
+          scrollbar: { vertical: 'hidden', horizontal: 'hidden', alwaysConsumeMouseWheel: false },
           overviewRulerLanes: 0,
           hideCursorInOverviewRuler: true,
           overviewRulerBorder: false,
           automaticLayout: true,
           domReadOnly: true,
           contextmenu: false,
+          mouseWheelZoom: false,
           padding: { top: 4, bottom: 4 },
         }}
         className="rounded-md overflow-hidden text-xs"

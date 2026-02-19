@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -594,5 +596,174 @@ func TestRepoLocks_ReleaseNonexistent(t *testing.T) {
 
 	if count != 0 {
 		t.Errorf("expected 0 locks in map, got %d", count)
+	}
+}
+
+func writeFakeGitScript(t *testing.T, scriptBody string) string {
+	t.Helper()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "git")
+	content := "#!/bin/sh\nset -eu\n\n" + scriptBody + "\n"
+	if err := os.WriteFile(scriptPath, []byte(content), 0755); err != nil {
+		t.Fatalf("failed to write fake git script: %v", err)
+	}
+	return scriptDir
+}
+
+func TestPullBaseBranch_UsesNonInteractiveGitEnv(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "git-env.log")
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    printf "%s|%s|%s|%s|%s" \
+      "${GIT_TERMINAL_PROMPT:-}" \
+      "${GCM_INTERACTIVE:-}" \
+      "${GIT_ASKPASS:-}" \
+      "${SSH_ASKPASS:-}" \
+      "${GIT_SSH_COMMAND:-}" > "${KD_GIT_ENV_LOG:?}"
+    exit 0
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--abbrev-ref" ]; then
+      echo "master"
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+
+	t.Setenv("KD_GIT_ENV_LOG", logPath)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	ref := mgr.pullBaseBranch(repoPath, "origin/master")
+	if ref != "origin/master" {
+		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
+	}
+
+	envBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed reading fake git env log: %v", err)
+	}
+
+	got := string(envBytes)
+	want := "0|Never|echo|/bin/false|ssh -oBatchMode=yes"
+	if got != want {
+		t.Fatalf("fake git env = %q, want %q", got, want)
+	}
+}
+
+func TestPullBaseBranch_FetchTimeoutFallsBackQuickly(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    sleep 2
+    exit 0
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--abbrev-ref" ]; then
+      echo "master"
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.fetchTimeout = 100 * time.Millisecond
+
+	repoPath := t.TempDir()
+	start := time.Now()
+	ref := mgr.pullBaseBranch(repoPath, "master")
+	elapsed := time.Since(start)
+
+	if ref != "master" {
+		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "master")
+	}
+	// Allow CI scheduling variance while still asserting we timed out
+	// well before the fake 2s fetch command completes.
+	if elapsed > 1500*time.Millisecond {
+		t.Fatalf("pullBaseBranch() took too long: %v", elapsed)
+	}
+}
+
+func TestPullBaseBranch_PullFailureFallsBackToRemoteRef(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    exit 0
+    ;;
+  pull)
+    echo "Authentication failed" 1>&2
+    exit 1
+    ;;
+  rev-parse)
+    if [ "${2:-}" = "--abbrev-ref" ]; then
+      echo "master"
+      exit 0
+    fi
+    if [ "${2:-}" = "--verify" ]; then
+      exit 0
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	mgr.pullTimeout = 300 * time.Millisecond
+
+	repoPath := t.TempDir()
+	ref := mgr.pullBaseBranch(repoPath, "master")
+	if ref != "origin/master" {
+		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
+	}
+}
+
+func TestClassifyGitFallbackReason_AuthPrompt(t *testing.T) {
+	reason := classifyGitFallbackReason(nil, "fatal: could not read Username for 'https://github.com'", nil)
+	if reason != "non_interactive_auth_failed" {
+		t.Fatalf("classifyGitFallbackReason() = %q, want %q", reason, "non_interactive_auth_failed")
+	}
+}
+
+func TestClassifyGitFallbackReason_Timeout(t *testing.T) {
+	reason := classifyGitFallbackReason(context.DeadlineExceeded, "", context.DeadlineExceeded)
+	if !strings.EqualFold(reason, "timeout") {
+		t.Fatalf("classifyGitFallbackReason() = %q, want %q", reason, "timeout")
 	}
 }

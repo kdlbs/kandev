@@ -59,6 +59,87 @@ export function computeDiffGutterDecorations(
   return decorations;
 }
 
+function computePatchGutterDecorations(diffText: string): monacoEditor.IModelDeltaDecoration[] {
+  const decorations: monacoEditor.IModelDeltaDecoration[] = [];
+  const lines = diffText.split('\n');
+  let currentLine = 1;
+  let removedCount = 0;
+  let addedCount = 0;
+
+  const flushRun = () => {
+    if (removedCount === 0 && addedCount === 0) return;
+    if (removedCount > 0 && addedCount > 0) {
+      for (let i = 0; i < addedCount; i++) {
+        decorations.push({
+          range: {
+            startLineNumber: currentLine + i,
+            startColumn: 1,
+            endLineNumber: currentLine + i,
+            endColumn: 1,
+          },
+          options: { isWholeLine: true, linesDecorationsClassName: 'monaco-diff-modified-gutter' },
+        });
+      }
+      currentLine += addedCount;
+    } else if (addedCount > 0) {
+      for (let i = 0; i < addedCount; i++) {
+        decorations.push({
+          range: {
+            startLineNumber: currentLine + i,
+            startColumn: 1,
+            endLineNumber: currentLine + i,
+            endColumn: 1,
+          },
+          options: { isWholeLine: true, linesDecorationsClassName: 'monaco-diff-added-gutter' },
+        });
+      }
+      currentLine += addedCount;
+    } else {
+      const indicatorLine = Math.max(1, currentLine - 1);
+      decorations.push({
+        range: {
+          startLineNumber: indicatorLine,
+          startColumn: 1,
+          endLineNumber: indicatorLine,
+          endColumn: 1,
+        },
+        options: { isWholeLine: true, linesDecorationsClassName: 'monaco-diff-deleted-gutter' },
+      });
+    }
+    removedCount = 0;
+    addedCount = 0;
+  };
+
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      flushRun();
+      const match = line.match(/^@@\s*-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/);
+      if (match) currentLine = Number.parseInt(match[1], 10);
+      continue;
+    }
+    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff --git') || line.startsWith('index ')) {
+      continue;
+    }
+    if (line.startsWith('-')) {
+      removedCount++;
+      continue;
+    }
+    if (line.startsWith('+')) {
+      addedCount++;
+      continue;
+    }
+    if (line.startsWith(' ')) {
+      flushRun();
+      currentLine++;
+      continue;
+    }
+    flushRun();
+  }
+
+  flushRun();
+  return decorations;
+}
+
 // ---------------------------------------------------------------------------
 // useMonacoEditorLsp — LSP integration and toasts
 // ---------------------------------------------------------------------------
@@ -130,27 +211,40 @@ type UseMonacoDiffDecorationsOpts = {
   originalContent: string;
   isDirty: boolean;
   showDiffIndicators: boolean;
+  vcsDiff?: string;
+  editorReady?: monacoEditor.IStandaloneCodeEditor | null;
   contentRef: RefObject<string>;
   editorRef: RefObject<monacoEditor.IStandaloneCodeEditor | null>;
   diffDecorationsRef: RefObject<monacoEditor.IEditorDecorationsCollection | null>;
 };
 
 export function useMonacoDiffDecorations(opts: UseMonacoDiffDecorationsOpts) {
-  const { originalContent, isDirty, showDiffIndicators, contentRef, editorRef, diffDecorationsRef } = opts;
+  const { originalContent, isDirty, showDiffIndicators, vcsDiff, editorReady, contentRef, editorRef, diffDecorationsRef } = opts;
 
   const updateDiffDecorations = useCallback(() => {
     if (!diffDecorationsRef.current || !editorRef.current) return;
-    if (!showDiffIndicators || !isDirty || !originalContent) {
+    if (!showDiffIndicators) {
       diffDecorationsRef.current.set([]);
       return;
     }
-    diffDecorationsRef.current.set(computeDiffGutterDecorations(originalContent, contentRef.current));
-  }, [originalContent, showDiffIndicators, isDirty, contentRef, editorRef, diffDecorationsRef]);
+
+    if (isDirty && originalContent) {
+      diffDecorationsRef.current.set(computeDiffGutterDecorations(originalContent, contentRef.current));
+      return;
+    }
+
+    if (vcsDiff) {
+      diffDecorationsRef.current.set(computePatchGutterDecorations(vcsDiff));
+      return;
+    }
+
+    diffDecorationsRef.current.set([]);
+  }, [originalContent, showDiffIndicators, isDirty, vcsDiff, contentRef, editorRef, diffDecorationsRef]);
 
   const diffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     updateDiffDecorations();
-    const editor = editorRef.current;
+    const editor = editorReady ?? editorRef.current;
     if (!editor) return;
     const model = editor.getModel();
     if (!model) return;
@@ -159,7 +253,7 @@ export function useMonacoDiffDecorations(opts: UseMonacoDiffDecorationsOpts) {
       diffTimerRef.current = setTimeout(updateDiffDecorations, 150);
     });
     return () => { if (diffTimerRef.current) clearTimeout(diffTimerRef.current); disposable.dispose(); };
-  }, [updateDiffDecorations, editorRef]);
+  }, [updateDiffDecorations, editorRef, editorReady]);
 
   // Diff stats
   const [diffStats, setDiffStats] = useState<{ additions: number; deletions: number } | null>(null);

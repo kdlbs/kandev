@@ -35,7 +35,7 @@ type ChangedFile = {
 type FileRowProps = {
   file: ChangedFile;
   isPending: boolean;
-  onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string) => void;
   onStage: (path: string) => void;
   onUnstage: (path: string) => void;
   onDiscard: (path: string) => void;
@@ -45,7 +45,7 @@ type FileRowProps = {
 export function FileRow({
   file,
   isPending,
-  onOpenFile,
+  onOpenDiff,
   onStage,
   onUnstage,
   onDiscard,
@@ -56,7 +56,7 @@ export function FileRow({
   return (
     <li
       className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenFile(file.path)}
+      onClick={() => onOpenDiff(file.path)}
     >
       <div className="flex items-center gap-2 min-w-0">
         <StageButton

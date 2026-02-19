@@ -114,7 +114,7 @@ export const DiffViewer = memo(function DiffViewer({
     return (
       <div className={cn(
         'rounded-md border border-border/50 bg-muted/20 p-4 text-muted-foreground',
-        compact ? 'text-xs' : 'text-sm',
+        'text-xs',
         className
       )}>
         No diff available
@@ -134,7 +134,7 @@ export const DiffViewer = memo(function DiffViewer({
         renderHoverUtility={renderHoverUtility}
         className={cn(
           'rounded-md border border-border/50',
-          compact && 'text-xs'
+          'text-xs'
         )}
       />
     </div>

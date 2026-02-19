@@ -146,7 +146,14 @@ function FileDiffSection({ file, isReviewed, isStale, sessionId, autoMarkOnScrol
       const hash = await calculateHash(currentContent);
       const lines = currentContent.split('\n');
       lines.splice(info.addStart - 1, info.addCount, ...info.oldLines);
-      await updateFileContent(client, sessionId, filePath, generateUnifiedDiff(currentContent, lines.join('\n'), filePath), hash);
+      const nextContent = lines.join('\n');
+      if (nextContent === currentContent) return;
+
+      const patch = generateUnifiedDiff(currentContent, nextContent, filePath);
+      // Guard against no-op diffs ("No valid patches in input") from createTwoFilesPatch.
+      if (!patch || !/^@@/m.test(patch)) return;
+
+      await updateFileContent(client, sessionId, filePath, patch, hash);
     } catch (err) {
       console.error('Failed to revert change block:', err);
     }

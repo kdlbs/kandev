@@ -37,8 +37,11 @@ import type { SelectedDiff } from './task-layout';
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from './task-archived-context';
 
 type TaskChangesPanelProps = {
+  mode?: 'all' | 'file';
+  filePath?: string;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
+  onBecameEmpty?: () => void;
   /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
 };
@@ -241,8 +244,11 @@ function ChangesTopBar({ autoMarkOnScroll, splitView, wordWrap, totalCommentCoun
 }
 
 const TaskChangesPanel = memo(function TaskChangesPanel({
+  mode = 'all',
+  filePath,
   selectedDiff,
   onClearSelected,
+  onBecameEmpty,
   onOpenFile: onOpenFileProp,
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
@@ -250,11 +256,37 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
   const { activeSessionId, allFiles, reviewedFiles, staleFiles, totalCommentCount, fileRefs, cumulativeLoading } = useChangesData(selectedDiff, onClearSelected);
+  const visibleFiles = useMemo(() => {
+    if (mode === 'file' && filePath) {
+      return allFiles.filter((file) => file.path === filePath);
+    }
+    return allFiles;
+  }, [allFiles, mode, filePath]);
+  const visibleFileRefs = useMemo(() => {
+    if (mode !== 'file' || !filePath) return fileRefs;
+    const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
+    const fileRef = fileRefs.get(filePath);
+    if (fileRef) refs.set(filePath, fileRef);
+    return refs;
+  }, [mode, filePath, fileRefs]);
   const { splitView, wordWrap, setWordWrap, autoMarkOnScroll, handleToggleSplitView, handleToggleReviewed, handleDiscard, handleToggleAutoMark, handleFixComments } = useChangesActions(activeSessionId, allFiles);
 
-  const reviewedCount = reviewedFiles.size;
-  const totalCount = allFiles.length;
+  const reviewedCount = useMemo(() => visibleFiles.reduce((count, file) => {
+    if (!staleFiles.has(file.path) && reviewedFiles.has(file.path)) return count + 1;
+    return count;
+  }, 0), [visibleFiles, reviewedFiles, staleFiles]);
+  const totalCount = visibleFiles.length;
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
+  const prevVisibleCountRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!onBecameEmpty) return;
+    const prevCount = prevVisibleCountRef.current;
+    if (prevCount !== null && prevCount > 0 && visibleFiles.length === 0) {
+      onBecameEmpty();
+    }
+    prevVisibleCountRef.current = visibleFiles.length;
+  }, [onBecameEmpty, visibleFiles.length]);
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -276,7 +308,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <ChangesPanelContent
           isLoading={cumulativeLoading}
-          allFiles={allFiles}
+          files={visibleFiles}
           activeSessionId={activeSessionId}
           reviewedFiles={reviewedFiles}
           staleFiles={staleFiles}
@@ -285,7 +317,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           onToggleReviewed={handleToggleReviewed}
           onDiscard={handleDiscard}
           onOpenFile={handleOpenFile}
-          fileRefs={fileRefs}
+          fileRefs={visibleFileRefs}
         />
       </PanelBody>
     </PanelRoot>
@@ -294,7 +326,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
 
 function ChangesPanelContent({
   isLoading,
-  allFiles,
+  files,
   activeSessionId,
   reviewedFiles,
   staleFiles,
@@ -306,7 +338,7 @@ function ChangesPanelContent({
   fileRefs,
 }: {
   isLoading: boolean;
-  allFiles: ReviewFile[];
+  files: ReviewFile[];
   activeSessionId: string | null | undefined;
   reviewedFiles: Set<string>;
   staleFiles: Set<string>;
@@ -317,14 +349,14 @@ function ChangesPanelContent({
   onOpenFile: (path: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {
-  if (isLoading && allFiles.length === 0) {
+  if (isLoading && files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
         Loading changes...
       </div>
     );
   }
-  if (allFiles.length === 0) {
+  if (files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
         No changes
@@ -334,7 +366,7 @@ function ChangesPanelContent({
   if (!activeSessionId) return null;
   return (
     <ReviewDiffList
-      files={allFiles}
+      files={files}
       reviewedFiles={reviewedFiles}
       staleFiles={staleFiles}
       sessionId={activeSessionId}
