@@ -91,6 +91,10 @@ func (m *MockRepository) ListAgentProfiles(ctx context.Context, agentID string) 
 	return []*models.AgentProfile{}, nil
 }
 
+func (m *MockRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {
+	return []*models.Agent{}, nil
+}
+
 func (m *MockRepository) Close() error {
 	return nil
 }

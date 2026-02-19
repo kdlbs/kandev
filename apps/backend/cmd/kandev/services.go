@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -18,11 +20,10 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, eventBus bus.EventBus) (*Services, *agentsettingscontroller.Controller, error) {
-	agentRegistry, _, err := registry.Provide(log)
-	if err != nil {
-		return nil, nil, err
-	}
+func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, eventBus bus.EventBus, agentRegistry *registry.Registry) (*Services, *agentsettingscontroller.Controller, error) {
+	// Load custom TUI agents from DB into registry before discovery
+	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
+
 	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
 	if err != nil {
 		return nil, nil, err
@@ -64,6 +65,28 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
+}
+
+// loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.
+// Non-fatal: logs warnings but continues if any individual agent fails.
+func loadCustomTUIAgents(ctx context.Context, repos *Repositories, agentRegistry *registry.Registry, log *logger.Logger) {
+	tuiAgents, err := repos.AgentSettings.ListTUIAgents(ctx)
+	if err != nil {
+		log.Warn("failed to load custom TUI agents from database", zap.Error(err))
+		return
+	}
+	for _, agent := range tuiAgents {
+		if agent.TUIConfig == nil {
+			continue
+		}
+		cfg := agent.TUIConfig
+		if regErr := agentRegistry.RegisterCustomTUIAgent(
+			agent.Name, cfg.DisplayName, cfg.Command, cfg.Description, cfg.Model, cfg.CommandArgs,
+		); regErr != nil {
+			log.Warn("failed to register custom TUI agent",
+				zap.String("name", agent.Name), zap.Error(regErr))
+		}
+	}
 }
 
 // workflowStepGetterAdapter adapts workflow service to task service's WorkflowStepGetter interface.

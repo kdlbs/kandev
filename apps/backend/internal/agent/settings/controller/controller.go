@@ -30,11 +30,14 @@ func buildCommandString(cmd []string) string {
 
 var (
 	ErrAgentNotFound        = errors.New("agent not found")
+	ErrAgentAlreadyExists   = errors.New("agent already exists")
 	ErrAgentProfileNotFound = errors.New("agent profile not found")
 	ErrAgentProfileInUse    = errors.New("agent profile is used by an active agent session")
 	ErrAgentMcpUnsupported  = errors.New("mcp not supported by agent")
 	ErrModelRequired        = errors.New("model is required for agent profiles")
 	ErrLogoNotAvailable     = errors.New("logo not available for agent")
+	ErrInvalidSlug          = errors.New("display name must produce a valid slug")
+	ErrCommandRequired      = errors.New("command is required")
 )
 
 type Controller struct {

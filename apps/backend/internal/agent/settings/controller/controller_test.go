@@ -240,16 +240,12 @@ func TestController_PreviewAgentCommand_PassthroughCommand(t *testing.T) {
 		t.Errorf("PreviewAgentCommand() missing permission flag, got %v", result.Command)
 	}
 
-	// Verify prompt placeholder is present
-	hasPrompt := false
+	// Verify prompt placeholder is NOT present in preview (prompt is injected at runtime, not in preview)
 	for _, part := range result.Command {
 		if part == "--prompt" || part == "{prompt}" {
-			hasPrompt = true
+			t.Errorf("PreviewAgentCommand() should not include prompt placeholder in passthrough preview, got %v", result.Command)
 			break
 		}
-	}
-	if !hasPrompt {
-		t.Errorf("PreviewAgentCommand() missing prompt placeholder, got %v", result.Command)
 	}
 }
 

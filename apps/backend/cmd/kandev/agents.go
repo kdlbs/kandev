@@ -26,7 +26,8 @@ func provideLifecycleManager(
 	eventBus bus.EventBus,
 	dockerClient *docker.Client,
 	agentSettingsRepo settingsstore.Repository,
-) (*lifecycle.Manager, *registry.Registry, error) {
+	agentRegistry *registry.Registry,
+) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
 	// Create runtime registry to manage multiple runtimes
@@ -70,11 +71,6 @@ func provideLifecycleManager(
 	runtimeRegistry.Register(remoteDockerRuntime)
 	log.Info("Remote Docker runtime registered")
 
-	agentRegistry, _, err := registry.Provide(log)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	credsMgr := credentials.NewManager(log)
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
@@ -101,11 +97,11 @@ func provideLifecycleManager(
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	log.Info("Agent Manager initialized",
 		zap.Int("runtimes", len(runtimeRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
-	return lifecycleMgr, agentRegistry, nil
+	return lifecycleMgr, nil
 }

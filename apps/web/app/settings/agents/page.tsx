@@ -2,15 +2,16 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { IconAlertTriangle, IconSettings } from '@tabler/icons-react';
+import { IconAlertTriangle, IconPlus, IconSettings } from '@tabler/icons-react';
 import { Badge } from '@kandev/ui/badge';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
 import { useAppStore } from '@/components/state-provider';
-import { listAgentDiscovery } from '@/lib/api';
+import { createCustomTUIAgent, listAgentDiscovery, listAgents, listAvailableAgents } from '@/lib/api';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
 import { AgentLogo } from '@/components/agent-logo';
+import { AddTUIAgentDialog } from '@/components/settings/add-tui-agent-dialog';
 import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from '@/lib/types/http';
 
 type AgentCardProps = {
@@ -72,23 +73,24 @@ function ProfileListItem({ agent, profile }: ProfileListItemProps) {
   );
 }
 
-export default function AgentsSettingsPage() {
+function useAgentPageState() {
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
   const savedAgents = useAppStore((state) => state.settingsAgents.items);
   const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
+  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
   const availableAgents = useAvailableAgents().items;
   const [rescanning, setRescanning] = useState(false);
+  const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
 
   const installedAgents = useMemo(
     () => discoveryAgents.filter((agent: AgentDiscovery) => agent.available),
     [discoveryAgents]
   );
-
   const savedAgentsByName = useMemo(
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents]
   );
-
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? name;
 
@@ -102,6 +104,32 @@ export default function AgentsSettingsPage() {
       setRescanning(false);
     }
   };
+
+  const handleCreateCustomTUI = async (data: { display_name: string; model?: string; command: string }) => {
+    await createCustomTUIAgent(data);
+    const [discoveryResp, agentsResp, availableResp] = await Promise.all([
+      listAgentDiscovery({ cache: 'no-store' }),
+      listAgents({ cache: 'no-store' }),
+      listAvailableAgents({ cache: 'no-store' }),
+    ]);
+    setAgentDiscovery(discoveryResp.agents);
+    setSettingsAgents(agentsResp.agents);
+    setAvailableAgents(availableResp.agents);
+  };
+
+  return {
+    savedAgents, installedAgents, savedAgentsByName,
+    rescanning, tuiDialogOpen, setTuiDialogOpen,
+    resolveDisplayName, handleRescan, handleCreateCustomTUI,
+  };
+}
+
+export default function AgentsSettingsPage() {
+  const {
+    savedAgents, installedAgents, savedAgentsByName,
+    rescanning, tuiDialogOpen, setTuiDialogOpen,
+    resolveDisplayName, handleRescan, handleCreateCustomTUI,
+  } = useAgentPageState();
 
   return (
     <div className="space-y-8">
@@ -122,9 +150,15 @@ export default function AgentsSettingsPage() {
               Agents detected on this machine are ready to configure.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={handleRescan} disabled={rescanning}>
-            {rescanning ? 'Rescanning...' : 'Rescan'}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setTuiDialogOpen(true)} className="cursor-pointer">
+              <IconPlus className="h-4 w-4 mr-2" />
+              Add TUI Agent
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleRescan} disabled={rescanning} className="cursor-pointer">
+              {rescanning ? 'Rescanning...' : 'Rescan'}
+            </Button>
+          </div>
         </div>
 
         {installedAgents.length === 0 && (
@@ -167,6 +201,8 @@ export default function AgentsSettingsPage() {
           </div>
         </div>
       )}
+
+      <AddTUIAgentDialog open={tuiDialogOpen} onOpenChange={setTuiDialogOpen} onSubmit={handleCreateCustomTUI} />
     </div>
   );
 }

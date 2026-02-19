@@ -88,6 +88,9 @@ func (r *sqliteRepository) initSchema() error {
 		return err
 	}
 
+	// Migration: add tui_config column (idempotent — ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
+
 	return nil
 }
 
@@ -105,16 +108,25 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	now := time.Now().UTC()
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
+	var tuiConfigJSON *string
+	if agent.TUIConfig != nil {
+		data, err := json.Marshal(agent.TUIConfig)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tui_config: %w", err)
+		}
+		s := string(data)
+		tuiConfigJSON = &s
+	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.CreatedAt, agent.UpdatedAt)
+		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.CreatedAt, agent.UpdatedAt)
 	return err
 }
 
 func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Agent, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
+		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at
 		FROM agents WHERE id = ?
 	`), id)
 	return scanAgent(row)
@@ -122,7 +134,7 @@ func (r *sqliteRepository) GetAgent(ctx context.Context, id string) (*models.Age
 
 func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*models.Agent, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
+		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at
 		FROM agents WHERE name = ?
 	`), name)
 	return scanAgent(row)
@@ -157,26 +169,7 @@ func (r *sqliteRepository) DeleteAgent(ctx context.Context, id string) error {
 }
 
 func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.Agent, error) {
-	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, workspace_id, supports_mcp, mcp_config_path, created_at, updated_at
-		FROM agents ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	var result []*models.Agent
-	for rows.Next() {
-		agent, err := scanAgent(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, agent)
-	}
-	return result, rows.Err()
+	return r.listAgentsWhere(ctx, "1=1")
 }
 
 func (r *sqliteRepository) GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error) {
@@ -319,18 +312,47 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 	return result, rows.Err()
 }
 
+func (r *sqliteRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {
+	return r.listAgentsWhere(ctx, "tui_config IS NOT NULL")
+}
+
+func (r *sqliteRepository) listAgentsWhere(ctx context.Context, where string) ([]*models.Agent, error) {
+	rows, err := r.ro.QueryContext(ctx,
+		`SELECT id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at
+		FROM agents WHERE `+where+` ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var result []*models.Agent
+	for rows.Next() {
+		agent, scanErr := scanAgent(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, agent)
+	}
+	return result, rows.Err()
+}
+
 func scanAgent(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*models.Agent, error) {
 	agent := &models.Agent{}
 	var supportsMCP int
 	var workspaceID sql.NullString
+	var tuiConfigRaw sql.NullString
 	if err := scanner.Scan(
 		&agent.ID,
 		&agent.Name,
 		&workspaceID,
 		&supportsMCP,
 		&agent.MCPConfigPath,
+		&tuiConfigRaw,
 		&agent.CreatedAt,
 		&agent.UpdatedAt,
 	); err != nil {
@@ -340,11 +362,18 @@ func scanAgent(scanner interface {
 		agent.WorkspaceID = &workspaceID.String
 	}
 	agent.SupportsMCP = supportsMCP == 1
+	if tuiConfigRaw.Valid {
+		var cfg models.TUIConfigJSON
+		if err := json.Unmarshal([]byte(tuiConfigRaw.String), &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse tui_config: %w", err)
+		}
+		agent.TUIConfig = &cfg
+	}
 	return agent, nil
 }
 
 func scanAgentProfile(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*models.AgentProfile, error) {
 	profile := &models.AgentProfile{}
 	var autoApprove int

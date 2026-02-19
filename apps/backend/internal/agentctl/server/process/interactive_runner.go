@@ -73,8 +73,10 @@ type AgentStateCallback func(sessionID string, state AgentState)
 // sessionWebSocket tracks a WebSocket connection at the session level.
 // This allows the WebSocket to survive process restarts.
 type sessionWebSocket struct {
-	writer DirectOutputWriter
-	mu     sync.RWMutex
+	writer   DirectOutputWriter
+	lastCols uint16
+	lastRows uint16
+	mu       sync.RWMutex
 }
 
 // userShellEntry tracks a user shell with its metadata.

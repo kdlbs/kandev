@@ -138,6 +138,7 @@ function ProfileSettingsCard({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
+          lockPassthrough={Boolean(agent.tui_config)}
         />
       </CardContent>
     </Card>

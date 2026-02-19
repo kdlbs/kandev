@@ -25,6 +25,7 @@ export type ProfileFormFieldsProps = {
   canRemove?: boolean;
   variant?: 'default' | 'compact';
   hideNameField?: boolean;
+  lockPassthrough?: boolean;
 };
 
 type PermissionToggleProps = {
@@ -33,6 +34,7 @@ type PermissionToggleProps = {
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
   variant: 'default' | 'compact';
+  lockPassthrough?: boolean;
 };
 
 function PermissionToggles({
@@ -41,6 +43,7 @@ function PermissionToggles({
   permissionSettings,
   passthroughConfig,
   variant,
+  lockPassthrough,
 }: PermissionToggleProps) {
   const isCompact = variant === 'compact';
   const switchSize = isCompact ? ('sm' as const) : ('default' as const);
@@ -79,6 +82,7 @@ function PermissionToggles({
               size={switchSize}
               checked={profile.cli_passthrough}
               onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
+              disabled={lockPassthrough}
             />
           </div>
         )}
@@ -117,6 +121,7 @@ function PermissionToggles({
           <Switch
             checked={profile.cli_passthrough}
             onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
+            disabled={lockPassthrough}
           />
         </div>
       )}
@@ -135,6 +140,7 @@ export function ProfileFormFields({
   canRemove = false,
   variant = 'default',
   hideNameField = false,
+  lockPassthrough = false,
 }: ProfileFormFieldsProps) {
   const isCompact = variant === 'compact';
 
@@ -181,6 +187,7 @@ export function ProfileFormFields({
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
         variant={variant}
+        lockPassthrough={lockPassthrough}
       />
     </div>
   );

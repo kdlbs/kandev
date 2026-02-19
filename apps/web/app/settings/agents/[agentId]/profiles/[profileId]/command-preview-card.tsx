@@ -41,9 +41,10 @@ function CommandPreviewEmpty() {
 
 type CommandPreviewContentProps = {
   preview: CommandPreviewResponse;
+  cliPassthrough: boolean;
 };
 
-function CommandPreviewContent({ preview }: CommandPreviewContentProps) {
+function CommandPreviewContent({ preview, cliPassthrough }: CommandPreviewContentProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -86,9 +87,11 @@ function CommandPreviewContent({ preview }: CommandPreviewContentProps) {
         </Button>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        <code className="rounded bg-muted px-1 py-0.5">{'{prompt}'}</code> will be replaced with your task description or follow-up message.
-      </p>
+      {!cliPassthrough && (
+        <p className="text-xs text-muted-foreground">
+          <code className="rounded bg-muted px-1 py-0.5">{'{prompt}'}</code> will be replaced with your task description or follow-up message.
+        </p>
+      )}
     </>
   );
 }
@@ -148,7 +151,7 @@ export function CommandPreviewCard({
 
         {loading && <CommandPreviewLoading />}
         {error && <CommandPreviewError error={error} />}
-        {!loading && !error && preview && <CommandPreviewContent preview={preview} />}
+        {!loading && !error && preview && <CommandPreviewContent preview={preview} cliPassthrough={cliPassthrough} />}
         {!loading && !error && !preview && <CommandPreviewEmpty />}
       </CardContent>
     </Card>

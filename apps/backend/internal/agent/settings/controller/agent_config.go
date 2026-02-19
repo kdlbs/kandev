@@ -191,7 +191,6 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 	if ptAgent, ok := agentConfig.(agents.PassthroughAgent); ok && req.CLIPassthrough {
 		cmd = ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 			Model:            req.Model,
-			Prompt:           "{prompt}",
 			PermissionValues: req.PermissionSettings,
 		})
 	} else {
