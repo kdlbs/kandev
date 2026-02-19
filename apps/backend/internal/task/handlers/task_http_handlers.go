@@ -71,53 +71,49 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	})
 }
 
-// toTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
 // session counts, and review status using bulk queries.
-func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
+func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
 	}
-
 	taskIDs := make([]string, len(tasks))
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-
-	primarySessionMap, err := h.service.GetPrimarySessionIDsForTasks(ctx, taskIDs)
+	primarySessionMap, err := svc.GetPrimarySessionIDsForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
-
-	sessionCountMap, err := h.service.GetSessionCountsForTasks(ctx, taskIDs)
+	sessionCountMap, err := svc.GetSessionCountsForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
-
-	primarySessionInfoMap, err := h.service.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
-
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		var primarySessionID *string
 		if sid, ok := primarySessionMap[task.ID]; ok {
 			primarySessionID = &sid
 		}
-
 		var sessionCount *int
 		if count, ok := sessionCountMap[task.ID]; ok {
 			sessionCount = &count
 		}
-
 		var reviewStatus *string
 		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
 			reviewStatus = sessionInfo.ReviewStatus
 		}
-
 		result = append(result, dto.FromTaskWithSessionInfo(task, primarySessionID, sessionCount, reviewStatus))
 	}
 	return result, nil
+}
+
+func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {

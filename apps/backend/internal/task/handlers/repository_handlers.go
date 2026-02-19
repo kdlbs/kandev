@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -314,20 +315,7 @@ func (h *RepositoryHandlers) httpDeleteRepository(c *gin.Context) {
 
 // WS handlers
 
-func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-	}
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	repositories, err := h.service.ListRepositories(ctx, req.WorkspaceID)
-	if err != nil {
-		h.logger.Error("failed to list repositories", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repositories", nil)
-	}
-
+func reposToListResponse(repositories []*models.Repository) dto.ListRepositoriesResponse {
 	resp := dto.ListRepositoriesResponse{
 		Repositories: make([]dto.RepositoryDTO, 0, len(repositories)),
 		Total:        len(repositories),
@@ -335,7 +323,22 @@ func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Mes
 	for _, repository := range repositories {
 		resp.Repositories = append(resp.Repositories, dto.FromRepository(repository))
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return resp
+}
+
+func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	repositories, err := h.service.ListRepositories(ctx, req.WorkspaceID)
+	if err != nil {
+		h.logger.Error("failed to list repositories", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repositories", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, reposToListResponse(repositories))
 }
 
 type wsCreateRepositoryRequest struct {

@@ -265,19 +265,5 @@ func (h *EnvironmentHandlers) wsUpdateEnvironment(ctx context.Context, msg *ws.M
 }
 
 func (h *EnvironmentHandlers) wsDeleteEnvironment(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsIDOnlyRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
-	}
-	if err := h.service.DeleteEnvironment(ctx, req.ID); err != nil {
-		h.logger.Error("failed to delete environment", zap.Error(err))
-		if errors.Is(err, service.ErrActiveTaskSessions) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "environment is used by an active agent session", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete environment", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+	return wsDeleteWithActiveSessionCheck(ctx, msg, h.logger, "environment", h.service.DeleteEnvironment)
 }

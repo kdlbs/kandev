@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -104,20 +105,7 @@ func (h *RepositoryHandlers) httpDeleteRepositoryScript(c *gin.Context) {
 
 // WS handlers
 
-func (h *RepositoryHandlers) wsListRepositoryScripts(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		RepositoryID string `json:"repository_id"`
-	}
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	scripts, err := h.service.ListRepositoryScripts(ctx, req.RepositoryID)
-	if err != nil {
-		h.logger.Error("failed to list repository scripts", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repository scripts", nil)
-	}
-
+func scriptsToListResponse(scripts []*models.RepositoryScript) dto.ListRepositoryScriptsResponse {
 	resp := dto.ListRepositoryScriptsResponse{
 		Scripts: make([]dto.RepositoryScriptDTO, 0, len(scripts)),
 		Total:   len(scripts),
@@ -125,7 +113,22 @@ func (h *RepositoryHandlers) wsListRepositoryScripts(ctx context.Context, msg *w
 	for _, script := range scripts {
 		resp.Scripts = append(resp.Scripts, dto.FromRepositoryScript(script))
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return resp
+}
+
+func (h *RepositoryHandlers) wsListRepositoryScripts(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		RepositoryID string `json:"repository_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	scripts, err := h.service.ListRepositoryScripts(ctx, req.RepositoryID)
+	if err != nil {
+		h.logger.Error("failed to list repository scripts", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list repository scripts", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, scriptsToListResponse(scripts))
 }
 
 type wsCreateRepositoryScriptRequest struct {

@@ -281,9 +281,12 @@ func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message)
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workflows", nil)
 	}
-	result := make([]dto.WorkflowDTO, 0, len(workflows))
+	result := dto.ListWorkflowsResponse{
+		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
+		Total:     len(workflows),
+	}
 	for _, w := range workflows {
-		result = append(result, dto.FromWorkflow(w))
+		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
@@ -400,43 +403,5 @@ func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
 	ctx context.Context,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
-	if len(tasks) == 0 {
-		return []dto.TaskDTO{}, nil
-	}
-
-	taskIDs := make([]string, len(tasks))
-	for i, task := range tasks {
-		taskIDs[i] = task.ID
-	}
-
-	primarySessionMap, err := h.service.GetPrimarySessionIDsForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	sessionCountMap, err := h.service.GetSessionCountsForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	primarySessionInfoMap, err := h.service.GetPrimarySessionInfoForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]dto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		var primarySessionID *string
-		if sid, ok := primarySessionMap[task.ID]; ok {
-			primarySessionID = &sid
-		}
-		var sessionCount *int
-		if count, ok := sessionCountMap[task.ID]; ok {
-			sessionCount = &count
-		}
-		var reviewStatus *string
-		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
-			reviewStatus = sessionInfo.ReviewStatus
-		}
-		result = append(result, dto.FromTaskWithSessionInfo(task, primarySessionID, sessionCount, reviewStatus))
-	}
-	return result, nil
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
 }

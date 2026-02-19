@@ -64,20 +64,26 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 }
 
-func (h *MessageHandlers) httpListMessages(c *gin.Context) {
-	sessionID := c.Param("id")
-	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "task session id is required"})
-		return
-	}
+type listMessagesParams struct {
+	before    string
+	after     string
+	sort      string
+	limit     int
+	paginated bool
+}
+
+func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesParams, bool) {
 	before := c.Query("before")
 	after := c.Query("after")
 	sort := strings.ToLower(strings.TrimSpace(c.Query("sort")))
 	limitProvided := strings.TrimSpace(c.Query("limit")) != ""
-	paginated := limitProvided || before != "" || after != "" || sort != ""
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
-		return
+		return listMessagesParams{}, false
+	}
+	if sort != "" && sort != "asc" && sort != "desc" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+		return listMessagesParams{}, false
 	}
 	limit := 0
 	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
@@ -85,57 +91,78 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 			limit = parsed
 		}
 	}
-	if sort != "" && sort != "asc" && sort != "desc" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+	return listMessagesParams{
+		before:    before,
+		after:     after,
+		sort:      sort,
+		limit:     limit,
+		paginated: limitProvided || before != "" || after != "" || sort != "",
+	}, true
+}
+
+func (h *MessageHandlers) fetchMessages(
+	ctx context.Context,
+	sessionID string,
+	params listMessagesParams,
+) (dto.ListMessagesResponse, error) {
+	if params.paginated {
+		return h.fetchMessagesPaginated(ctx, sessionID, params)
+	}
+	messages, err := h.service.ListMessages(ctx, sessionID)
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
+	return dto.ListMessagesResponse{Messages: result, Total: len(result)}, nil
+}
+
+func (h *MessageHandlers) fetchMessagesPaginated(
+	ctx context.Context,
+	sessionID string,
+	params listMessagesParams,
+) (dto.ListMessagesResponse, error) {
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+		TaskSessionID: sessionID,
+		Limit:         params.limit,
+		Before:        params.before,
+		After:         params.after,
+		Sort:          params.sort,
+	})
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
+	cursor := ""
+	if len(result) > 0 {
+		cursor = result[len(result)-1].ID
+	}
+	return dto.ListMessagesResponse{
+		Messages: result,
+		Total:    len(result),
+		HasMore:  hasMore,
+		Cursor:   cursor,
+	}, nil
+}
+
+func messagesToAPI(messages []*models.Message) []*v1.Message {
+	result := make([]*v1.Message, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, message.ToAPI())
+	}
+	return result
+}
+
+func (h *MessageHandlers) httpListMessages(c *gin.Context) {
+	sessionID := c.Param("id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task session id is required"})
 		return
 	}
-
-	var (
-		resp dto.ListMessagesResponse
-		err  error
-	)
-	if paginated {
-		var messages []*models.Message
-		var hasMore bool
-		messages, hasMore, err = h.service.ListMessagesPaginated(c.Request.Context(), service.ListMessagesRequest{
-			TaskSessionID: sessionID,
-			Limit:         limit,
-			Before:        before,
-			After:         after,
-			Sort:          sort,
-		})
-		if err == nil {
-			result := make([]*v1.Message, 0, len(messages))
-			for _, message := range messages {
-				result = append(result, message.ToAPI())
-			}
-			cursor := ""
-			if len(result) > 0 {
-				cursor = result[len(result)-1].ID
-			}
-			resp = dto.ListMessagesResponse{
-				Messages: result,
-				Total:    len(result),
-				HasMore:  hasMore,
-				Cursor:   cursor,
-			}
-		}
-	} else {
-		var messages []*models.Message
-		messages, err = h.service.ListMessages(c.Request.Context(), sessionID)
-		if err == nil {
-			result := make([]*v1.Message, 0, len(messages))
-			for _, message := range messages {
-				result = append(result, message.ToAPI())
-			}
-			resp = dto.ListMessagesResponse{
-				Messages: result,
-				Total:    len(result),
-				HasMore:  false,
-				Cursor:   "",
-			}
-		}
+	params, ok := h.parseListMessageParams(c)
+	if !ok {
+		return
 	}
+	resp, err := h.fetchMessages(c.Request.Context(), sessionID, params)
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list messages"})
