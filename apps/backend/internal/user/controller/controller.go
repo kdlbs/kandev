@@ -57,6 +57,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LspAutoStartLanguages:   req.LspAutoStartLanguages,
 		LspAutoInstallLanguages: req.LspAutoInstallLanguages,
 		LspServerConfigs:        req.LspServerConfigs,
+		SavedLayouts:            req.SavedLayouts,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

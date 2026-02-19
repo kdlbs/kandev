@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from 'dockview-react';
 import { getSessionLayout, setSessionLayout } from '@/lib/local-storage';
+import { applyLayoutFixups, focusOrAddPanel } from './dockview-layout-builders';
+import {
+    SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP,
+    getPresetLayout, applyLayout, fromDockviewApi, filterEphemeral,
+    defaultLayout,
+} from './layout-manager';
+import type { BuiltInPreset, LayoutState, LayoutGroupIds } from './layout-manager';
+
+// Re-export types and constants used by other modules
+export type { BuiltInPreset } from './layout-manager';
+export { LAYOUT_SIDEBAR_RATIO, LAYOUT_RIGHT_RATIO, LAYOUT_SIDEBAR_MAX_PX, LAYOUT_RIGHT_MAX_PX } from './layout-manager';
+export { applyLayoutFixups } from './dockview-layout-builders';
 
 export type FileEditorState = {
     path: string;
@@ -20,29 +32,30 @@ export type DeferredPanelAction = {
     id: string;
     component: string;
     title: string;
-    /** Where to place the panel. 'tab' adds as a tab in the reference group. */
     placement: 'tab' | PanelDirection;
-    /** Panel ID or group alias to position relative to. Defaults to 'chat'. */
     referencePanel?: string;
     params?: Record<string, unknown>;
+};
+
+/** Saved layout configuration persisted to user settings. */
+export type SavedLayoutConfig = {
+    id: string;
+    name: string;
+    isDefault: boolean;
+    layout: Record<string, unknown>;
+    createdAt: string;
 };
 
 type DockviewStore = {
     api: DockviewApi | null;
     setApi: (api: DockviewApi | null) => void;
-
-    // File editor tracking
     openFiles: Map<string, FileEditorState>;
     setFileState: (path: string, state: FileEditorState) => void;
     updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
     removeFileState: (path: string) => void;
     clearFileStates: () => void;
-
-    // Layout methods
     buildDefaultLayout: (api: DockviewApi) => void;
     resetLayout: () => void;
-
-    // Add-only panel actions (single-instance panels use focusOrAddPanel)
     addChatPanel: () => void;
     addChangesPanel: (groupId?: string) => void;
     addFilesPanel: (groupId?: string) => void;
@@ -52,239 +65,210 @@ type DockviewStore = {
     addBrowserPanel: (url?: string, groupId?: string) => void;
     addPlanPanel: (groupId?: string) => void;
     addTerminalPanel: (terminalId?: string, groupId?: string) => void;
-
-    // Cross-panel shared state
     selectedDiff: { path: string; content?: string } | null;
     setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
-
-    // Active group tracking
     activeGroupId: string | null;
-
-    // Group IDs for header action routing
     centerGroupId: string;
     rightTopGroupId: string;
     rightBottomGroupId: string;
     sidebarGroupId: string;
-
-    // Per-session layout switching
+    sidebarVisible: boolean;
+    rightPanelsVisible: boolean;
+    toggleSidebar: () => void;
+    toggleRightPanels: () => void;
+    setSidebarVisible: (visible: boolean) => void;
+    setRightPanelsVisible: (visible: boolean) => void;
+    applyBuiltInPreset: (preset: BuiltInPreset) => void;
+    applyCustomLayout: (layout: SavedLayoutConfig) => void;
+    captureCurrentLayout: () => Record<string, unknown>;
     isRestoringLayout: boolean;
     currentLayoutSessionId: string | null;
     switchSessionLayout: (oldSessionId: string | null, newSessionId: string) => void;
-
-    // Deferred panel actions — queued before navigation, applied after next layout build / restore
     deferredPanelActions: DeferredPanelAction[];
     queuePanelAction: (action: DeferredPanelAction) => void;
+    pinnedWidths: Map<string, number>;
+    setPinnedWidth: (columnId: string, width: number) => void;
+    userDefaultLayout: LayoutState | null;
+    setUserDefaultLayout: (layout: LayoutState | null) => void;
 };
 
-const SIDEBAR_GROUP = 'group-sidebar';
-const CENTER_GROUP = 'group-center';
-const RIGHT_TOP_GROUP = 'group-right-top';
-const RIGHT_BOTTOM_GROUP = 'group-right-bottom';
+type StoreGet = () => DockviewStore;
+type StoreSet = (partial: Partial<DockviewStore> | ((s: DockviewStore) => Partial<DockviewStore>)) => void;
 
-// Layout sizing constants (single source of truth)
-export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
-export const LAYOUT_RIGHT_RATIO = 2.5 / 10;
-export const LAYOUT_SIDEBAR_MAX_PX = 350;
-export const LAYOUT_RIGHT_MAX_PX = 400;
-
-function focusOrAddPanel(api: DockviewApi, options: AddPanelOptions & { id: string }, quiet = false) {
-    const existing = api.getPanel(options.id);
-    if (existing) {
-        if (!quiet) existing.api.setActive();
-        return;
-    }
-    // Remember the currently active panel so we can restore focus after adding
-    const previousActive = quiet ? api.activePanel : null;
-    api.addPanel(options);
-    // When quiet, restore focus to whatever was active before the add
-    if (previousActive) {
-        previousActive.api.setActive();
-    }
-}
-
-/**
- * Drain the deferred panel action queue, applying each action to the dockview API.
- * Call this after a layout build or restore so queued panels appear in the new layout.
- */
 function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelAction[]): void {
     for (const action of actions) {
         const ref = action.referencePanel ?? 'chat';
         let position: AddPanelOptions['position'];
         if (action.placement === 'tab') {
             const groupId = api.getPanel(ref)?.group?.id;
-            if (groupId) {
-                position = { referenceGroup: groupId };
-            }
+            if (groupId) position = { referenceGroup: groupId };
         } else {
             position = { referencePanel: ref, direction: action.placement };
         }
         focusOrAddPanel(api, {
-            id: action.id,
-            component: action.component,
-            title: action.title,
-            position,
-            ...(action.params ? { params: action.params } : {}),
+            id: action.id, component: action.component, title: action.title,
+            position, ...(action.params ? { params: action.params } : {}),
         });
     }
 }
 
-/** Build the default dockview layout with sidebar, chat, changes, files, and terminal panels. */
-function buildDefaultLayoutPanels(api: DockviewApi): {
-    centerGroupId: string;
-    rightTopGroupId: string;
-    rightBottomGroupId: string;
-    sidebarGroupId: string;
-} {
-    api.clear();
-
-    const totalWidth = api.width;
-    const sidebarWidth = Math.min(Math.round(totalWidth * LAYOUT_SIDEBAR_RATIO), LAYOUT_SIDEBAR_MAX_PX);
-    const rightWidth = Math.min(Math.round(totalWidth * LAYOUT_RIGHT_RATIO), LAYOUT_RIGHT_MAX_PX);
-
-    api.addPanel({
-        id: 'chat',
-        component: 'chat',
-        tabComponent: 'permanentTab',
-        title: 'Agent',
-    });
-
-    const sidebarPanel = api.addPanel({
-        id: 'sidebar',
-        component: 'sidebar',
-        title: 'Sidebar',
-        position: { direction: 'left', referencePanel: 'chat' },
-        initialWidth: sidebarWidth,
-    });
-    sidebarPanel.group.locked = 'no-drop-target';
-
-    const changesPanel = api.addPanel({
-        id: 'changes',
-        component: 'changes',
-        title: 'Changes',
-        position: { direction: 'right', referencePanel: 'chat' },
-        initialWidth: rightWidth,
-    });
-
-    const rightTopGroupId = changesPanel.group.id;
-    api.addPanel({
-        id: 'files',
-        component: 'files',
-        title: 'Files',
-        position: { referenceGroup: rightTopGroupId },
-    });
-
-    api.addPanel({
-        id: 'terminal-default',
-        component: 'terminal',
-        title: 'Terminal',
-        params: { terminalId: 'shell-default' },
-        position: { direction: 'below', referencePanel: 'changes' },
-    });
-
-    const chatPanel = api.getPanel('chat');
-    const terminalPanel = api.getPanel('terminal-default');
-
-    return {
-        centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
-        rightTopGroupId: rightTopGroupId ?? RIGHT_TOP_GROUP,
-        rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
-        sidebarGroupId: sidebarPanel.group.id,
-    };
-}
-
-/** Save old session layout, restore new session layout or build default. */
 function performSessionSwitch(
-    api: DockviewApi,
-    oldSessionId: string | null,
-    newSessionId: string,
-    buildDefaultLayout: (api: DockviewApi) => void,
+    api: DockviewApi, oldSessionId: string | null, newSessionId: string,
+    buildDefault: (api: DockviewApi) => void,
 ): void {
-    // Save current layout for the old session
     if (oldSessionId) {
-        try {
-            setSessionLayout(oldSessionId, api.toJSON());
-        } catch {
-            // Ignore save errors
-        }
+        try { setSessionLayout(oldSessionId, api.toJSON()); } catch { /* ignore */ }
     }
-
-    // Try to restore the new session's layout
-    const savedLayout = getSessionLayout(newSessionId);
-    if (savedLayout) {
-        try {
-            api.fromJSON(savedLayout as SerializedDockview);
-            return;
-        } catch {
-            // Restore failed, fall through to default
-        }
+    const saved = getSessionLayout(newSessionId);
+    if (saved) {
+        try { api.fromJSON(saved as SerializedDockview); return; } catch { /* fall through */ }
     }
-
-    buildDefaultLayout(api);
+    buildDefault(api);
 }
-
-type LayoutGroupIds = {
-    centerGroupId: string;
-    rightTopGroupId: string;
-    rightBottomGroupId: string;
-    sidebarGroupId: string;
-};
-
-function resolveGroupIds(api: DockviewApi, sidebarPanel: ReturnType<DockviewApi['getPanel']>, oldChanges: ReturnType<DockviewApi['getPanel']>): LayoutGroupIds {
-    const chatPanel = api.getPanel('chat');
-    const changesPanel = api.getPanel('changes') ?? oldChanges;
-    const terminalPanel = api.panels.find(
-        (p) => p.id.startsWith('terminal-') || p.id === 'terminal-default'
-    );
-    return {
-        centerGroupId: chatPanel?.group?.id ?? CENTER_GROUP,
-        rightTopGroupId: changesPanel?.group?.id ?? RIGHT_TOP_GROUP,
-        rightBottomGroupId: terminalPanel?.group?.id ?? RIGHT_BOTTOM_GROUP,
-        sidebarGroupId: sidebarPanel?.group?.id ?? SIDEBAR_GROUP,
-    };
-}
-
-/**
- * After fromJSON() restores a layout, apply fixups: re-lock sidebar,
- * fix old panel aliases, and return computed group IDs.
- */
-export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
-    // Re-lock sidebar group and ensure header is visible for workspace tab
-    const sidebarPanel = api.getPanel('sidebar');
-    if (sidebarPanel) {
-        sidebarPanel.group.locked = 'no-drop-target';
-        sidebarPanel.group.header.hidden = false;
-    }
-
-    // Fix up panel titles from old saved layouts
-    const oldChanges = api.getPanel('diff-files');
-    if (oldChanges) oldChanges.api.setTitle('Changes');
-    const oldFiles = api.getPanel('all-files');
-    if (oldFiles) oldFiles.api.setTitle('Files');
-
-    return resolveGroupIds(api, sidebarPanel, oldChanges);
-}
-
-type StoreGet = () => DockviewStore;
-type StoreSet = (partial: Partial<DockviewStore> | ((s: DockviewStore) => Partial<DockviewStore>)) => void;
 
 function buildFileStateActions(set: StoreSet) {
     return {
         setFileState: (path: string, state: FileEditorState) => {
-            set((prev) => { const next = new Map(prev.openFiles); next.set(path, state); return { openFiles: next }; });
+            set((prev) => { const m = new Map(prev.openFiles); m.set(path, state); return { openFiles: m }; });
         },
         updateFileState: (path: string, updates: Partial<FileEditorState>) => {
             set((prev) => {
-                const existing = prev.openFiles.get(path);
-                if (!existing) return prev;
-                const next = new Map(prev.openFiles);
-                next.set(path, { ...existing, ...updates });
-                return { openFiles: next };
+                const e = prev.openFiles.get(path);
+                if (!e) return prev;
+                const m = new Map(prev.openFiles);
+                m.set(path, { ...e, ...updates });
+                return { openFiles: m };
             });
         },
         removeFileState: (path: string) => {
-            set((prev) => { const next = new Map(prev.openFiles); next.delete(path); return { openFiles: next }; });
+            set((prev) => { const m = new Map(prev.openFiles); m.delete(path); return { openFiles: m }; });
         },
         clearFileStates: () => { set({ openFiles: new Map() }); },
+    };
+}
+
+function applyLayoutAndSet(
+    api: DockviewApi, state: LayoutState, pinnedWidths: Map<string, number>,
+    set: StoreSet,
+): LayoutGroupIds {
+    const ids = applyLayout(api, state, pinnedWidths);
+    set(ids);
+    return ids;
+}
+
+function buildVisibilityActions(set: StoreSet, get: StoreGet) {
+    return {
+        toggleSidebar: () => {
+            const { api, sidebarVisible, pinnedWidths } = get();
+            if (!api) return;
+            if (sidebarVisible) {
+                const current = fromDockviewApi(api);
+                const withoutSidebar: LayoutState = {
+                    columns: current.columns.filter((c) => c.id !== 'sidebar'),
+                };
+                set({ isRestoringLayout: true, sidebarVisible: false });
+                applyLayoutAndSet(api, withoutSidebar, pinnedWidths, set);
+                requestAnimationFrame(() => set({ isRestoringLayout: false }));
+            } else {
+                const current = fromDockviewApi(api);
+                const sidebarCol = defaultLayout().columns[0];
+                const withSidebar: LayoutState = {
+                    columns: [sidebarCol, ...current.columns],
+                };
+                set({ isRestoringLayout: true, sidebarVisible: true });
+                applyLayoutAndSet(api, withSidebar, pinnedWidths, set);
+                requestAnimationFrame(() => set({ isRestoringLayout: false }));
+            }
+        },
+        toggleRightPanels: () => {
+            const { api, rightPanelsVisible, pinnedWidths } = get();
+            if (!api) return;
+            if (rightPanelsVisible) {
+                const current = fromDockviewApi(api);
+                const centerIdx = current.columns.findIndex((c) => c.id === 'center');
+                const withoutRight: LayoutState = {
+                    columns: current.columns.slice(0, centerIdx + 1),
+                };
+                set({ isRestoringLayout: true, rightPanelsVisible: false });
+                applyLayoutAndSet(api, withoutRight, pinnedWidths, set);
+                requestAnimationFrame(() => set({ isRestoringLayout: false }));
+            } else {
+                const defLayout = defaultLayout();
+                const rightCol = defLayout.columns.find((c) => c.id === 'right');
+                if (!rightCol) return;
+                const current = fromDockviewApi(api);
+                const withRight: LayoutState = {
+                    columns: [...current.columns, rightCol],
+                };
+                set({ isRestoringLayout: true, rightPanelsVisible: true });
+                applyLayoutAndSet(api, withRight, pinnedWidths, set);
+                requestAnimationFrame(() => set({ isRestoringLayout: false }));
+            }
+        },
+        setSidebarVisible: (visible: boolean) => {
+            const { sidebarVisible } = get();
+            if (sidebarVisible === visible) return;
+            get().toggleSidebar();
+        },
+        setRightPanelsVisible: (visible: boolean) => {
+            const { rightPanelsVisible } = get();
+            if (rightPanelsVisible === visible) return;
+            get().toggleRightPanels();
+        },
+    };
+}
+
+function buildPresetActions(set: StoreSet, get: StoreGet) {
+    return {
+        applyBuiltInPreset: (preset: BuiltInPreset) => {
+            const { api, pinnedWidths } = get();
+            if (!api) return;
+            set({ isRestoringLayout: true });
+            const state = getPresetLayout(preset);
+            const ids = applyLayout(api, state, pinnedWidths);
+            set({
+                ...ids,
+                sidebarVisible: true,
+                rightPanelsVisible: preset === 'default',
+            });
+            requestAnimationFrame(() => {
+                api.layout(api.width, api.height);
+                set({ isRestoringLayout: false });
+            });
+        },
+        applyCustomLayout: (layout: SavedLayoutConfig) => {
+            const { api, pinnedWidths } = get();
+            if (!api) return;
+            set({ isRestoringLayout: true });
+            const state = layout.layout as unknown as LayoutState;
+            if (!state?.columns) {
+                try {
+                    api.fromJSON(layout.layout as unknown as SerializedDockview);
+                    set(applyLayoutFixups(api));
+                } catch (e) {
+                    console.warn('applyCustomLayout: old-format restore failed:', e);
+                }
+            } else {
+                const ids = applyLayout(api, state, pinnedWidths);
+                set(ids);
+            }
+            const hasSidebar = !!api.getPanel('sidebar');
+            const colCount = state?.columns?.length ?? api.groups.length;
+            const sidebarCols = hasSidebar ? 1 : 0;
+            const hasRight = colCount > sidebarCols + 1;
+            set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+            requestAnimationFrame(() => {
+                api.layout(api.width, api.height);
+                set({ isRestoringLayout: false });
+            });
+        },
+        captureCurrentLayout: (): Record<string, unknown> => {
+            const { api } = get();
+            if (!api) return {};
+            const state = fromDockviewApi(api);
+            const filtered = filterEphemeral(state);
+            return filtered as unknown as Record<string, unknown>;
+        },
     };
 }
 
@@ -356,6 +340,20 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     rightTopGroupId: RIGHT_TOP_GROUP,
     rightBottomGroupId: RIGHT_BOTTOM_GROUP,
     sidebarGroupId: SIDEBAR_GROUP,
+    sidebarVisible: true,
+    rightPanelsVisible: true,
+    pinnedWidths: new Map(),
+    setPinnedWidth: (columnId, width) => {
+        set((prev) => {
+            const m = new Map(prev.pinnedWidths);
+            m.set(columnId, width);
+            return { pinnedWidths: m };
+        });
+    },
+    userDefaultLayout: null,
+    setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
+    ...buildVisibilityActions(set, get),
+    ...buildPresetActions(set, get),
     isRestoringLayout: false,
     currentLayoutSessionId: null,
     deferredPanelActions: [],
@@ -369,29 +367,30 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         try {
             performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
             if (getSessionLayout(newSessionId)) set(applyLayoutFixups(api));
-        } finally {
-            set({ isRestoringLayout: false });
-        }
+        } finally { set({ isRestoringLayout: false }); }
     },
     buildDefaultLayout: (api) => {
-        set(buildDefaultLayoutPanels(api));
+        const { userDefaultLayout } = get();
+        // Clear pinned overrides so fresh default gets clean preset widths
+        const freshPinned = new Map<string, number>();
+        set({ isRestoringLayout: true, pinnedWidths: freshPinned });
+        const state = userDefaultLayout ?? getPresetLayout('default');
+        const ids = applyLayout(api, state, freshPinned);
+        const hasSidebar = state.columns.some((c) => c.id === 'sidebar');
+        const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
+        set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
         const pending = get().deferredPanelActions;
         if (pending.length > 0) {
             set({ deferredPanelActions: [] });
             applyDeferredPanelActions(api, pending);
         }
+        requestAnimationFrame(() => set({ isRestoringLayout: false }));
     },
-    resetLayout: () => {
-        const { api } = get();
-        if (api) get().buildDefaultLayout(api);
-    },
+    resetLayout: () => { const { api } = get(); if (api) get().buildDefaultLayout(api); },
     ...buildPanelActions(set, get),
 }));
 
-/**
- * Perform a layout switch between sessions. Call this after setActiveSession()
- * so that remounted components (e.g. TerminalPanel) read the new session.
- */
+/** Perform a layout switch between sessions. */
 export function performLayoutSwitch(oldSessionId: string | null, newSessionId: string): void {
     useDockviewStore.getState().switchSessionLayout(oldSessionId, newSessionId);
 }

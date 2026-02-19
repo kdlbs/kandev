@@ -8,6 +8,7 @@ import type {
   EditorOption,
   Executor,
   NotificationProvider,
+  SavedLayout,
 } from '@/lib/types/http';
 
 export type ExecutorsState = {
@@ -99,6 +100,7 @@ export type UserSettingsState = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  savedLayouts: SavedLayout[];
   loaded: boolean;
 };
 

@@ -26,24 +26,21 @@ func RequestLogger(log *logger.Logger, serverName string) gin.HandlerFunc {
 			size = 0
 		}
 
-		if status >= 500 {
-			log.Error("http",
-				zap.String("server", serverName),
-				zap.String("method", c.Request.Method),
-				zap.String("path", path),
-				zap.Int("status", status),
-				zap.Int64("duration_ms", latency.Milliseconds()),
-				zap.Int("bytes", size),
-			)
-		} else {
-			log.Debug("http",
-				zap.String("server", serverName),
-				zap.String("method", c.Request.Method),
-				zap.String("path", path),
-				zap.Int("status", status),
-				zap.Int64("duration_ms", latency.Milliseconds()),
-				zap.Int("bytes", size),
-			)
+		fields := []zap.Field{
+			zap.String("server", serverName),
+			zap.String("method", c.Request.Method),
+			zap.String("path", path),
+			zap.Int("status", status),
+			zap.Int64("duration_ms", latency.Milliseconds()),
+			zap.Int("bytes", size),
+		}
+		switch {
+		case status >= 500:
+			log.Error("http", fields...)
+		case status >= 400:
+			log.Warn("http", fields...)
+		default:
+			log.Debug("http", fields...)
 		}
 	}
 }

@@ -22,6 +22,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           reviewAutoMarkOnScroll: message.payload.review_auto_mark_on_scroll ?? true,
           lspAutoStartLanguages: message.payload.lsp_auto_start_languages ?? [],
           lspAutoInstallLanguages: message.payload.lsp_auto_install_languages ?? [],
+          savedLayouts: message.payload.saved_layouts ?? [],
           loaded: true,
         },
       }));

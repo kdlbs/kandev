@@ -26,6 +26,7 @@ import { CommitStatBadge } from '@/components/diff-stat';
 import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
 import { formatUserHomePath } from '@/lib/utils';
 import { EditorsMenu } from '@/components/task/editors-menu';
+import { LayoutPresetSelector } from '@/components/task/layout-preset-selector';
 import { DocumentControls } from '@/components/task/document/document-controls';
 import { VcsSplitButton } from '@/components/vcs-split-button';
 import { WorkflowStepper, type WorkflowStepperStep } from '@/components/task/workflow-stepper';
@@ -310,6 +311,7 @@ function TopBarRight({
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
+          <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
           <VcsSplitButton
             sessionId={activeSessionId ?? null}

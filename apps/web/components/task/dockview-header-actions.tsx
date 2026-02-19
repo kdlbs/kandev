@@ -12,8 +12,13 @@ import {
   IconFolder,
   IconGitBranch,
   IconPlayerPlay,
+  IconLayoutSidebarRightCollapse,
+  IconLayoutColumns,
+  IconLayoutRows,
+  IconX,
 } from '@tabler/icons-react';
 import { Button } from '@kandev/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -124,20 +129,96 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
+/** Faded split-vertical, split-horizontal, and close buttons for any non-sidebar group. */
+function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsProps) {
+  const centerGroupId = useDockviewStore((s) => s.centerGroupId);
+  const isChatGroup = group.id === centerGroupId;
+
+  const handleSplitRight = useCallback(() => {
+    containerApi.addGroup({ referenceGroup: group, direction: 'right' });
+  }, [group, containerApi]);
+
+  const handleSplitDown = useCallback(() => {
+    containerApi.addGroup({ referenceGroup: group, direction: 'below' });
+  }, [group, containerApi]);
+
+  const handleCloseGroup = useCallback(() => {
+    const panels = [...group.panels];
+    if (panels.length === 0) {
+      try { containerApi.removeGroup(group); } catch { /* already removed */ }
+      return;
+    }
+    for (const panel of panels) {
+      try { containerApi.removePanel(panel); } catch { /* already removed */ }
+    }
+  }, [group, containerApi]);
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+            onClick={handleSplitRight}
+          >
+            <IconLayoutColumns className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Split right</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+            onClick={handleSplitDown}
+          >
+            <IconLayoutRows className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Split down</TooltipContent>
+      </Tooltip>
+      {!isChatGroup && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
+              onClick={handleCloseGroup}
+            >
+              <IconX className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Close group</TooltipContent>
+        </Tooltip>
+      )}
+    </>
+  );
+}
+
 export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group } = props;
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
+  const rightTopGroupId = useDockviewStore((s) => s.rightTopGroupId);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
 
   const isSidebarGroup = group.id === sidebarGroupId;
+  if (isSidebarGroup) return <SidebarRightActions />;
+
   const isCenterGroup = group.id === centerGroupId;
+  const isRightTopGroup = group.id === rightTopGroupId;
   const isTerminalGroup = group.id === rightBottomGroupId;
 
-  if (isSidebarGroup) return <SidebarRightActions />;
-  if (isCenterGroup) return <CenterRightActions />;
-  if (isTerminalGroup) return <TerminalGroupRightActions />;
-  return null;
+  return (
+    <div className="flex items-center gap-0.5 pr-1">
+      {isCenterGroup && <CenterRightActions />}
+      {isRightTopGroup && <RightTopGroupActions />}
+      {isTerminalGroup && <TerminalGroupRightActions />}
+      <GroupSplitCloseActions {...props} />
+    </div>
+  );
 }
 
 function SidebarRightActions() {
@@ -168,7 +249,7 @@ function SidebarRightActions() {
   );
 
   return (
-    <div className="flex items-center pr-2">
+    <div className="flex items-center gap-1 pr-2">
       <NewTaskButton
         workspaceId={workspaceId}
         workflowId={workflowId}
@@ -176,6 +257,25 @@ function SidebarRightActions() {
         onSuccess={handleTaskCreated}
       />
     </div>
+  );
+}
+
+function RightTopGroupActions() {
+  const toggleRightPanels = useDockviewStore((s) => s.toggleRightPanels);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 cursor-pointer"
+          onClick={toggleRightPanels}
+        >
+          <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Hide right panels</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -214,17 +314,15 @@ function CenterRightActions() {
   if (!hasDevScript) return null;
 
   return (
-    <div className="flex items-center gap-1 pr-1">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-6 w-6 p-0 cursor-pointer"
-        onClick={handleStartBrowser}
-        title="Open browser preview"
-      >
-        <IconDeviceDesktop className="h-3.5 w-3.5" />
-      </Button>
-    </div>
+    <Button
+      size="sm"
+      variant="ghost"
+      className="h-6 w-6 p-0 cursor-pointer"
+      onClick={handleStartBrowser}
+      title="Open browser preview"
+    >
+      <IconDeviceDesktop className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
@@ -285,7 +383,7 @@ function TerminalGroupRightActions() {
   if (scripts.length === 0 && !hasDevScript) return null;
 
   return (
-    <div className="flex items-center gap-1 pr-1">
+    <>
       {scripts.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -326,6 +424,6 @@ function TerminalGroupRightActions() {
           <IconDeviceDesktop className="h-3.5 w-3.5" />
         </Button>
       )}
-    </div>
+    </>
   );
 }

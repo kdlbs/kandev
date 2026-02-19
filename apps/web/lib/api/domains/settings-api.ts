@@ -13,6 +13,7 @@ import type {
   EditorOption,
   CustomPrompt,
   PromptsResponse,
+  SavedLayout,
   UserSettingsResponse,
   DynamicModelsResponse,
 } from '@/lib/types/http';
@@ -36,6 +37,7 @@ export async function updateUserSettings(
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
     lsp_server_configs?: Record<string, Record<string, unknown>>;
+    saved_layouts?: SavedLayout[];
   },
   options?: ApiRequestOptions
 ) {

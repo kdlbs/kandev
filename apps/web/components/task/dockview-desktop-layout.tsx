@@ -10,15 +10,8 @@ import {
   type SerializedDockview,
 } from 'dockview-react';
 import { themeKandev } from '@/lib/layout/dockview-theme';
-import {
-  useDockviewStore,
-  applyLayoutFixups,
-  performLayoutSwitch,
-  LAYOUT_SIDEBAR_RATIO,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_RATIO,
-  LAYOUT_RIGHT_MAX_PX,
-} from '@/lib/state/dockview-store';
+import { useDockviewStore, performLayoutSwitch } from '@/lib/state/dockview-store';
+import { applyLayoutFixups, getRootSplitview } from '@/lib/state/dockview-layout-builders';
 import { getSessionLayout, setSessionLayout } from '@/lib/local-storage';
 import { useAppStore } from '@/components/state-provider';
 import { useFileEditors } from '@/hooks/use-file-editors';
@@ -30,6 +23,7 @@ import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
 // Panel components
 import { TaskSessionSidebar } from './task-session-sidebar';
 import { LeftHeaderActions, RightHeaderActions } from './dockview-header-actions';
+import { DockviewWatermark } from './dockview-watermark';
 import { TaskChatPanel } from './task-chat-panel';
 import { TaskChangesPanel } from './task-changes-panel';
 import { ChangesPanel } from './changes-panel';
@@ -257,38 +251,36 @@ function tryRestoreLayout(
   return false;
 }
 
-/** Enforce column max widths after group add/remove (dockview redistributes all columns equally). */
-function enforceColumnMaxWidths(api: DockviewReadyEvent['api']) {
-  requestAnimationFrame(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rootSplitview = (api as any).component?.gridview?.root?.splitview;
-      if (!rootSplitview?.resizeView || !rootSplitview?.getViewSize) return;
-      const count = rootSplitview.length;
-      if (count < 3) return;
-
-      const sidebarMax = Math.min(Math.round(api.width * LAYOUT_SIDEBAR_RATIO), LAYOUT_SIDEBAR_MAX_PX);
-      const rightMax = Math.min(Math.round(api.width * LAYOUT_RIGHT_RATIO), LAYOUT_RIGHT_MAX_PX);
-
-      if (rootSplitview.getViewSize(0) > sidebarMax) {
-        rootSplitview.resizeView(0, sidebarMax);
+/**
+ * Track pinned column widths (sidebar, right) when the user manually resizes.
+ * Reads column widths from the root splitview on layout changes,
+ * and stores them in the dockview store's pinnedWidths map.
+ */
+function trackPinnedWidths(api: DockviewReadyEvent['api']): void {
+  if (useDockviewStore.getState().isRestoringLayout) return;
+  const sv = getRootSplitview(api);
+  if (!sv || sv.length < 2) return;
+  try {
+    // Track sidebar (index 0)
+    const sidebarW = sv.getViewSize(0);
+    if (sidebarW > 50) {
+      const current = useDockviewStore.getState().pinnedWidths.get('sidebar');
+      if (current !== sidebarW) {
+        useDockviewStore.getState().setPinnedWidth('sidebar', sidebarW);
       }
-      if (rootSplitview.getViewSize(count - 1) > rightMax) {
-        rootSplitview.resizeView(count - 1, rightMax);
-      }
-
-      const centerCount = count - 2;
-      if (centerCount > 1) {
-        const centerTotal = api.width - rootSplitview.getViewSize(0) - rootSplitview.getViewSize(count - 1);
-        const equalSize = Math.round(centerTotal / centerCount);
-        for (let i = 1; i <= centerCount; i++) {
-          rootSplitview.resizeView(i, equalSize);
+    }
+    // Track right column (last index, if 3+ columns)
+    if (sv.length >= 3) {
+      const rightIdx = sv.length - 1;
+      const rightW = sv.getViewSize(rightIdx);
+      if (rightW > 50) {
+        const current = useDockviewStore.getState().pinnedWidths.get('right');
+        if (current !== rightW) {
+          useDockviewStore.getState().setPinnedWidth('right', rightW);
         }
       }
-    } catch {
-      // Internal API may change between versions
     }
-  });
+  } catch { /* noop */ }
 }
 
 /** Re-add the chat panel if it gets removed (keeps center group alive). */
@@ -415,6 +407,15 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   const review = useReviewDialog(effectiveSessionId);
 
+  // Sync user's default saved layout into dockview store
+  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
+  useEffect(() => {
+    const defaultLayout = savedLayouts.find((l) => l.is_default);
+    const state = defaultLayout?.layout as unknown as import('@/lib/state/layout-manager').LayoutState | undefined;
+    setUserDefaultLayout(state?.columns ? state : null);
+  }, [savedLayouts, setUserDefaultLayout]);
+
   // Connect LSP Go-to-Definition navigation to dockview file tabs
   useLspFileOpener();
 
@@ -445,8 +446,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       });
       useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
 
-      api.onDidAddGroup(() => enforceColumnMaxWidths(api));
-      api.onDidRemoveGroup(() => enforceColumnMaxWidths(api));
+      // Track pinned column widths on layout changes (captures user sash drags)
+      api.onDidLayoutChange(() => trackPinnedWidths(api));
+      trackPinnedWidths(api);
+
       setupChatPanelSafetyNet(api);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
     },
@@ -487,6 +490,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         tabComponents={tabComponents}
         leftHeaderActionsComponent={LeftHeaderActions}
         rightHeaderActionsComponent={RightHeaderActions}
+        watermarkComponent={DockviewWatermark}
         onReady={onReady}
         defaultRenderer="always"
         className="h-full"

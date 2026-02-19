@@ -471,6 +471,14 @@ function buildSettingsPayload(s: UserSettingsState, defaultEditorId: string, lsp
   return { workspace_id: s.workspaceId ?? '', repository_ids: s.repositoryIds ?? [], default_editor_id: defaultEditorId || undefined, lsp_auto_start_languages: lspAutoStartLanguages, lsp_auto_install_languages: lspAutoInstallLanguages, lsp_server_configs: parsedConfigs };
 }
 
+function mapEditorSettingsFields(s: NonNullable<NonNullable<UpdateUserSettingsResponse>['settings']>) {
+  return {
+    chatSubmitKey: s.chat_submit_key ?? 'cmd_enter', reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
+    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [], lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
+    lspServerConfigs: s.lsp_server_configs ?? {}, savedLayouts: s.saved_layouts ?? [], loaded: true as const,
+  };
+}
+
 function buildUserSettingsFromResponse(s: NonNullable<UpdateUserSettingsResponse>['settings'], shellOptions: Array<{ value: string; label: string }> | null | undefined) {
   if (!s) return null;
   return {
@@ -478,9 +486,7 @@ function buildUserSettingsFromResponse(s: NonNullable<UpdateUserSettingsResponse
     kanbanViewMode: s.kanban_view_mode || null, repositoryIds: s.repository_ids ?? [],
     preferredShell: s.preferred_shell || null, shellOptions: shellOptions ?? [],
     defaultEditorId: s.default_editor_id || null, enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? 'cmd_enter', reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [], lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s.lsp_server_configs ?? {}, loaded: true as const,
+    ...mapEditorSettingsFields(s),
   };
 }
 

@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID        string    `json:"id"`
@@ -24,6 +27,16 @@ type UserSettings struct {
 	LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs"`
+	SavedLayouts            []SavedLayout                     `json:"saved_layouts"`
 	CreatedAt               time.Time                         `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
+}
+
+// SavedLayout represents a user-saved dockview layout configuration.
+type SavedLayout struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	IsDefault bool            `json:"is_default"`
+	Layout    json.RawMessage `json:"layout"`
+	CreatedAt string          `json:"created_at"`
 }

@@ -23,6 +23,7 @@ function mapUserSettingsResponse(data: any): UserSettingsState {
     lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
     lspServerConfigs: s.lsp_server_configs ?? {},
+    savedLayouts: s.saved_layouts ?? [],
     loaded: true,
   };
 }

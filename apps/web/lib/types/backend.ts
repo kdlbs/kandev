@@ -56,7 +56,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
   timestamp?: string;
 };
 
-import type { AvailableAgent, StepEvents, TaskState } from '@/lib/types/http';
+import type { AvailableAgent, SavedLayout, StepEvents, TaskState } from '@/lib/types/http';
 import type { GitEventPayload } from '@/lib/types/git-events';
 
 export type KanbanUpdatePayload = {
@@ -291,6 +291,7 @@ export type UserSettingsUpdatedPayload = {
   review_auto_mark_on_scroll?: boolean;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
+  saved_layouts?: SavedLayout[];
   updated_at?: string;
 };
 

@@ -125,6 +125,10 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if lspServerConfigs == nil {
 		lspServerConfigs = map[string]map[string]interface{}{}
 	}
+	savedLayouts := settings.SavedLayouts
+	if savedLayouts == nil {
+		savedLayouts = []models.SavedLayout{}
+	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
 		"workspace_id":               settings.WorkspaceID,
 		"kanban_view_mode":           settings.KanbanViewMode,
@@ -139,6 +143,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"lsp_auto_start_languages":   lspAutoStart,
 		"lsp_auto_install_languages": lspAutoInstall,
 		"lsp_server_configs":         lspServerConfigs,
+		"saved_layouts":              savedLayouts,
 	})
 	if err != nil {
 		return err
@@ -194,6 +199,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
 		LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs"`
+		SavedLayouts            []models.SavedLayout              `json:"saved_layouts"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -226,5 +232,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.LspAutoInstallLanguages = []string{}
 	}
 	settings.LspServerConfigs = payload.LspServerConfigs
+	settings.SavedLayouts = payload.SavedLayouts
+	if settings.SavedLayouts == nil {
+		settings.SavedLayouts = []models.SavedLayout{}
+	}
 	return settings, nil
 }
