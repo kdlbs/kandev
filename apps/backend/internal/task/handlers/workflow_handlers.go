@@ -67,36 +67,43 @@ func (h *WorkflowHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionWorkflowDelete, h.wsDeleteWorkflow)
 }
 
+func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string) (dto.ListWorkflowsResponse, error) {
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+	if err != nil {
+		return dto.ListWorkflowsResponse{}, err
+	}
+	result := dto.ListWorkflowsResponse{
+		Workflows: make([]dto.WorkflowDTO, 0, len(workflows)),
+		Total:     len(workflows),
+	}
+	for _, w := range workflows {
+		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
+	}
+	return result, nil
+}
+
 // HTTP handlers
 
 func (h *WorkflowHandlers) httpListWorkflows(c *gin.Context) {
 	workspaceID := c.Query("workspace_id")
-	workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID)
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
 		return
 	}
-	result := make([]dto.WorkflowDTO, 0, len(workflows))
-	for _, w := range workflows {
-		result = append(result, dto.FromWorkflow(w))
-	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *WorkflowHandlers) httpListWorkflowsByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
-	workflows, err := h.service.ListWorkflows(c.Request.Context(), workspaceID)
+	resp, err := h.listWorkflows(c.Request.Context(), workspaceID)
 	if err != nil {
 		h.logger.Error("failed to list workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
 		return
 	}
-	result := make([]dto.WorkflowDTO, 0, len(workflows))
-	for _, w := range workflows {
-		result = append(result, dto.FromWorkflow(w))
-	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *WorkflowHandlers) httpGetWorkflow(c *gin.Context) {
