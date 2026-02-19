@@ -43,6 +43,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.httpCreateAgent)
+	api.POST("/agents/tui", h.httpCreateCustomTUIAgent)
 	api.GET("/agents/:id", h.httpGetAgent)
 	api.PATCH("/agents/:id", h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.httpDeleteAgent)
@@ -200,6 +201,20 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete agent"})
 		return
 	}
+
+	// Broadcast updated available agents list (agent may have been unregistered)
+	if h.hub != nil {
+		availableResp, err := h.controller.ListAvailableAgents(c.Request.Context())
+		if err != nil {
+			h.logger.Error("failed to list available agents after delete", zap.Error(err))
+		} else {
+			notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
+				"agents": availableResp.Agents,
+			})
+			h.hub.Broadcast(notification)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

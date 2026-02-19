@@ -1,5 +1,6 @@
 import { fetchJson, type ApiRequestOptions } from '../client';
 import type {
+  Agent,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
   ListAvailableAgentsResponse,
@@ -96,6 +97,16 @@ export async function previewAgentCommand(
   options?: ApiRequestOptions
 ): Promise<CommandPreviewResponse> {
   return fetchJson<CommandPreviewResponse>(`/api/v1/agent-command-preview/${agentName}`, {
+    ...options,
+    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function createCustomTUIAgent(
+  payload: { display_name: string; model?: string; command: string; description?: string },
+  options?: ApiRequestOptions
+): Promise<Agent> {
+  return fetchJson<Agent>('/api/v1/agents/tui', {
     ...options,
     init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });

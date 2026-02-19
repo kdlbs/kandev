@@ -131,7 +131,7 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 	for _, profile := range profiles {
 		profileDTOs = append(profileDTOs, toProfileDTO(profile))
 	}
-	return dto.AgentDTO{
+	result := dto.AgentDTO{
 		ID:            agent.ID,
 		Name:          agent.Name,
 		WorkspaceID:   agent.WorkspaceID,
@@ -141,6 +141,17 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 		CreatedAt:     agent.CreatedAt,
 		UpdatedAt:     agent.UpdatedAt,
 	}
+	if agent.TUIConfig != nil {
+		result.TUIConfig = &dto.TUIConfigDTO{
+			Command:         agent.TUIConfig.Command,
+			DisplayName:     agent.TUIConfig.DisplayName,
+			Model:           agent.TUIConfig.Model,
+			Description:     agent.TUIConfig.Description,
+			CommandArgs:     agent.TUIConfig.CommandArgs,
+			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
+		}
+	}
+	return result
 }
 
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {

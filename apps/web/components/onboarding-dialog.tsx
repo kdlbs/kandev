@@ -123,8 +123,8 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     if (!open) return;
     Promise.all([listAvailableAgents({ cache: 'no-store' }), listAgentsAction()])
       .then(([availRes, savedRes]) => { setAvailableAgents(availRes.agents ?? []); setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? [])); })
-      .catch(() => {}).finally(() => setLoadingAgents(false));
-    listWorkflowTemplates().then((res) => setTemplates(res.templates ?? [])).catch(() => {}).finally(() => setLoadingTemplates(false));
+      .catch(() => { }).finally(() => setLoadingAgents(false));
+    listWorkflowTemplates().then((res) => setTemplates(res.templates ?? [])).catch(() => { }).finally(() => setLoadingTemplates(false));
   }, [open]);
 
   const saveAgentSettings = useCallback(async () => {
@@ -242,6 +242,7 @@ function StepAgents({
       </div>
       <p className="text-xs text-muted-foreground">
         Expand an agent to configure its model and permissions. Changes are saved when you proceed.
+        You can also add custom TUI agents later in Settings &gt; Agents.
       </p>
     </div>
   );

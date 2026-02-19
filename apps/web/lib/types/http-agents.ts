@@ -14,12 +14,22 @@ export type AgentProfile = {
   updated_at: string;
 };
 
+export type TUIConfig = {
+  command: string;
+  display_name: string;
+  model?: string;
+  description?: string;
+  command_args?: string[];
+  wait_for_terminal: boolean;
+};
+
 export type Agent = {
   id: string;
   name: string;
   workspace_id?: string | null;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
+  tui_config?: TUIConfig | null;
   profiles: AgentProfile[];
   created_at: string;
   updated_at: string;

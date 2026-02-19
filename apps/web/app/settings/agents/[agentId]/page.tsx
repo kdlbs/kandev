@@ -3,7 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconTrash } from '@tabler/icons-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@kandev/ui/alert-dialog';
 import { Button } from '@kandev/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
 import { Separator } from '@kandev/ui/separator';
@@ -15,6 +26,7 @@ import { buildDefaultPermissions } from '@/lib/agent-permissions';
 import { generateUUID } from '@/lib/utils';
 import { useAppStore } from '@/components/state-provider';
 import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
+import { deleteAgentAction } from '@/app/actions/agents';
 import { ProfileMcpConfigCard } from './profile-mcp-config-card';
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from './agent-save-helpers';
 import type { DraftProfile, DraftAgent } from './agent-save-helpers';
@@ -109,6 +121,7 @@ function ProfileCardItem({
           agentName={draftAgent.name}
           onRemove={() => onRemoveProfile(profile.id)}
           canRemove={draftAgent.profiles.length > 1}
+          lockPassthrough={Boolean(draftAgent.tui_config)}
         />
         <ProfileMcpConfigCard
           profileId={profile.id}
@@ -167,9 +180,11 @@ type AgentHeaderProps = {
   displayName: string;
   matchedPath: string | null | undefined;
   isCreateMode: boolean;
+  savedAgent: Agent | null;
+  onDelete?: () => void;
 };
 
-function AgentHeader({ displayName, matchedPath, isCreateMode }: AgentHeaderProps) {
+function AgentHeader({ displayName, matchedPath, isCreateMode, savedAgent, onDelete }: AgentHeaderProps) {
   return (
     <div className="flex items-start justify-between gap-6">
       <div>
@@ -183,6 +198,28 @@ function AgentHeader({ displayName, matchedPath, isCreateMode }: AgentHeaderProp
           {isCreateMode ? 'Create a new profile for this agent.' : 'Configure profiles and defaults for this agent.'}
         </p>
       </div>
+      {savedAgent?.tui_config && onDelete && (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm" className="cursor-pointer">
+              <IconTrash className="h-4 w-4 mr-2" />
+              Delete Agent
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {displayName}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove the agent and all its profiles. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} className="cursor-pointer">Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
@@ -287,11 +324,21 @@ function AgentSetupForm({ initialAgent, savedAgent, discoveryAgent, onToastError
     } catch (error) { setSaveStatus('error'); onToastError(error); }
   };
 
+  const handleDeleteAgent = async () => {
+    if (!savedAgent) return;
+    try {
+      await deleteAgentAction(savedAgent.id);
+      router.replace('/settings/agents');
+    } catch (err) {
+      onToastError(err);
+    }
+  };
+
   const displayName = draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name;
 
   return (
     <div className="space-y-8">
-      <AgentHeader displayName={displayName} matchedPath={discoveryAgent?.matched_path} isCreateMode={isCreateMode} />
+      <AgentHeader displayName={displayName} matchedPath={discoveryAgent?.matched_path} isCreateMode={isCreateMode} savedAgent={savedAgent} onDelete={handleDeleteAgent} />
       <Separator />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

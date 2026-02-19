@@ -192,7 +192,13 @@ func startServices( //nolint:cyclop
 		addCleanup(c)
 	}
 
-	services, agentSettingsController, err := provideServices(cfg, log, repos, eventBus)
+	agentRegistry, _, err := registry.Provide(log)
+	if err != nil {
+		log.Error("Failed to initialize agent registry", zap.Error(err))
+		return false
+	}
+
+	services, agentSettingsController, err := provideServices(cfg, log, repos, eventBus, agentRegistry)
 	if err != nil {
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
@@ -225,7 +231,7 @@ func startServices( //nolint:cyclop
 		}()
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbPool, repos, services, agentSettingsController, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbPool, repos, services, agentSettingsController, agentRegistry, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -241,12 +247,13 @@ func startAgentInfrastructure(
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
+	agentRegistry *registry.Registry,
 	runCleanups func(),
 ) bool {
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, agentRegistry, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false

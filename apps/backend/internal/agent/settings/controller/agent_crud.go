@@ -166,6 +166,18 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 }
 
 func (c *Controller) DeleteAgent(ctx context.Context, id string) error {
+	// If the agent has a tui_config, unregister from the in-memory registry
+	agent, err := c.repo.GetAgent(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAgentNotFound
+		}
+		return err
+	}
+	if agent.TUIConfig != nil {
+		_ = c.agentRegistry.Unregister(agent.Name)
+	}
+
 	if err := c.repo.DeleteAgent(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "agent not found") {
 			return ErrAgentNotFound

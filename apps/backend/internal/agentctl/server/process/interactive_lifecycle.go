@@ -152,6 +152,22 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, proc *interactiveProcess, id string) error {
 	cols := req.DefaultCols
 	rows := req.DefaultRows
+
+	// Prefer last known session dimensions from previous resize events.
+	// This ensures restarted processes use the correct terminal size
+	// instead of the 120x40 defaults.
+	r.sessionWsMu.RLock()
+	sessWs, exists := r.sessionWs[req.SessionID]
+	r.sessionWsMu.RUnlock()
+	if exists && sessWs != nil {
+		sessWs.mu.RLock()
+		if sessWs.lastCols > 0 && sessWs.lastRows > 0 {
+			cols = int(sessWs.lastCols)
+			rows = int(sessWs.lastRows)
+		}
+		sessWs.mu.RUnlock()
+	}
+
 	if cols <= 0 {
 		cols = 120
 	}

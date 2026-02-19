@@ -13,6 +13,7 @@ type Repository interface {
 	UpdateAgent(ctx context.Context, agent *models.Agent) error
 	DeleteAgent(ctx context.Context, id string) error
 	ListAgents(ctx context.Context) ([]*models.Agent, error)
+	ListTUIAgents(ctx context.Context) ([]*models.Agent, error)
 
 	GetAgentProfileMcpConfig(ctx context.Context, profileID string) (*models.AgentProfileMcpConfig, error)
 	UpsertAgentProfileMcpConfig(ctx context.Context, config *models.AgentProfileMcpConfig) error

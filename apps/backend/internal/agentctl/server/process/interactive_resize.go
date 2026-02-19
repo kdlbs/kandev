@@ -38,6 +38,19 @@ func (r *InteractiveRunner) lazyStartAndResize(proc *interactiveProcess, cols, r
 		statusTracker.Resize(int(cols), int(rows))
 	}
 
+	// Store dimensions at session level so restarted processes use the correct size
+	if !proc.isUserShell {
+		r.sessionWsMu.RLock()
+		sessWs, exists := r.sessionWs[proc.info.SessionID]
+		r.sessionWsMu.RUnlock()
+		if exists && sessWs != nil {
+			sessWs.mu.Lock()
+			sessWs.lastCols = cols
+			sessWs.lastRows = rows
+			sessWs.mu.Unlock()
+		}
+	}
+
 	return nil
 }
 
