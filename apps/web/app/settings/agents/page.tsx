@@ -1,18 +1,23 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { IconAlertTriangle, IconPlus, IconSettings } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { Button } from '@kandev/ui/button';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Separator } from '@kandev/ui/separator';
-import { useAppStore } from '@/components/state-provider';
-import { createCustomTUIAgent, listAgentDiscovery, listAgents, listAvailableAgents } from '@/lib/api';
-import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
-import { AgentLogo } from '@/components/agent-logo';
-import { AddTUIAgentDialog } from '@/components/settings/add-tui-agent-dialog';
-import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from '@/lib/types/http';
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { IconAlertTriangle, IconPlus, IconSettings } from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
+import { Card, CardContent } from "@kandev/ui/card";
+import { Separator } from "@kandev/ui/separator";
+import { useAppStore } from "@/components/state-provider";
+import {
+  createCustomTUIAgent,
+  listAgentDiscovery,
+  listAgents,
+  listAvailableAgents,
+} from "@/lib/api";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { AgentLogo } from "@/components/agent-logo";
+import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
+import type { AgentDiscovery, Agent, AvailableAgent, AgentProfile } from "@/lib/types/http";
 
 type AgentCardProps = {
   agent: AgentDiscovery;
@@ -38,9 +43,15 @@ function AgentCard({ agent, savedAgent, displayName }: AgentCardProps) {
           )}
         </div>
         <Button size="sm" className="cursor-pointer" asChild>
-          <Link href={hasAgentRecord ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create` : `/settings/agents/${encodeURIComponent(agent.name)}`}>
+          <Link
+            href={
+              hasAgentRecord
+                ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create`
+                : `/settings/agents/${encodeURIComponent(agent.name)}`
+            }
+          >
             <IconSettings className="h-4 w-4 mr-2" />
-            {hasAgentRecord ? 'Create new profile' : 'Setup Profile'}
+            {hasAgentRecord ? "Create new profile" : "Setup Profile"}
           </Link>
         </Button>
       </CardContent>
@@ -85,11 +96,11 @@ function useAgentPageState() {
 
   const installedAgents = useMemo(
     () => discoveryAgents.filter((agent: AgentDiscovery) => agent.available),
-    [discoveryAgents]
+    [discoveryAgents],
   );
   const savedAgentsByName = useMemo(
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
-    [savedAgents]
+    [savedAgents],
   );
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? name;
@@ -98,19 +109,23 @@ function useAgentPageState() {
     if (rescanning) return;
     setRescanning(true);
     try {
-      const response = await listAgentDiscovery({ cache: 'no-store' });
+      const response = await listAgentDiscovery({ cache: "no-store" });
       setAgentDiscovery(response.agents);
     } finally {
       setRescanning(false);
     }
   };
 
-  const handleCreateCustomTUI = async (data: { display_name: string; model?: string; command: string }) => {
+  const handleCreateCustomTUI = async (data: {
+    display_name: string;
+    model?: string;
+    command: string;
+  }) => {
     await createCustomTUIAgent(data);
     const [discoveryResp, agentsResp, availableResp] = await Promise.all([
-      listAgentDiscovery({ cache: 'no-store' }),
-      listAgents({ cache: 'no-store' }),
-      listAvailableAgents({ cache: 'no-store' }),
+      listAgentDiscovery({ cache: "no-store" }),
+      listAgents({ cache: "no-store" }),
+      listAvailableAgents({ cache: "no-store" }),
     ]);
     setAgentDiscovery(discoveryResp.agents);
     setSettingsAgents(agentsResp.agents);
@@ -118,17 +133,29 @@ function useAgentPageState() {
   };
 
   return {
-    savedAgents, installedAgents, savedAgentsByName,
-    rescanning, tuiDialogOpen, setTuiDialogOpen,
-    resolveDisplayName, handleRescan, handleCreateCustomTUI,
+    savedAgents,
+    installedAgents,
+    savedAgentsByName,
+    rescanning,
+    tuiDialogOpen,
+    setTuiDialogOpen,
+    resolveDisplayName,
+    handleRescan,
+    handleCreateCustomTUI,
   };
 }
 
 export default function AgentsSettingsPage() {
   const {
-    savedAgents, installedAgents, savedAgentsByName,
-    rescanning, tuiDialogOpen, setTuiDialogOpen,
-    resolveDisplayName, handleRescan, handleCreateCustomTUI,
+    savedAgents,
+    installedAgents,
+    savedAgentsByName,
+    rescanning,
+    tuiDialogOpen,
+    setTuiDialogOpen,
+    resolveDisplayName,
+    handleRescan,
+    handleCreateCustomTUI,
   } = useAgentPageState();
 
   return (
@@ -151,12 +178,23 @@ export default function AgentsSettingsPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setTuiDialogOpen(true)} className="cursor-pointer">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTuiDialogOpen(true)}
+              className="cursor-pointer"
+            >
               <IconPlus className="h-4 w-4 mr-2" />
               Add TUI Agent
             </Button>
-            <Button variant="outline" size="sm" onClick={handleRescan} disabled={rescanning} className="cursor-pointer">
-              {rescanning ? 'Rescanning...' : 'Rescan'}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRescan}
+              disabled={rescanning}
+              className="cursor-pointer"
+            >
+              {rescanning ? "Rescanning..." : "Rescan"}
             </Button>
           </div>
         </div>
@@ -196,13 +234,17 @@ export default function AgentsSettingsPage() {
             {savedAgents.flatMap((agent: Agent) =>
               agent.profiles.map((profile: AgentProfile) => (
                 <ProfileListItem key={profile.id} agent={agent} profile={profile} />
-              ))
+              )),
             )}
           </div>
         </div>
       )}
 
-      <AddTUIAgentDialog open={tuiDialogOpen} onOpenChange={setTuiDialogOpen} onSubmit={handleCreateCustomTUI} />
+      <AddTUIAgentDialog
+        open={tuiDialogOpen}
+        onOpenChange={setTuiDialogOpen}
+        onSubmit={handleCreateCustomTUI}
+      />
     </div>
   );
 }

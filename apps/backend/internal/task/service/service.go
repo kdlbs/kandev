@@ -10,8 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/repository"
-	"github.com/kandev/kandev/internal/worktree"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // WorktreeCleanup provides worktree cleanup on task deletion.

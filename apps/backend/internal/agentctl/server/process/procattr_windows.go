@@ -26,4 +26,3 @@ func killProcessGroup(pid int) error {
 	kill := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 	return kill.Run()
 }
-

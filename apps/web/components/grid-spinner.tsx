@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 type GridSpinnerProps = {
   className?: string;
@@ -6,7 +6,7 @@ type GridSpinnerProps = {
 
 export function GridSpinner({ className }: GridSpinnerProps) {
   return (
-    <span className={`spinner-grid ${className ?? ''}`} role="status" aria-label="Loading">
+    <span className={`spinner-grid ${className ?? ""}`} role="status" aria-label="Loading">
       <span className="spinner-grid-cube" />
       <span className="spinner-grid-cube" />
       <span className="spinner-grid-cube" />

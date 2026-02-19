@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { listPrompts } from '@/lib/api';
-import { useAppStore } from '@/components/state-provider';
+import { useEffect } from "react";
+import { listPrompts } from "@/lib/api";
+import { useAppStore } from "@/components/state-provider";
 export function useCustomPrompts() {
   const prompts = useAppStore((state) => state.prompts.items);
   const loaded = useAppStore((state) => state.prompts.loaded);
@@ -13,7 +13,7 @@ export function useCustomPrompts() {
   useEffect(() => {
     if (loaded || loading) return;
     setPromptsLoading(true);
-    listPrompts({ cache: 'no-store' })
+    listPrompts({ cache: "no-store" })
       .then((response) => {
         setPrompts(response.prompts ?? []);
       })

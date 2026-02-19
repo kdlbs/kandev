@@ -62,4 +62,3 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 		router.GET("/lsp/:sessionId", g.LSPHandler.HandleLSPConnection)
 	}
 }
-

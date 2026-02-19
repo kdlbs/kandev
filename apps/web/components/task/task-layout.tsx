@@ -1,20 +1,20 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import dynamic from 'next/dynamic';
-import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
-import { SessionMobileLayout, SessionTabletLayout } from './mobile';
-import type { Repository, RepositoryScript } from '@/lib/types/http';
-import type { Terminal } from '@/hooks/domains/session/use-terminals';
-import type { Layout } from 'react-resizable-panels';
+import { memo } from "react";
+import dynamic from "next/dynamic";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
+import type { Repository, RepositoryScript } from "@/lib/types/http";
+import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import type { Layout } from "react-resizable-panels";
 
 // Re-export for backwards compatibility
-export type { SelectedDiff } from '@/hooks/use-session-layout-state';
+export type { SelectedDiff } from "@/hooks/use-session-layout-state";
 
 // Dynamic import for dockview (no SSR)
 const DockviewDesktopLayout = dynamic(
-  () => import('./dockview-desktop-layout').then((mod) => mod.DockviewDesktopLayout),
-  { ssr: false }
+  () => import("./dockview-desktop-layout").then((mod) => mod.DockviewDesktopLayout),
+  { ssr: false },
 );
 
 type TaskLayoutProps = {

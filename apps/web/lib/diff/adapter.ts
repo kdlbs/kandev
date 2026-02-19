@@ -1,4 +1,4 @@
-import type { FileDiffData, DiffComment, AnnotationSide, CommentAnnotation } from './types';
+import type { FileDiffData, DiffComment, AnnotationSide, CommentAnnotation } from "./types";
 
 /**
  * Format line range for display (e.g., "L10" or "L10-15")
@@ -11,7 +11,7 @@ export function formatLineRange(startLine: number, endLine: number): string {
  * Frontend types that mirror backend FileMutation
  */
 export interface FileMutation {
-  type: 'create' | 'replace' | 'patch' | 'delete' | 'rename';
+  type: "create" | "replace" | "patch" | "delete" | "rename";
   content?: string;
   old_content?: string;
   new_content?: string;
@@ -31,17 +31,17 @@ export interface ModifyFilePayload {
  * Required because backend diffs may not include full git headers.
  */
 export function normalizeDiffString(diff: string, filePath: string): string {
-  if (!diff) return '';
+  if (!diff) return "";
 
   const trimmed = diff.trim();
 
   // Check if the diff already has headers
-  if (trimmed.startsWith('diff --git')) {
+  if (trimmed.startsWith("diff --git")) {
     return trimmed;
   }
 
   // Check if it has file headers but not diff header
-  const hasFileHeaders = trimmed.includes('---') && trimmed.includes('+++');
+  const hasFileHeaders = trimmed.includes("---") && trimmed.includes("+++");
 
   if (hasFileHeaders) {
     // Add just the diff header
@@ -54,21 +54,18 @@ export function normalizeDiffString(diff: string, filePath: string): string {
     `--- a/${filePath}`,
     `+++ b/${filePath}`,
   ];
-  return headers.join('\n') + '\n' + trimmed;
+  return headers.join("\n") + "\n" + trimmed;
 }
 
 /**
  * Transform a backend FileMutation to FileDiffData for @pierre/diffs.
  * The DiffViewer component handles diff generation from content using the library.
  */
-export function transformFileMutation(
-  filePath: string,
-  mutation: FileMutation
-): FileDiffData {
+export function transformFileMutation(filePath: string, mutation: FileMutation): FileDiffData {
   return {
     filePath: mutation.new_path || filePath,
-    oldContent: mutation.old_content || '',
-    newContent: mutation.new_content || mutation.content || '',
+    oldContent: mutation.old_content || "",
+    newContent: mutation.new_content || mutation.content || "",
     diff: mutation.diff ? normalizeDiffString(mutation.diff, filePath) : undefined,
     additions: 0,
     deletions: 0,
@@ -83,12 +80,12 @@ export function transformGitDiff(
   filePath: string,
   diff: string,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _status: 'A' | 'M' | 'D' | '??' | string
+  _status: "A" | "M" | "D" | "??" | string,
 ): FileDiffData {
   return {
     filePath,
-    oldContent: '',
-    newContent: '',
+    oldContent: "",
+    newContent: "",
     diff: normalizeDiffString(diff, filePath),
     additions: 0,
     deletions: 0,
@@ -98,9 +95,7 @@ export function transformGitDiff(
 /**
  * Convert DiffComment[] to @pierre/diffs DiffLineAnnotation[]
  */
-export function commentsToAnnotations(
-  comments: DiffComment[]
-): CommentAnnotation[] {
+export function commentsToAnnotations(comments: DiffComment[]): CommentAnnotation[] {
   return comments.map((comment) => ({
     side: comment.side,
     lineNumber: comment.endLine, // Anchor at the end of the range
@@ -112,7 +107,7 @@ export function commentsToAnnotations(
 }
 
 function isDiffHeader(line: string): boolean {
-  return line.startsWith('diff --git') || line.startsWith('---') || line.startsWith('+++');
+  return line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++");
 }
 
 function isInRange(lineNum: number, startLine: number, endLine: number): boolean {
@@ -138,20 +133,27 @@ type ProcessDiffLineParams = {
   resultLines: string[];
 };
 
-function processDiffLine({ line, counters, startLine, endLine, side, resultLines }: ProcessDiffLineParams): void {
-  if (line.startsWith('+')) {
-    if (side === 'additions' && isInRange(counters.currentNewLine, startLine, endLine)) {
+function processDiffLine({
+  line,
+  counters,
+  startLine,
+  endLine,
+  side,
+  resultLines,
+}: ProcessDiffLineParams): void {
+  if (line.startsWith("+")) {
+    if (side === "additions" && isInRange(counters.currentNewLine, startLine, endLine)) {
       resultLines.push(line.substring(1));
     }
     counters.currentNewLine++;
-  } else if (line.startsWith('-')) {
-    if (side === 'deletions' && isInRange(counters.currentOldLine, startLine, endLine)) {
+  } else if (line.startsWith("-")) {
+    if (side === "deletions" && isInRange(counters.currentOldLine, startLine, endLine)) {
       resultLines.push(line.substring(1));
     }
     counters.currentOldLine++;
-  } else if (line.startsWith(' ') || (!line.startsWith('@') && line !== '')) {
-    const content = line.startsWith(' ') ? line.substring(1) : line;
-    const lineNum = side === 'additions' ? counters.currentNewLine : counters.currentOldLine;
+  } else if (line.startsWith(" ") || (!line.startsWith("@") && line !== "")) {
+    const content = line.startsWith(" ") ? line.substring(1) : line;
+    const lineNum = side === "additions" ? counters.currentNewLine : counters.currentOldLine;
     if (isInRange(lineNum, startLine, endLine)) resultLines.push(content);
     counters.currentOldLine++;
     counters.currentNewLine++;
@@ -165,9 +167,9 @@ export function extractCodeFromDiff(
   diff: string,
   startLine: number,
   endLine: number,
-  side: AnnotationSide
+  side: AnnotationSide,
 ): string {
-  const lines = diff.split('\n');
+  const lines = diff.split("\n");
   const resultLines: string[] = [];
   const counters: DiffLineCounters = { currentOldLine: 0, currentNewLine: 0 };
 
@@ -177,7 +179,7 @@ export function extractCodeFromDiff(
     processDiffLine({ line, counters, startLine, endLine, side, resultLines });
   }
 
-  return resultLines.join('\n');
+  return resultLines.join("\n");
 }
 
 /**
@@ -186,10 +188,10 @@ export function extractCodeFromDiff(
 export function extractCodeFromContent(
   content: string,
   startLine: number,
-  endLine: number
+  endLine: number,
 ): string {
-  const lines = content.split('\n');
-  return lines.slice(startLine - 1, endLine).join('\n');
+  const lines = content.split("\n");
+  return lines.slice(startLine - 1, endLine).join("\n");
 }
 
 /**
@@ -200,8 +202,8 @@ export function computeLineDiffStats(
   original: string,
   current: string,
 ): { additions: number; deletions: number } {
-  const originalLines = original.split('\n');
-  const currentLines = current.split('\n');
+  const originalLines = original.split("\n");
+  const currentLines = current.split("\n");
   let additions = 0;
   let deletions = 0;
   const maxLen = Math.max(originalLines.length, currentLines.length);
@@ -210,7 +212,10 @@ export function computeLineDiffStats(
     const currLine = currentLines[i];
     if (origLine === undefined && currLine !== undefined) additions++;
     else if (origLine !== undefined && currLine === undefined) deletions++;
-    else if (origLine !== currLine) { additions++; deletions++; }
+    else if (origLine !== currLine) {
+      additions++;
+      deletions++;
+    }
   }
   return { additions, deletions };
 }

@@ -24,4 +24,3 @@ func killProcessGroup(pid int) error {
 	// Kill the entire process group by using negative PID
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
-

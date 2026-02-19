@@ -50,8 +50,8 @@ func (a *Auggie) ID() string          { return "auggie" }
 func (a *Auggie) Name() string        { return "Augment Coding Agent" }
 func (a *Auggie) DisplayName() string { return "Auggie" }
 func (a *Auggie) Description() string { return "Auggie CLI-powered autonomous coding agent." }
-func (a *Auggie) Enabled() bool        { return true }
-func (a *Auggie) DisplayOrder() int    { return 3 }
+func (a *Auggie) Enabled() bool       { return true }
+func (a *Auggie) DisplayOrder() int   { return 3 }
 
 func (a *Auggie) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
@@ -100,10 +100,10 @@ func (a *Auggie) BuildCommand(opts CommandOptions) Command {
 func (a *Auggie) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Image:      "kandev/multi-agent",
-		Tag:        "latest",
-		Cmd:        Cmd("npx", "-y", "@augmentcode/auggie@0.15.0", "--acp").Build(),
-		WorkingDir: "/workspace",
+		Image:       "kandev/multi-agent",
+		Tag:         "latest",
+		Cmd:         Cmd("npx", "-y", "@augmentcode/auggie@0.15.0", "--acp").Build(),
+		WorkingDir:  "/workspace",
 		RequiredEnv: []string{"AUGMENT_SESSION_AUTH"},
 		Env:         map[string]string{},
 		Mounts: []MountTemplate{

@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { Fragment, memo, useMemo, useState } from 'react';
-import { IconCheck, IconChevronDown, IconLogicBuffer } from '@tabler/icons-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
-import { Button } from '@kandev/ui/button';
-import type { WorkflowSnapshotData } from '@/lib/state/slices/kanban/types';
+import { Fragment, memo, useMemo, useState } from "react";
+import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Button } from "@kandev/ui/button";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 type StepItem = { id: string; title: string; color: string; position: number };
 
@@ -18,7 +18,7 @@ function InlineSteps({ steps }: { steps: StepItem[] }) {
           <span className="flex items-center gap-1">
             <span
               className="h-1.5 w-1.5 rounded-full shrink-0"
-              style={{ backgroundColor: s.color || 'hsl(var(--muted-foreground))' }}
+              style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
             />
             {s.title}
           </span>
@@ -45,19 +45,15 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
 
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId),
-    [workflows, selectedWorkflowId]
+    [workflows, selectedWorkflowId],
   );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-auto justify-between cursor-pointer"
-        >
+        <Button type="button" variant="ghost" className="w-auto justify-between cursor-pointer">
           <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{selectedWorkflow?.name ?? 'Select workflow'}</span>
+          <span className="truncate">{selectedWorkflow?.name ?? "Select workflow"}</span>
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -66,9 +62,7 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
         {workflows.map((wf) => {
           const isSelected = wf.id === selectedWorkflowId;
           const snapshot = snapshots[wf.id];
-          const steps = snapshot
-            ? [...snapshot.steps].sort((a, b) => a.position - b.position)
-            : [];
+          const steps = snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];
           return (
             <button
               key={wf.id}

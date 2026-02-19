@@ -1,10 +1,14 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { useFileEditors, setPendingCursorPosition, consumePendingCursorPosition } from '@/hooks/use-file-editors';
-import { lspClientManager } from '@/lib/lsp/lsp-client-manager';
-import { getMonacoInstance } from '@/components/editors/monaco/monaco-init';
+import { useEffect } from "react";
+import { useAppStore } from "@/components/state-provider";
+import {
+  useFileEditors,
+  setPendingCursorPosition,
+  consumePendingCursorPosition,
+} from "@/hooks/use-file-editors";
+import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
 /**
  * Try to scroll an already-mounted editor to the given position.
@@ -56,7 +60,7 @@ export function useLspFileOpener() {
   useEffect(() => {
     const opener = async (uri: string, line?: number, column?: number) => {
       // uri is like "file:///workspace/path/src/foo.ts"
-      const filePath = uri.replace(/^file:\/\//, '');
+      const filePath = uri.replace(/^file:\/\//, "");
 
       // Dispose the placeholder model since a real tab will create its own model
       lspClientManager.disposePlaceholderModel(uri);

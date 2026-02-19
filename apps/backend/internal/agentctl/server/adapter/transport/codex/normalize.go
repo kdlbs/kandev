@@ -167,4 +167,3 @@ func (n *Normalizer) normalizeCommandResult(payload *streams.ShellExecPayload, r
 		}
 	}
 }
-

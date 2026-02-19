@@ -84,14 +84,14 @@ func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStep
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	WorkflowID      string            `json:"workflow_id"`
-	Name            string            `json:"name"`
-	Position        int               `json:"position"`
-	Color           string            `json:"color"`
-	Prompt          string            `json:"prompt,omitempty"`
+	WorkflowID      string             `json:"workflow_id"`
+	Name            string             `json:"name"`
+	Position        int                `json:"position"`
+	Color           string             `json:"color"`
+	Prompt          string             `json:"prompt,omitempty"`
 	Events          *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove bool              `json:"allow_manual_move"`
-	IsStartStep     *bool             `json:"is_start_step,omitempty"`
+	AllowManualMove bool               `json:"allow_manual_move"`
+	IsStartStep     *bool              `json:"is_start_step,omitempty"`
 }
 
 // CreateStep creates a new workflow step.
@@ -203,7 +203,7 @@ func (c *Controller) ListHistoryBySession(ctx context.Context, req ListHistoryRe
 
 // ImportWorkflowsRequest carries import data.
 type ImportWorkflowsRequest struct {
-	WorkspaceID string               `json:"workspace_id"`
+	WorkspaceID string                 `json:"workspace_id"`
 	Data        *models.WorkflowExport `json:"data"`
 }
 

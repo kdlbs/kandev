@@ -15,14 +15,14 @@ export type LayoutGroup = {
 
 /** A leaf node in the column tree — contains a panel group. */
 export type LayoutLeafNode = {
-  type: 'leaf';
+  type: "leaf";
   group: LayoutGroup;
   size?: number;
 };
 
 /** A branch node in the column tree — splits into child nodes. */
 export type LayoutBranchNode = {
-  type: 'branch';
+  type: "branch";
   children: LayoutNode[];
   size?: number;
 };

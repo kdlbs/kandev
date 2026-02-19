@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { DragHandle } from '@tiptap/extension-drag-handle-react';
-import { IconGripVertical } from '@tabler/icons-react';
-import type { Editor } from '@tiptap/core';
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
+import { IconGripVertical } from "@tabler/icons-react";
+import type { Editor } from "@tiptap/core";
 
 type PlanDragHandleProps = {
   editor: Editor;

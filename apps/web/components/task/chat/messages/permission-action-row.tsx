@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { IconCheck, IconX } from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import { Button } from '@kandev/ui/button';
+import { memo } from "react";
+import { IconCheck, IconX } from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import { Button } from "@kandev/ui/button";
 
 type PermissionActionRowProps = {
   onApprove: () => void;

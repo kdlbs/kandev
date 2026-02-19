@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useCallback, useMemo } from 'react';
-import type { IWatermarkPanelProps } from 'dockview-react';
+import { useCallback, useMemo } from "react";
+import type { IWatermarkPanelProps } from "dockview-react";
 import {
   IconMessage,
   IconFileText,
@@ -9,12 +9,12 @@ import {
   IconDeviceDesktop,
   IconGitBranch,
   IconFolder,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { useDockviewStore } from '@/lib/state/dockview-store';
-import { PANEL_REGISTRY } from '@/lib/state/layout-manager';
-import { useAppStore } from '@/components/state-provider';
-import { createUserShell } from '@/lib/api/domains/user-shell-api';
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { PANEL_REGISTRY } from "@/lib/state/layout-manager";
+import { useAppStore } from "@/components/state-provider";
+import { createUserShell } from "@/lib/api/domains/user-shell-api";
 
 type PanelOption = {
   id: string;
@@ -25,12 +25,12 @@ type PanelOption = {
 };
 
 const PANEL_OPTIONS: PanelOption[] = [
-  { id: 'chat', label: 'Agent', icon: IconMessage, singleton: true },
-  { id: 'plan', label: 'Plan', icon: IconFileText },
-  { id: 'terminal', label: 'Terminal', icon: IconTerminal2 },
-  { id: 'browser', label: 'Browser', icon: IconDeviceDesktop },
-  { id: 'changes', label: 'Changes', icon: IconGitBranch, singleton: true },
-  { id: 'files', label: 'Files', icon: IconFolder, singleton: true },
+  { id: "chat", label: "Agent", icon: IconMessage, singleton: true },
+  { id: "plan", label: "Plan", icon: IconFileText },
+  { id: "terminal", label: "Terminal", icon: IconTerminal2 },
+  { id: "browser", label: "Browser", icon: IconDeviceDesktop },
+  { id: "changes", label: "Changes", icon: IconGitBranch, singleton: true },
+  { id: "files", label: "Files", icon: IconFolder, singleton: true },
 ];
 
 export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps) {
@@ -40,7 +40,7 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
     async (option: PanelOption) => {
       const groupId = group?.id;
 
-      if (option.id === 'terminal') {
+      if (option.id === "terminal") {
         let terminalId = `terminal-${Date.now()}`;
         if (activeSessionId) {
           try {
@@ -52,21 +52,21 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
         }
         containerApi.addPanel({
           id: terminalId,
-          component: 'terminal',
-          title: 'Terminal',
+          component: "terminal",
+          title: "Terminal",
           params: { terminalId },
           ...(groupId ? { position: { referenceGroup: groupId } } : {}),
         });
         return;
       }
 
-      if (option.id === 'browser') {
+      if (option.id === "browser") {
         const browserId = `browser:${Date.now()}`;
         containerApi.addPanel({
           id: browserId,
-          component: 'browser',
-          title: 'Browser',
-          params: { url: '' },
+          component: "browser",
+          title: "Browser",
+          params: { url: "" },
           ...(groupId ? { position: { referenceGroup: groupId } } : {}),
         });
         return;
@@ -92,7 +92,7 @@ export function DockviewWatermark({ containerApi, group }: IWatermarkPanelProps)
         ...(groupId ? { position: { referenceGroup: groupId } } : {}),
       });
     },
-    [containerApi, group, activeSessionId]
+    [containerApi, group, activeSessionId],
   );
 
   // Check which singletons already exist so we can hide them

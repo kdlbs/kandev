@@ -1,10 +1,13 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { getAgentProfileMcpConfigAction, updateAgentProfileMcpConfigAction } from '@/app/actions/agents';
-import type { AgentProfileMcpConfig, McpServerDef } from '@/lib/types/http';
+import { useEffect, useState } from "react";
+import {
+  getAgentProfileMcpConfigAction,
+  updateAgentProfileMcpConfigAction,
+} from "@/app/actions/agents";
+import type { AgentProfileMcpConfig, McpServerDef } from "@/lib/types/http";
 
-type McpStatus = 'idle' | 'loading' | 'success' | 'error';
+type McpStatus = "idle" | "loading" | "success" | "error";
 
 type UseProfileMcpConfigParams = {
   profileId: string;
@@ -34,13 +37,13 @@ function serializeServers(config: AgentProfileMcpConfig | null): string {
 }
 
 function normalizeServers(value: unknown): Record<string, McpServerDef> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('MCP servers config must be a JSON object');
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("MCP servers config must be a JSON object");
   }
-  if ('mcpServers' in value) {
+  if ("mcpServers" in value) {
     const nested = (value as { mcpServers?: unknown }).mcpServers;
-    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
-      throw new Error('mcpServers must be a JSON object');
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
+      throw new Error("mcpServers must be a JSON object");
     }
     return nested as Record<string, McpServerDef>;
   }
@@ -69,9 +72,11 @@ function useResetOnUnsupported(
       setters.setMcpServers(EMPTY_EXAMPLE);
       setters.setMcpDirty(false);
       setters.setMcpError(null);
-      setters.setMcpStatus('idle');
+      setters.setMcpStatus("idle");
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only tracking these deps
   }, [supportsMcp, isEditableProfile]);
 }
@@ -95,7 +100,7 @@ function useFetchConfig(
     let active = true;
     Promise.resolve().then(() => {
       if (!active) return;
-      setters.setMcpStatus('loading');
+      setters.setMcpStatus("loading");
     });
     getAgentProfileMcpConfigAction(profileId)
       .then((config) => {
@@ -105,15 +110,17 @@ function useFetchConfig(
         setters.setMcpServers(serializeServers(config));
         setters.setMcpDirty(false);
         setters.setMcpError(null);
-        setters.setMcpStatus('idle');
+        setters.setMcpStatus("idle");
       })
       .catch((error) => {
         if (!active) return;
-        setters.setMcpError(error instanceof Error ? error.message : 'Failed to load MCP config');
-        setters.setMcpStatus('error');
+        setters.setMcpError(error instanceof Error ? error.message : "Failed to load MCP config");
+        setters.setMcpStatus("error");
       });
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only tracking these deps
   }, [profileId, supportsMcp, isEditableProfile, hasInitialConfig]);
 }
@@ -125,17 +132,15 @@ export function useProfileMcpConfig({
   onToastError,
 }: UseProfileMcpConfigParams): UseProfileMcpConfigResult {
   const initialServers = serializeServers(initialConfig ?? null);
-  const [mcpConfig, setMcpConfig] = useState<AgentProfileMcpConfig | null>(
-    initialConfig ?? null
-  );
+  const [mcpConfig, setMcpConfig] = useState<AgentProfileMcpConfig | null>(initialConfig ?? null);
   const [mcpEnabled, setMcpEnabledState] = useState(initialConfig?.enabled ?? false);
   const [mcpServers, setMcpServers] = useState(initialServers);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpDirty, setMcpDirty] = useState(false);
-  const [mcpStatus, setMcpStatus] = useState<McpStatus>('idle');
+  const [mcpStatus, setMcpStatus] = useState<McpStatus>("idle");
   const [hasInitialConfig] = useState(initialConfig !== undefined);
 
-  const isEditableProfile = Boolean(profileId) && !profileId.startsWith('draft-');
+  const isEditableProfile = Boolean(profileId) && !profileId.startsWith("draft-");
 
   const stateSetters = {
     setMcpConfig,
@@ -172,22 +177,22 @@ export function useProfileMcpConfig({
       normalizeServers(parsed);
       setMcpError(null);
     } catch {
-      setMcpError('Invalid JSON');
+      setMcpError("Invalid JSON");
     }
   };
 
   const handleSaveMcp = async () => {
     if (!isEditableProfile) return;
-    setMcpStatus('loading');
+    setMcpStatus("loading");
 
     let servers: Record<string, McpServerDef> = {};
     try {
-      const raw = isEmptyExample(mcpServers) ? '{}' : mcpServers;
+      const raw = isEmptyExample(mcpServers) ? "{}" : mcpServers;
       const parsed = raw.trim() ? JSON.parse(raw) : {};
       servers = normalizeServers(parsed);
     } catch (error) {
-      setMcpStatus('error');
-      setMcpError(error instanceof Error ? error.message : 'Invalid MCP config');
+      setMcpStatus("error");
+      setMcpError(error instanceof Error ? error.message : "Invalid MCP config");
       return;
     }
 
@@ -202,9 +207,9 @@ export function useProfileMcpConfig({
       setMcpServers(serializeServers(updated));
       setMcpDirty(false);
       setMcpError(null);
-      setMcpStatus('success');
+      setMcpStatus("success");
     } catch (error) {
-      setMcpStatus('error');
+      setMcpStatus("error");
       onToastError(error);
     }
   };

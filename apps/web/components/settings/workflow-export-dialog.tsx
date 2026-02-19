@@ -1,16 +1,10 @@
-'use client';
+"use client";
 
-import { IconCheck, IconCopy } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@kandev/ui/dialog';
-import { Textarea } from '@kandev/ui/textarea';
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
+import { IconCheck, IconCopy } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
+import { Textarea } from "@kandev/ui/textarea";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
 type WorkflowExportDialogProps = {
   open: boolean;
@@ -19,7 +13,12 @@ type WorkflowExportDialogProps = {
   json: string;
 };
 
-export function WorkflowExportDialog({ open, onOpenChange, title, json }: WorkflowExportDialogProps) {
+export function WorkflowExportDialog({
+  open,
+  onOpenChange,
+  title,
+  json,
+}: WorkflowExportDialogProps) {
   const { copied, copy } = useCopyToClipboard();
 
   return (
@@ -28,18 +27,18 @@ export function WorkflowExportDialog({ open, onOpenChange, title, json }: Workfl
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <Textarea
-          readOnly
-          value={json}
-          className="font-mono text-xs max-h-96 overflow-y-auto"
-        />
+        <Textarea readOnly value={json} className="font-mono text-xs max-h-96 overflow-y-auto" />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Close
           </Button>
           <Button onClick={() => copy(json)} className="cursor-pointer">
-            {copied ? <IconCheck className="h-4 w-4 mr-2" /> : <IconCopy className="h-4 w-4 mr-2" />}
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? (
+              <IconCheck className="h-4 w-4 mr-2" />
+            ) : (
+              <IconCopy className="h-4 w-4 mr-2" />
+            )}
+            {copied ? "Copied" : "Copy"}
           </Button>
         </DialogFooter>
       </DialogContent>

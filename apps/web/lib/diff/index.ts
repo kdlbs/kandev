@@ -10,7 +10,7 @@ export type {
   CommentBlockData,
   DiffViewerProps,
   DiffViewInlineProps,
-} from './types';
+} from "./types";
 
 // Adapter functions
 export {
@@ -24,4 +24,4 @@ export {
   computeLineDiffStats,
   type FileMutation,
   type ModifyFilePayload,
-} from './adapter';
+} from "./adapter";

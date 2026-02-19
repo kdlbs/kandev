@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { IconServer, IconChevronRight } from '@tabler/icons-react';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Badge } from '@kandev/ui/badge';
-import type { Environment } from '@/lib/types/http';
+import Link from "next/link";
+import { IconServer, IconChevronRight } from "@tabler/icons-react";
+import { Card, CardContent } from "@kandev/ui/card";
+import { Badge } from "@kandev/ui/badge";
+import type { Environment } from "@/lib/types/http";
 
 type EnvironmentCardProps = {
   environment: Environment;
 };
 
 export function EnvironmentCard({ environment }: EnvironmentCardProps) {
-  const typeLabel = environment.kind === 'local_pc' ? 'Local' : 'Custom Image';
-  const imageLabel = environment.image_tag || 'Unbuilt';
+  const typeLabel = environment.kind === "local_pc" ? "Local" : "Custom Image";
+  const imageLabel = environment.image_tag || "Unbuilt";
 
   return (
     <Link href={`/settings/environment/${environment.id}`}>
@@ -29,13 +29,13 @@ export function EnvironmentCard({ environment }: EnvironmentCardProps) {
                   <Badge variant="secondary" className="text-xs">
                     {typeLabel}
                   </Badge>
-                  {environment.kind === 'docker_image' && (
+                  {environment.kind === "docker_image" && (
                     <Badge variant="outline" className="text-xs">
                       {imageLabel}
                     </Badge>
                   )}
                 </div>
-                {environment.kind === 'local_pc' && environment.worktree_root && (
+                {environment.kind === "local_pc" && environment.worktree_root && (
                   <div className="text-xs text-muted-foreground mt-1">
                     Worktree: {environment.worktree_root}
                   </div>

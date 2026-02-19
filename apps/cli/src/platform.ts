@@ -3,12 +3,7 @@ import { execSync } from "node:child_process";
 const isWindows = process.platform === "win32";
 
 export type PlatformArch = "x64" | "arm64";
-export type PlatformDir =
-  | "linux-x64"
-  | "linux-arm64"
-  | "macos-x64"
-  | "macos-arm64"
-  | "windows-x64";
+export type PlatformDir = "linux-x64" | "linux-arm64" | "macos-x64" | "macos-arm64" | "windows-x64";
 
 export function getBinaryName(base: string): string {
   return isWindows ? `${base}.exe` : base;

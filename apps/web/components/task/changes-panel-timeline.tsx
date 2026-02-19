@@ -1,21 +1,17 @@
-'use client';
+"use client";
 
-import {
-  IconGitCommit,
-  IconGitPullRequest,
-  IconCloudUpload,
-} from '@tabler/icons-react';
+import { IconGitCommit, IconGitPullRequest, IconCloudUpload } from "@tabler/icons-react";
 
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { cn } from '@/lib/utils';
-import type { FileInfo } from '@/lib/state/store';
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@/lib/utils";
+import type { FileInfo } from "@/lib/state/store";
 
 // --- Timeline visual components ---
 
 type ChangedFile = {
   path: string;
-  status: FileInfo['status'];
+  status: FileInfo["status"];
   staged: boolean;
   plus: number | undefined;
   minus: number | undefined;
@@ -24,21 +20,14 @@ type ChangedFile = {
 
 // --- Timeline section dot colors ---
 const DOT_COLORS = {
-  unstaged: 'bg-yellow-500',
-  staged: 'bg-emerald-500',
-  commits: 'bg-blue-500',
-  action: 'bg-muted-foreground/25',
+  unstaged: "bg-yellow-500",
+  staged: "bg-emerald-500",
+  commits: "bg-blue-500",
+  action: "bg-muted-foreground/25",
 } as const;
 
 function TimelineDot({ color }: { color: string }) {
-  return (
-    <div
-      className={cn(
-        'relative z-10 size-1.5 rounded-full shrink-0 mt-[5px]',
-        color,
-      )}
-    />
-  );
+  return <div className={cn("relative z-10 size-1.5 rounded-full shrink-0 mt-[5px]", color)} />;
 }
 
 function TimelineSection({
@@ -61,9 +50,7 @@ function TimelineSection({
       {/* Vertical line + dot */}
       <div className="flex flex-col items-center">
         <TimelineDot color={dotColor} />
-        {!isLast && (
-          <div className="w-px flex-1 bg-border/60" />
-        )}
+        {!isLast && <div className="w-px flex-1 bg-border/60" />}
       </div>
 
       {/* Content */}
@@ -73,7 +60,7 @@ function TimelineSection({
           <div className="flex items-center justify-between gap-2 -mt-0.5 mb-1">
             <span className="text-[11px] font-medium uppercase tracking-wider text-foreground/70">
               {label}
-              {typeof count === 'number' && count > 0 && (
+              {typeof count === "number" && count > 0 && (
                 <span className="ml-1 text-muted-foreground/50 font-normal">({count})</span>
               )}
             </span>
@@ -122,12 +109,9 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
             <code className="font-mono text-muted-foreground text-[11px]">
               {commit.commit_sha.slice(0, 7)}
             </code>
-            <span className="flex-1 min-w-0 truncate text-foreground">
-              {commit.commit_message}
-            </span>
+            <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
             <span className="shrink-0 text-[11px]">
-              <span className="text-emerald-500">+{commit.insertions}</span>
-              {' '}
+              <span className="text-emerald-500">+{commit.insertions}</span>{" "}
               <span className="text-rose-500">-{commit.deletions}</span>
             </span>
           </li>
@@ -146,7 +130,12 @@ type ActionButtonsSectionProps = {
   aheadCount: number;
 };
 
-export function ActionButtonsSection({ onOpenPRDialog, onPush, isLoading, aheadCount }: ActionButtonsSectionProps) {
+export function ActionButtonsSection({
+  onOpenPRDialog,
+  onPush,
+  isLoading,
+  aheadCount,
+}: ActionButtonsSectionProps) {
   return (
     <TimelineSection dotColor={DOT_COLORS.action} isLast>
       <div className="flex items-center gap-2 -mt-0.5">
@@ -168,9 +157,7 @@ export function ActionButtonsSection({ onOpenPRDialog, onPush, isLoading, aheadC
         >
           <IconCloudUpload className="h-3 w-3" />
           Push
-          {aheadCount > 0 && (
-            <span className="text-muted-foreground">{aheadCount} ahead</span>
-          )}
+          {aheadCount > 0 && <span className="text-muted-foreground">{aheadCount} ahead</span>}
         </Button>
       </div>
     </TimelineSection>
@@ -179,10 +166,10 @@ export function ActionButtonsSection({ onOpenPRDialog, onPush, isLoading, aheadC
 
 // --- File list sections (Unstaged / Staged) ---
 
-import { FileRow } from './changes-panel-file-row';
+import { FileRow } from "./changes-panel-file-row";
 
 type FileListSectionProps = {
-  variant: 'unstaged' | 'staged';
+  variant: "unstaged" | "staged";
   files: ChangedFile[];
   pendingStageFiles: Set<string>;
   isLast: boolean;
@@ -208,8 +195,8 @@ export function FileListSection({
   onUnstage,
   onDiscard,
 }: FileListSectionProps) {
-  const dotColor = variant === 'unstaged' ? DOT_COLORS.unstaged : DOT_COLORS.staged;
-  const label = variant === 'unstaged' ? 'Unstaged' : 'Staged';
+  const dotColor = variant === "unstaged" ? DOT_COLORS.unstaged : DOT_COLORS.staged;
+  const label = variant === "unstaged" ? "Unstaged" : "Staged";
 
   return (
     <TimelineSection
@@ -254,7 +241,11 @@ type ReviewProgressBarProps = {
   onOpenReview?: () => void;
 };
 
-export function ReviewProgressBar({ reviewedCount, totalFileCount, onOpenReview }: ReviewProgressBarProps) {
+export function ReviewProgressBar({
+  reviewedCount,
+  totalFileCount,
+  onOpenReview,
+}: ReviewProgressBarProps) {
   const progressPercent = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
 
   if (totalFileCount <= 0) return null;

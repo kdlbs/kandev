@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState, memo, useCallback } from 'react';
-import { Textarea } from '@kandev/ui/textarea';
-import { Combobox } from './combobox';
+import { useEffect, useRef, useState, memo, useCallback } from "react";
+import { Textarea } from "@kandev/ui/textarea";
+import { Combobox } from "./combobox";
 
-const CURSOR_POINTER_CLASS = 'cursor-pointer';
+const CURSOR_POINTER_CLASS = "cursor-pointer";
 
 type RepositoryOption = {
   value: string;
@@ -116,7 +116,7 @@ export const AgentSelector = memo(function AgentSelector({
       emptyMessage="No agent found."
       disabled={disabled}
       dropdownLabel="Agent profile"
-      className={`min-w-[380px]${disabled ? '' : ` ${CURSOR_POINTER_CLASS}`}`}
+      className={`min-w-[380px]${disabled ? "" : ` ${CURSOR_POINTER_CLASS}`}`}
       triggerClassName={triggerClassName}
     />
   );
@@ -224,7 +224,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = 'auto';
+    textarea.style.height = "auto";
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [description]);
 
@@ -236,26 +236,38 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }, [autoFocus]);
 
-  const handleDescriptionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newValue = e.target.value;
-    const hadContent = description.trim().length > 0;
-    const hasContent = newValue.trim().length > 0;
-    setDescription(newValue);
-    if (hadContent !== hasContent) {
-      onDescriptionChange(hasContent);
-    }
-  }, [description, onDescriptionChange]);
+  const handleDescriptionChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const newValue = e.target.value;
+      const hadContent = description.trim().length > 0;
+      const hasContent = newValue.trim().length > 0;
+      setDescription(newValue);
+      if (hadContent !== hasContent) {
+        onDescriptionChange(hasContent);
+      }
+    },
+    [description, onDescriptionChange],
+  );
 
   return (
     <div>
       <Textarea
         ref={textareaRef}
-        placeholder={placeholder ?? (isSessionMode ? 'Describe what you want the agent to do...' : 'Write a prompt for the agent...')}
+        placeholder={
+          placeholder ??
+          (isSessionMode
+            ? "Describe what you want the agent to do..."
+            : "Write a prompt for the agent...")
+        }
         value={description}
         onChange={handleDescriptionChange}
         onKeyDown={onKeyDown}
         rows={2}
-        className={isSessionMode ? 'min-h-[120px] max-h-[240px] resize-none overflow-auto' : 'min-h-[96px] max-h-[240px] resize-y overflow-auto'}
+        className={
+          isSessionMode
+            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto"
+            : "min-h-[96px] max-h-[240px] resize-y overflow-auto"
+        }
         required={isSessionMode}
         disabled={disabled}
       />

@@ -1,9 +1,16 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
-import { useAppStore } from '@/components/state-provider';
-import type { Agent, AgentProfile, ModelConfig, AvailableAgent, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useAppStore } from "@/components/state-provider";
+import type {
+  Agent,
+  AgentProfile,
+  ModelConfig,
+  AvailableAgent,
+  PermissionSetting,
+  PassthroughConfig,
+} from "@/lib/types/http";
 
 type AgentProfileSettingsResult = {
   agent: Agent | null;
@@ -15,7 +22,7 @@ type AgentProfileSettingsResult = {
 
 export function useAgentProfileSettings(
   agentKey: string,
-  profileId: string
+  profileId: string,
 ): AgentProfileSettingsResult {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const availableAgents = useAvailableAgents().items;
@@ -33,7 +40,13 @@ export function useAgentProfileSettings(
   }, [availableAgents, agent?.name]);
 
   const modelConfig = useMemo(() => {
-    return availableAgent?.model_config ?? { default_model: '', available_models: [], supports_dynamic_models: false };
+    return (
+      availableAgent?.model_config ?? {
+        default_model: "",
+        available_models: [],
+        supports_dynamic_models: false,
+      }
+    );
   }, [availableAgent]);
 
   const permissionSettings = useMemo(() => {

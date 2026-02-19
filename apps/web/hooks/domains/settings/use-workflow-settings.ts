@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { Workflow } from '@/lib/types/http';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { Workflow } from "@/lib/types/http";
 
 /**
  * Manages workflow list state for the settings page, synced with WS events
@@ -55,7 +55,9 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
 
     const newFromStore = (prev: Workflow[]) => {
       const localIds = new Set(prev.map((w) => w.id));
-      return storeWorkflows.filter((sw) => !localIds.has(sw.id)).map((sw) => storeItemToWorkflow(sw));
+      return storeWorkflows
+        .filter((sw) => !localIds.has(sw.id))
+        .map((sw) => storeItemToWorkflow(sw));
     };
 
     setWorkflowItems((prev) => {
@@ -64,13 +66,17 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
       // Only remove workflows the store explicitly deleted, keep everything else.
       const filtered = prev.filter((w) => !deletedIds.has(w.id));
       const updated = filtered.map((w) => {
-        if (w.id.startsWith('temp-')) return w;
+        if (w.id.startsWith("temp-")) return w;
         const sw = storeWorkflows.find((s) => s.id === w.id);
         if (sw && sw.name !== w.name) return { ...w, name: sw.name };
         return w;
       });
 
-      if (toAdd.length === 0 && updated.length === prev.length && updated.every((w, i) => w === prev[i])) {
+      if (
+        toAdd.length === 0 &&
+        updated.length === prev.length &&
+        updated.every((w, i) => w === prev[i])
+      ) {
         return prev;
       }
       return [...toAdd, ...updated];
@@ -103,13 +109,18 @@ export function useWorkflowSettings(initialWorkflows: Workflow[]) {
   };
 }
 
-function storeItemToWorkflow(sw: { id: string; workspaceId: string; name: string; description?: string | null }): Workflow {
+function storeItemToWorkflow(sw: {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string | null;
+}): Workflow {
   return {
     id: sw.id,
     workspace_id: sw.workspaceId,
     name: sw.name,
     description: sw.description,
-    created_at: '',
-    updated_at: '',
+    created_at: "",
+    updated_at: "",
   };
 }

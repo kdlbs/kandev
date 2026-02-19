@@ -117,13 +117,13 @@ type MessageUpdatedProperties struct {
 
 // MessageInfo contains message metadata
 type MessageInfo struct {
-	ID         string              `json:"id"`
-	SessionID  string              `json:"sessionID"`
-	Role       string              `json:"role"` // "user", "assistant"
-	Model      *MessageModelInfo   `json:"model,omitempty"`
-	ProviderID string              `json:"providerID,omitempty"`
-	ModelID    string              `json:"modelID,omitempty"`
-	Tokens     *MessageTokensInfo  `json:"tokens,omitempty"`
+	ID         string             `json:"id"`
+	SessionID  string             `json:"sessionID"`
+	Role       string             `json:"role"` // "user", "assistant"
+	Model      *MessageModelInfo  `json:"model,omitempty"`
+	ProviderID string             `json:"providerID,omitempty"`
+	ModelID    string             `json:"modelID,omitempty"`
+	Tokens     *MessageTokensInfo `json:"tokens,omitempty"`
 }
 
 // MessageModelInfo contains model information
@@ -134,8 +134,8 @@ type MessageModelInfo struct {
 
 // MessageTokensInfo contains token usage information
 type MessageTokensInfo struct {
-	Input  int                    `json:"input"`
-	Output int                    `json:"output"`
+	Input  int                     `json:"input"`
+	Output int                     `json:"output"`
 	Cache  *MessageTokensCacheInfo `json:"cache,omitempty"`
 }
 
@@ -156,10 +156,10 @@ type Part struct {
 	Type      string           `json:"type"` // "text", "reasoning", "tool"
 	MessageID string           `json:"messageID"`
 	SessionID string           `json:"sessionID"`
-	Text      string           `json:"text,omitempty"`      // For text/reasoning
-	CallID    string           `json:"callID,omitempty"`    // For tool
-	Tool      string           `json:"tool,omitempty"`      // For tool
-	State     *ToolStateUpdate `json:"state,omitempty"`     // For tool
+	Text      string           `json:"text,omitempty"`   // For text/reasoning
+	CallID    string           `json:"callID,omitempty"` // For tool
+	Tool      string           `json:"tool,omitempty"`   // For tool
+	State     *ToolStateUpdate `json:"state,omitempty"`  // For tool
 }
 
 // ToolStateUpdate represents tool execution state
@@ -174,12 +174,12 @@ type ToolStateUpdate struct {
 
 // PermissionAskedProperties for permission.asked events
 type PermissionAskedProperties struct {
-	ID         string                 `json:"id"`
-	SessionID  string                 `json:"sessionID"`
-	Permission string                 `json:"permission"`
-	Patterns   []string               `json:"patterns,omitempty"`
-	Metadata   map[string]any         `json:"metadata,omitempty"`
-	Tool       *PermissionToolInfo    `json:"tool,omitempty"`
+	ID         string              `json:"id"`
+	SessionID  string              `json:"sessionID"`
+	Permission string              `json:"permission"`
+	Patterns   []string            `json:"patterns,omitempty"`
+	Metadata   map[string]any      `json:"metadata,omitempty"`
+	Tool       *PermissionToolInfo `json:"tool,omitempty"`
 }
 
 // PermissionToolInfo contains tool information for permission requests
@@ -194,8 +194,8 @@ type SessionIdleProperties struct {
 
 // SessionErrorProperties for session.error events
 type SessionErrorProperties struct {
-	SessionID string     `json:"sessionID"`
-	Error     *SDKError  `json:"error,omitempty"`
+	SessionID string    `json:"sessionID"`
+	Error     *SDKError `json:"error,omitempty"`
 }
 
 // SDKError represents an error from the SDK
@@ -260,7 +260,7 @@ type ProviderListResponse struct {
 
 // ProviderInfo contains provider information
 type ProviderInfo struct {
-	ID     string                      `json:"id"`
+	ID     string                       `json:"id"`
 	Models map[string]ProviderModelInfo `json:"models,omitempty"`
 }
 

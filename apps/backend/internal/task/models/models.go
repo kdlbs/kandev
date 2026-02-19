@@ -319,9 +319,9 @@ type RepositoryScript struct {
 type ExecutorType string
 
 const (
-	ExecutorTypeLocal       ExecutorType = "local"
-	ExecutorTypeWorktree    ExecutorType = "worktree"
-	ExecutorTypeLocalDocker ExecutorType = "local_docker"
+	ExecutorTypeLocal        ExecutorType = "local"
+	ExecutorTypeWorktree     ExecutorType = "worktree"
+	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 )
 

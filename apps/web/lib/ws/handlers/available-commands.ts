@@ -1,11 +1,11 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
-import type { AvailableCommand } from '@/lib/state/slices/session-runtime/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
 
 export function registerAvailableCommandsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'session.available_commands': (message) => {
+    "session.available_commands": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) {
         return;

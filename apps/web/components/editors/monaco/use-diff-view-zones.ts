@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import type { editor as monacoEditor } from 'monaco-editor';
-import { createRoot, type Root } from 'react-dom/client';
-import type { DiffComment } from '@/lib/diff/types';
-import { CommentForm } from '@/components/diff/comment-form';
-import { CommentDisplay } from '@/components/diff/comment-display';
-import { createElement } from 'react';
+import { useEffect, useRef } from "react";
+import type { editor as monacoEditor } from "monaco-editor";
+import { createRoot, type Root } from "react-dom/client";
+import type { DiffComment } from "@/lib/diff/types";
+import { CommentForm } from "@/components/diff/comment-form";
+import { CommentDisplay } from "@/components/diff/comment-display";
+import { createElement } from "react";
 
-type ViewZoneEntry = { id: string; root: Root; editorSide: 'modified' | 'original' };
+type ViewZoneEntry = { id: string; root: Root; editorSide: "modified" | "original" };
 
 interface UseViewZonesParams {
   modifiedEditor: monacoEditor.ICodeEditor | null;
@@ -29,7 +29,7 @@ interface UseViewZonesParams {
 
 interface AddZoneParams {
   targetEditor: monacoEditor.ICodeEditor;
-  side: 'modified' | 'original';
+  side: "modified" | "original";
   afterLine: number;
   heightPx: number;
   content: React.ReactNode;
@@ -37,11 +37,11 @@ interface AddZoneParams {
 }
 
 function addZone({ targetEditor, side, afterLine, heightPx, content, zones }: AddZoneParams) {
-  const domNode = document.createElement('div');
-  domNode.style.zIndex = '10';
+  const domNode = document.createElement("div");
+  domNode.style.zIndex = "10";
   const root = createRoot(domNode);
   root.render(content);
-  let zoneId = '';
+  let zoneId = "";
   targetEditor.changeViewZones((accessor) => {
     zoneId = accessor.addZone({ afterLineNumber: afterLine, heightInPx: heightPx, domNode });
   });
@@ -54,10 +54,14 @@ function removeZones(
   originalEditor: monacoEditor.ICodeEditor,
 ) {
   modifiedEditor.changeViewZones((accessor) => {
-    for (const z of zones) { if (z.editorSide === 'modified') accessor.removeZone(z.id); }
+    for (const z of zones) {
+      if (z.editorSide === "modified") accessor.removeZone(z.id);
+    }
   });
   originalEditor.changeViewZones((accessor) => {
-    for (const z of zones) { if (z.editorSide === 'original') accessor.removeZone(z.id); }
+    for (const z of zones) {
+      if (z.editorSide === "original") accessor.removeZone(z.id);
+    }
   });
   const roots = zones.map((z) => z.root);
   queueMicrotask(() => roots.forEach((r) => r.unmount()));
@@ -65,11 +69,20 @@ function removeZones(
 
 /** Manages inline ViewZones for comments and comment forms */
 export function useViewZones({
-  modifiedEditor, originalEditor, comments, showCommentForm,
-  selectedLineRange, editingCommentId, setEditingComment,
-  handleCommentSubmitRef, handleCommentDeleteRef, handleCommentUpdateRef,
-  clearModifiedGutter, clearOriginalGutter,
-  setShowCommentForm, setSelectedLineRange,
+  modifiedEditor,
+  originalEditor,
+  comments,
+  showCommentForm,
+  selectedLineRange,
+  editingCommentId,
+  setEditingComment,
+  handleCommentSubmitRef,
+  handleCommentDeleteRef,
+  handleCommentUpdateRef,
+  clearModifiedGutter,
+  clearOriginalGutter,
+  setShowCommentForm,
+  setSelectedLineRange,
 }: UseViewZonesParams) {
   const viewZonesRef = useRef<ViewZoneEntry[]>([]);
 
@@ -85,34 +98,47 @@ export function useViewZones({
     const newZones: ViewZoneEntry[] = [];
 
     for (const comment of comments) {
-      const side = comment.side === 'deletions' ? 'original' : 'modified';
-      const editor = side === 'modified' ? modifiedEditor : originalEditor;
+      const side = comment.side === "deletions" ? "original" : "modified";
+      const editor = side === "modified" ? modifiedEditor : originalEditor;
       const isEditing = editingCommentId === comment.id;
       const node = isEditing
-        ? createElement('div', { className: 'px-2 py-0.5' },
+        ? createElement(
+            "div",
+            { className: "px-2 py-0.5" },
             createElement(CommentForm, {
               initialContent: comment.text,
               onSubmit: (c: string) => handleCommentUpdateRef.current?.(comment.id, c),
               onCancel: () => setEditingComment(null),
               isEditing: true,
-            })
+            }),
           )
-        : createElement('div', { className: 'px-2 py-0.5' },
+        : createElement(
+            "div",
+            { className: "px-2 py-0.5" },
             createElement(CommentDisplay, {
               comment,
               onDelete: () => handleCommentDeleteRef.current?.(comment.id),
               onEdit: () => setEditingComment(comment.id),
               showCode: false,
               compact: true,
-            })
+            }),
           );
-      addZone({ targetEditor: editor, side, afterLine: comment.endLine, heightPx: isEditing ? 120 : 32, content: node, zones: newZones });
+      addZone({
+        targetEditor: editor,
+        side,
+        afterLine: comment.endLine,
+        heightPx: isEditing ? 120 : 32,
+        content: node,
+        zones: newZones,
+      });
     }
 
     if (showCommentForm && selectedLineRange) {
-      const side = selectedLineRange.side === 'deletions' ? 'original' : 'modified';
-      const editor = side === 'modified' ? modifiedEditor : originalEditor;
-      const node = createElement('div', { className: 'px-2 py-1' },
+      const side = selectedLineRange.side === "deletions" ? "original" : "modified";
+      const editor = side === "modified" ? modifiedEditor : originalEditor;
+      const node = createElement(
+        "div",
+        { className: "px-2 py-1" },
         createElement(CommentForm, {
           onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
           onCancel: () => {
@@ -121,16 +147,34 @@ export function useViewZones({
             clearModifiedGutter();
             clearOriginalGutter();
           },
-        })
+        }),
       );
-      addZone({ targetEditor: editor, side, afterLine: Math.max(selectedLineRange.start, selectedLineRange.end), heightPx: 120, content: node, zones: newZones });
+      addZone({
+        targetEditor: editor,
+        side,
+        afterLine: Math.max(selectedLineRange.start, selectedLineRange.end),
+        heightPx: 120,
+        content: node,
+        zones: newZones,
+      });
     }
 
     viewZonesRef.current = newZones;
 
     return () => {
-      try { removeZones(newZones, modifiedEditor, originalEditor); } catch { /* editors may be disposed */ }
+      try {
+        removeZones(newZones, modifiedEditor, originalEditor);
+      } catch {
+        /* editors may be disposed */
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modifiedEditor, originalEditor, comments, showCommentForm, selectedLineRange, editingCommentId]);
+  }, [
+    modifiedEditor,
+    originalEditor,
+    comments,
+    showCommentForm,
+    selectedLineRange,
+    editingCommentId,
+  ]);
 }

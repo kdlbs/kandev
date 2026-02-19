@@ -16,8 +16,8 @@ import (
 func getAdapterBaseDir() (string, error) {
 	// Try multiple possible paths
 	candidates := []string{
-		"apps/backend/internal/agentctl/server/adapter",   // From git root
-		"internal/agentctl/server/adapter",                 // From apps/backend
+		"apps/backend/internal/agentctl/server/adapter", // From git root
+		"internal/agentctl/server/adapter",              // From apps/backend
 	}
 
 	cwd, err := os.Getwd()

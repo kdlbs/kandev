@@ -1,7 +1,7 @@
-import type { AppState, KanbanState } from '@/lib/state/store';
-import type { WorkflowSnapshot, Message, Task } from '@/lib/types/http';
+import type { AppState, KanbanState } from "@/lib/state/store";
+import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
 
-type KanbanTask = KanbanState['tasks'][number];
+type KanbanTask = KanbanState["tasks"][number];
 
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   const tasks = snapshot.tasks
@@ -31,7 +31,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       steps: snapshot.steps.map((step) => ({
         id: step.id,
         title: step.name,
-        color: step.color ?? 'bg-neutral-400',
+        color: step.color ?? "bg-neutral-400",
         position: step.position,
         events: step.events,
         allow_manual_move: step.allow_manual_move,
@@ -46,10 +46,9 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
 export function taskToState(
   task: Task,
   sessionId?: string | null,
-  messages?: { items: Message[]; hasMore?: boolean; oldestCursor?: string | null }
+  messages?: { items: Message[]; hasMore?: boolean; oldestCursor?: string | null },
 ): Partial<AppState> {
-  const resolvedSessionId =
-    sessionId ?? messages?.items[0]?.session_id ?? null;
+  const resolvedSessionId = sessionId ?? messages?.items[0]?.session_id ?? null;
   return {
     tasks: {
       activeTaskId: task.id,
@@ -65,7 +64,7 @@ export function taskToState(
               [resolvedSessionId]: {
                 isLoading: false,
                 hasMore: messages.hasMore ?? false,
-                oldestCursor: messages.oldestCursor ?? (messages.items[0]?.id ?? null),
+                oldestCursor: messages.oldestCursor ?? messages.items[0]?.id ?? null,
               },
             },
           }

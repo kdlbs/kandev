@@ -1,7 +1,7 @@
-import { getSessionStorage, setSessionStorage, removeSessionStorage } from '@/lib/local-storage';
-import type { Comment } from './types';
+import { getSessionStorage, setSessionStorage, removeSessionStorage } from "@/lib/local-storage";
+import type { Comment } from "./types";
 
-const STORAGE_PREFIX = 'kandev.comments.';
+const STORAGE_PREFIX = "kandev.comments.";
 
 export function persistSessionComments(sessionId: string, comments: Comment[]): void {
   if (comments.length === 0) {

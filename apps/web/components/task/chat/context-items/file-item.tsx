@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo, useCallback } from 'react';
-import type { FileContextItem } from '@/lib/types/context';
-import { ContextChip } from './context-chip';
-import { LazyFilePreview } from './lazy-file-preview';
+import { memo, useCallback } from "react";
+import type { FileContextItem } from "@/lib/types/context";
+import { ContextChip } from "./context-chip";
+import { LazyFilePreview } from "./lazy-file-preview";
 
 export const FileItem = memo(function FileItem({
   item,

@@ -27,7 +27,7 @@ func TestSQLiteRepository_TaskCRUD(t *testing.T) {
 	// Create task (workflow steps are managed by workflow repository)
 	task := &models.Task{
 		WorkspaceID:    "ws-1",
-		WorkflowID:        "wf-123",
+		WorkflowID:     "wf-123",
 		WorkflowStepID: "step-123",
 		Title:          "Test Task",
 		Description:    "A test task",
@@ -196,7 +196,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-4", WorkspaceID: "ws-2", WorkflowID: "wf-456", WorkflowStepID: "step-2", Title: "Task Four"})
 
 	// Test basic listing without search
-	tasks, total, err := repo.ListTasksByWorkspace(ctx,"ws-1", "", 1, 10, false)
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks by workspace: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	}
 
 	// Test pagination
-	tasks, total, err = repo.ListTasksByWorkspace(ctx,"ws-1", "", 1, 2, false)
+	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 2, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks with pagination: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	}
 
 	// Test page 2
-	tasksPage2, _, err := repo.ListTasksByWorkspace(ctx,"ws-1", "", 2, 2, false)
+	tasksPage2, _, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 2, 2, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks page 2: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main"})
 
 	// Test search by title
-	_, totalAuth, err := repo.ListTasksByWorkspace(ctx,"ws-1", "authentication", 1, 10, false)
+	_, totalAuth, err := repo.ListTasksByWorkspace(ctx, "ws-1", "authentication", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by title: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by description
-	tasksDarkMode, totalDarkMode, err := repo.ListTasksByWorkspace(ctx,"ws-1", "dark mode", 1, 10, false)
+	tasksDarkMode, totalDarkMode, err := repo.ListTasksByWorkspace(ctx, "ws-1", "dark mode", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by description: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by repository name
-	tasksRepo, totalRepo, err := repo.ListTasksByWorkspace(ctx,"ws-1", "MyProject", 1, 10, false)
+	tasksRepo, totalRepo, err := repo.ListTasksByWorkspace(ctx, "ws-1", "MyProject", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by repository name: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by repository local_path
-	_, totalPath, err := repo.ListTasksByWorkspace(ctx,"ws-1", "myproject", 1, 10, false)
+	_, totalPath, err := repo.ListTasksByWorkspace(ctx, "ws-1", "myproject", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by repository path: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search with no results
-	tasksNone, totalNone, err := repo.ListTasksByWorkspace(ctx,"ws-1", "nonexistent", 1, 10, false)
+	tasksNone, totalNone, err := repo.ListTasksByWorkspace(ctx, "ws-1", "nonexistent", 1, 10, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks with no results: %v", err)
 	}

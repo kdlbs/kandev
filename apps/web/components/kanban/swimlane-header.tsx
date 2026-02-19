@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { Badge } from '@kandev/ui/badge';
-import { IconChevronRight } from '@tabler/icons-react';
-import { cn } from '@kandev/ui/lib/utils';
+import { Badge } from "@kandev/ui/badge";
+import { IconChevronRight } from "@tabler/icons-react";
+import { cn } from "@kandev/ui/lib/utils";
 
 export type SwimlaneHeaderProps = {
   workflowName: string;
@@ -27,8 +27,8 @@ export function SwimlaneHeader({
       <Badge variant="secondary" className="text-xs shrink-0 gap-1.5 px-2.5 py-0.5">
         <IconChevronRight
           className={cn(
-            'h-3 w-3 text-muted-foreground transition-transform shrink-0',
-            !isCollapsed && 'rotate-90'
+            "h-3 w-3 text-muted-foreground transition-transform shrink-0",
+            !isCollapsed && "rotate-90",
           )}
         />
         {workflowName}

@@ -1,9 +1,16 @@
-import { PageClient } from '@/app/page-client';
-import { StateHydrator } from '@/components/state-hydrator';
-import { fetchWorkflowSnapshot, fetchUserSettings, listWorkflows, listRepositories, listWorkspaces, listTaskSessionMessages } from '@/lib/api';
-import { snapshotToState } from '@/lib/ssr/mapper';
-import type { AppState } from '@/lib/state/store';
-import type { ListWorkspacesResponse, UserSettings, UserSettingsResponse } from '@/lib/types/http';
+import { PageClient } from "@/app/page-client";
+import { StateHydrator } from "@/components/state-hydrator";
+import {
+  fetchWorkflowSnapshot,
+  fetchUserSettings,
+  listWorkflows,
+  listRepositories,
+  listWorkspaces,
+  listTaskSessionMessages,
+} from "@/lib/api";
+import { snapshotToState } from "@/lib/ssr/mapper";
+import type { AppState } from "@/lib/state/store";
+import type { ListWorkspacesResponse, UserSettings, UserSettingsResponse } from "@/lib/types/http";
 
 // Server Component: runs on the server for SSR and data hydration.
 type PageProps = {
@@ -14,7 +21,7 @@ function resolveParam(value: string | string[] | undefined): string | undefined 
   return Array.isArray(value) ? value[0] : value;
 }
 
-type WorkspaceItem = ListWorkspacesResponse['workspaces'][number];
+type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 function mapWorkspaceItem(ws: WorkspaceItem) {
   return {
     id: ws.id,
@@ -37,14 +44,29 @@ function buildLspConfig(s: UserSettings) {
   };
 }
 
-function buildUserSettingsState(resp: UserSettingsResponse | null, workspaceId: string | null): AppState['userSettings'] {
+function buildUserSettingsState(
+  resp: UserSettingsResponse | null,
+  workspaceId: string | null,
+): AppState["userSettings"] {
   const s = resp?.settings;
   const shellOptions = resp ? (resp.shell_options ?? []) : [];
   if (!s) {
     return {
-      workspaceId, workflowId: null, kanbanViewMode: null, repositoryIds: [], preferredShell: null,
-      shellOptions, defaultEditorId: null, enablePreviewOnClick: false, chatSubmitKey: 'cmd_enter',
-      reviewAutoMarkOnScroll: true, savedLayouts: [], lspAutoStartLanguages: [], lspAutoInstallLanguages: [], lspServerConfigs: {}, loaded: false,
+      workspaceId,
+      workflowId: null,
+      kanbanViewMode: null,
+      repositoryIds: [],
+      preferredShell: null,
+      shellOptions,
+      defaultEditorId: null,
+      enablePreviewOnClick: false,
+      chatSubmitKey: "cmd_enter",
+      reviewAutoMarkOnScroll: true,
+      savedLayouts: [],
+      lspAutoStartLanguages: [],
+      lspAutoInstallLanguages: [],
+      lspServerConfigs: {},
+      loaded: false,
     };
   }
   return {
@@ -56,7 +78,7 @@ function buildUserSettingsState(resp: UserSettingsResponse | null, workspaceId: 
     shellOptions,
     defaultEditorId: s.default_editor_id || null,
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? 'cmd_enter',
+    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     savedLayouts: s.saved_layouts ?? [],
     ...buildLspConfig(s),
@@ -64,8 +86,17 @@ function buildUserSettingsState(resp: UserSettingsResponse | null, workspaceId: 
   };
 }
 
-function resolveActiveId<T extends { id: string }>(items: T[], preferredId?: string, fallbackId?: string | null): string | null {
-  return items.find((i) => i.id === preferredId)?.id ?? items.find((i) => i.id === fallbackId)?.id ?? items[0]?.id ?? null;
+function resolveActiveId<T extends { id: string }>(
+  items: T[],
+  preferredId?: string,
+  fallbackId?: string | null,
+): string | null {
+  return (
+    items.find((i) => i.id === preferredId)?.id ??
+    items.find((i) => i.id === fallbackId)?.id ??
+    items[0]?.id ??
+    null
+  );
 }
 
 function buildBaseState(
@@ -87,7 +118,11 @@ async function loadSessionMessages(
   state: Partial<AppState>,
 ): Promise<Partial<AppState>> {
   try {
-    const messagesResponse = await listTaskSessionMessages(sessionId, { limit: 50, sort: 'desc' }, { cache: 'no-store' });
+    const messagesResponse = await listTaskSessionMessages(
+      sessionId,
+      { limit: 50, sort: "desc" },
+      { cache: "no-store" },
+    );
     const messages = [...(messagesResponse.messages ?? [])].reverse();
     return {
       ...state,
@@ -103,7 +138,10 @@ async function loadSessionMessages(
       },
     };
   } catch (error) {
-    console.warn('Could not SSR messages (client will load via WebSocket):', error instanceof Error ? error.message : String(error));
+    console.warn(
+      "Could not SSR messages (client will load via WebSocket):",
+      error instanceof Error ? error.message : String(error),
+    );
     return state;
   }
 }
@@ -117,12 +155,16 @@ export default async function Page({ searchParams }: PageProps) {
     const sessionId = resolveParam(resolvedParams.sessionId);
 
     const [workspaces, userSettingsResponse] = await Promise.all([
-      listWorkspaces({ cache: 'no-store' }),
-      fetchUserSettings({ cache: 'no-store' }).catch(() => null),
+      listWorkspaces({ cache: "no-store" }),
+      fetchUserSettings({ cache: "no-store" }).catch(() => null),
     ]);
     const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
-    const activeWorkspaceId = resolveActiveId(workspaces.workspaces, workspaceId, settingsWorkspaceId);
+    const activeWorkspaceId = resolveActiveId(
+      workspaces.workspaces,
+      workspaceId,
+      settingsWorkspaceId,
+    );
 
     let initialState = buildBaseState(workspaces, userSettingsResponse, activeWorkspaceId);
 
@@ -136,8 +178,10 @@ export default async function Page({ searchParams }: PageProps) {
     }
 
     const [workflowList, repositoriesResponse] = await Promise.all([
-      listWorkflows(activeWorkspaceId, { cache: 'no-store' }),
-      listRepositories(activeWorkspaceId, undefined, { cache: 'no-store' }).catch(() => ({ repositories: [] })),
+      listWorkflows(activeWorkspaceId, { cache: "no-store" }),
+      listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
+        repositories: [],
+      })),
     ]);
 
     const workflowId = resolveActiveId(workflowList.workflows, workflowIdParam, settingsWorkflowId);
@@ -145,11 +189,15 @@ export default async function Page({ searchParams }: PageProps) {
     initialState = {
       ...initialState,
       userSettings: {
-        ...(initialState.userSettings as AppState['userSettings']),
+        ...(initialState.userSettings as AppState["userSettings"]),
         workflowId,
       },
       workflows: {
-        items: workflowList.workflows.map((w) => ({ id: w.id, workspaceId: w.workspace_id, name: w.name })),
+        items: workflowList.workflows.map((w) => ({
+          id: w.id,
+          workspaceId: w.workspace_id,
+          name: w.name,
+        })),
         activeId: workflowId,
       },
       repositories: {
@@ -168,7 +216,7 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const snapshot = await fetchWorkflowSnapshot(workflowId, { cache: 'no-store' });
+    const snapshot = await fetchWorkflowSnapshot(workflowId, { cache: "no-store" });
     initialState = { ...initialState, ...snapshotToState(snapshot) };
 
     if (taskId && sessionId) {

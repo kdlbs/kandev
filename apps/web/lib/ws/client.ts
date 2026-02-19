@@ -1,9 +1,9 @@
-import type { BackendMessageMap, BackendMessageType } from '@/lib/types/backend';
-import { generateUUID } from '@/lib/utils';
+import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
+import { generateUUID } from "@/lib/utils";
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
-type WebSocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error' | 'reconnecting';
+type WebSocketStatus = "idle" | "connecting" | "open" | "closed" | "error" | "reconnecting";
 
 export interface ReconnectOptions {
   enabled?: boolean;
@@ -23,11 +23,15 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
-  private status: WebSocketStatus = 'idle';
+  private status: WebSocketStatus = "idle";
   private handlers = new Map<BackendMessageType, Set<MessageHandler<BackendMessageType>>>();
   private pendingRequests = new Map<
     string,
-    { resolve: (payload: unknown) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> }
+    {
+      resolve: (payload: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+    }
   >();
   private pendingQueue: string[] = [];
   private reconnectOptions: Required<ReconnectOptions>;
@@ -41,7 +45,7 @@ export class WebSocketClient {
   constructor(
     private url: string,
     private onStatusChange?: (status: WebSocketStatus) => void,
-    reconnectOptions?: ReconnectOptions
+    reconnectOptions?: ReconnectOptions,
   ) {
     this.reconnectOptions = { ...DEFAULT_RECONNECT_OPTIONS, ...reconnectOptions };
   }
@@ -54,18 +58,18 @@ export class WebSocketClient {
     if (this.socket) return;
     this.intentionalClose = false;
     this.clearReconnectTimer();
-    this.setStatus('connecting');
+    this.setStatus("connecting");
     this.socket = new WebSocket(this.url);
 
     this.socket.onopen = () => {
       this.reconnectAttempts = 0;
-      this.setStatus('open');
+      this.setStatus("open");
       this.flushQueue();
       this.resubscribe();
     };
 
     this.socket.onmessage = (event) => {
-      const parts = (event.data as string).split('\n');
+      const parts = (event.data as string).split("\n");
       for (const part of parts) {
         const trimmed = part.trim();
         if (!trimmed) continue;
@@ -79,7 +83,7 @@ export class WebSocketClient {
     };
 
     this.socket.onerror = () => {
-      this.setStatus('error');
+      this.setStatus("error");
     };
 
     this.socket.onclose = (event) => {
@@ -95,13 +99,13 @@ export class WebSocketClient {
       this.socket.close();
       this.socket = null;
     }
-    this.setStatus('closed');
+    this.setStatus("closed");
     this.cleanupPendingRequests();
   }
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
-    if (this.status !== 'open' || !this.socket) {
+    if (this.status !== "open" || !this.socket) {
       this.pendingQueue.push(data);
       return;
     }
@@ -115,8 +119,12 @@ export class WebSocketClient {
         this.pendingRequests.delete(id);
         reject(new Error(`WebSocket request timed out: ${action}`));
       }, timeoutMs);
-      this.pendingRequests.set(id, { resolve: resolve as (payload: unknown) => void, reject, timeout });
-      this.send({ id, type: 'request', action, payload });
+      this.pendingRequests.set(id, {
+        resolve: resolve as (payload: unknown) => void,
+        reject,
+        timeout,
+      });
+      this.send({ id, type: "request", action, payload });
     });
   }
 
@@ -124,11 +132,11 @@ export class WebSocketClient {
     const currentCount = this.subscriptions.get(taskId) ?? 0;
     const nextCount = currentCount + 1;
     this.subscriptions.set(taskId, nextCount);
-    if (this.status === 'open' && nextCount === 1) {
+    if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'task.subscribe',
+        type: "request",
+        action: "task.subscribe",
         payload: { task_id: taskId },
       });
     }
@@ -139,11 +147,11 @@ export class WebSocketClient {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
-    if (this.status === 'open' && nextCount === 1) {
+    if (this.status === "open" && nextCount === 1) {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'session.subscribe',
+        type: "request",
+        action: "session.subscribe",
         payload: { session_id: sessionId },
       });
     }
@@ -152,11 +160,11 @@ export class WebSocketClient {
 
   subscribeUser() {
     this.userSubscriptionCount += 1;
-    if (this.status === 'open' && this.userSubscriptionCount === 1) {
+    if (this.status === "open" && this.userSubscriptionCount === 1) {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'user.subscribe',
+        type: "request",
+        action: "user.subscribe",
         payload: {},
       });
     }
@@ -168,11 +176,11 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.subscriptions.delete(taskId);
-      if (this.status === 'open') {
+      if (this.status === "open") {
         this.send({
           id: generateUUID(),
-          type: 'request',
-          action: 'task.unsubscribe',
+          type: "request",
+          action: "task.unsubscribe",
           payload: { task_id: taskId },
         });
       }
@@ -187,11 +195,11 @@ export class WebSocketClient {
     const nextCount = currentCount - 1;
     if (nextCount <= 0) {
       this.sessionSubscriptions.delete(sessionId);
-      if (this.status === 'open') {
+      if (this.status === "open") {
         this.send({
           id: generateUUID(),
-          type: 'request',
-          action: 'session.unsubscribe',
+          type: "request",
+          action: "session.unsubscribe",
           payload: { session_id: sessionId },
         });
       }
@@ -202,11 +210,11 @@ export class WebSocketClient {
 
   unsubscribeUser() {
     this.userSubscriptionCount = Math.max(0, this.userSubscriptionCount - 1);
-    if (this.status === 'open' && this.userSubscriptionCount === 0) {
+    if (this.status === "open" && this.userSubscriptionCount === 0) {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'user.unsubscribe',
+        type: "request",
+        action: "user.unsubscribe",
         payload: {},
       });
     }
@@ -231,15 +239,15 @@ export class WebSocketClient {
   private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
     const msgWithId = message as { id?: string; type: string };
 
-    if (msgWithId.type === 'response' && msgWithId.id) {
+    if (msgWithId.type === "response" && msgWithId.id) {
       this.resolvePendingRequest(msgWithId.id, message.payload);
       return;
     }
-    if (msgWithId.type === 'error' && msgWithId.id) {
+    if (msgWithId.type === "error" && msgWithId.id) {
       this.rejectPendingRequest(msgWithId.id, message.payload);
       return;
     }
-    if (message.type !== 'notification') return;
+    if (message.type !== "notification") return;
 
     const action = (message as { action?: string })?.action as BackendMessageType | undefined;
     if (!action) return;
@@ -263,14 +271,14 @@ export class WebSocketClient {
     clearTimeout(pending.timeout);
     this.pendingRequests.delete(msgId);
     const errorMessage =
-      typeof payload === 'object' && payload && 'message' in payload
+      typeof payload === "object" && payload && "message" in payload
         ? String((payload as { message?: string }).message)
-        : 'WebSocket request failed';
+        : "WebSocket request failed";
     pending.reject(new Error(errorMessage));
   }
 
   private handleDisconnect(event: CloseEvent) {
-    this.setStatus('closed');
+    this.setStatus("closed");
 
     // Don't reconnect if this was an intentional close
     if (this.intentionalClose) {
@@ -284,24 +292,27 @@ export class WebSocketClient {
 
     // Don't reconnect if we've exceeded max attempts
     if (this.reconnectAttempts >= this.reconnectOptions.maxAttempts) {
-      console.warn(`WebSocket max reconnect attempts (${this.reconnectOptions.maxAttempts}) reached`);
-      this.setStatus('error');
+      console.warn(
+        `WebSocket max reconnect attempts (${this.reconnectOptions.maxAttempts}) reached`,
+      );
+      this.setStatus("error");
       this.cleanupPendingRequests();
       return;
     }
 
     // Calculate delay with exponential backoff
     const delay = Math.min(
-      this.reconnectOptions.initialDelay * Math.pow(this.reconnectOptions.backoffMultiplier, this.reconnectAttempts),
-      this.reconnectOptions.maxDelay
+      this.reconnectOptions.initialDelay *
+        Math.pow(this.reconnectOptions.backoffMultiplier, this.reconnectAttempts),
+      this.reconnectOptions.maxDelay,
     );
 
     this.reconnectAttempts++;
-    this.setStatus('reconnecting');
+    this.setStatus("reconnecting");
 
     console.log(
-      `WebSocket disconnected (code: ${event.code}, reason: ${event.reason || 'none'}). ` +
-        `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.reconnectOptions.maxAttempts})...`
+      `WebSocket disconnected (code: ${event.code}, reason: ${event.reason || "none"}). ` +
+        `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.reconnectOptions.maxAttempts})...`,
     );
 
     this.reconnectTimer = setTimeout(() => {
@@ -320,7 +331,7 @@ export class WebSocketClient {
     // Reject all pending requests
     this.pendingRequests.forEach(({ reject, timeout }) => {
       clearTimeout(timeout);
-      reject(new Error('WebSocket connection closed'));
+      reject(new Error("WebSocket connection closed"));
     });
     this.pendingRequests.clear();
   }
@@ -330,31 +341,31 @@ export class WebSocketClient {
     this.subscriptions.forEach((_count, taskId) => {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'task.subscribe',
+        type: "request",
+        action: "task.subscribe",
         payload: { task_id: taskId },
       });
     });
     this.sessionSubscriptions.forEach((_count, sessionId) => {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'session.subscribe',
+        type: "request",
+        action: "session.subscribe",
         payload: { session_id: sessionId },
       });
     });
     if (this.userSubscriptionCount > 0) {
       this.send({
         id: generateUUID(),
-        type: 'request',
-        action: 'user.subscribe',
+        type: "request",
+        action: "user.subscribe",
         payload: {},
       });
     }
   }
 
   private flushQueue() {
-    if (!this.socket || this.status !== 'open') return;
+    if (!this.socket || this.status !== "open") return;
     this.pendingQueue.forEach((data) => this.socket?.send(data));
     this.pendingQueue = [];
   }

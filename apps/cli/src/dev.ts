@@ -30,11 +30,11 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  const backendProc = spawn(
-    "make",
-    ["-C", path.join("apps", "backend"), "dev"],
-    { cwd: repoRoot, env: backendEnv, stdio: "inherit" },
-  );
+  const backendProc = spawn("make", ["-C", path.join("apps", "backend"), "dev"], {
+    cwd: repoRoot,
+    env: backendEnv,
+    stdio: "inherit",
+  });
   supervisor.children.push(backendProc);
 
   attachBackendExitHandler(backendProc, supervisor);

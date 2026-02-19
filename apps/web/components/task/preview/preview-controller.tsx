@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { usePreviewPanel } from '@/hooks/use-preview-panel';
+import { usePreviewPanel } from "@/hooks/use-preview-panel";
 
 type PreviewControllerProps = {
   sessionId: string | null;

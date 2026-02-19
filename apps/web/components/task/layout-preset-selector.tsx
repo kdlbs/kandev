@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState } from "react";
 import {
   IconLayout,
   IconCheck,
@@ -9,11 +9,11 @@ import {
   IconFileText,
   IconDeviceDesktop,
   IconTrash,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Checkbox } from '@kandev/ui/checkbox';
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Checkbox } from "@kandev/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@kandev/ui/dialog';
+} from "@kandev/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,13 +30,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { Badge } from '@kandev/ui/badge';
-import { useDockviewStore, type BuiltInPreset } from '@/lib/state/dockview-store';
-import { useAppStore } from '@/components/state-provider';
-import { updateUserSettings } from '@/lib/api/domains/settings-api';
-import type { SavedLayout } from '@/lib/types/http';
+} from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Badge } from "@kandev/ui/badge";
+import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import type { SavedLayout } from "@/lib/types/http";
 
 type PresetOption = {
   id: BuiltInPreset;
@@ -47,21 +47,21 @@ type PresetOption = {
 
 const BUILT_IN_PRESETS: PresetOption[] = [
   {
-    id: 'default',
-    label: 'Default',
-    description: 'Sidebar + Agent + Changes/Files/Terminal',
+    id: "default",
+    label: "Default",
+    description: "Sidebar + Agent + Changes/Files/Terminal",
     icon: IconColumns3,
   },
   {
-    id: 'plan',
-    label: 'Plan Mode',
-    description: 'Sidebar + Agent + Plan (side-by-side)',
+    id: "plan",
+    label: "Plan Mode",
+    description: "Sidebar + Agent + Plan (side-by-side)",
     icon: IconFileText,
   },
   {
-    id: 'preview',
-    label: 'Preview Mode',
-    description: 'Sidebar + Agent + Browser (side-by-side)',
+    id: "preview",
+    label: "Preview Mode",
+    description: "Sidebar + Agent + Browser (side-by-side)",
     icon: IconDeviceDesktop,
   },
 ];
@@ -73,7 +73,7 @@ function SaveLayoutDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
@@ -93,13 +93,11 @@ function SaveLayoutDialog({
         created_at: new Date().toISOString(),
       };
       // If this layout is the default, unset other defaults
-      const updated = savedLayouts.map((l) =>
-        isDefault ? { ...l, is_default: false } : l
-      );
+      const updated = savedLayouts.map((l) => (isDefault ? { ...l, is_default: false } : l));
       await updateUserSettings({
         saved_layouts: [...updated, newLayout],
       });
-      setName('');
+      setName("");
       setIsDefault(false);
       onOpenChange(false);
     } finally {
@@ -126,7 +124,7 @@ function SaveLayoutDialog({
               placeholder="My layout"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSave();
+                if (e.key === "Enter") handleSave();
               }}
             />
           </div>
@@ -156,7 +154,7 @@ function SaveLayoutDialog({
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -174,11 +172,7 @@ function SavedLayoutItems({
   onDelete: (layoutId: string) => void;
 }) {
   if (layouts.length === 0) {
-    return (
-      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-        No saved layouts
-      </div>
-    );
+    return <div className="px-2 py-1.5 text-xs text-muted-foreground">No saved layouts</div>;
   }
   return layouts.map((layout) => (
     <DropdownMenuItem
@@ -216,21 +210,22 @@ export function LayoutPresetSelector() {
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
 
   const handleApplyCustom = useCallback(
-    (layout: SavedLayout) => applyCustomLayout({
-      id: layout.id,
-      name: layout.name,
-      isDefault: layout.is_default,
-      layout: layout.layout,
-      createdAt: layout.created_at,
-    }),
-    [applyCustomLayout]
+    (layout: SavedLayout) =>
+      applyCustomLayout({
+        id: layout.id,
+        name: layout.name,
+        isDefault: layout.is_default,
+        layout: layout.layout,
+        createdAt: layout.created_at,
+      }),
+    [applyCustomLayout],
   );
 
   const handleDeleteLayout = useCallback(
     async (layoutId: string) => {
       await updateUserSettings({ saved_layouts: savedLayouts.filter((l) => l.id !== layoutId) });
     },
-    [savedLayouts]
+    [savedLayouts],
   );
 
   return (
@@ -252,11 +247,17 @@ export function LayoutPresetSelector() {
             {BUILT_IN_PRESETS.map((preset) => {
               const Icon = preset.icon;
               return (
-                <DropdownMenuItem key={preset.id} onClick={() => applyBuiltInPreset(preset.id)} className="cursor-pointer">
+                <DropdownMenuItem
+                  key={preset.id}
+                  onClick={() => applyBuiltInPreset(preset.id)}
+                  className="cursor-pointer"
+                >
                   <Icon className="h-4 w-4 mr-2 shrink-0" />
                   <div className="flex flex-col min-w-0">
                     <span className="text-xs font-medium">{preset.label}</span>
-                    <span className="text-[10px] text-muted-foreground truncate">{preset.description}</span>
+                    <span className="text-[10px] text-muted-foreground truncate">
+                      {preset.description}
+                    </span>
                   </div>
                 </DropdownMenuItem>
               );
@@ -265,7 +266,11 @@ export function LayoutPresetSelector() {
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
-            <SavedLayoutItems layouts={savedLayouts} onApply={handleApplyCustom} onDelete={handleDeleteLayout} />
+            <SavedLayoutItems
+              layouts={savedLayouts}
+              onApply={handleApplyCustom}
+              onDelete={handleDeleteLayout}
+            />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setSaveDialogOpen(true)} className="cursor-pointer">

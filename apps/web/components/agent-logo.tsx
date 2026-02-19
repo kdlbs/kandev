@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { useTheme } from 'next-themes';
-import { getBackendConfig } from '@/lib/config';
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useTheme } from "next-themes";
+import { getBackendConfig } from "@/lib/config";
 
 interface AgentLogoProps {
   agentName: string;
@@ -38,17 +38,21 @@ export function AgentLogo({ agentName, size = 16, className }: AgentLogoProps) {
 
 function AgentLogoImage({ agentName, size = 16, className }: AgentLogoProps) {
   const { resolvedTheme } = useTheme();
-  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
   const [fetchedSrc, setFetchedSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
-  const variant = resolvedTheme === 'dark' ? 'dark' : 'light';
+  const variant = resolvedTheme === "dark" ? "dark" : "light";
   const logoUrl = mounted
     ? `${getBackendConfig().apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentName)}/logo?variant=${variant}`
     : null;
 
   // Read from cache during render to avoid setState in effect
-  const cachedSrc = logoUrl ? logoCache.get(logoUrl) ?? null : null;
+  const cachedSrc = logoUrl ? (logoCache.get(logoUrl) ?? null) : null;
 
   useEffect(() => {
     if (!logoUrl || logoCache.has(logoUrl)) return;
@@ -72,7 +76,7 @@ function AgentLogoImage({ agentName, size = 16, className }: AgentLogoProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
         className={className}
-        style={{ display: 'inline-block', opacity: 0.5 }}
+        style={{ display: "inline-block", opacity: 0.5 }}
       >
         <polyline points="4 17 10 11 4 5" />
         <line x1="12" y1="19" x2="20" y2="19" />
@@ -82,12 +86,6 @@ function AgentLogoImage({ agentName, size = 16, className }: AgentLogoProps) {
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      className={className}
-    />
+    <img src={src} alt="" width={size} height={size} className={className} />
   );
 }

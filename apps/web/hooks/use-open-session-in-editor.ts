@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { openSessionInEditor } from '@/lib/api';
-import { useRequest } from '@/lib/http/use-request';
+import { openSessionInEditor } from "@/lib/api";
+import { useRequest } from "@/lib/http/use-request";
 
 type OpenEditorOptions = {
   filePath?: string;
@@ -25,10 +25,10 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         line: options?.line,
         column: options?.column,
       },
-      { cache: 'no-store' }
+      { cache: "no-store" },
     );
     if (response?.url) {
-      window.open(response.url, '_blank', 'noopener,noreferrer');
+      window.open(response.url, "_blank", "noopener,noreferrer");
     }
     return response ?? null;
   });

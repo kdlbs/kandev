@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { useSwimlaneCollapse } from '@/hooks/domains/kanban/use-swimlane-collapse';
-import { filterTasksByRepositories, mapSelectedRepositoryIds } from '@/lib/kanban/filters';
-import { SwimlaneSection } from './swimlane-section';
-import { getViewByStoredValue, getDefaultView } from '@/lib/kanban/view-registry';
-import type { Task } from '@/components/kanban-card';
-import type { WorkflowAutomation, MoveTaskError } from '@/hooks/use-drag-and-drop';
-import type { Repository } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
+import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { SwimlaneSection } from "./swimlane-section";
+import { getViewByStoredValue, getDefaultView } from "@/lib/kanban/view-registry";
+import type { Task } from "@/components/kanban-card";
+import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { Repository } from "@/lib/types/http";
 
 export type SwimlaneContainerProps = {
   viewMode: string;
@@ -31,12 +31,12 @@ function getEmptyMessage(
   workflowFilter: string | null,
   getFilteredTasks: (id: string) => Task[],
 ): string | null {
-  if (isLoading && Object.keys(snapshots).length === 0) return 'Loading...';
-  if (orderedWorkflows.length === 0) return 'No workflows available yet.';
+  if (isLoading && Object.keys(snapshots).length === 0) return "Loading...";
+  if (orderedWorkflows.length === 0) return "No workflows available yet.";
   const visible = workflowFilter
     ? orderedWorkflows
     : orderedWorkflows.filter((wf) => getFilteredTasks(wf.id).length > 0);
-  if (visible.length === 0) return 'No tasks yet';
+  if (visible.length === 0) return "No tasks yet";
   return null;
 }
 
@@ -61,12 +61,12 @@ export function SwimlaneContainer({
 
   const repositories = useMemo(
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
-    [repositoriesByWorkspace]
+    [repositoriesByWorkspace],
   );
 
   const repoFilter = useMemo(
     () => mapSelectedRepositoryIds(repositories, selectedRepositoryIds),
-    [repositories, selectedRepositoryIds]
+    [repositories, selectedRepositoryIds],
   );
 
   // Build ordered list of workflows to render
@@ -94,14 +94,20 @@ export function SwimlaneContainer({
       tasks = tasks.filter(
         (t) =>
           t.title.toLowerCase().includes(q) ||
-          (t.description && t.description.toLowerCase().includes(q))
+          (t.description && t.description.toLowerCase().includes(q)),
       );
     }
 
     return tasks;
   };
 
-  const emptyMessage = getEmptyMessage(isLoading, snapshots, orderedWorkflows, workflowFilter, getFilteredTasks);
+  const emptyMessage = getEmptyMessage(
+    isLoading,
+    snapshots,
+    orderedWorkflows,
+    workflowFilter,
+    getFilteredTasks,
+  );
   if (emptyMessage) {
     return (
       <div className="flex-1 min-h-0 px-4 pb-4">
@@ -127,13 +133,24 @@ export function SwimlaneContainer({
         const steps = [...snapshot.steps].sort((a, b) => a.position - b.position);
         return (
           <SwimlaneSection
-            key={wf.id} workflowId={wf.id} workflowName={wf.name} taskCount={tasks.length}
-            isCollapsed={isCollapsed(wf.id)} onToggleCollapse={() => toggleCollapse(wf.id)}
+            key={wf.id}
+            workflowId={wf.id}
+            workflowName={wf.name}
+            taskCount={tasks.length}
+            isCollapsed={isCollapsed(wf.id)}
+            onToggleCollapse={() => toggleCollapse(wf.id)}
           >
             <ViewComponent
-              workflowId={wf.id} steps={steps} tasks={tasks} onPreviewTask={onPreviewTask}
-              onOpenTask={onOpenTask} onEditTask={onEditTask} onDeleteTask={onDeleteTask}
-              onMoveError={onMoveError} onWorkflowAutomation={onWorkflowAutomation} deletingTaskId={deletingTaskId}
+              workflowId={wf.id}
+              steps={steps}
+              tasks={tasks}
+              onPreviewTask={onPreviewTask}
+              onOpenTask={onOpenTask}
+              onEditTask={onEditTask}
+              onDeleteTask={onDeleteTask}
+              onMoveError={onMoveError}
+              onWorkflowAutomation={onWorkflowAutomation}
+              deletingTaskId={deletingTaskId}
             />
           </SwimlaneSection>
         );

@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useCallback } from 'react';
-import useEmblaCarousel from 'embla-carousel-react';
-import { KanbanColumn, WorkflowStep } from '../kanban-column';
-import { Task } from '../kanban-card';
+import { useEffect, useCallback } from "react";
+import useEmblaCarousel from "embla-carousel-react";
+import { KanbanColumn, WorkflowStep } from "../kanban-column";
+import { Task } from "../kanban-card";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -33,8 +33,8 @@ export function SwipeableColumns({
   deletingTaskId,
 }: SwipeableColumnsProps) {
   const [emblaRef, emblaApi] = useEmblaCarousel({
-    align: 'start',
-    containScroll: 'trimSnaps',
+    align: "start",
+    containScroll: "trimSnaps",
     watchDrag: true,
   });
 
@@ -45,7 +45,7 @@ export function SwipeableColumns({
         .map((task) => ({ ...task, position: task.position ?? 0 }))
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
     },
-    [tasks]
+    [tasks],
   );
 
   // Sync carousel position with external activeIndex
@@ -66,9 +66,9 @@ export function SwipeableColumns({
       }
     };
 
-    emblaApi.on('select', onSelect);
+    emblaApi.on("select", onSelect);
     return () => {
-      emblaApi.off('select', onSelect);
+      emblaApi.off("select", onSelect);
     };
   }, [emblaApi, activeIndex, onIndexChange]);
 
@@ -78,7 +78,7 @@ export function SwipeableColumns({
     <div
       className="flex-1 min-h-0 overflow-hidden"
       ref={emblaRef}
-      style={{ height: 'calc(100dvh - 100px - env(safe-area-inset-bottom, 0px))' }}
+      style={{ height: "calc(100dvh - 100px - env(safe-area-inset-bottom, 0px))" }}
     >
       <div className="flex h-full touch-pan-y">
         {steps.map((step) => (

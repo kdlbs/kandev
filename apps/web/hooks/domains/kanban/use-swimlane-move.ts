@@ -1,22 +1,34 @@
-import { useCallback } from 'react';
-import { useAppStoreApi } from '@/components/state-provider';
-import { useTaskActions } from '@/hooks/use-task-actions';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { Task } from '@/components/kanban-card';
-import type { WorkflowAutomation, MoveTaskError } from '@/hooks/use-drag-and-drop';
-import type { KanbanState } from '@/lib/state/slices/kanban/types';
+import { useCallback } from "react";
+import { useAppStoreApi } from "@/components/state-provider";
+import { useTaskActions } from "@/hooks/use-task-actions";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { Task } from "@/components/kanban-card";
+import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
-function hasAutoStartEvent(response: { workflow_step?: { events?: { on_enter?: Array<{ type: string }> } } }): boolean {
-  return response?.workflow_step?.events?.on_enter?.some((a) => a.type === 'auto_start_agent') ?? false;
+function hasAutoStartEvent(response: {
+  workflow_step?: { events?: { on_enter?: Array<{ type: string }> } };
+}): boolean {
+  return (
+    response?.workflow_step?.events?.on_enter?.some((a) => a.type === "auto_start_agent") ?? false
+  );
 }
 
-async function triggerAutoStart(taskId: string, sessionId: string, workflowStepId: string): Promise<void> {
+async function triggerAutoStart(
+  taskId: string,
+  sessionId: string,
+  workflowStepId: string,
+): Promise<void> {
   const client = getWebSocketClient();
   if (!client) return;
   try {
-    await client.request('orchestrator.start', { task_id: taskId, session_id: sessionId, workflow_step_id: workflowStepId }, 15000);
+    await client.request(
+      "orchestrator.start",
+      { task_id: taskId, session_id: sessionId, workflow_step_id: workflowStepId },
+      15000,
+    );
   } catch (err) {
-    console.error('Failed to auto-start session for workflow step:', err);
+    console.error("Failed to auto-start session for workflow step:", err);
   }
 }
 
@@ -25,7 +37,7 @@ export function useSwimlaneMove(
   opts: {
     onMoveError?: (error: MoveTaskError) => void;
     onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
-  }
+  },
 ) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
@@ -40,12 +52,12 @@ export function useSwimlaneMove(
 
       const targetTasks = snapshot.tasks
         .filter(
-          (t: KanbanState['tasks'][number]) =>
-            t.workflowStepId === targetStepId && t.id !== task.id
+          (t: KanbanState["tasks"][number]) =>
+            t.workflowStepId === targetStepId && t.id !== task.id,
         )
         .sort(
-          (a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) =>
-            a.position - b.position
+          (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
+            a.position - b.position,
         );
       const nextPosition = targetTasks.length;
 
@@ -54,10 +66,8 @@ export function useSwimlaneMove(
       // Optimistic update
       state.setWorkflowSnapshot(workflowId, {
         ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState['tasks'][number]) =>
-          t.id === task.id
-            ? { ...t, workflowStepId: targetStepId, position: nextPosition }
-            : t
+        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+          t.id === task.id ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
         ),
       });
 
@@ -77,7 +87,7 @@ export function useSwimlaneMove(
               taskId: task.id,
               sessionId: null,
               workflowStep: response.workflow_step,
-              taskDescription: task.description ?? '',
+              taskDescription: task.description ?? "",
             });
           }
         }
@@ -90,7 +100,7 @@ export function useSwimlaneMove(
             tasks: originalTasks,
           });
         }
-        const message = error instanceof Error ? error.message : 'Failed to move task';
+        const message = error instanceof Error ? error.message : "Failed to move task";
         opts.onMoveError?.({
           message,
           taskId: task.id,
@@ -98,7 +108,7 @@ export function useSwimlaneMove(
         });
       }
     },
-    [workflowId, store, moveTaskById, opts]
+    [workflowId, store, moveTaskById, opts],
   );
 
   return { moveTask };

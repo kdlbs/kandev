@@ -1,5 +1,5 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import type { editor as monacoEditor } from 'monaco-editor';
+import { useEffect, useRef, useCallback, useState } from "react";
+import type { editor as monacoEditor } from "monaco-editor";
 
 type SelectionCompleteParams = {
   range: { start: number; end: number };
@@ -33,9 +33,9 @@ function applySelectionDecos(
       range: { startLineNumber: l, startColumn: 1, endLineNumber: l, endColumn: 1 },
       options: {
         isWholeLine: true,
-        className: 'monaco-gutter-selected-line',
-        lineNumberClassName: 'monaco-gutter-selected-line',
-        linesDecorationsClassName: 'monaco-gutter-selected-deco',
+        className: "monaco-gutter-selected-line",
+        lineNumberClassName: "monaco-gutter-selected-line",
+        linesDecorationsClassName: "monaco-gutter-selected-deco",
       },
     });
   }
@@ -43,14 +43,13 @@ function applySelectionDecos(
 }
 
 /** Show "+" hover hint on the lines-decoration lane (same lane as comment icons) */
-function showHoverHint(
-  collection: monacoEditor.IEditorDecorationsCollection | null,
-  line: number,
-) {
-  collection?.set([{
-    range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
-    options: { linesDecorationsClassName: 'monaco-gutter-comment-hint' },
-  }]);
+function showHoverHint(collection: monacoEditor.IEditorDecorationsCollection | null, line: number) {
+  collection?.set([
+    {
+      range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+      options: { linesDecorationsClassName: "monaco-gutter-comment-hint" },
+    },
+  ]);
 }
 
 /** Get viewport-relative position for the bottom of a line in the editor */
@@ -77,7 +76,10 @@ export function useGutterComments(
 ) {
   const { enabled, commentedLines, onSelectionComplete } = options;
 
-  const [gutterSelection, setGutterSelection] = useState<{ startLine: number; endLine: number } | null>(null);
+  const [gutterSelection, setGutterSelection] = useState<{
+    startLine: number;
+    endLine: number;
+  } | null>(null);
   const anchorLineRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
   const hasSelectionRef = useRef(false);
@@ -86,9 +88,15 @@ export function useGutterComments(
   const callbackRef = useRef(onSelectionComplete);
   const commentedRef = useRef(commentedLines);
 
-  useEffect(() => { callbackRef.current = onSelectionComplete; }, [onSelectionComplete]);
-  useEffect(() => { commentedRef.current = commentedLines; }, [commentedLines]);
-  useEffect(() => { hasSelectionRef.current = gutterSelection !== null; }, [gutterSelection]);
+  useEffect(() => {
+    callbackRef.current = onSelectionComplete;
+  }, [onSelectionComplete]);
+  useEffect(() => {
+    commentedRef.current = commentedLines;
+  }, [commentedLines]);
+  useEffect(() => {
+    hasSelectionRef.current = gutterSelection !== null;
+  }, [gutterSelection]);
 
   const clearGutterSelection = useCallback(() => {
     setGutterSelection(null);
@@ -102,14 +110,23 @@ export function useGutterComments(
     hoverDecRef.current = editor.createDecorationsCollection([]);
     const moveSub = editor.onMouseMove((e) => {
       const line = e.target.position?.lineNumber;
-      if (!isGutterTarget(e.target.type) || !line || commentedRef.current.has(line) || hasSelectionRef.current) {
+      if (
+        !isGutterTarget(e.target.type) ||
+        !line ||
+        commentedRef.current.has(line) ||
+        hasSelectionRef.current
+      ) {
         hoverDecRef.current?.set([]);
         return;
       }
       showHoverHint(hoverDecRef.current, line);
     });
     const leaveSub = editor.onMouseLeave(() => hoverDecRef.current?.set([]));
-    return () => { moveSub.dispose(); leaveSub.dispose(); hoverDecRef.current?.set([]); };
+    return () => {
+      moveSub.dispose();
+      leaveSub.dispose();
+      hoverDecRef.current?.set([]);
+    };
   }, [editor, enabled]);
 
   // Drag-to-select: mousedown → DOM mousemove → DOM mouseup
@@ -123,16 +140,18 @@ export function useGutterComments(
     const finishDrag = () => {
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
-      document.removeEventListener('mousemove', onDomMouseMove);
-      document.removeEventListener('mouseup', onDomMouseUp);
+      document.removeEventListener("mousemove", onDomMouseMove);
+      document.removeEventListener("mouseup", onDomMouseUp);
 
       const model = editor.getModel();
       if (!model) return;
       const s = Math.min(dragStart, dragEnd);
       const e = Math.max(dragStart, dragEnd);
       const code = model.getValueInRange({
-        startLineNumber: s, startColumn: 1,
-        endLineNumber: e, endColumn: model.getLineMaxColumn(e),
+        startLineNumber: s,
+        startColumn: 1,
+        endLineNumber: e,
+        endColumn: model.getLineMaxColumn(e),
       });
       setGutterSelection({ startLine: s, endLine: e });
       // Position popover right below the last selected line
@@ -175,14 +194,14 @@ export function useGutterComments(
       dragStart = line;
       dragEnd = line;
       applySelectionDecos(selectionDecRef.current, line, line);
-      document.addEventListener('mousemove', onDomMouseMove);
-      document.addEventListener('mouseup', onDomMouseUp);
+      document.addEventListener("mousemove", onDomMouseMove);
+      document.addEventListener("mouseup", onDomMouseUp);
     });
 
     return () => {
       mouseDownSub.dispose();
-      document.removeEventListener('mousemove', onDomMouseMove);
-      document.removeEventListener('mouseup', onDomMouseUp);
+      document.removeEventListener("mousemove", onDomMouseMove);
+      document.removeEventListener("mouseup", onDomMouseUp);
       isDraggingRef.current = false;
       selectionDecRef.current?.set([]);
     };

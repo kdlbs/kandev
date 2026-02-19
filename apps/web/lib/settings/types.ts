@@ -1,5 +1,5 @@
-export type Theme = 'system' | 'light' | 'dark';
-export type Editor = 'vscode' | 'cursor' | 'zed' | 'vim' | 'custom';
+export type Theme = "system" | "light" | "dark";
+export type Editor = "vscode" | "cursor" | "zed" | "vim" | "custom";
 
 export type Notifications = {
   taskUpdates: boolean;
@@ -55,8 +55,8 @@ export type KeyValue = {
   value: string;
 };
 
-export type ExecutorType = 'local' | 'worktree' | 'local_docker' | 'remote_docker';
-export type ExecutorStatus = 'active' | 'disabled';
+export type ExecutorType = "local" | "worktree" | "local_docker" | "remote_docker";
+export type ExecutorStatus = "active" | "disabled";
 
 export type Executor = {
   id: string;
@@ -67,8 +67,8 @@ export type Executor = {
   config: Record<string, string>;
 };
 
-export type EnvironmentKind = 'local_pc' | 'docker_image';
-export type BaseDocker = 'universal' | 'golang' | 'node' | 'python';
+export type EnvironmentKind = "local_pc" | "docker_image";
+export type BaseDocker = "universal" | "golang" | "node" | "python";
 
 export type EnvironmentBuildConfig = {
   baseImage: BaseDocker;
@@ -85,7 +85,7 @@ export type Environment = {
   buildConfig?: EnvironmentBuildConfig;
 };
 
-export type AgentType = 'claude-code' | 'codex' | 'auggie';
+export type AgentType = "claude-code" | "codex" | "auggie";
 
 export type AgentProfile = {
   id: string;

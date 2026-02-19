@@ -1,21 +1,32 @@
-'use client';
+"use client";
 
-import React from 'react';
+import React from "react";
 import {
-  IconChevronRight, IconChevronDown, IconFolder, IconFolderOpen,
-  IconSearch, IconX, IconLoader2, IconTrash, IconRefresh,
-  IconListTree, IconFolderShare, IconCopy, IconCheck, IconPlus,
-} from '@tabler/icons-react';
-import { Input } from '@kandev/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { cn } from '@/lib/utils';
-import { FileIcon } from '@/components/ui/file-icon';
-import type { FileTreeNode } from '@/lib/types/backend';
-import type { FileInfo } from '@/lib/state/store';
-import { InlineFileInput } from './inline-file-input';
-import { PanelHeaderBar, PanelHeaderBarSplit } from './panel-primitives';
+  IconChevronRight,
+  IconChevronDown,
+  IconFolder,
+  IconFolderOpen,
+  IconSearch,
+  IconX,
+  IconLoader2,
+  IconTrash,
+  IconRefresh,
+  IconListTree,
+  IconFolderShare,
+  IconCopy,
+  IconCheck,
+  IconPlus,
+} from "@tabler/icons-react";
+import { Input } from "@kandev/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { FileIcon } from "@/components/ui/file-icon";
+import type { FileTreeNode } from "@/lib/types/backend";
+import type { FileInfo } from "@/lib/state/store";
+import { InlineFileInput } from "./inline-file-input";
+import { PanelHeaderBar, PanelHeaderBarSplit } from "./panel-primitives";
 
-type GitFileStatus = FileInfo['status'] | undefined;
+type GitFileStatus = FileInfo["status"] | undefined;
 
 /** Sort comparator: directories first, then alphabetical by name. */
 export const compareTreeNodes = (a: FileTreeNode, b: FileTreeNode): number => {
@@ -42,8 +53,12 @@ export function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): 
 }
 
 /** Insert a file node into a parent folder, keeping children sorted (dirs first, then alpha). */
-export function insertNodeInTree(root: FileTreeNode, parentPath: string, node: FileTreeNode): FileTreeNode {
-  if (root.path === parentPath || (parentPath === '' && root.path === '')) {
+export function insertNodeInTree(
+  root: FileTreeNode,
+  parentPath: string,
+  node: FileTreeNode,
+): FileTreeNode {
+  if (root.path === parentPath || (parentPath === "" && root.path === "")) {
     const children = [...(root.children ?? []), node].sort(compareTreeNodes);
     return { ...root, children };
   }
@@ -92,61 +107,82 @@ function handleTreeNodeClick(
 }
 
 /** Expand/collapse chevron for directory nodes. */
-function TreeNodeExpandChevron({ isLoading, isExpanded }: { isLoading: boolean; isExpanded: boolean }) {
-  if (isLoading) return <IconRefresh className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />;
+function TreeNodeExpandChevron({
+  isLoading,
+  isExpanded,
+}: {
+  isLoading: boolean;
+  isExpanded: boolean;
+}) {
+  if (isLoading)
+    return <IconRefresh className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />;
   if (isExpanded) return <IconChevronDown className="h-3 w-3 text-muted-foreground/60" />;
   return <IconChevronRight className="h-3 w-3 text-muted-foreground/60" />;
 }
 
 /** Directory or file icon for a tree node. */
-function TreeNodeFileIcon({ node, isExpanded, isActive }: { node: FileTreeNode; isExpanded: boolean; isActive: boolean }) {
+function TreeNodeFileIcon({
+  node,
+  isExpanded,
+  isActive,
+}: {
+  node: FileTreeNode;
+  isExpanded: boolean;
+  isActive: boolean;
+}) {
   if (node.is_dir) {
-    return isExpanded
-      ? <IconFolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-      : <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />;
+    return isExpanded ? (
+      <IconFolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+    ) : (
+      <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+    );
   }
   return (
     <FileIcon
       fileName={node.name}
       filePath={node.path}
       className="flex-shrink-0"
-      style={{ width: '14px', height: '14px', opacity: isActive ? 1 : 0.7 }}
+      style={{ width: "14px", height: "14px", opacity: isActive ? 1 : 0.7 }}
     />
   );
 }
 
 function getGitStatusTextClass(status: GitFileStatus): string {
   switch (status) {
-    case 'added':
-    case 'untracked':
-      return 'text-emerald-600';
-    case 'modified':
-      return 'text-yellow-600';
+    case "added":
+    case "untracked":
+      return "text-emerald-600";
+    case "modified":
+      return "text-yellow-600";
     default:
-      return '';
+      return "";
   }
 }
 
 function getGitStatusDotClass(status: GitFileStatus): string {
   switch (status) {
-    case 'added':
-    case 'untracked':
-      return 'bg-emerald-500';
-    case 'modified':
-      return 'bg-yellow-500';
+    case "added":
+    case "untracked":
+      return "bg-emerald-500";
+    case "modified":
+      return "bg-yellow-500";
     default:
-      return 'bg-transparent';
+      return "bg-transparent";
   }
 }
 
 function TreeNodeGitStatusDot({ status }: { status: GitFileStatus }) {
-  if (!status || (status !== 'added' && status !== 'untracked' && status !== 'modified')) return null;
-  return <span className={cn('h-1.5 w-1.5 rounded-full', getGitStatusDotClass(status))} />;
+  if (!status || (status !== "added" && status !== "untracked" && status !== "modified"))
+    return null;
+  return <span className={cn("h-1.5 w-1.5 rounded-full", getGitStatusDotClass(status))} />;
 }
 
 /** Delete button shown on hover for file nodes. */
 function TreeNodeDeleteButton({
-  node, tree, setTree, onDeleteFile,
+  node,
+  tree,
+  setTree,
+  onDeleteFile,
 }: {
   node: FileTreeNode;
   tree: FileTreeNode | null;
@@ -164,11 +200,13 @@ function TreeNodeDeleteButton({
               e.stopPropagation();
               const snapshot = tree;
               setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-              onDeleteFile(node.path).then((ok) => {
-                if (!ok) setTree(snapshot);
-              }).catch(() => {
-                setTree(snapshot);
-              });
+              onDeleteFile(node.path)
+                .then((ok) => {
+                  if (!ok) setTree(snapshot);
+                })
+                .catch(() => {
+                  setTree(snapshot);
+                });
             }}
           >
             <IconTrash className="h-3.5 w-3.5" />
@@ -181,9 +219,21 @@ function TreeNodeDeleteButton({
 }
 
 export function TreeNodeItem({
-  node, depth, expandedPaths, activeFolderPath, activeFilePath,
-  visibleLoadingPaths, creatingInPath, fileStatuses, tree,
-  onToggleExpand, onOpenFile, onDeleteFile, onCreateFileSubmit, onCancelCreate, setTree,
+  node,
+  depth,
+  expandedPaths,
+  activeFolderPath,
+  activeFilePath,
+  visibleLoadingPaths,
+  creatingInPath,
+  fileStatuses,
+  tree,
+  onToggleExpand,
+  onOpenFile,
+  onDeleteFile,
+  onCreateFileSubmit,
+  onCancelCreate,
+  setTree,
 }: TreeNodeItemProps) {
   const isExpanded = expandedPaths.has(node.path);
   const isLoading = visibleLoadingPaths.has(node.path);
@@ -200,7 +250,7 @@ export function TreeNodeItem({
           "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
           "hover:bg-muted",
           isActive && "bg-muted",
-          isActiveFolder && "bg-muted/50"
+          isActiveFolder && "bg-muted/50",
         )}
         style={{ paddingLeft: rowPadding }}
         onClick={handleNodeClick}
@@ -213,9 +263,9 @@ export function TreeNodeItem({
         <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
         <span
           className={cn(
-            'flex-1 truncate group-hover:text-foreground',
-            isActive ? 'text-foreground' : 'text-muted-foreground',
-            node.is_dir ? 'font-medium' : getGitStatusTextClass(gitStatus),
+            "flex-1 truncate group-hover:text-foreground",
+            isActive ? "text-foreground" : "text-muted-foreground",
+            node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
           )}
         >
           {node.name}
@@ -224,7 +274,12 @@ export function TreeNodeItem({
           <div className="ml-auto flex items-center gap-1">
             <TreeNodeGitStatusDot status={gitStatus} />
             {onDeleteFile && (
-              <TreeNodeDeleteButton node={node} tree={tree} setTree={setTree} onDeleteFile={onDeleteFile} />
+              <TreeNodeDeleteButton
+                node={node}
+                tree={tree}
+                setTree={setTree}
+                onDeleteFile={onDeleteFile}
+              />
             )}
           </div>
         )}
@@ -238,28 +293,29 @@ export function TreeNodeItem({
               onCancel={onCancelCreate}
             />
           )}
-          {node.children && [...node.children]
-            .sort(compareTreeNodes)
-            .map((child) => (
-              <TreeNodeItem
-                key={child.path}
-                node={child}
-                depth={depth + 1}
-                expandedPaths={expandedPaths}
-                activeFolderPath={activeFolderPath}
-                activeFilePath={activeFilePath}
-                visibleLoadingPaths={visibleLoadingPaths}
-                creatingInPath={creatingInPath}
-                fileStatuses={fileStatuses}
-                tree={tree}
-                onToggleExpand={onToggleExpand}
-                onOpenFile={onOpenFile}
-                onDeleteFile={onDeleteFile}
-                onCreateFileSubmit={onCreateFileSubmit}
-                onCancelCreate={onCancelCreate}
-                setTree={setTree}
-              />
-            ))}
+          {node.children &&
+            [...node.children]
+              .sort(compareTreeNodes)
+              .map((child) => (
+                <TreeNodeItem
+                  key={child.path}
+                  node={child}
+                  depth={depth + 1}
+                  expandedPaths={expandedPaths}
+                  activeFolderPath={activeFolderPath}
+                  activeFilePath={activeFilePath}
+                  visibleLoadingPaths={visibleLoadingPaths}
+                  creatingInPath={creatingInPath}
+                  fileStatuses={fileStatuses}
+                  tree={tree}
+                  onToggleExpand={onToggleExpand}
+                  onOpenFile={onOpenFile}
+                  onDeleteFile={onDeleteFile}
+                  onCreateFileSubmit={onCreateFileSubmit}
+                  onCancelCreate={onCancelCreate}
+                  setTree={setTree}
+                />
+              ))}
         </div>
       )}
     </div>
@@ -272,29 +328,29 @@ type SearchResultsListProps = {
   onOpenFile: (path: string) => void;
 };
 
-export function SearchResultsList({ searchResults, fileStatuses, onOpenFile }: SearchResultsListProps) {
+export function SearchResultsList({
+  searchResults,
+  fileStatuses,
+  onOpenFile,
+}: SearchResultsListProps) {
   if (!searchResults) return null;
 
   if (searchResults.length === 0) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground text-center">
-        No files found
-      </div>
-    );
+    return <div className="p-4 text-sm text-muted-foreground text-center">No files found</div>;
   }
 
   return (
     <div className="pb-2">
       {searchResults.map((path) => {
-        const name = path.split('/').pop() || path;
-        const folder = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
+        const name = path.split("/").pop() || path;
+        const folder = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : "";
         const gitStatus = fileStatuses.get(path);
         return (
           <div
             key={path}
             className={cn(
               "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
-              "hover:bg-muted"
+              "hover:bg-muted",
             )}
             onClick={() => onOpenFile(path)}
           >
@@ -302,9 +358,14 @@ export function SearchResultsList({ searchResults, fileStatuses, onOpenFile }: S
               fileName={name}
               filePath={path}
               className="flex-shrink-0"
-              style={{ width: '14px', height: '14px' }}
+              style={{ width: "14px", height: "14px" }}
             />
-            <span className={cn('truncate group-hover:text-foreground', getGitStatusTextClass(gitStatus) || 'text-muted-foreground')}>
+            <span
+              className={cn(
+                "truncate group-hover:text-foreground",
+                getGitStatusTextClass(gitStatus) || "text-muted-foreground",
+              )}
+            >
               {folder && <span>{folder}/</span>}
               <span>{name}</span>
             </span>
@@ -327,7 +388,11 @@ type FileBrowserSearchHeaderProps = {
 };
 
 export function FileBrowserSearchHeader({
-  isSearching, localSearchQuery, searchInputRef, onSearchChange, onCloseSearch,
+  isSearching,
+  localSearchQuery,
+  searchInputRef,
+  onSearchChange,
+  onCloseSearch,
 }: FileBrowserSearchHeaderProps) {
   return (
     <PanelHeaderBar className="group/header">
@@ -341,7 +406,9 @@ export function FileBrowserSearchHeader({
         type="text"
         value={localSearchQuery}
         onChange={onSearchChange}
-        onKeyDown={(e) => { if (e.key === 'Escape') onCloseSearch(); }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCloseSearch();
+        }}
         placeholder="Search files..."
         className="flex-1 min-w-0 h-5 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 px-2"
       />
@@ -369,8 +436,16 @@ type FileBrowserToolbarProps = {
 };
 
 export function FileBrowserToolbar({
-  displayPath, fullPath, copied, expandedPathsSize,
-  onCopyPath, onStartCreate, onOpenFolder, onStartSearch, onCollapseAll, showCreateButton,
+  displayPath,
+  fullPath,
+  copied,
+  expandedPathsSize,
+  onCopyPath,
+  onStartCreate,
+  onOpenFolder,
+  onStartSearch,
+  onCollapseAll,
+  showCreateButton,
 }: FileBrowserToolbarProps) {
   return (
     <PanelHeaderBarSplit
@@ -381,9 +456,16 @@ export function FileBrowserToolbar({
             <TooltipTrigger asChild>
               <button
                 className="relative shrink-0 cursor-pointer"
-                onClick={() => { if (fullPath) void onCopyPath(fullPath); }}
+                onClick={() => {
+                  if (fullPath) void onCopyPath(fullPath);
+                }}
               >
-                <IconFolderOpen className={cn("h-3.5 w-3.5 text-muted-foreground transition-opacity", copied ? "opacity-0" : "group-hover/header:opacity-0")} />
+                <IconFolderOpen
+                  className={cn(
+                    "h-3.5 w-3.5 text-muted-foreground transition-opacity",
+                    copied ? "opacity-0" : "group-hover/header:opacity-0",
+                  )}
+                />
                 {copied ? (
                   <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
                 ) : (
@@ -479,28 +561,49 @@ type FileBrowserContentAreaProps = {
 };
 
 export function FileBrowserContentArea({
-  isSearchActive, searchResults, isSessionFailed, sessionError,
-  loadState, isLoadingTree, tree, loadError, creatingInPath, fileStatuses,
-  expandedPaths, activeFolderPath, activeFilePath, visibleLoadingPaths,
-  onOpenFile, onToggleExpand, onDeleteFile, onCreateFileSubmit, onCancelCreate, onRetry, setTree,
+  isSearchActive,
+  searchResults,
+  isSessionFailed,
+  sessionError,
+  loadState,
+  isLoadingTree,
+  tree,
+  loadError,
+  creatingInPath,
+  fileStatuses,
+  expandedPaths,
+  activeFolderPath,
+  activeFilePath,
+  visibleLoadingPaths,
+  onOpenFile,
+  onToggleExpand,
+  onDeleteFile,
+  onCreateFileSubmit,
+  onCancelCreate,
+  onRetry,
+  setTree,
 }: FileBrowserContentAreaProps) {
   if (isSearchActive && searchResults !== null) {
-    return <SearchResultsList searchResults={searchResults} fileStatuses={fileStatuses} onOpenFile={onOpenFile} />;
+    return (
+      <SearchResultsList
+        searchResults={searchResults}
+        fileStatuses={fileStatuses}
+        onOpenFile={onOpenFile}
+      />
+    );
   }
   if (isSessionFailed) {
     return (
       <div className="p-4 text-sm text-destructive/80 space-y-2">
         <div>Session failed</div>
-        {sessionError && (
-          <div className="text-xs text-muted-foreground">{sessionError}</div>
-        )}
+        {sessionError && <div className="text-xs text-muted-foreground">{sessionError}</div>}
       </div>
     );
   }
-  if ((loadState === 'loading' || isLoadingTree) && !tree) {
+  if ((loadState === "loading" || isLoadingTree) && !tree) {
     return <div className="p-4 text-sm text-muted-foreground">Loading files...</div>;
   }
-  if (loadState === 'waiting') {
+  if (loadState === "waiting") {
     return (
       <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
         <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
@@ -508,10 +611,10 @@ export function FileBrowserContentArea({
       </div>
     );
   }
-  if (loadState === 'manual') {
+  if (loadState === "manual") {
     return (
       <div className="p-4 text-sm text-muted-foreground space-y-2">
-        <div>{loadError ?? 'Workspace is still starting.'}</div>
+        <div>{loadError ?? "Workspace is still starting."}</div>
         <button
           type="button"
           className="text-xs text-foreground underline cursor-pointer"
@@ -525,35 +628,36 @@ export function FileBrowserContentArea({
   if (tree) {
     return (
       <div className="pb-2">
-        {creatingInPath === '' && (
+        {creatingInPath === "" && (
           <InlineFileInput
             depth={0}
-            onSubmit={(name) => onCreateFileSubmit('', name)}
+            onSubmit={(name) => onCreateFileSubmit("", name)}
             onCancel={onCancelCreate}
           />
         )}
-        {tree.children && [...tree.children]
-          .sort(compareTreeNodes)
-          .map((child) => (
-            <TreeNodeItem
-              key={child.path}
-              node={child}
-              depth={0}
-              expandedPaths={expandedPaths}
-              activeFolderPath={activeFolderPath}
-              activeFilePath={activeFilePath}
-              visibleLoadingPaths={visibleLoadingPaths}
-              creatingInPath={creatingInPath}
-              fileStatuses={fileStatuses}
-              tree={tree}
-              onToggleExpand={onToggleExpand}
-              onOpenFile={onOpenFile}
-              onDeleteFile={onDeleteFile}
-              onCreateFileSubmit={onCreateFileSubmit}
-              onCancelCreate={onCancelCreate}
-              setTree={setTree}
-            />
-          ))}
+        {tree.children &&
+          [...tree.children]
+            .sort(compareTreeNodes)
+            .map((child) => (
+              <TreeNodeItem
+                key={child.path}
+                node={child}
+                depth={0}
+                expandedPaths={expandedPaths}
+                activeFolderPath={activeFolderPath}
+                activeFilePath={activeFilePath}
+                visibleLoadingPaths={visibleLoadingPaths}
+                creatingInPath={creatingInPath}
+                fileStatuses={fileStatuses}
+                tree={tree}
+                onToggleExpand={onToggleExpand}
+                onOpenFile={onOpenFile}
+                onDeleteFile={onDeleteFile}
+                onCreateFileSubmit={onCreateFileSubmit}
+                onCancelCreate={onCancelCreate}
+                setTree={setTree}
+              />
+            ))}
       </div>
     );
   }

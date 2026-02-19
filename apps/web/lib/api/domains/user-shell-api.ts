@@ -1,5 +1,5 @@
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { getBackendConfig } from '@/lib/config';
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { getBackendConfig } from "@/lib/config";
 
 /**
  * Terminal info returned by HTTP API (for SSR).
@@ -23,13 +23,13 @@ export async function fetchTerminals(sessionId: string): Promise<TerminalInfo[]>
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.warn('Failed to fetch terminals:', response.status);
+      console.warn("Failed to fetch terminals:", response.status);
       return [];
     }
     const data = await response.json();
     return data.terminals ?? [];
   } catch (error) {
-    console.warn('Failed to fetch terminals:', error);
+    console.warn("Failed to fetch terminals:", error);
     return [];
   }
 }
@@ -50,10 +50,13 @@ export type CreateUserShellResult = {
  * First terminal is "Terminal" and not closable, subsequent are "Terminal 2", etc. and closable.
  * If scriptId is provided, creates a script terminal with the script's name and command.
  */
-export async function createUserShell(sessionId: string, scriptId?: string): Promise<CreateUserShellResult> {
+export async function createUserShell(
+  sessionId: string,
+  scriptId?: string,
+): Promise<CreateUserShellResult> {
   const client = getWebSocketClient();
   if (!client) {
-    throw new Error('WebSocket client not available');
+    throw new Error("WebSocket client not available");
   }
 
   const payload: Record<string, string> = { session_id: sessionId };
@@ -61,7 +64,7 @@ export async function createUserShell(sessionId: string, scriptId?: string): Pro
     payload.script_id = scriptId;
   }
 
-  const response = await client.request('user_shell.create', payload) as {
+  const response = (await client.request("user_shell.create", payload)) as {
     terminal_id: string;
     label: string;
     closable: boolean;
@@ -88,12 +91,12 @@ export async function stopUserShell(sessionId: string, terminalId: string): Prom
   }
 
   try {
-    await client.request('user_shell.stop', {
+    await client.request("user_shell.stop", {
       session_id: sessionId,
       terminal_id: terminalId,
     });
   } catch (error) {
     // Log but don't throw - this is best-effort cleanup
-    console.warn('Failed to stop user shell:', error);
+    console.warn("Failed to stop user shell:", error);
   }
 }

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { IconRobot } from '@tabler/icons-react';
-import type { SlashCommand } from '@/hooks/use-inline-slash';
-import { PopupMenu, PopupMenuItem, useMenuItemRefs } from './popup-menu';
+import { IconRobot } from "@tabler/icons-react";
+import type { SlashCommand } from "@/hooks/use-inline-slash";
+import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
 
 type SlashCommandMenuProps = {
   isOpen: boolean;

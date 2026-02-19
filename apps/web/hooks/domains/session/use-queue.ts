@@ -1,11 +1,11 @@
-import { useEffect, useCallback } from 'react';
-import { useAppStore } from '@/components/state-provider';
+import { useEffect, useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
 import {
   queueMessage,
   cancelQueuedMessage,
   getQueueStatus,
   updateQueuedMessage,
-} from '@/lib/api/domains/queue-api';
+} from "@/lib/api/domains/queue-api";
 
 export type MessageAttachment = {
   type: string;
@@ -15,10 +15,10 @@ export type MessageAttachment = {
 
 export function useQueue(sessionId: string | null) {
   const queueStatus = useAppStore((state) =>
-    sessionId ? state.queue.bySessionId[sessionId] : undefined
+    sessionId ? state.queue.bySessionId[sessionId] : undefined,
   );
   const isLoading = useAppStore((state) =>
-    sessionId ? state.queue.isLoading[sessionId] ?? false : false
+    sessionId ? (state.queue.isLoading[sessionId] ?? false) : false,
   );
   const setQueueStatus = useAppStore((state) => state.setQueueStatus);
   const setQueueLoading = useAppStore((state) => state.setQueueLoading);
@@ -33,7 +33,7 @@ export function useQueue(sessionId: string | null) {
         const status = await getQueueStatus(sessionId);
         setQueueStatus(sessionId, status);
       } catch (error) {
-        console.error('Failed to fetch queue status:', error);
+        console.error("Failed to fetch queue status:", error);
       } finally {
         setQueueLoading(sessionId, false);
       }
@@ -48,7 +48,7 @@ export function useQueue(sessionId: string | null) {
       content: string,
       model?: string,
       planMode?: boolean,
-      attachments?: MessageAttachment[]
+      attachments?: MessageAttachment[],
     ) => {
       if (!sessionId) return;
 
@@ -68,13 +68,13 @@ export function useQueue(sessionId: string | null) {
           message: queuedMsg,
         });
       } catch (error) {
-        console.error('Failed to queue message:', error);
+        console.error("Failed to queue message:", error);
         throw error;
       } finally {
         setQueueLoading(sessionId, false);
       }
     },
-    [sessionId, setQueueStatus, setQueueLoading]
+    [sessionId, setQueueStatus, setQueueLoading],
   );
 
   const cancel = useCallback(async () => {
@@ -88,7 +88,7 @@ export function useQueue(sessionId: string | null) {
         message: null,
       });
     } catch (error) {
-      console.error('Failed to cancel queue:', error);
+      console.error("Failed to cancel queue:", error);
       throw error;
     } finally {
       setQueueLoading(sessionId, false);
@@ -103,11 +103,11 @@ export function useQueue(sessionId: string | null) {
         const status = await updateQueuedMessage(sessionId, content);
         setQueueStatus(sessionId, status);
       } catch (error) {
-        console.error('Failed to update queued message:', error);
+        console.error("Failed to update queued message:", error);
         throw error;
       }
     },
-    [sessionId, setQueueStatus]
+    [sessionId, setQueueStatus],
   );
 
   return {

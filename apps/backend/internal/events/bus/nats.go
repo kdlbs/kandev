@@ -189,4 +189,3 @@ func (b *NATSEventBus) IsConnected() bool {
 	}
 	return b.conn.IsConnected()
 }
-

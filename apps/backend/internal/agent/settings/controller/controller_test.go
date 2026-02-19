@@ -35,7 +35,6 @@ func (a *testAgent) DisplayOrder() int   { return 0 }
 
 func (a *testAgent) Logo(v agents.LogoVariant) []byte { return a.logoData }
 
-
 func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
 	return &agents.DiscoveryResult{Available: false}, nil
 }

@@ -1,17 +1,13 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Button } from '@kandev/ui/button';
-import { Badge } from '@kandev/ui/badge';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@kandev/ui/collapsible';
-import { IconChevronDown, IconChevronRight, IconMessage } from '@tabler/icons-react';
-import { cn } from '@kandev/ui/lib/utils';
-import type { DiffComment } from '@/lib/diff/types';
-import { formatLineRange } from '@/lib/diff';
+import { useState } from "react";
+import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { IconChevronDown, IconChevronRight, IconMessage } from "@tabler/icons-react";
+import { cn } from "@kandev/ui/lib/utils";
+import type { DiffComment } from "@/lib/diff/types";
+import { formatLineRange } from "@/lib/diff";
 
 interface ReviewCommentsAttachmentProps {
   /** Review comments from the message */
@@ -24,10 +20,7 @@ interface ReviewCommentsAttachmentProps {
  * Renders review comments attached to a sent user message.
  * Shows a compact summary that expands to show full comment details.
  */
-export function ReviewCommentsAttachment({
-  comments,
-  className,
-}: ReviewCommentsAttachmentProps) {
+export function ReviewCommentsAttachment({ comments, className }: ReviewCommentsAttachmentProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   if (!comments || comments.length === 0) {
@@ -48,12 +41,7 @@ export function ReviewCommentsAttachment({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div
-        className={cn(
-          'mt-2 rounded-lg border border-border bg-muted/30',
-          className
-        )}
-      >
+      <div className={cn("mt-2 rounded-lg border border-border bg-muted/30", className)}>
         {/* Header */}
         <CollapsibleTrigger asChild>
           <Button
@@ -68,15 +56,11 @@ export function ReviewCommentsAttachment({
 
             <IconMessage className="h-4 w-4 shrink-0 text-blue-500" />
 
-            <span className="text-sm font-medium">
-              Review Comments
-            </span>
+            <span className="text-sm font-medium">Review Comments</span>
 
-            <Badge
-              variant="secondary"
-              className="ml-auto text-xs"
-            >
-              {totalComments} comment{totalComments !== 1 ? 's' : ''} on {fileCount} file{fileCount !== 1 ? 's' : ''}
+            <Badge variant="secondary" className="ml-auto text-xs">
+              {totalComments} comment{totalComments !== 1 ? "s" : ""} on {fileCount} file
+              {fileCount !== 1 ? "s" : ""}
             </Badge>
           </Button>
         </CollapsibleTrigger>
@@ -89,11 +73,9 @@ export function ReviewCommentsAttachment({
                 {/* File header */}
                 <div className="mb-1.5 flex items-center gap-1.5 text-xs">
                   <span className="font-medium text-muted-foreground">
-                    {filePath.split('/').pop()}
+                    {filePath.split("/").pop()}
                   </span>
-                  <span className="text-muted-foreground/60">
-                    ({fileComments.length})
-                  </span>
+                  <span className="text-muted-foreground/60">({fileComments.length})</span>
                 </div>
 
                 {/* Comments */}
@@ -108,7 +90,7 @@ export function ReviewCommentsAttachment({
                         <span className="font-medium">
                           {formatLineRange(comment.startLine, comment.endLine)}
                         </span>
-                        <span>({comment.side === 'additions' ? 'new' : 'old'})</span>
+                        <span>({comment.side === "additions" ? "new" : "old"})</span>
                       </div>
 
                       {/* Code preview */}
@@ -119,9 +101,7 @@ export function ReviewCommentsAttachment({
                       )}
 
                       {/* Comment text */}
-                      <p className="whitespace-pre-wrap text-xs leading-relaxed">
-                        {comment.text}
-                      </p>
+                      <p className="whitespace-pre-wrap text-xs leading-relaxed">{comment.text}</p>
                     </div>
                   ))}
                 </div>
@@ -135,4 +115,4 @@ export function ReviewCommentsAttachment({
 }
 
 // Re-export from unified comment system
-export { formatReviewCommentsAsMarkdown } from '@/lib/state/slices/comments/format';
+export { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";

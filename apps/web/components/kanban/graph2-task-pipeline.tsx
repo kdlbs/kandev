@@ -1,28 +1,28 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { IconDots, IconTrash } from '@tabler/icons-react';
+import { useMemo } from "react";
+import { IconDots, IconTrash } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { cn } from '@kandev/ui/lib/utils';
-import { needsAction } from '@/lib/utils/needs-action';
-import { Graph2StepNode } from './graph2-step-node';
-import { Graph2Connector } from './graph2-connector';
-import type { Task } from '@/components/kanban-card';
-import type { WorkflowStep } from '@/components/kanban-column';
+} from "@kandev/ui/dropdown-menu";
+import { cn } from "@kandev/ui/lib/utils";
+import { needsAction } from "@/lib/utils/needs-action";
+import { Graph2StepNode } from "./graph2-step-node";
+import { Graph2Connector } from "./graph2-connector";
+import type { Task } from "@/components/kanban-card";
+import type { WorkflowStep } from "@/components/kanban-column";
 
-type ConnectorType = 'past' | 'transition' | 'future';
+type ConnectorType = "past" | "transition" | "future";
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;
   const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
@@ -44,16 +44,19 @@ export type Graph2TaskPipelineProps = {
   isDeleting?: boolean;
 };
 
-function getStepPhase(index: number, currentStepIndex: number): 'past' | 'current' | 'future' {
-  if (index < currentStepIndex) return 'past';
-  if (index === currentStepIndex) return 'current';
-  return 'future';
+function getStepPhase(index: number, currentStepIndex: number): "past" | "current" | "future" {
+  if (index < currentStepIndex) return "past";
+  if (index === currentStepIndex) return "current";
+  return "future";
 }
 
-function getConnectorType(phase: 'past' | 'current' | 'future', nextPhase: 'past' | 'current' | 'future'): ConnectorType {
-  if (phase === 'past' && nextPhase === 'past') return 'past';
-  if (phase === 'future' && nextPhase === 'future') return 'future';
-  return 'transition';
+function getConnectorType(
+  phase: "past" | "current" | "future",
+  nextPhase: "past" | "current" | "future",
+): ConnectorType {
+  if (phase === "past" && nextPhase === "past") return "past";
+  if (phase === "future" && nextPhase === "future") return "future";
+  return "transition";
 }
 
 function PipelineStepNodes({
@@ -114,7 +117,7 @@ export function Graph2TaskPipeline({
 }: Graph2TaskPipelineProps) {
   const currentStepIndex = useMemo(
     () => steps.findIndex((s) => s.id === task.workflowStepId),
-    [steps, task.workflowStepId]
+    [steps, task.workflowStepId],
   );
 
   const hasAction = needsAction(task);
@@ -127,10 +130,10 @@ export function Graph2TaskPipeline({
           type="button"
           onClick={() => onEditTask(task)}
           className={cn(
-            'w-[160px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer',
-            'hover:bg-accent/60 active:bg-accent/80',
-            'border border-transparent hover:border-border/50',
-            hasAction && 'border-l-2 !border-l-amber-500'
+            "w-[160px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer",
+            "hover:bg-accent/60 active:bg-accent/80",
+            "border border-transparent hover:border-border/50",
+            hasAction && "border-l-2 !border-l-amber-500",
           )}
         >
           <span className="text-xs font-medium truncate block text-foreground/80">
@@ -144,7 +147,7 @@ export function Graph2TaskPipeline({
             )}
             {sessionCount > 0 && (
               <span className="text-[10px] text-muted-foreground/60">
-                {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
+                {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
               </span>
             )}
           </div>

@@ -19,12 +19,7 @@ import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import {
-  attachBackendExitHandler,
-  buildBackendEnv,
-  buildWebEnv,
-  pickPorts,
-} from "./shared";
+import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, pickPorts } from "./shared";
 import { launchWebApp } from "./web";
 
 export type StartOptions = {
@@ -68,7 +63,15 @@ export async function runStart({
   }
 
   // Check for standalone build (Next.js standalone output)
-  const webServerPath = path.join(repoRoot, "apps", "web", ".next", "standalone", "web", "server.js");
+  const webServerPath = path.join(
+    repoRoot,
+    "apps",
+    "web",
+    ".next",
+    "standalone",
+    "web",
+    "server.js",
+  );
   if (!fs.existsSync(webServerPath)) {
     throw new Error("Web standalone build not found. Run `make build` first.");
   }

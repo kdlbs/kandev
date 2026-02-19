@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import type { PointerEvent } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
+import type { PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type DebugOverlayProps = {
   title?: string;
@@ -11,10 +11,10 @@ type DebugOverlayProps = {
 };
 
 function formatValue(value: unknown): string {
-  if (value === null) return 'null';
-  if (value === undefined) return 'undefined';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
     return JSON.stringify(value);
   } catch {
@@ -22,7 +22,7 @@ function formatValue(value: unknown): string {
   }
 }
 
-export function DebugOverlay({ title = 'Debug', entries, className }: DebugOverlayProps) {
+export function DebugOverlay({ title = "Debug", entries, className }: DebugOverlayProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -65,7 +65,7 @@ export function DebugOverlay({ title = 'Debug', entries, className }: DebugOverl
         key,
         value: formatValue(value),
       })),
-    [entries]
+    [entries],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -91,8 +91,8 @@ export function DebugOverlay({ title = 'Debug', entries, className }: DebugOverl
   return (
     <div
       className={cn(
-        'fixed z-50 min-w-[220px] max-w-[360px] rounded-lg border border-border bg-background/45 p-3 text-xs shadow-lg',
-        className
+        "fixed z-50 min-w-[220px] max-w-[360px] rounded-lg border border-border bg-background/45 p-3 text-xs shadow-lg",
+        className,
       )}
       style={{ left: position.x, top: position.y }}
       ref={setContainerRef}

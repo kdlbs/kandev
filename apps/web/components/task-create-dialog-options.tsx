@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { IconGitBranch, IconTerminal2 } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { ScrollOnOverflow } from '@kandev/ui/scroll-on-overflow';
-import type { LocalRepository, Repository, Branch, Executor } from '@/lib/types/http';
-import type { AgentProfileOption } from '@/lib/state/slices';
-import { formatUserHomePath, truncateRepoPath } from '@/lib/utils';
-import { getExecutorIcon } from '@/lib/executor-icons';
-import { AgentLogo } from '@/components/agent-logo';
+import { useMemo } from "react";
+import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import type { LocalRepository, Repository, Branch, Executor } from "@/lib/types/http";
+import type { AgentProfileOption } from "@/lib/state/slices";
+import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
+import { getExecutorIcon } from "@/lib/executor-icons";
+import { AgentLogo } from "@/components/agent-logo";
 
 type OptionItem = {
   value: string;
@@ -21,15 +21,15 @@ export function useRepositoryOptions(
   discoveredRepositories: LocalRepository[],
 ) {
   const repositoryOptions = useMemo(() => {
-    const normalizeRepoPath = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/g, '');
+    const normalizeRepoPath = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/g, "");
     const workspaceRepoPaths = new Set(
       repositories
         .map((repo: Repository) => repo.local_path)
         .filter(Boolean)
-        .map((path: string) => normalizeRepoPath(path))
+        .map((path: string) => normalizeRepoPath(path)),
     );
     const localRepoOptions = discoveredRepositories.filter(
-      (repo: LocalRepository) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path))
+      (repo: LocalRepository) => !workspaceRepoPaths.has(normalizeRepoPath(repo.path)),
     );
     return [
       ...repositories.map((repo: Repository) => ({
@@ -66,9 +66,7 @@ export function useRepositoryOptions(
   const headerRepositoryOptions = useMemo(() => {
     return repositoryOptions.map((opt) => ({
       ...opt,
-      renderLabel: () => (
-        <span className="truncate">{opt.label}</span>
-      ),
+      renderLabel: () => <span className="truncate">{opt.label}</span>,
     }));
   }, [repositoryOptions]);
 
@@ -79,7 +77,7 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
   return useMemo(() => {
     return branchOptionsRaw.map((branchObj: Branch) => {
       const displayName =
-        branchObj.type === 'remote' && branchObj.remote
+        branchObj.type === "remote" && branchObj.remote
           ? `${branchObj.remote}/${branchObj.name}`
           : branchObj.name;
       return {
@@ -94,7 +92,7 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
               </span>
             </span>
             <Badge variant="outline" className="text-xs">
-              {branchObj.type === 'local' ? 'local' : branchObj.remote || 'remote'}
+              {branchObj.type === "local" ? "local" : branchObj.remote || "remote"}
             </Badge>
           </span>
         ),
@@ -106,9 +104,9 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   return useMemo(() => {
     return agentProfiles.map((profile: AgentProfileOption) => {
-      const parts = profile.label.split(' \u2022 ');
+      const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
-      const profileLabel = parts[1] ?? '';
+      const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
       return {
         value: profile.id,
@@ -120,7 +118,12 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               <span>{agentLabel}</span>
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
-              {isPassthrough && <IconTerminal2 className="size-3.5 text-muted-foreground" title="Passthrough terminal" />}
+              {isPassthrough && (
+                <IconTerminal2
+                  className="size-3.5 text-muted-foreground"
+                  title="Passthrough terminal"
+                />
+              )}
               {profileLabel ? (
                 <ScrollOnOverflow className="rounded-full border border-border px-2 py-0.5 text-xs">
                   {profileLabel}
@@ -155,8 +158,9 @@ export function useExecutorOptions(executors: Executor[]): OptionItem[] {
 export function useExecutorHint(executors: Executor[], executorId: string): string | null {
   return useMemo(() => {
     const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
-    if (selectedExecutor?.type === 'worktree') return 'A git worktree will be created from the base branch.';
-    if (selectedExecutor?.type === 'local') return 'The agent will run directly on the repository.';
+    if (selectedExecutor?.type === "worktree")
+      return "A git worktree will be created from the base branch.";
+    if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
     return null;
   }, [executors, executorId]);
 }

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { IconGitCommit } from '@tabler/icons-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import type { StatsResponse, TaskStatsDTO, RepositoryStatsDTO } from '@/lib/types/http';
+import { IconGitCommit } from "@tabler/icons-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import type { StatsResponse, TaskStatsDTO, RepositoryStatsDTO } from "@/lib/types/http";
 
 function formatDuration(ms: number): string {
-  if (ms === 0) return '\u2014';
+  if (ms === 0) return "\u2014";
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
@@ -23,13 +23,12 @@ function formatPercent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-type GlobalStats = StatsResponse['global'];
-type GitStats = StatsResponse['git_stats'];
+type GlobalStats = StatsResponse["global"];
+type GitStats = StatsResponse["git_stats"];
 
 function TasksCard({ global }: { global: GlobalStats }) {
-  const completionRate = global.total_tasks > 0
-    ? Math.round((global.completed_tasks / global.total_tasks) * 100)
-    : 0;
+  const completionRate =
+    global.total_tasks > 0 ? Math.round((global.completed_tasks / global.total_tasks) * 100) : 0;
 
   return (
     <Card className="rounded-sm">
@@ -68,7 +67,9 @@ function TimeSpentCard({ global }: { global: GlobalStats }) {
         <CardTitle className="text-sm font-medium text-muted-foreground">Time Spent</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-3xl font-bold tabular-nums">{formatDuration(global.total_duration_ms)}</div>
+        <div className="text-3xl font-bold tabular-nums">
+          {formatDuration(global.total_duration_ms)}
+        </div>
         <div className="mt-2 text-sm text-muted-foreground">
           {formatDuration(global.avg_duration_ms_per_task)} avg per task
         </div>
@@ -88,7 +89,8 @@ function TimeSpentCard({ global }: { global: GlobalStats }) {
 }
 
 function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats: GitStats }) {
-  const hasGitStats = git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
+  const hasGitStats =
+    git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
 
   if (hasGitStats) {
     return (
@@ -109,7 +111,8 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
               +{git_stats.total_insertions.toLocaleString()}
             </span>
             <span className="text-red-600 dark:text-red-400 tabular-nums">
-              {'\u2212'}{git_stats.total_deletions.toLocaleString()}
+              {"\u2212"}
+              {git_stats.total_deletions.toLocaleString()}
             </span>
           </div>
         </CardContent>
@@ -130,7 +133,9 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Messages per task</span>
-            <span className="font-medium tabular-nums">{global.avg_messages_per_task.toFixed(1)}</span>
+            <span className="font-medium tabular-nums">
+              {global.avg_messages_per_task.toFixed(1)}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Sessions</span>
@@ -143,18 +148,18 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
 }
 
 function SignalCard({ global }: { global: GlobalStats }) {
-  const avgTurnsPerSession = global.total_sessions > 0
-    ? global.total_turns / global.total_sessions
-    : 0;
-  const avgMessagesPerSession = global.total_sessions > 0
-    ? global.total_messages / global.total_sessions
-    : 0;
-  const toolShare = global.total_messages > 0
-    ? Math.round((global.total_tool_calls / global.total_messages) * 100)
-    : 0;
-  const userShare = global.total_messages > 0
-    ? Math.round((global.total_user_messages / global.total_messages) * 100)
-    : 0;
+  const avgTurnsPerSession =
+    global.total_sessions > 0 ? global.total_turns / global.total_sessions : 0;
+  const avgMessagesPerSession =
+    global.total_sessions > 0 ? global.total_messages / global.total_sessions : 0;
+  const toolShare =
+    global.total_messages > 0
+      ? Math.round((global.total_tool_calls / global.total_messages) * 100)
+      : 0;
+  const userShare =
+    global.total_messages > 0
+      ? Math.round((global.total_user_messages / global.total_messages) * 100)
+      : 0;
 
   return (
     <Card className="rounded-sm">
@@ -162,11 +167,10 @@ function SignalCard({ global }: { global: GlobalStats }) {
         <CardTitle className="text-sm font-medium text-muted-foreground">Signal</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-3xl font-bold tabular-nums">
-          {global.total_sessions}
-        </div>
+        <div className="text-3xl font-bold tabular-nums">{global.total_sessions}</div>
         <div className="mt-2 text-sm text-muted-foreground">
-          {avgTurnsPerSession.toFixed(1)} turns {'\u00B7'} {avgMessagesPerSession.toFixed(1)} messages per session
+          {avgTurnsPerSession.toFixed(1)} turns {"\u00B7"} {avgMessagesPerSession.toFixed(1)}{" "}
+          messages per session
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t text-xs text-muted-foreground">
           <div className="space-y-1">
@@ -218,9 +222,7 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       {/* Longest Tasks (Most Complex) */}
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Longest Tasks
-          </CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Longest Tasks</CardTitle>
         </CardHeader>
         <CardContent>
           <TaskDurationList
@@ -252,11 +254,15 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
 
 type TaskDurationListProps = {
   tasks: TaskStatsDTO[];
-  sortDirection: 'asc' | 'desc';
+  sortDirection: "asc" | "desc";
   emptyLabel: string;
 };
 
-export function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+export function RepositoryStatsGrid({
+  repositoryStats,
+}: {
+  repositoryStats: RepositoryStatsDTO[];
+}) {
   if (!repositoryStats || repositoryStats.length === 0) {
     return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
   }
@@ -264,9 +270,8 @@ export function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: Repo
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {repositoryStats.map((repo) => {
-        const completionRate = repo.total_tasks > 0
-          ? (repo.completed_tasks / repo.total_tasks) * 100
-          : 0;
+        const completionRate =
+          repo.total_tasks > 0 ? (repo.completed_tasks / repo.total_tasks) * 100 : 0;
         const hasGit = repo.total_commits > 0 || repo.total_files_changed > 0;
 
         return (
@@ -291,7 +296,8 @@ export function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: Repo
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span>Completion</span>
                 <span className="tabular-nums font-mono">
-                  {formatPercent(completionRate)} {'\u00B7'} {repo.completed_tasks}/{repo.total_tasks}
+                  {formatPercent(completionRate)} {"\u00B7"} {repo.completed_tasks}/
+                  {repo.total_tasks}
                 </span>
               </div>
             </div>
@@ -303,9 +309,10 @@ export function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: Repo
                   <span className="font-mono tabular-nums">
                     <span className="text-emerald-600 dark:text-emerald-400">
                       +{repo.total_insertions.toLocaleString()}
-                    </span>{' '}
+                    </span>{" "}
                     <span className="text-red-600 dark:text-red-400">
-                      {'\u2212'}{repo.total_deletions.toLocaleString()}
+                      {"\u2212"}
+                      {repo.total_deletions.toLocaleString()}
                     </span>
                   </span>
                 </div>
@@ -320,12 +327,16 @@ export function RepositoryStatsGrid({ repositoryStats }: { repositoryStats: Repo
   );
 }
 
-function RankedRepoList({ repos, valueAccessor }: { repos: RepositoryStatsDTO[]; valueAccessor: (repo: RepositoryStatsDTO) => string | number }) {
+function RankedRepoList({
+  repos,
+  valueAccessor,
+}: {
+  repos: RepositoryStatsDTO[];
+  valueAccessor: (repo: RepositoryStatsDTO) => string | number;
+}) {
   return (
     <div className="space-y-2">
-      {repos.length === 0 && (
-        <div className="text-sm text-muted-foreground">No data yet.</div>
-      )}
+      {repos.length === 0 && <div className="text-sm text-muted-foreground">No data yet.</div>}
       {repos.map((repo, idx) => (
         <div key={repo.repository_id} className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
@@ -334,9 +345,7 @@ function RankedRepoList({ repos, valueAccessor }: { repos: RepositoryStatsDTO[];
               {repo.repository_name}
             </div>
           </div>
-          <div className="text-sm font-medium tabular-nums font-mono">
-            {valueAccessor(repo)}
-          </div>
+          <div className="text-sm font-medium tabular-nums font-mono">{valueAccessor(repo)}</div>
         </div>
       ))}
     </div>
@@ -408,7 +417,10 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
           Most Time
         </div>
-        <RankedRepoList repos={topByTime} valueAccessor={(r) => formatDuration(r.total_duration_ms)} />
+        <RankedRepoList
+          repos={topByTime}
+          valueAccessor={(r) => formatDuration(r.total_duration_ms)}
+        />
       </div>
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
@@ -421,10 +433,11 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 }
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
-  const filtered = [...tasks].filter(t => t.total_duration_ms > 0);
-  const sorted = sortDirection === 'desc'
-    ? filtered.sort((a, b) => b.total_duration_ms - a.total_duration_ms)
-    : filtered.sort((a, b) => a.total_duration_ms - b.total_duration_ms);
+  const filtered = [...tasks].filter((t) => t.total_duration_ms > 0);
+  const sorted =
+    sortDirection === "desc"
+      ? filtered.sort((a, b) => b.total_duration_ms - a.total_duration_ms)
+      : filtered.sort((a, b) => a.total_duration_ms - b.total_duration_ms);
   const top3 = sorted.slice(0, 3);
 
   return (
@@ -437,7 +450,7 @@ function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationList
               {task.task_title}
             </div>
             <div className="text-xs text-muted-foreground">
-              {task.turn_count} turns {'\u00B7'} {task.message_count} messages
+              {task.turn_count} turns {"\u00B7"} {task.message_count} messages
             </div>
           </div>
           <div className="text-sm font-medium tabular-nums text-right">

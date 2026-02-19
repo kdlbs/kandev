@@ -123,4 +123,3 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 func (c *ChannelBackendClient) Close() {
 	close(c.requestCh)
 }
-

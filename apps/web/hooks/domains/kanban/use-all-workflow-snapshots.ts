@@ -1,15 +1,15 @@
-import { useEffect, useRef } from 'react';
-import { fetchWorkflowSnapshot } from '@/lib/api';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import type { KanbanState } from '@/lib/state/slices/kanban/types';
+import { useEffect, useRef } from "react";
+import { fetchWorkflowSnapshot } from "@/lib/api";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
-type KanbanTask = KanbanState['tasks'][number];
+type KanbanTask = KanbanState["tasks"][number];
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
   const workflows = useAppStore((state) => state.workflows.items);
-  const lastFetchedRef = useRef<string>('');
+  const lastFetchedRef = useRef<string>("");
 
   useEffect(() => {
     if (!workspaceId) {
@@ -22,7 +22,13 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     }
 
     // Deduplicate: skip if same set of workflow IDs already fetched for this connection status
-    const key = workspaceWorkflows.map((w) => w.id).sort().join(',') + ':' + connectionStatus;
+    const key =
+      workspaceWorkflows
+        .map((w) => w.id)
+        .sort()
+        .join(",") +
+      ":" +
+      connectionStatus;
     if (lastFetchedRef.current === key) {
       return;
     }
@@ -34,12 +40,12 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     Promise.all(
       workspaceWorkflows.map(async (wf) => {
         try {
-          const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: 'no-store' });
+          const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
 
           const steps = snapshot.steps.map((step) => ({
             id: step.id,
             title: step.name,
-            color: step.color ?? 'bg-neutral-400',
+            color: step.color ?? "bg-neutral-400",
             position: step.position,
             events: step.events,
             allow_manual_move: step.allow_manual_move,
@@ -76,9 +82,12 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
             tasks,
           });
         } catch (err) {
-          console.error(`[useAllWorkflowSnapshots] Failed to fetch snapshot for workflow "${wf.name}" (${wf.id}):`, err);
+          console.error(
+            `[useAllWorkflowSnapshots] Failed to fetch snapshot for workflow "${wf.name}" (${wf.id}):`,
+            err,
+          );
         }
-      })
+      }),
     ).finally(() => {
       store.getState().setKanbanMultiLoading(false);
     });

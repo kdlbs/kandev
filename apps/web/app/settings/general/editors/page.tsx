@@ -1,13 +1,13 @@
-import { EditorsSettings } from '@/components/settings/editors-settings';
-import { StateProvider } from '@/components/state-provider';
-import { fetchUserSettings, listEditors } from '@/lib/api';
+import { EditorsSettings } from "@/components/settings/editors-settings";
+import { StateProvider } from "@/components/state-provider";
+import { fetchUserSettings, listEditors } from "@/lib/api";
 
 export default async function GeneralEditorsPage() {
   let initialState = {};
   try {
     const [editorsResponse, settingsResponse] = await Promise.all([
-      listEditors({ cache: 'no-store' }),
-      fetchUserSettings({ cache: 'no-store' }),
+      listEditors({ cache: "no-store" }),
+      fetchUserSettings({ cache: "no-store" }),
     ]);
     const settings = settingsResponse.settings;
     initialState = {

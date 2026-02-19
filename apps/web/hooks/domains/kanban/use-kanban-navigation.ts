@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { linkToSession } from '@/lib/links';
-import type { Task } from '@/components/kanban-card';
+import { useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { linkToSession } from "@/lib/links";
+import type { Task } from "@/components/kanban-card";
 
 type NavigationOptions = {
   enablePreviewOnClick?: boolean;
@@ -34,9 +34,9 @@ export function useKanbanNavigation({
       if (!client) return null;
       try {
         const response = await client.request<{ sessions: Array<{ id: string }> }>(
-          'task.session.list',
+          "task.session.list",
           { task_id: taskId },
-          10000
+          10000,
         );
         setTaskSessionAvailability((prev) => ({
           ...prev,
@@ -44,11 +44,11 @@ export function useKanbanNavigation({
         }));
         return response.sessions[0]?.id ?? null;
       } catch (error) {
-        console.error('Failed to load task sessions:', error);
+        console.error("Failed to load task sessions:", error);
         return null;
       }
     },
-    [setTaskSessionAvailability]
+    [setTaskSessionAvailability],
   );
 
   // Open task (always navigates, opens dialog if no session)
@@ -66,7 +66,7 @@ export function useKanbanNavigation({
         router.push(linkToSession(latestSessionId));
       }
     },
-    [fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen]
+    [fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen],
   );
 
   // Handle card click (preview or navigate based on settings)
@@ -113,7 +113,16 @@ export function useKanbanNavigation({
         }
       }
     },
-    [isMobile, enablePreviewOnClick, onPreviewTask, fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen]
+    [
+      isMobile,
+      enablePreviewOnClick,
+      onPreviewTask,
+      fetchLatestSessionId,
+      onOpenTask,
+      router,
+      setEditingTask,
+      setIsDialogOpen,
+    ],
   );
 
   return {

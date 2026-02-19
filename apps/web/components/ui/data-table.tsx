@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import {
   type ColumnDef,
@@ -6,26 +6,19 @@ import {
   flexRender,
   getCoreRowModel,
   useReactTable,
-} from "@tanstack/react-table"
+} from "@tanstack/react-table";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@kandev/ui/table"
-import { DataTablePagination } from "./data-table-pagination"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
+import { DataTablePagination } from "./data-table-pagination";
 
 interface DataTableProps<TData, TValue> {
-  columns: ColumnDef<TData, TValue>[]
-  data: TData[]
-  pageCount?: number
-  pagination?: PaginationState
-  onPaginationChange?: (pagination: PaginationState) => void
-  isLoading?: boolean
-  onRowClick?: (row: TData) => void
+  columns: ColumnDef<TData, TValue>[];
+  data: TData[];
+  pageCount?: number;
+  pagination?: PaginationState;
+  onPaginationChange?: (pagination: PaginationState) => void;
+  isLoading?: boolean;
+  onRowClick?: (row: TData) => void;
 }
 
 export function DataTable<TData, TValue>({
@@ -47,14 +40,13 @@ export function DataTable<TData, TValue>({
     },
     onPaginationChange: onPaginationChange
       ? (updater) => {
-          const newPagination =
-            typeof updater === "function" ? updater(pagination!) : updater
-          onPaginationChange(newPagination)
+          const newPagination = typeof updater === "function" ? updater(pagination!) : updater;
+          onPaginationChange(newPagination);
         }
       : undefined,
     getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
-  })
+  });
 
   return (
     <div className="space-y-4">
@@ -67,10 +59,7 @@ export function DataTable<TData, TValue>({
                   <TableHead key={header.id}>
                     {header.isPlaceholder
                       ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
+                      : flexRender(header.column.columnDef.header, header.getContext())}
                   </TableHead>
                 ))}
               </TableRow>
@@ -81,10 +70,7 @@ export function DataTable<TData, TValue>({
               if (isLoading) {
                 return (
                   <TableRow>
-                    <TableCell
-                      colSpan={columns.length}
-                      className="h-24 text-center"
-                    >
+                    <TableCell colSpan={columns.length} className="h-24 text-center">
                       Loading...
                     </TableCell>
                   </TableRow>
@@ -100,10 +86,7 @@ export function DataTable<TData, TValue>({
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext()
-                        )}
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
                   </TableRow>
@@ -111,10 +94,7 @@ export function DataTable<TData, TValue>({
               }
               return (
                 <TableRow>
-                  <TableCell
-                    colSpan={columns.length}
-                    className="h-24 text-center"
-                  >
+                  <TableCell colSpan={columns.length} className="h-24 text-center">
                     No results.
                   </TableCell>
                 </TableRow>
@@ -123,9 +103,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      {pagination && onPaginationChange && (
-        <DataTablePagination table={table} />
-      )}
+      {pagination && onPaginationChange && <DataTablePagination table={table} />}
     </div>
-  )
+  );
 }

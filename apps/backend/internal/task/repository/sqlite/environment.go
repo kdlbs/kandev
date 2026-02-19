@@ -135,4 +135,3 @@ func (r *Repository) ListEnvironments(ctx context.Context) ([]*models.Environmen
 	}
 	return result, rows.Err()
 }
-

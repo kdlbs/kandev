@@ -351,4 +351,3 @@ func (c *Client) WaitForTerminalExit(ctx context.Context, p acp.WaitForTerminalE
 
 // Verify interface implementation
 var _ acp.Client = (*Client)(nil)
-

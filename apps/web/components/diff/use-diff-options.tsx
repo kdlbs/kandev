@@ -1,11 +1,11 @@
-import { useCallback, useMemo, type ReactNode } from 'react';
-import { useTheme } from 'next-themes';
-import type { FileDiffOptions, SelectedLineRange, RenderHeaderMetadataProps } from '@pierre/diffs';
-import { IconPlus } from '@tabler/icons-react';
-import { FONT } from '@/lib/theme/colors';
-import { useGlobalViewMode } from '@/hooks/use-global-view-mode';
-import { useDiffHeaderToolbar } from './diff-header-toolbar';
-import type { AnnotationMetadata } from './use-diff-annotation-renderer';
+import { useCallback, useMemo, type ReactNode } from "react";
+import { useTheme } from "next-themes";
+import type { FileDiffOptions, SelectedLineRange, RenderHeaderMetadataProps } from "@pierre/diffs";
+import { IconPlus } from "@tabler/icons-react";
+import { FONT } from "@/lib/theme/colors";
+import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
+import { useDiffHeaderToolbar } from "./diff-header-toolbar";
+import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
@@ -59,64 +59,83 @@ type UseDiffOptionsResult = {
 
 export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
   const {
-    filePath, diff, enableComments, showHeader, wordWrap,
-    setWordWrap, handleLineSelectionEnd, onLineEnter, onLineLeave,
-    onOpenFile, onRevert,
+    filePath,
+    diff,
+    enableComments,
+    showHeader,
+    wordWrap,
+    setWordWrap,
+    handleLineSelectionEnd,
+    onLineEnter,
+    onLineLeave,
+    onOpenFile,
+    onRevert,
   } = args;
 
   const { resolvedTheme } = useTheme();
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
 
   const toggleViewMode = useCallback(
-    () => setGlobalViewMode(globalViewMode === 'split' ? 'unified' : 'split'),
-    [globalViewMode, setGlobalViewMode]
+    () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),
+    [globalViewMode, setGlobalViewMode],
   );
 
-  const toggleWordWrap = useCallback(
-    () => setWordWrap((v: boolean) => !v),
-    [setWordWrap]
-  );
+  const toggleWordWrap = useCallback(() => setWordWrap((v: boolean) => !v), [setWordWrap]);
 
   const renderHeaderMetadata = useDiffHeaderToolbar({
-    filePath, diff, wordWrap,
+    filePath,
+    diff,
+    wordWrap,
     onToggleWordWrap: toggleWordWrap,
     viewMode: globalViewMode,
     onToggleViewMode: toggleViewMode,
-    onOpenFile, onRevert,
+    onOpenFile,
+    onRevert,
   });
 
-  const renderHoverUtility = useCallback(
-    (): ReactNode => {
-      if (!enableComments) return null;
-      return (
-        <div
-          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="Add comment"
-        >
-          <IconPlus className="h-3 w-3" />
-        </div>
-      );
-    },
-    [enableComments]
-  );
+  const renderHoverUtility = useCallback((): ReactNode => {
+    if (!enableComments) return null;
+    return (
+      <div
+        className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+        title="Add comment"
+      >
+        <IconPlus className="h-3 w-3" />
+      </div>
+    );
+  }, [enableComments]);
 
   const options = useMemo<FileDiffOptions<AnnotationMetadata>>(
     () => ({
       diffStyle: globalViewMode,
-      themeType: resolvedTheme === 'dark' ? 'dark' : 'light',
+      themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
-      hunkSeparators: 'simple',
+      hunkSeparators: "simple",
       enableHoverUtility: enableComments,
-      diffIndicators: 'none',
+      diffIndicators: "none",
       onLineSelectionEnd: handleLineSelectionEnd,
       onLineEnter,
       onLineLeave,
       disableFileHeader: !showHeader,
-      overflow: wordWrap ? 'wrap' : 'scroll',
+      overflow: wordWrap ? "wrap" : "scroll",
       unsafeCSS: DIFF_UNSAFE_CSS,
     }),
-    [globalViewMode, resolvedTheme, enableComments, showHeader, handleLineSelectionEnd, wordWrap, onLineEnter, onLineLeave]
+    [
+      globalViewMode,
+      resolvedTheme,
+      enableComments,
+      showHeader,
+      handleLineSelectionEnd,
+      wordWrap,
+      onLineEnter,
+      onLineLeave,
+    ],
   );
 
-  return { globalViewMode, options, renderHeaderMetadata: showHeader ? renderHeaderMetadata : undefined, renderHoverUtility };
+  return {
+    globalViewMode,
+    options,
+    renderHeaderMetadata: showHeader ? renderHeaderMetadata : undefined,
+    renderHoverUtility,
+  };
 }

@@ -1,12 +1,12 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
-import { useAppStore } from '@/components/state-provider';
+import { useEffect, useCallback, useState, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
 import {
   getTaskPlan,
   createTaskPlan,
   updateTaskPlan,
   deleteTaskPlan,
-} from '@/lib/api/domains/plan-api';
-import type { TaskPlan } from '@/lib/types/http';
+} from "@/lib/api/domains/plan-api";
+import type { TaskPlan } from "@/lib/types/http";
 
 /**
  * Hook to fetch and manage the plan for a task.
@@ -17,17 +17,15 @@ import type { TaskPlan } from '@/lib/types/http';
 export function useTaskPlan(taskId: string | null, options?: { visible?: boolean }) {
   const { visible = true } = options ?? {};
   const prevVisibleRef = useRef(visible);
-  const plan = useAppStore((state) =>
-    taskId ? state.taskPlans.byTaskId[taskId] : undefined
-  );
+  const plan = useAppStore((state) => (taskId ? state.taskPlans.byTaskId[taskId] : undefined));
   const isLoading = useAppStore((state) =>
-    taskId ? state.taskPlans.loadingByTaskId[taskId] ?? false : false
+    taskId ? (state.taskPlans.loadingByTaskId[taskId] ?? false) : false,
   );
   const isLoaded = useAppStore((state) =>
-    taskId ? state.taskPlans.loadedByTaskId[taskId] ?? false : false
+    taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : false,
   );
   const isSaving = useAppStore((state) =>
-    taskId ? state.taskPlans.savingByTaskId[taskId] ?? false : false
+    taskId ? (state.taskPlans.savingByTaskId[taskId] ?? false) : false,
   );
   const setTaskPlan = useAppStore((state) => state.setTaskPlan);
   const setTaskPlanLoading = useAppStore((state) => state.setTaskPlanLoading);
@@ -45,8 +43,8 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
       const fetchedPlan = await getTaskPlan(taskId);
       setTaskPlan(taskId, fetchedPlan);
     } catch (err) {
-      console.error('Failed to fetch task plan:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch plan');
+      console.error("Failed to fetch task plan:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch plan");
     } finally {
       setTaskPlanLoading(taskId, false);
     }
@@ -54,7 +52,7 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
 
   // Fetch plan on mount or when taskId changes
   useEffect(() => {
-    if (connectionStatus !== 'connected') return;
+    if (connectionStatus !== "connected") return;
     if (taskId && !isLoaded && !isLoading) {
       fetchPlan();
     }
@@ -67,7 +65,7 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     prevVisibleRef.current = visible;
 
     // Only refetch when transitioning from hidden to visible
-    if (wasHidden && isNowVisible && connectionStatus === 'connected' && taskId) {
+    if (wasHidden && isNowVisible && connectionStatus === "connected" && taskId) {
       fetchPlan();
     }
   }, [visible, connectionStatus, taskId, fetchPlan]);
@@ -90,14 +88,14 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
         setTaskPlan(taskId, savedPlan);
         return savedPlan;
       } catch (err) {
-        console.error('Failed to save task plan:', err);
-        setError(err instanceof Error ? err.message : 'Failed to save plan');
+        console.error("Failed to save task plan:", err);
+        setError(err instanceof Error ? err.message : "Failed to save plan");
         return null;
       } finally {
         setTaskPlanSaving(taskId, false);
       }
     },
-    [taskId, plan, setTaskPlan, setTaskPlanSaving]
+    [taskId, plan, setTaskPlan, setTaskPlanSaving],
   );
 
   const removePlan = useCallback(async (): Promise<boolean> => {
@@ -110,8 +108,8 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
       setTaskPlan(taskId, null);
       return true;
     } catch (err) {
-      console.error('Failed to delete task plan:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete plan');
+      console.error("Failed to delete task plan:", err);
+      setError(err instanceof Error ? err.message : "Failed to delete plan");
       return false;
     } finally {
       setTaskPlanSaving(taskId, false);
@@ -128,4 +126,3 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     refetch: fetchPlan,
   };
 }
-

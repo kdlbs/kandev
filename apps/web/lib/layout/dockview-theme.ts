@@ -1,4 +1,4 @@
-import { themeAbyss, type DockviewTheme } from 'dockview-react';
+import { themeAbyss, type DockviewTheme } from "dockview-react";
 
 export const themeKandev: DockviewTheme = {
   ...themeAbyss,

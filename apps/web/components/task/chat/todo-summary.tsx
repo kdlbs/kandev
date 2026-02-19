@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { IconCheck, IconChevronDown } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 
 type TodoItem = {
   text: string;
@@ -31,7 +31,7 @@ export function TodoSummary({ todos }: TodoSummaryProps) {
             ) : (
               <span className="h-3.5 w-3.5" />
             )}
-            <span className={cn(todo.done && 'line-through text-muted-foreground')}>
+            <span className={cn(todo.done && "line-through text-muted-foreground")}>
               {todo.text}
             </span>
           </div>

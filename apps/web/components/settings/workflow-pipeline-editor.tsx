@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   DndContext,
   closestCenter,
@@ -8,32 +8,27 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   SortableContext,
   horizontalListSortingStrategy,
   arrayMove,
   useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   IconGripVertical,
   IconPlus,
   IconTrash,
   IconChevronRight,
   IconRosetteNumber1,
-} from '@tabler/icons-react';
-import { StepCapabilityIcons } from '@/components/step-capability-icons';
-import { ScrollArea, ScrollBar } from '@kandev/ui/scroll-area';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@kandev/ui/tooltip';
-import type { WorkflowStep } from '@/lib/types/http';
-import { cn } from '@/lib/utils';
-import { StepConfigPanel } from './workflow-pipeline-editor-panels';
+} from "@tabler/icons-react";
+import { StepCapabilityIcons } from "@/components/step-capability-icons";
+import { ScrollArea, ScrollBar } from "@kandev/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import type { WorkflowStep } from "@/lib/types/http";
+import { cn } from "@/lib/utils";
+import { StepConfigPanel } from "./workflow-pipeline-editor-panels";
 
 type WorkflowPipelineEditorProps = {
   steps: WorkflowStep[];
@@ -48,17 +43,17 @@ type WorkflowPipelineEditorProps = {
 
 function getTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_complete?.find((a) =>
-    ['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
+    ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
-  return action?.type ?? 'none';
+  return action?.type ?? "none";
 }
 
 function getTransitionLabel(step: WorkflowStep): string {
   const t = getTransitionType(step);
-  if (t === 'move_to_next') return 'auto';
-  if (t === 'move_to_previous') return 'back';
-  if (t === 'move_to_step') return 'goto';
-  return 'manual';
+  if (t === "move_to_next") return "auto";
+  if (t === "move_to_previous") return "back";
+  if (t === "move_to_step") return "goto";
+  return "manual";
 }
 
 // --- Pipeline Node ---
@@ -71,7 +66,13 @@ type PipelineNodeProps = {
   readOnly?: boolean;
 };
 
-function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }: PipelineNodeProps) {
+function PipelineNode({
+  step,
+  isSelected,
+  onSelect,
+  onRemove,
+  readOnly = false,
+}: PipelineNodeProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: step.id,
   });
@@ -83,9 +84,11 @@ function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }
       ref={setNodeRef}
       style={style}
       className={cn(
-        'group relative flex items-center gap-1.5 rounded-lg border-2 px-3 py-2 min-w-[120px] max-w-[160px] cursor-pointer transition-colors select-none',
-        isSelected ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/50',
-        isDragging && 'opacity-50 z-50',
+        "group relative flex items-center gap-1.5 rounded-lg border-2 px-3 py-2 min-w-[120px] max-w-[160px] cursor-pointer transition-colors select-none",
+        isSelected
+          ? "border-primary bg-primary/5"
+          : "border-border bg-card hover:border-primary/50",
+        isDragging && "opacity-50 z-50",
       )}
       onClick={onSelect}
     >
@@ -103,7 +106,10 @@ function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }
       )}
       <button
         type="button"
-        className={cn('shrink-0 p-0.5 rounded text-muted-foreground/40 hover:text-muted-foreground', readOnly ? 'cursor-default' : 'cursor-grab')}
+        className={cn(
+          "shrink-0 p-0.5 rounded text-muted-foreground/40 hover:text-muted-foreground",
+          readOnly ? "cursor-default" : "cursor-grab",
+        )}
         {...(readOnly ? {} : attributes)}
         {...(readOnly ? {} : listeners)}
         aria-disabled={readOnly}
@@ -113,16 +119,22 @@ function PipelineNode({ step, isSelected, onSelect, onRemove, readOnly = false }
       </button>
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <div className={cn('w-3 h-3 rounded-full shrink-0', step.color)} />
+          <div className={cn("w-3 h-3 rounded-full shrink-0", step.color)} />
           <span className="text-sm font-medium truncate">{step.name}</span>
         </div>
-        <StepCapabilityIcons events={step.events} fallback={<span className="text-xs text-muted-foreground/50">manual</span>} />
+        <StepCapabilityIcons
+          events={step.events}
+          fallback={<span className="text-xs text-muted-foreground/50">manual</span>}
+        />
       </div>
       {!readOnly && (
         <button
           type="button"
           className="absolute -top-2 -right-2 hidden group-hover:flex items-center justify-center w-5 h-5 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
         >
           <IconTrash className="h-3 w-3" />
         </button>
@@ -156,7 +168,14 @@ type PipelineAreaProps = {
   readOnly: boolean;
 };
 
-function PipelineArea({ steps, selectedStepId, onSelectStep, onRemoveStep, onAddStep, readOnly }: PipelineAreaProps) {
+function PipelineArea({
+  steps,
+  selectedStepId,
+  onSelectStep,
+  onRemoveStep,
+  onAddStep,
+  readOnly,
+}: PipelineAreaProps) {
   return (
     <div className="flex items-center gap-0 py-2 px-1">
       {steps.map((step, index) => (
@@ -171,7 +190,11 @@ function PipelineArea({ steps, selectedStepId, onSelectStep, onRemoveStep, onAdd
           />
         </div>
       ))}
-      {steps.length > 0 && <div className="flex items-center"><div className="w-4 h-px bg-border shrink-0" /></div>}
+      {steps.length > 0 && (
+        <div className="flex items-center">
+          <div className="w-4 h-px bg-border shrink-0" />
+        </div>
+      )}
       <button
         type="button"
         onClick={readOnly ? undefined : onAddStep}
@@ -198,12 +221,17 @@ export function WorkflowPipelineEditor({
   const [prevStepCount, setPrevStepCount] = useState(steps.length);
 
   if (steps.length !== prevStepCount) {
-    if (steps.length > prevStepCount && steps.length > 0) setSelectedStepId(steps[steps.length - 1].id);
+    if (steps.length > prevStepCount && steps.length > 0)
+      setSelectedStepId(steps[steps.length - 1].id);
     setPrevStepCount(steps.length);
   }
 
   const stepItems = useMemo(() => steps.map((step) => step.id), [steps]);
-  const isMounted = useSyncExternalStore(() => () => { }, () => true, () => false);
+  const isMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -214,10 +242,13 @@ export function WorkflowPipelineEditor({
     const oldIndex = steps.findIndex((step) => step.id === active.id);
     const newIndex = steps.findIndex((step) => step.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
-    onReorderSteps(arrayMove(steps, oldIndex, newIndex).map((step, index) => ({ ...step, position: index })));
+    onReorderSteps(
+      arrayMove(steps, oldIndex, newIndex).map((step, index) => ({ ...step, position: index })),
+    );
   };
 
-  const handleSelectStep = (stepId: string) => setSelectedStepId((prev) => (prev === stepId ? null : stepId));
+  const handleSelectStep = (stepId: string) =>
+    setSelectedStepId((prev) => (prev === stepId ? null : stepId));
 
   const handleRemoveStep = (stepId: string) => {
     onRemoveStep(stepId);
@@ -225,18 +256,33 @@ export function WorkflowPipelineEditor({
   };
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
-  const pipelineArea = <PipelineArea steps={steps} selectedStepId={selectedStepId} onSelectStep={handleSelectStep} onRemoveStep={handleRemoveStep} onAddStep={onAddStep} readOnly={readOnly} />;
+  const pipelineArea = (
+    <PipelineArea
+      steps={steps}
+      selectedStepId={selectedStepId}
+      onSelectStep={handleSelectStep}
+      onRemoveStep={handleRemoveStep}
+      onAddStep={onAddStep}
+      readOnly={readOnly}
+    />
+  );
 
   return (
     <div className="space-y-3">
       <ScrollArea className="w-full">
         {isMounted ? (
-          <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd} sensors={sensors}>
+          <DndContext
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+            sensors={sensors}
+          >
             <SortableContext items={stepItems} strategy={horizontalListSortingStrategy}>
               {pipelineArea}
             </SortableContext>
           </DndContext>
-        ) : pipelineArea}
+        ) : (
+          pipelineArea
+        )}
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
       {selectedStep && (
@@ -245,7 +291,10 @@ export function WorkflowPipelineEditor({
           step={selectedStep}
           steps={steps}
           onUpdate={(updates) => onUpdateStep(selectedStep.id, updates)}
-          onRemove={() => { onRemoveStep(selectedStep.id); setSelectedStepId(null); }}
+          onRemove={() => {
+            onRemoveStep(selectedStep.id);
+            setSelectedStepId(null);
+          }}
           readOnly={readOnly}
         />
       )}

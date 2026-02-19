@@ -72,8 +72,6 @@ func (h *Handler) HandleConnection(c *gin.Context) {
 	client.ReadPump(c.Request.Context())
 }
 
-
-
 // RegisterHealthHandler registers the health check handler
 func RegisterHealthHandler(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionHealthCheck, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -84,4 +82,3 @@ func RegisterHealthHandler(d *ws.Dispatcher) {
 		})
 	})
 }
-

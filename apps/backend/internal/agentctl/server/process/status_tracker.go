@@ -40,10 +40,10 @@ type StateChangeCallback func(sessionID string, state AgentState)
 
 // StatusTrackerConfig contains configuration for the status tracker.
 type StatusTrackerConfig struct {
-	Rows              int           // Terminal rows (default 24)
-	Cols              int           // Terminal columns (default 80)
-	CheckInterval     time.Duration // How often to check state (default 100ms)
-	StabilityWindow   time.Duration // Time state must be stable before reporting (default 0)
+	Rows            int           // Terminal rows (default 24)
+	Cols            int           // Terminal columns (default 80)
+	CheckInterval   time.Duration // How often to check state (default 100ms)
+	StabilityWindow time.Duration // Time state must be stable before reporting (default 0)
 }
 
 // DefaultStatusTrackerConfig returns the default configuration.
@@ -58,11 +58,11 @@ func DefaultStatusTrackerConfig() StatusTrackerConfig {
 
 // StatusTracker uses a virtual terminal emulator to track agent state.
 type StatusTracker struct {
-	logger      *logger.Logger
-	sessionID   string
-	detector    StatusDetector
-	callback    StateChangeCallback
-	config      StatusTrackerConfig
+	logger    *logger.Logger
+	sessionID string
+	detector  StatusDetector
+	callback  StateChangeCallback
+	config    StatusTrackerConfig
 
 	// vt10x terminal emulator
 	term vt10x.Terminal
@@ -72,8 +72,8 @@ type StatusTracker struct {
 	lastState        AgentState
 	lastStateChange  time.Time
 	lastCheck        time.Time
-	pendingState     AgentState      // State waiting for stability window
-	pendingStateTime time.Time       // When pending state was first detected
+	pendingState     AgentState // State waiting for stability window
+	pendingStateTime time.Time  // When pending state was first detected
 }
 
 // NewStatusTracker creates a new status tracker with the given detector.
@@ -98,13 +98,13 @@ func NewStatusTracker(
 	term := vt10x.New(vt10x.WithSize(config.Cols, config.Rows))
 
 	return &StatusTracker{
-		logger:      log.WithFields(zap.String("component", "status-tracker"), zap.String("session_id", sessionID)),
-		sessionID:   sessionID,
-		detector:    detector,
-		callback:    callback,
-		config:      config,
-		term:        term,
-		lastState:   StateUnknown,
+		logger:    log.WithFields(zap.String("component", "status-tracker"), zap.String("session_id", sessionID)),
+		sessionID: sessionID,
+		detector:  detector,
+		callback:  callback,
+		config:    config,
+		term:      term,
+		lastState: StateUnknown,
 	}
 }
 

@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from '../client';
+import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
   ListWorkflowTemplatesResponse,
   ListWorkflowStepsResponse,
@@ -7,7 +7,7 @@ import type {
   StepEvents,
   WorkflowTemplate,
   WorkflowStep,
-} from '@/lib/types/http';
+} from "@/lib/types/http";
 
 type BackendTemplateStep = {
   name: string;
@@ -17,7 +17,7 @@ type BackendTemplateStep = {
   events?: StepEvents;
 };
 
-type BackendWorkflowTemplate = Omit<WorkflowTemplate, 'default_steps'> & {
+type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
   steps?: BackendTemplateStep[];
   default_steps?: BackendTemplateStep[];
 };
@@ -40,13 +40,13 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
 // Workflow Template operations
 export async function listWorkflowTemplates(options?: ApiRequestOptions) {
   const response = await fetchJson<ListWorkflowTemplatesResponse>(
-    '/api/v1/workflow/templates',
-    options
+    "/api/v1/workflow/templates",
+    options,
   );
   return {
     ...response,
     templates: (response.templates ?? []).map((template) =>
-      normalizeWorkflowTemplate(template as BackendWorkflowTemplate)
+      normalizeWorkflowTemplate(template as BackendWorkflowTemplate),
     ),
   };
 }
@@ -54,14 +54,17 @@ export async function listWorkflowTemplates(options?: ApiRequestOptions) {
 export async function getWorkflowTemplate(templateId: string, options?: ApiRequestOptions) {
   const response = await fetchJson<WorkflowTemplate>(
     `/api/v1/workflow/templates/${templateId}`,
-    options
+    options,
   );
   return normalizeWorkflowTemplate(response as BackendWorkflowTemplate);
 }
 
 // Workflow Step operations
 export async function listWorkflowSteps(workflowId: string, options?: ApiRequestOptions) {
-  return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workflows/${workflowId}/workflow/steps`, options);
+  return fetchJson<ListWorkflowStepsResponse>(
+    `/api/v1/workflows/${workflowId}/workflow/steps`,
+    options,
+  );
 }
 
 export async function getWorkflowStep(stepId: string, options?: ApiRequestOptions) {
@@ -77,11 +80,11 @@ export async function createWorkflowStep(
     prompt?: string;
     events?: StepEvents;
   },
-  options?: ApiRequestOptions
+  options?: ApiRequestOptions,
 ) {
-  return fetchJson<WorkflowStep>('/api/v1/workflow/steps', {
+  return fetchJson<WorkflowStep>("/api/v1/workflow/steps", {
     ...options,
-    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
@@ -89,6 +92,6 @@ export async function createWorkflowStep(
 export async function listSessionStepHistory(sessionId: string, options?: ApiRequestOptions) {
   return fetchJson<ListSessionStepHistoryResponse>(
     `/api/v1/workflow/history?session_id=${sessionId}`,
-    options
+    options,
   );
 }

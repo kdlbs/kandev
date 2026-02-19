@@ -1,29 +1,23 @@
-'use client';
+"use client";
 
-import {
-  useRef,
-  useImperativeHandle,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-} from 'react';
-import { useEditor, ReactNodeViewRenderer } from '@tiptap/react';
-import Document from '@tiptap/extension-document';
-import Paragraph from '@tiptap/extension-paragraph';
-import Text from '@tiptap/extension-text';
-import HardBreak from '@tiptap/extension-hard-break';
-import History from '@tiptap/extension-history';
-import Placeholder from '@tiptap/extension-placeholder';
-import Code from '@tiptap/extension-code';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { common, createLowlight } from 'lowlight';
-import { Extension } from '@tiptap/core';
-import { cn } from '@/lib/utils';
-import { getChatDraftContent, setChatDraftContent } from '@/lib/local-storage';
-import { getMarkdownText, escapeHtml, handleEditorPaste } from './tiptap-helpers';
-import { CodeBlockView } from './tiptap-code-block-view';
-import { ContextMention } from './tiptap-mention-extension';
-import type { ContextFile } from '@/lib/state/context-files-store';
+import { useRef, useImperativeHandle, useEffect, useLayoutEffect, useMemo } from "react";
+import { useEditor, ReactNodeViewRenderer } from "@tiptap/react";
+import Document from "@tiptap/extension-document";
+import Paragraph from "@tiptap/extension-paragraph";
+import Text from "@tiptap/extension-text";
+import HardBreak from "@tiptap/extension-hard-break";
+import History from "@tiptap/extension-history";
+import Placeholder from "@tiptap/extension-placeholder";
+import Code from "@tiptap/extension-code";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { common, createLowlight } from "lowlight";
+import { Extension } from "@tiptap/core";
+import { cn } from "@/lib/utils";
+import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
+import { getMarkdownText, escapeHtml, handleEditorPaste } from "./tiptap-helpers";
+import { CodeBlockView } from "./tiptap-code-block-view";
+import { ContextMention } from "./tiptap-mention-extension";
+import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type TipTapInputHandle = {
   focus: () => void;
@@ -47,7 +41,7 @@ type UseTipTapEditorOptions = {
   disabled: boolean;
   className?: string;
   planModeEnabled: boolean;
-  submitKey: 'enter' | 'cmd_enter';
+  submitKey: "enter" | "cmd_enter";
   onFocus?: () => void;
   onBlur?: () => void;
   sessionId: string | null;
@@ -123,12 +117,12 @@ export function useTipTapEditor({
     editorProps: {
       attributes: {
         class: cn(
-          'w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto',
-          'text-sm leading-relaxed',
-          'placeholder:text-muted-foreground',
-          'focus:outline-none',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          planModeEnabled && 'border-primary/40',
+          "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
+          "text-sm leading-relaxed",
+          "placeholder:text-muted-foreground",
+          "focus:outline-none",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          planModeEnabled && "border-primary/40",
           className,
         ),
       },
@@ -136,8 +130,14 @@ export function useTipTapEditor({
         return handleEditorPaste(view, event, onImagePasteRef);
       },
       handleDOMEvents: {
-        focus: () => { onFocus?.(); return false; },
-        blur: () => { onBlur?.(); return false; },
+        focus: () => {
+          onFocus?.();
+          return false;
+        },
+        blur: () => {
+          onBlur?.();
+          return false;
+        },
       },
     },
     onUpdate: ({ editor: e }) => {
@@ -152,7 +152,16 @@ export function useTipTapEditor({
   });
 
   // ── Sync effects ──────────────────────────────────────────────
-  useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef });
+  useSyncEditor({
+    editor,
+    disabled,
+    placeholder,
+    sessionId,
+    value,
+    isSyncingRef,
+    initialSyncDoneRef,
+    onChangeRef,
+  });
 
   // ── Imperative handle ─────────────────────────────────────────
   useEditorImperativeHandle(ref, editor, onChange, isSyncingRef);
@@ -173,7 +182,16 @@ type SyncEditorOptions = {
   onChangeRef: React.RefObject<(value: string) => void>;
 };
 
-function useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef }: SyncEditorOptions) {
+function useSyncEditor({
+  editor,
+  disabled,
+  placeholder,
+  sessionId,
+  value,
+  isSyncingRef,
+  initialSyncDoneRef,
+  onChangeRef,
+}: SyncEditorOptions) {
   // Sync disabled state
   useEffect(() => {
     if (editor) editor.setEditable(!disabled);
@@ -183,7 +201,7 @@ function useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSync
   useEffect(() => {
     if (!editor) return;
     editor.extensionManager.extensions.forEach((ext) => {
-      if (ext.name === 'placeholder') {
+      if (ext.name === "placeholder") {
         ext.options.placeholder = placeholder;
         editor.view.dispatch(editor.state.tr);
       }
@@ -213,7 +231,14 @@ type SyncEditorValueOptions = {
   onChangeRef: React.RefObject<(value: string) => void>;
 };
 
-function syncEditorValue({ editor, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef }: SyncEditorValueOptions) {
+function syncEditorValue({
+  editor,
+  sessionId,
+  value,
+  isSyncingRef,
+  initialSyncDoneRef,
+  onChangeRef,
+}: SyncEditorValueOptions) {
   if (!editor) return;
 
   if (!initialSyncDoneRef.current) {
@@ -222,7 +247,7 @@ function syncEditorValue({ editor, sessionId, value, isSyncingRef, initialSyncDo
       const savedContent = getChatDraftContent(sid);
       if (savedContent) {
         isSyncingRef.current = true;
-        editor.commands.setContent(savedContent as import('@tiptap/core').Content);
+        editor.commands.setContent(savedContent as import("@tiptap/core").Content);
         isSyncingRef.current = false;
         initialSyncDoneRef.current = true;
         onChangeRef.current(getMarkdownText(editor));
@@ -231,7 +256,7 @@ function syncEditorValue({ editor, sessionId, value, isSyncingRef, initialSyncDo
     }
   }
 
-  if (value === '') {
+  if (value === "") {
     if (!editor.isEmpty) {
       isSyncingRef.current = true;
       editor.commands.clearContent();
@@ -257,25 +282,25 @@ function syncEditorValue({ editor, sessionId, value, isSyncingRef, initialSyncDo
 
 function useSubmitKeymap(
   disabledRef: React.RefObject<boolean | undefined>,
-  submitKeyRef: React.RefObject<'enter' | 'cmd_enter'>,
+  submitKeyRef: React.RefObject<"enter" | "cmd_enter">,
   onSubmitRef: React.RefObject<(() => void) | undefined>,
 ) {
   return useMemo(() => {
     return Extension.create({
-      name: 'submitKeymap',
+      name: "submitKeymap",
       addKeyboardShortcuts() {
         return {
-          'Enter': () => {
+          Enter: () => {
             if (disabledRef.current) return true;
-            if (submitKeyRef.current === 'enter') {
+            if (submitKeyRef.current === "enter") {
               onSubmitRef.current?.();
               return true;
             }
             return false;
           },
-          'Mod-Enter': () => {
+          "Mod-Enter": () => {
             if (disabledRef.current) return true;
-            if (submitKeyRef.current === 'cmd_enter') {
+            if (submitKeyRef.current === "cmd_enter") {
               onSubmitRef.current?.();
               return true;
             }
@@ -284,7 +309,7 @@ function useSubmitKeymap(
         };
       },
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
 
@@ -296,45 +321,49 @@ function useEditorImperativeHandle(
   onChange: (value: string) => void,
   isSyncingRef: React.RefObject<boolean>,
 ) {
-  useImperativeHandle(ref, () => ({
-    focus: () => editor?.commands.focus(),
-    blur: () => editor?.commands.blur(),
-    getSelectionStart: () => editor?.state.selection.from ?? 0,
-    getValue: () => editor ? getMarkdownText(editor) : '',
-    setValue: (v: string) => {
-      if (!editor) return;
-      isSyncingRef.current = true;
-      if (v === '') {
-        editor.commands.clearContent();
-      } else {
-        editor.commands.setContent(`<p>${escapeHtml(v)}</p>`);
-      }
-      isSyncingRef.current = false;
-      onChange(v);
-    },
-    clear: () => {
-      if (!editor) return;
-      isSyncingRef.current = true;
-      editor.commands.clearContent();
-      isSyncingRef.current = false;
-      onChange('');
-    },
-    getTextareaElement: () => editor?.view.dom ?? null,
-    insertText: (text: string, from: number, to: number) => {
-      if (!editor) return;
-      editor.chain().focus().insertContentAt({ from, to }, text).run();
-    },
-    getMentions: () => {
-      if (!editor) return [];
-      const mentions: ContextFile[] = [];
-      editor.state.doc.descendants((node) => {
-        if (node.type.name === 'contextMention') {
-          const { kind, path, label } = node.attrs;
-          if (kind === 'file') mentions.push({ path, name: label, pinned: false });
-          else if (kind === 'prompt') mentions.push({ path, name: label, pinned: false });
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => editor?.commands.focus(),
+      blur: () => editor?.commands.blur(),
+      getSelectionStart: () => editor?.state.selection.from ?? 0,
+      getValue: () => (editor ? getMarkdownText(editor) : ""),
+      setValue: (v: string) => {
+        if (!editor) return;
+        isSyncingRef.current = true;
+        if (v === "") {
+          editor.commands.clearContent();
+        } else {
+          editor.commands.setContent(`<p>${escapeHtml(v)}</p>`);
         }
-      });
-      return mentions;
-    },
-  }), [editor, onChange, isSyncingRef]);
+        isSyncingRef.current = false;
+        onChange(v);
+      },
+      clear: () => {
+        if (!editor) return;
+        isSyncingRef.current = true;
+        editor.commands.clearContent();
+        isSyncingRef.current = false;
+        onChange("");
+      },
+      getTextareaElement: () => editor?.view.dom ?? null,
+      insertText: (text: string, from: number, to: number) => {
+        if (!editor) return;
+        editor.chain().focus().insertContentAt({ from, to }, text).run();
+      },
+      getMentions: () => {
+        if (!editor) return [];
+        const mentions: ContextFile[] = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === "contextMention") {
+            const { kind, path, label } = node.attrs;
+            if (kind === "file") mentions.push({ path, name: label, pinned: false });
+            else if (kind === "prompt") mentions.push({ path, name: label, pinned: false });
+          }
+        });
+        return mentions;
+      },
+    }),
+    [editor, onChange, isSyncingRef],
+  );
 }

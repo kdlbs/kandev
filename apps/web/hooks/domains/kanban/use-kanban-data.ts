@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { useWorkflows } from '@/hooks/use-workflows';
-import { useWorkflowSnapshot } from '@/hooks/use-workflow-snapshot';
-import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
-import { filterTasksByRepositories } from '@/lib/kanban/filters';
-import type { WorkflowStep } from '@/components/kanban-column';
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useWorkflows } from "@/hooks/use-workflows";
+import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
+import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
+import { filterTasksByRepositories } from "@/lib/kanban/filters";
+import type { WorkflowStep } from "@/components/kanban-column";
 
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
@@ -14,8 +14,14 @@ type KanbanDataOptions = {
   searchQuery?: string;
 };
 
-export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery = '' }: KanbanDataOptions) {
-  const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>({});
+export function useKanbanData({
+  onWorkspaceChange,
+  onWorkflowChange,
+  searchQuery = "",
+}: KanbanDataOptions) {
+  const [taskSessionAvailability, setTaskSessionAvailability] = useState<Record<string, boolean>>(
+    {},
+  );
 
   // Store selectors
   const kanban = useAppStore((state) => state.kanban);
@@ -44,7 +50,7 @@ export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery
   const isMounted = useSyncExternalStore(
     () => () => {},
     () => true,
-    () => false
+    () => false,
   );
 
   // Derived data
@@ -55,13 +61,13 @@ export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery
         .map((step) => ({
           id: step.id,
           title: step.title,
-          color: step.color || 'bg-neutral-400',
+          color: step.color || "bg-neutral-400",
           events: step.events,
         })),
-    [kanban.steps]
+    [kanban.steps],
   );
 
-  const tasks = kanban.tasks.map((task: typeof kanban.tasks[number]) => ({
+  const tasks = kanban.tasks.map((task: (typeof kanban.tasks)[number]) => ({
     id: task.id,
     title: task.title,
     workflowStepId: task.workflowStepId,
@@ -78,7 +84,7 @@ export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery
 
   const visibleTasks = useMemo(
     () => filterTasksByRepositories(tasks, selectedRepositoryIds),
-    [tasks, selectedRepositoryIds]
+    [tasks, selectedRepositoryIds],
   );
 
   // Apply search filtering
@@ -87,7 +93,7 @@ export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery
 
     // Get repositories for the current workspace for search filtering
     const repositories = workspaceState.activeId
-      ? repositoriesByWorkspace[workspaceState.activeId] ?? []
+      ? (repositoriesByWorkspace[workspaceState.activeId] ?? [])
       : [];
 
     const query = searchQuery.toLowerCase();
@@ -113,7 +119,7 @@ export function useKanbanData({ onWorkspaceChange, onWorkflowChange, searchQuery
         ...task,
         hasSession: taskSessionAvailability[task.id],
       })),
-    [filteredTasks, taskSessionAvailability]
+    [filteredTasks, taskSessionAvailability],
   );
 
   return {

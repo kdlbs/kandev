@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useTheme } from 'next-themes';
-import { IconPalette, IconServer, IconKeyboard } from '@tabler/icons-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Label } from '@kandev/ui/label';
-import { Input } from '@kandev/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
-import { Separator } from '@kandev/ui/separator';
-import { SettingsSection } from '@/components/settings/settings-section';
-import { ShellSettingsCard } from '@/components/settings/shell-settings-card';
-import { getBackendConfig } from '@/lib/config';
-import { useAppStore } from '@/components/state-provider';
-import { updateUserSettings } from '@/lib/api';
-import type { Theme } from '@/lib/settings/types';
+import { useState } from "react";
+import { useTheme } from "next-themes";
+import { IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Label } from "@kandev/ui/label";
+import { Input } from "@kandev/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Separator } from "@kandev/ui/separator";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
+import { getBackendConfig } from "@/lib/config";
+import { useAppStore } from "@/components/state-provider";
+import { updateUserSettings } from "@/lib/api";
+import type { Theme } from "@/lib/settings/types";
 
 function ThemeSettingsCard() {
   const { theme: currentTheme, setTheme } = useTheme();
-  const themeValue = currentTheme ?? 'system';
+  const themeValue = currentTheme ?? "system";
 
   return (
     <Card>
@@ -47,14 +47,14 @@ function ChatSubmitKeyCard() {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const [isSavingSubmitKey, setIsSavingSubmitKey] = useState(false);
 
-  const handleChatSubmitKeyChange = async (value: 'enter' | 'cmd_enter') => {
+  const handleChatSubmitKeyChange = async (value: "enter" | "cmd_enter") => {
     if (isSavingSubmitKey) return;
     setIsSavingSubmitKey(true);
     const previousValue = userSettings.chatSubmitKey;
     try {
       setUserSettings({ ...userSettings, chatSubmitKey: value });
       await updateUserSettings({
-        workspace_id: userSettings.workspaceId || '',
+        workspace_id: userSettings.workspaceId || "",
         repository_ids: userSettings.repositoryIds || [],
         chat_submit_key: value,
       });
@@ -75,7 +75,7 @@ function ChatSubmitKeyCard() {
           <Label htmlFor="chat-submit-key">Message Submit Key</Label>
           <Select
             value={userSettings.chatSubmitKey}
-            onValueChange={(value) => handleChatSubmitKeyChange(value as 'enter' | 'cmd_enter')}
+            onValueChange={(value) => handleChatSubmitKeyChange(value as "enter" | "cmd_enter")}
             disabled={isSavingSubmitKey}
           >
             <SelectTrigger id="chat-submit-key">
@@ -87,9 +87,9 @@ function ChatSubmitKeyCard() {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {userSettings.chatSubmitKey === 'cmd_enter'
-              ? 'Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines.'
-              : 'Press Enter to send messages. Press Shift+Enter for newlines.'}
+            {userSettings.chatSubmitKey === "cmd_enter"
+              ? "Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines."
+              : "Press Enter to send messages. Press Shift+Enter for newlines."}
           </p>
         </div>
       </CardContent>
@@ -99,7 +99,7 @@ function ChatSubmitKeyCard() {
 
 function BackendConnectionCard() {
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
-  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
   return (
     <Card>

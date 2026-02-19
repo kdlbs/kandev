@@ -1,19 +1,19 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { IconFolder, IconPlus, IconChevronRight } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Separator } from '@kandev/ui/separator';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { createWorkspaceAction } from '@/app/actions/workspaces';
-import { useRequest } from '@/lib/http/use-request';
-import { useToast } from '@/components/toast-provider';
-import { RequestIndicator } from '@/components/request-indicator';
-import { useAppStore } from '@/components/state-provider';
-import type { Workspace } from '@/lib/types/http';
+import { useState } from "react";
+import Link from "next/link";
+import { IconFolder, IconPlus, IconChevronRight } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Card, CardContent } from "@kandev/ui/card";
+import { Separator } from "@kandev/ui/separator";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { createWorkspaceAction } from "@/app/actions/workspaces";
+import { useRequest } from "@/lib/http/use-request";
+import { useToast } from "@/components/toast-provider";
+import { RequestIndicator } from "@/components/request-indicator";
+import { useAppStore } from "@/components/state-provider";
+import type { Workspace } from "@/lib/types/http";
 
 type AddWorkspaceFormProps = {
   newWorkspaceName: string;
@@ -21,10 +21,17 @@ type AddWorkspaceFormProps = {
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
   isLoading: boolean;
-  status: 'idle' | 'loading' | 'success' | 'error';
+  status: "idle" | "loading" | "success" | "error";
 };
 
-function AddWorkspaceForm({ newWorkspaceName, onNameChange, onSubmit, onCancel, isLoading, status }: AddWorkspaceFormProps) {
+function AddWorkspaceForm({
+  newWorkspaceName,
+  onNameChange,
+  onSubmit,
+  onCancel,
+  isLoading,
+  status,
+}: AddWorkspaceFormProps) {
   return (
     <Card>
       <CardContent className="pt-6">
@@ -86,7 +93,7 @@ export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
   const [isAdding, setIsAdding] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
   const { toast } = useToast();
 
@@ -119,13 +126,13 @@ export function WorkspacesPageClient() {
           updated_at: workspace.updated_at,
         })),
       ]);
-      setNewWorkspaceName('');
+      setNewWorkspaceName("");
       setIsAdding(false);
     } catch (error) {
       toast({
-        title: 'Failed to create workspace',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
+        title: "Failed to create workspace",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
       });
     }
   };
@@ -135,9 +142,7 @@ export function WorkspacesPageClient() {
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold">Workspaces</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage your workspaces and workflows
-          </p>
+          <p className="text-sm text-muted-foreground mt-1">Manage your workspaces and workflows</p>
         </div>
         <Button size="sm" onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />

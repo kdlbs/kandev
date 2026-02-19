@@ -24,6 +24,7 @@ flowchart TD
 ## Overview
 
 This package powers `npx kandev` by downloading prebuilt release bundles from GitHub Releases and running them locally. It:
+
 - Detects OS/arch and fetches the matching bundle ZIP.
 - Verifies the SHA256 checksum when available.
 - Extracts the bundle into `~/.kandev/bin/<version>/<platform>/`.
@@ -35,11 +36,11 @@ It also supports local dev and production runs from a repo checkout.
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `kandev` or `kandev run` | Download and run release bundles (default) |
-| `kandev dev` | Run local repo with hot-reload (requires repo checkout) |
-| `kandev start` | Run local production build (requires `make build` first) |
+| Command                  | Description                                              |
+| ------------------------ | -------------------------------------------------------- |
+| `kandev` or `kandev run` | Download and run release bundles (default)               |
+| `kandev dev`             | Run local repo with hot-reload (requires repo checkout)  |
+| `kandev start`           | Run local production build (requires `make build` first) |
 
 ## Updates
 
@@ -53,6 +54,7 @@ If you accept, it re-runs `npx kandev@latest` with the same arguments.
 This check is skipped in `dev` and `start` modes.
 
 Note: the runtime bundles are pulled from the latest GitHub Release by default, even if the CLI version is unchanged. So:
+
 - **New runtime release without CLI publish**: users get new runtime automatically, but no update prompt.
 - **New CLI publish**: users get an update prompt and then re-run with the new CLI.
 
@@ -87,15 +89,15 @@ pnpm -C apps/cli start
 
 ## CLI Options
 
-| Option | Description |
-|--------|-------------|
-| `run` | Use release bundles (default) |
-| `dev` | Use local repo with hot-reload |
-| `start` | Use local production build |
-| `--version <tag>` | Release tag to install (default: latest) |
-| `--backend-port <port>` | Override backend port |
-| `--web-port <port>` | Override web port |
-| `--help`, `-h` | Show help |
+| Option                  | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `run`                   | Use release bundles (default)            |
+| `dev`                   | Use local repo with hot-reload           |
+| `start`                 | Use local production build               |
+| `--version <tag>`       | Release tag to install (default: latest) |
+| `--backend-port <port>` | Override backend port                    |
+| `--web-port <port>`     | Override web port                        |
+| `--help`, `-h`          | Show help                                |
 
 ## Local Development
 
@@ -125,22 +127,22 @@ scripts/release/publish-launcher.sh 0.1.0
 
 ## Environment Overrides
 
-| Variable | Description |
-|----------|-------------|
-| `KANDEV_GITHUB_OWNER` | Override GitHub repo owner (default: `kandev`) |
-| `KANDEV_GITHUB_REPO` | Override GitHub repo name (default: `kandev`) |
-| `KANDEV_GITHUB_TOKEN` | Optional token for GitHub API rate limits |
-| `KANDEV_NO_UPDATE_PROMPT=1` | Disable the CLI update prompt |
-| `KANDEV_SKIP_UPDATE=1` | Internal guard to avoid update loops |
-| `KANDEV_HEALTH_TIMEOUT_MS` | Override health check timeout in milliseconds |
+| Variable                    | Description                                    |
+| --------------------------- | ---------------------------------------------- |
+| `KANDEV_GITHUB_OWNER`       | Override GitHub repo owner (default: `kandev`) |
+| `KANDEV_GITHUB_REPO`        | Override GitHub repo name (default: `kandev`)  |
+| `KANDEV_GITHUB_TOKEN`       | Optional token for GitHub API rate limits      |
+| `KANDEV_NO_UPDATE_PROMPT=1` | Disable the CLI update prompt                  |
+| `KANDEV_SKIP_UPDATE=1`      | Internal guard to avoid update loops           |
+| `KANDEV_HEALTH_TIMEOUT_MS`  | Override health check timeout in milliseconds  |
 
 ## Supported Platforms
 
-| Platform | Asset Name |
-|----------|------------|
-| macOS (Apple Silicon) | `kandev-macos-arm64.zip` |
-| macOS (Intel) | `kandev-macos-x64.zip` |
-| Linux (x64) | `kandev-linux-x64.zip` |
-| Linux (ARM64) | `kandev-linux-arm64.zip` |
-| Windows (x64) | `kandev-windows-x64.zip` |
-| Windows (ARM64) | Falls back to `windows-x64` (x64 emulation) |
+| Platform              | Asset Name                                  |
+| --------------------- | ------------------------------------------- |
+| macOS (Apple Silicon) | `kandev-macos-arm64.zip`                    |
+| macOS (Intel)         | `kandev-macos-x64.zip`                      |
+| Linux (x64)           | `kandev-linux-x64.zip`                      |
+| Linux (ARM64)         | `kandev-linux-arm64.zip`                    |
+| Windows (x64)         | `kandev-windows-x64.zip`                    |
+| Windows (ARM64)       | Falls back to `windows-x64` (x64 emulation) |

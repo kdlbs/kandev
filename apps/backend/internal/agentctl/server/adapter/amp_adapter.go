@@ -13,8 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/amp"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
 

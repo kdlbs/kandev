@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useCallback, useState } from 'react';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { useTaskActions } from '@/hooks/use-task-actions';
-import type { Task } from '@/components/kanban-card';
-import type { KanbanState } from '@/lib/state/slices';
+import { useCallback, useState } from "react";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskActions } from "@/hooks/use-task-actions";
+import type { Task } from "@/components/kanban-card";
+import type { KanbanState } from "@/lib/state/slices";
 
 /**
  * Custom hook that extracts task CRUD operations from the Kanban component.
@@ -42,16 +42,16 @@ export function useTaskCRUD() {
         store.getState().hydrate({
           kanban: {
             ...store.getState().kanban,
-            tasks: store.getState().kanban.tasks.filter(
-              (item: KanbanState['tasks'][number]) => item.id !== task.id
-            ),
+            tasks: store
+              .getState()
+              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
           },
         });
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, kanban.workflowId, store]
+    [deleteTaskById, kanban.workflowId, store],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

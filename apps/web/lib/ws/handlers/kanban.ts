@@ -1,20 +1,20 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
-import type { KanbanState } from '@/lib/state/slices/kanban/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
-type KanbanTask = KanbanState['tasks'][number];
-type KanbanStep = KanbanState['steps'][number];
+type KanbanTask = KanbanState["tasks"][number];
+type KanbanStep = KanbanState["steps"][number];
 
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'kanban.update': (message) => {
+    "kanban.update": (message) => {
       const workflowId = message.payload.workflowId;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const steps: KanbanStep[] = message.payload.steps.map((step: any, index: number) => ({
         id: step.id,
         title: step.title,
-        color: step.color ?? 'bg-neutral-400',
+        color: step.color ?? "bg-neutral-400",
         position: step.position ?? index,
         events: step.events,
       }));

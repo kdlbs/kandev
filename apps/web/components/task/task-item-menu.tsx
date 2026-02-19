@@ -1,14 +1,22 @@
-'use client';
+"use client";
 
-import { IconDots, IconTrash, IconCopy, IconEye, IconPencil, IconLoader, IconArchive } from '@tabler/icons-react';
+import {
+  IconDots,
+  IconTrash,
+  IconCopy,
+  IconEye,
+  IconPencil,
+  IconLoader,
+  IconArchive,
+} from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+} from "@kandev/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 type TaskItemMenuProps = {
   open?: boolean;
@@ -37,10 +45,10 @@ export function TaskItemMenu({
         <button
           type="button"
           className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md cursor-pointer',
-            'text-muted-foreground hover:text-foreground hover:bg-foreground/10',
-            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-            'transition-colors'
+            "flex h-6 w-6 items-center justify-center rounded-md cursor-pointer",
+            "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "transition-colors",
           )}
           onClick={(e) => e.stopPropagation()}
           aria-label="Task actions"
@@ -94,7 +102,11 @@ export function TaskItemMenu({
             onDelete?.();
           }}
         >
-          {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : <IconTrash className="mr-2 h-4 w-4" />}
+          {isDeleting ? (
+            <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <IconTrash className="mr-2 h-4 w-4" />
+          )}
           Delete
         </DropdownMenuItem>
       </DropdownMenuContent>

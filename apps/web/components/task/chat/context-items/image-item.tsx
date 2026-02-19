@@ -1,13 +1,9 @@
-'use client';
+"use client";
 
-import { memo, useState, useCallback } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from '@kandev/ui/dialog';
-import type { ImageContextItem } from '@/lib/types/context';
-import { ContextChip } from './context-chip';
+import { memo, useState, useCallback } from "react";
+import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
+import type { ImageContextItem } from "@/lib/types/context";
+import { ContextChip } from "./context-chip";
 
 export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
   const [dialogOpen, setDialogOpen] = useState(false);

@@ -1,5 +1,5 @@
-import type { StateCreator } from 'zustand';
-import type { KanbanSlice, KanbanSliceState } from './types';
+import type { StateCreator } from "zustand";
+import type { KanbanSlice, KanbanSliceState } from "./types";
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
@@ -10,7 +10,7 @@ export const defaultKanbanState: KanbanSliceState = {
 
 export const createKanbanSlice: StateCreator<
   KanbanSlice,
-  [['zustand/immer', never]],
+  [["zustand/immer", never]],
   [],
   KanbanSlice
 > = (set, get) => ({

@@ -1,4 +1,4 @@
-import type { WebSocketClient } from '@/lib/ws/client';
+import type { WebSocketClient } from "@/lib/ws/client";
 
 let activeClient: WebSocketClient | null = null;
 

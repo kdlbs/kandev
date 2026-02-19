@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { requestFileContent } from '@/lib/ws/workspace-files';
+import { useState, useEffect } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { requestFileContent } from "@/lib/ws/workspace-files";
 
 type LazyFilePreviewProps = {
   path: string;
@@ -42,7 +42,9 @@ export function LazyFilePreview({ path, sessionId }: LazyFilePreviewProps) {
     }
 
     fetch();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [path, sessionId]);
 
   if (loading) {
@@ -59,7 +61,7 @@ export function LazyFilePreview({ path, sessionId }: LazyFilePreviewProps) {
     return <div className="text-muted-foreground text-xs">{path}</div>;
   }
 
-  const preview = content.length > 2000 ? content.slice(0, 2000) + '...' : content;
+  const preview = content.length > 2000 ? content.slice(0, 2000) + "..." : content;
 
   return (
     <div className="space-y-1.5">

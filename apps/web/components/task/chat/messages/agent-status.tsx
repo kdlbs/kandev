@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useMemo, useState, useEffect } from 'react';
-import { IconAlertCircle, IconAlertTriangle } from '@tabler/icons-react';
-import type { Message, TaskSessionState } from '@/lib/types/http';
-import { useSessionTurn } from '@/hooks/domains/session/use-session-turn';
-import { useAppStore } from '@/components/state-provider';
-import { GridSpinner } from '@/components/grid-spinner';
+import { useMemo, useState, useEffect } from "react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
+import type { Message, TaskSessionState } from "@/lib/types/http";
+import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
+import { useAppStore } from "@/components/state-provider";
+import { GridSpinner } from "@/components/grid-spinner";
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -13,21 +13,24 @@ type AgentStatusProps = {
   messages?: Message[];
 };
 
-const STATE_CONFIG: Record<TaskSessionState, { label: string; icon: 'spinner' | 'error' | 'warning' | null }> = {
-  CREATED: { label: '', icon: null },
-  STARTING: { label: 'Agent is starting', icon: 'spinner' },
-  RUNNING: { label: 'Agent is running', icon: 'spinner' },
-  WAITING_FOR_INPUT: { label: '', icon: null },
-  COMPLETED: { label: '', icon: null },
-  FAILED: { label: 'Agent has encountered an error', icon: 'error' },
-  CANCELLED: { label: '', icon: null },
+const STATE_CONFIG: Record<
+  TaskSessionState,
+  { label: string; icon: "spinner" | "error" | "warning" | null }
+> = {
+  CREATED: { label: "", icon: null },
+  STARTING: { label: "Agent is starting", icon: "spinner" },
+  RUNNING: { label: "Agent is running", icon: "spinner" },
+  WAITING_FOR_INPUT: { label: "", icon: null },
+  COMPLETED: { label: "", icon: null },
+  FAILED: { label: "Agent has encountered an error", icon: "error" },
+  CANCELLED: { label: "", icon: null },
 };
 
 /**
  * Format duration in seconds to a human-readable string.
  */
 function formatDuration(seconds: number): string {
-  if (seconds < 0) return '0s';
+  if (seconds < 0) return "0s";
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
@@ -49,9 +52,9 @@ function calculateTurnDurationFromMessages(messages: Message[]): string | null {
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!lastAgentMsg && msg.author_type === 'agent') {
+    if (!lastAgentMsg && msg.author_type === "agent") {
       lastAgentMsg = msg;
-    } else if (lastAgentMsg && msg.author_type === 'user') {
+    } else if (lastAgentMsg && msg.author_type === "user") {
       lastUserMsgBeforeAgent = msg;
       break;
     }
@@ -112,10 +115,11 @@ function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
   return { elapsedSeconds: displaySeconds, formatted };
 }
 
-
 function useActiveTurn(sessionId: string | null) {
-  const turns = useAppStore((state) => sessionId ? state.turns.bySession[sessionId] : undefined);
-  const activeTurnId = useAppStore((state) => sessionId ? state.turns.activeBySession[sessionId] : null);
+  const turns = useAppStore((state) => (sessionId ? state.turns.bySession[sessionId] : undefined));
+  const activeTurnId = useAppStore((state) =>
+    sessionId ? state.turns.activeBySession[sessionId] : null,
+  );
   return useMemo(() => {
     if (!turns || !activeTurnId) return null;
     return turns.find((t) => t.id === activeTurnId) ?? null;
@@ -148,16 +152,22 @@ function AgentWarningStatus({ config }: { config: { label: string } }) {
   );
 }
 
-function AgentRunningStatus({ config, elapsedSeconds, runningDuration }: { config: { label: string }; elapsedSeconds: number; runningDuration: string }) {
+function AgentRunningStatus({
+  config,
+  elapsedSeconds,
+  runningDuration,
+}: {
+  config: { label: string };
+  elapsedSeconds: number;
+  runningDuration: string;
+}) {
   return (
     <div className="py-2" role="status" aria-label={config.label}>
       <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         {config.label}
         <GridSpinner className="text-muted-foreground" />
         {elapsedSeconds > 0 && (
-          <span className="text-muted-foreground/60 tabular-nums">
-            {runningDuration}
-          </span>
+          <span className="text-muted-foreground/60 tabular-nums">{runningDuration}</span>
         )}
       </span>
     </div>
@@ -167,7 +177,10 @@ function AgentRunningStatus({ config, elapsedSeconds, runningDuration }: { confi
 function useAgentStatusData(sessionId: string | null, messages: Message[], isRunning: boolean) {
   const { lastTurnDuration, isActive: isTurnActive } = useSessionTurn(sessionId);
   const activeTurn = useActiveTurn(sessionId);
-  const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(isRunning, activeTurn?.started_at ?? null);
+  const { formatted: runningDuration, elapsedSeconds } = useRunningTimer(
+    isRunning,
+    activeTurn?.started_at ?? null,
+  );
   const fallbackDuration = useMemo(() => {
     if (lastTurnDuration) return null;
     return calculateTurnDurationFromMessages(messages);
@@ -178,15 +191,26 @@ function useAgentStatusData(sessionId: string | null, messages: Message[], isRun
 
 export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
   const config = sessionState ? STATE_CONFIG[sessionState] : null;
-  const isRunning = config?.icon === 'spinner';
-  const isError = config?.icon === 'error';
-  const isWarning = config?.icon === 'warning';
+  const isRunning = config?.icon === "spinner";
+  const isError = config?.icon === "error";
+  const isWarning = config?.icon === "warning";
 
-  const { isTurnActive, runningDuration, elapsedSeconds, displayDuration } = useAgentStatusData(sessionId, messages, isRunning);
+  const { isTurnActive, runningDuration, elapsedSeconds, displayDuration } = useAgentStatusData(
+    sessionId,
+    messages,
+    isRunning,
+  );
 
   if (isError && config) return <AgentErrorStatus config={config} />;
   if (isWarning && config) return <AgentWarningStatus config={config} />;
-  if (isRunning && config) return <AgentRunningStatus config={config} elapsedSeconds={elapsedSeconds} runningDuration={runningDuration} />;
+  if (isRunning && config)
+    return (
+      <AgentRunningStatus
+        config={config}
+        elapsedSeconds={elapsedSeconds}
+        runningDuration={runningDuration}
+      />
+    );
 
   if (!isTurnActive && displayDuration) {
     return (

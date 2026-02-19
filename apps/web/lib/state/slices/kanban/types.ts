@@ -1,4 +1,4 @@
-import type { TaskState as TaskStatus } from '@/lib/types/http';
+import type { TaskState as TaskStatus } from "@/lib/types/http";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -29,7 +29,7 @@ export type KanbanState = {
     repositoryId?: string;
     primarySessionId?: string | null;
     sessionCount?: number | null;
-    reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+    reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     updatedAt?: string;
   }>;
   isLoading?: boolean;
@@ -38,8 +38,8 @@ export type KanbanState = {
 export type WorkflowSnapshotData = {
   workflowId: string;
   workflowName: string;
-  steps: KanbanState['steps'];
-  tasks: KanbanState['tasks'];
+  steps: KanbanState["steps"];
+  tasks: KanbanState["tasks"];
 };
 
 export type KanbanMultiState = {
@@ -66,14 +66,14 @@ export type KanbanSliceState = {
 
 export type KanbanSliceActions = {
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState['items']) => void;
+  setWorkflows: (workflows: WorkflowsState["items"]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
-  updateMultiTask: (workflowId: string, task: KanbanState['tasks'][number]) => void;
+  updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
 };
 

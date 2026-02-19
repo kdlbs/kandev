@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useRef, useEffect } from 'react';
-import { cn } from '@/lib/utils';
-import { Badge } from '@kandev/ui/badge';
-import type { WorkflowStep } from '../kanban-column';
+import { useRef, useEffect } from "react";
+import { cn } from "@/lib/utils";
+import { Badge } from "@kandev/ui/badge";
+import type { WorkflowStep } from "../kanban-column";
 
 type MobileColumnTabsProps = {
   steps: WorkflowStep[];
@@ -32,9 +32,9 @@ export function MobileColumnTabs({
 
       if (!isTabVisible) {
         activeTabRef.current.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'center',
+          behavior: "smooth",
+          block: "nearest",
+          inline: "center",
         });
       }
     }
@@ -51,14 +51,14 @@ export function MobileColumnTabs({
           ref={index === activeIndex ? activeTabRef : null}
           onClick={() => onColumnChange(index)}
           className={cn(
-            'flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors',
-            'border-b-2 -mb-px',
+            "flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
+            "border-b-2 -mb-px",
             index === activeIndex
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
-          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', step.color)} />
+          <div className={cn("w-2 h-2 rounded-full flex-shrink-0", step.color)} />
           <span className="truncate max-w-[100px]">{step.title}</span>
           <Badge variant="secondary" className="text-xs h-5 px-1.5">
             {taskCounts[step.id] ?? 0}

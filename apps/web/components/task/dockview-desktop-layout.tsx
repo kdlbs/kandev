@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from "react";
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -8,46 +8,46 @@ import {
   type IDockviewPanelHeaderProps,
   type DockviewReadyEvent,
   type SerializedDockview,
-} from 'dockview-react';
-import { themeKandev } from '@/lib/layout/dockview-theme';
-import { useDockviewStore, performLayoutSwitch } from '@/lib/state/dockview-store';
-import { applyLayoutFixups, getRootSplitview } from '@/lib/state/dockview-layout-builders';
-import { getSessionLayout, setSessionLayout } from '@/lib/local-storage';
-import { useAppStore } from '@/components/state-provider';
-import { useFileEditors } from '@/hooks/use-file-editors';
-import { useLspFileOpener } from '@/hooks/use-lsp-file-opener';
-import { useEditorKeybinds } from '@/hooks/use-editor-keybinds';
-import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
-import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
+} from "dockview-react";
+import { themeKandev } from "@/lib/layout/dockview-theme";
+import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
+import { applyLayoutFixups, getRootSplitview } from "@/lib/state/dockview-layout-builders";
+import { getSessionLayout, setSessionLayout } from "@/lib/local-storage";
+import { useAppStore } from "@/components/state-provider";
+import { useFileEditors } from "@/hooks/use-file-editors";
+import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
+import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
+import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 
 // Panel components
-import { TaskSessionSidebar } from './task-session-sidebar';
-import { LeftHeaderActions, RightHeaderActions } from './dockview-header-actions';
-import { DockviewWatermark } from './dockview-watermark';
-import { TaskChatPanel } from './task-chat-panel';
-import { TaskChangesPanel } from './task-changes-panel';
-import { ChangesPanel } from './changes-panel';
-import { FilesPanel } from './files-panel';
-import { TaskPlanPanel } from './task-plan-panel';
-import { FileEditorPanel } from './file-editor-panel';
-import { PassthroughTerminal } from './passthrough-terminal';
-import { PanelRoot, PanelBody } from './panel-primitives';
-import { TerminalPanel } from './terminal-panel';
-import { BrowserPanel } from './browser-panel';
-import { CommitDetailPanel } from './commit-detail-panel';
-import { PreviewController } from './preview/preview-controller';
-import { ReviewDialog } from '@/components/review/review-dialog';
-import { useCumulativeDiff } from '@/hooks/domains/session/use-cumulative-diff';
-import { formatReviewCommentsAsMarkdown } from '@/components/task/chat/messages/review-comments-attachment';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useToast } from '@/components/toast-provider';
-import type { DiffComment } from '@/lib/diff/types';
+import { TaskSessionSidebar } from "./task-session-sidebar";
+import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions";
+import { DockviewWatermark } from "./dockview-watermark";
+import { TaskChatPanel } from "./task-chat-panel";
+import { TaskChangesPanel } from "./task-changes-panel";
+import { ChangesPanel } from "./changes-panel";
+import { FilesPanel } from "./files-panel";
+import { TaskPlanPanel } from "./task-plan-panel";
+import { FileEditorPanel } from "./file-editor-panel";
+import { PassthroughTerminal } from "./passthrough-terminal";
+import { PanelRoot, PanelBody } from "./panel-primitives";
+import { TerminalPanel } from "./terminal-panel";
+import { BrowserPanel } from "./browser-panel";
+import { CommitDetailPanel } from "./commit-detail-panel";
+import { PreviewController } from "./preview/preview-controller";
+import { ReviewDialog } from "@/components/review/review-dialog";
+import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
+import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useToast } from "@/components/toast-provider";
+import type { DiffComment } from "@/lib/diff/types";
 
-import type { Repository, RepositoryScript } from '@/lib/types/http';
-import type { Terminal } from '@/hooks/domains/session/use-terminals';
+import type { Repository, RepositoryScript } from "@/lib/types/http";
+import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 // --- STORAGE KEY ---
-const LAYOUT_STORAGE_KEY = 'dockview-layout-v1';
+const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
 // --- PANEL COMPONENTS ---
 // Each panel is a standalone component wrapped for dockview
@@ -57,7 +57,7 @@ function SidebarPanel(props: IDockviewPanelProps) {
   const workflowId = useAppStore((state) => state.workflows.activeId);
   const workspaceName = useAppStore((state) => {
     const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
-    return ws?.name ?? 'Workspace';
+    return ws?.name ?? "Workspace";
   });
 
   // Keep the dockview tab title in sync with workspace name
@@ -82,7 +82,7 @@ function ChatPanel(props: IDockviewPanelProps) {
   });
 
   useEffect(() => {
-    props.api.setTitle('Agent');
+    props.api.setTitle("Agent");
   }, [props.api]);
 
   if (isPassthrough) {
@@ -105,13 +105,15 @@ function ChatPanel(props: IDockviewPanelProps) {
   );
 }
 
-function DiffViewerPanelComponent(props: IDockviewPanelProps<{ kind?: 'all' | 'file'; path?: string; content?: string }>) {
+function DiffViewerPanelComponent(
+  props: IDockviewPanelProps<{ kind?: "all" | "file"; path?: string; content?: string }>,
+) {
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
-  const panelKind = props.params?.kind ?? 'all';
-  const selectedPath = panelKind === 'file' ? props.params?.path : undefined;
-  const panelSelectedDiff = panelKind === 'all' ? selectedDiff : null;
+  const panelKind = props.params?.kind ?? "all";
+  const selectedPath = panelKind === "file" ? props.params?.path : undefined;
+  const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(props.api.id);
@@ -145,30 +147,39 @@ function ChangesPanelWrapper(props: IDockviewPanelProps) {
   const totalCount = fileCount + commits.length;
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : 'Changes';
+    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
     if (props.api.title !== title) {
       props.api.setTitle(title);
     }
   }, [totalCount, props.api]);
 
-  const handleEditFile = useCallback((path: string) => {
-    openFile(path);
-  }, [openFile]);
+  const handleEditFile = useCallback(
+    (path: string) => {
+      openFile(path);
+    },
+    [openFile],
+  );
 
-  const handleOpenDiffFile = useCallback((path: string) => {
-    addFileDiffPanel(path);
-  }, [addFileDiffPanel]);
+  const handleOpenDiffFile = useCallback(
+    (path: string) => {
+      addFileDiffPanel(path);
+    },
+    [addFileDiffPanel],
+  );
 
-  const handleOpenCommitDetail = useCallback((sha: string) => {
-    addCommitDetailPanel(sha);
-  }, [addCommitDetailPanel]);
+  const handleOpenCommitDetail = useCallback(
+    (sha: string) => {
+      addCommitDetailPanel(sha);
+    },
+    [addCommitDetailPanel],
+  );
 
   const handleOpenDiffAll = useCallback(() => {
     addDiffViewerPanel();
   }, [addDiffViewerPanel]);
 
   const handleOpenReview = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('open-review-dialog'));
+    window.dispatchEvent(new CustomEvent("open-review-dialog"));
   }, []);
 
   return (
@@ -186,10 +197,18 @@ function FilesPanelWrapper() {
   const { openFile } = useFileEditors();
 
   const handleOpenFile = useCallback(
-    (file: { path: string; name: string; content: string; originalContent?: string; originalHash?: string; isDirty?: boolean; isBinary?: boolean }) => {
+    (file: {
+      path: string;
+      name: string;
+      content: string;
+      originalContent?: string;
+      originalHash?: string;
+      isDirty?: boolean;
+      isBinary?: boolean;
+    }) => {
       openFile(file.path);
     },
-    [openFile]
+    [openFile],
   );
 
   return <FilesPanel onOpenFile={handleOpenFile} />;
@@ -204,17 +223,17 @@ function PlanPanelComponent() {
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   sidebar: SidebarPanel,
   chat: ChatPanel,
-  'diff-viewer': DiffViewerPanelComponent,
-  'file-editor': FileEditorPanel,
-  'commit-detail': CommitDetailPanel,
+  "diff-viewer": DiffViewerPanelComponent,
+  "file-editor": FileEditorPanel,
+  "commit-detail": CommitDetailPanel,
   changes: ChangesPanelWrapper,
   files: FilesPanelWrapper,
   terminal: TerminalPanel,
   browser: BrowserPanel,
   plan: PlanPanelComponent,
   // Backwards compat aliases for saved layouts
-  'diff-files': ChangesPanelWrapper,
-  'all-files': FilesPanelWrapper,
+  "diff-files": ChangesPanelWrapper,
+  "all-files": FilesPanelWrapper,
 };
 
 // --- TAB COMPONENTS ---
@@ -231,7 +250,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 
 /** Try to restore layout from per-session or global localStorage. Returns true if restored. */
 function tryRestoreLayout(
-  api: DockviewReadyEvent['api'],
+  api: DockviewReadyEvent["api"],
   currentSessionId: string | null,
 ): boolean {
   // 1. Try per-session layout
@@ -273,7 +292,7 @@ function tryRestoreLayout(
  * Reads column widths from the root splitview on layout changes,
  * and stores them in the dockview store's pinnedWidths map.
  */
-function trackPinnedWidths(api: DockviewReadyEvent['api']): void {
+function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
@@ -281,9 +300,9 @@ function trackPinnedWidths(api: DockviewReadyEvent['api']): void {
     // Track sidebar (index 0)
     const sidebarW = sv.getViewSize(0);
     if (sidebarW > 50) {
-      const current = useDockviewStore.getState().pinnedWidths.get('sidebar');
+      const current = useDockviewStore.getState().pinnedWidths.get("sidebar");
       if (current !== sidebarW) {
-        useDockviewStore.getState().setPinnedWidth('sidebar', sidebarW);
+        useDockviewStore.getState().setPinnedWidth("sidebar", sidebarW);
       }
     }
     // Track right column (last index, if 3+ columns)
@@ -291,34 +310,34 @@ function trackPinnedWidths(api: DockviewReadyEvent['api']): void {
       const rightIdx = sv.length - 1;
       const rightW = sv.getViewSize(rightIdx);
       if (rightW > 50) {
-        const current = useDockviewStore.getState().pinnedWidths.get('right');
+        const current = useDockviewStore.getState().pinnedWidths.get("right");
         if (current !== rightW) {
-          useDockviewStore.getState().setPinnedWidth('right', rightW);
+          useDockviewStore.getState().setPinnedWidth("right", rightW);
         }
       }
     }
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
 }
 
 /** Re-add the chat panel if it gets removed (keeps center group alive). */
-function setupChatPanelSafetyNet(api: DockviewReadyEvent['api']) {
+function setupChatPanelSafetyNet(api: DockviewReadyEvent["api"]) {
   api.onDidRemovePanel((panel) => {
-    if (panel.id !== 'chat') return;
+    if (panel.id !== "chat") return;
     // Skip during layout restore — fromJSON removes all panels before re-adding
     if (useDockviewStore.getState().isRestoringLayout) return;
     requestAnimationFrame(() => {
-      if (api.getPanel('chat')) return;
-      const sidebarPanel = api.getPanel('sidebar');
+      if (api.getPanel("chat")) return;
+      const sidebarPanel = api.getPanel("sidebar");
       api.addPanel({
-        id: 'chat',
-        component: 'chat',
-        tabComponent: 'permanentTab',
-        title: 'Agent',
-        position: sidebarPanel
-          ? { direction: 'right', referencePanel: 'sidebar' }
-          : undefined,
+        id: "chat",
+        component: "chat",
+        tabComponent: "permanentTab",
+        title: "Agent",
+        position: sidebarPanel ? { direction: "right", referencePanel: "sidebar" } : undefined,
       });
-      const newChat = api.getPanel('chat');
+      const newChat = api.getPanel("chat");
       if (newChat) {
         useDockviewStore.setState({ centerGroupId: newChat.group.id });
       }
@@ -328,7 +347,7 @@ function setupChatPanelSafetyNet(api: DockviewReadyEvent['api']) {
 
 /** Debounced layout persistence on every layout change. */
 function setupLayoutPersistence(
-  api: DockviewReadyEvent['api'],
+  api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
   sessionIdRef: React.MutableRefObject<string | null>,
 ) {
@@ -370,23 +389,29 @@ function useReviewDialog(effectiveSessionId: string | null) {
       const client = getWebSocketClient();
       if (!client) return;
       const markdown = formatReviewCommentsAsMarkdown(comments);
-      client.request('message.add', {
-        task_id: activeTaskId,
-        session_id: effectiveSessionId,
-        content: markdown,
-      }, 10000).catch(() => {
-        toast({ title: 'Failed to send comments', variant: 'error' });
-      });
+      client
+        .request(
+          "message.add",
+          {
+            task_id: activeTaskId,
+            session_id: effectiveSessionId,
+            content: markdown,
+          },
+          10000,
+        )
+        .catch(() => {
+          toast({ title: "Failed to send comments", variant: "error" });
+        });
       setReviewDialogOpen(false);
     },
-    [activeTaskId, effectiveSessionId, toast]
+    [activeTaskId, effectiveSessionId, toast],
   );
 
   // Listen for open-review-dialog events from any panel
   useEffect(() => {
     const handler = () => setReviewDialogOpen(true);
-    window.addEventListener('open-review-dialog', handler);
-    return () => window.removeEventListener('open-review-dialog', handler);
+    window.addEventListener("open-review-dialog", handler);
+    return () => window.removeEventListener("open-review-dialog", handler);
   }, []);
 
   return {
@@ -419,7 +444,8 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(null);
 
-  const effectiveSessionId = useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const effectiveSessionId =
+    useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const review = useReviewDialog(effectiveSessionId);
@@ -429,7 +455,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
   useEffect(() => {
     const defaultLayout = savedLayouts.find((l) => l.is_default);
-    const state = defaultLayout?.layout as unknown as import('@/lib/state/layout-manager').LayoutState | undefined;
+    const state = defaultLayout?.layout as unknown as
+      | import("@/lib/state/layout-manager").LayoutState
+      | undefined;
     setUserDefaultLayout(state?.columns ? state : null);
   }, [savedLayouts, setUserDefaultLayout]);
 
@@ -470,7 +498,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupChatPanelSafetyNet(api);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
     },
-    [setApi, buildDefaultLayout]
+    [setApi, buildDefaultLayout],
   );
 
   // Catch-all: detect session changes and trigger layout switch

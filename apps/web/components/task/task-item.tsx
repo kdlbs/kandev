@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { memo, useState } from 'react';
-import { IconLoader2 } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
-import type { TaskState } from '@/lib/types/http';
-import { TaskItemMenu } from './task-item-menu';
+import { memo, useState } from "react";
+import { IconLoader2 } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
+import type { TaskState } from "@/lib/types/http";
+import { TaskItemMenu } from "./task-item-menu";
 
 type DiffStats = {
   additions: number;
@@ -39,7 +39,7 @@ function formatRelativeTime(dateString: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffSecs < 60) return 'just now';
+  if (diffSecs < 60) return "just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
@@ -68,7 +68,7 @@ export const TaskItem = memo(function TaskItem({
   // Effective open state: keep menu open while deleting
   const effectiveMenuOpen = menuOpen || isDeleting;
 
-  const isInProgress = state === 'IN_PROGRESS' || state === 'SCHEDULING';
+  const isInProgress = state === "IN_PROGRESS" || state === "SCHEDULING";
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
@@ -77,23 +77,23 @@ export const TaskItem = memo(function TaskItem({
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onClick?.();
         }
       }}
       className={cn(
-        'group relative flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none cursor-pointer',
-        'transition-colors duration-75',
-        'hover:bg-foreground/[0.05]',
-        isSelected && 'bg-primary/10'
+        "group relative flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none cursor-pointer",
+        "transition-colors duration-75",
+        "hover:bg-foreground/[0.05]",
+        isSelected && "bg-primary/10",
       )}
     >
       {/* Selection indicator */}
       <div
         className={cn(
-          'absolute left-0 top-0 bottom-0 w-[2px] transition-opacity',
-          isSelected ? 'bg-primary opacity-100' : 'opacity-0'
+          "absolute left-0 top-0 bottom-0 w-[2px] transition-opacity",
+          isSelected ? "bg-primary opacity-100" : "opacity-0",
         )}
       />
 
@@ -103,9 +103,7 @@ export const TaskItem = memo(function TaskItem({
           {title}
         </span>
         {description && (
-          <span className="text-[11px] text-muted-foreground/60 truncate">
-            {description}
-          </span>
+          <span className="text-[11px] text-muted-foreground/60 truncate">{description}</span>
         )}
       </div>
 
@@ -113,8 +111,8 @@ export const TaskItem = memo(function TaskItem({
       <div className="relative flex items-center shrink-0">
         <div
           className={cn(
-            'flex flex-col items-end gap-0.5 transition-opacity duration-100',
-            effectiveMenuOpen ? 'opacity-0' : 'group-hover:opacity-0'
+            "flex flex-col items-end gap-0.5 transition-opacity duration-100",
+            effectiveMenuOpen ? "opacity-0" : "group-hover:opacity-0",
           )}
         >
           <TaskItemStepBadge isArchived={isArchived} stepName={stepName} />
@@ -128,9 +126,9 @@ export const TaskItem = memo(function TaskItem({
         {/* Action buttons - hidden by default, visible on hover */}
         <div
           className={cn(
-            'absolute right-0 flex items-center gap-0.5',
-            'transition-opacity duration-100',
-            effectiveMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            "absolute right-0 flex items-center gap-0.5",
+            "transition-opacity duration-100",
+            effectiveMenuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
           )}
         >
           <TaskItemMenu
@@ -187,17 +185,14 @@ function TaskItemRightMeta({
   if (diffStats) {
     return (
       <span className="text-[11px] font-mono text-muted-foreground">
-        <span className="text-emerald-500">+{diffStats.additions}</span>
-        {' '}
+        <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
         <span className="text-rose-500">-{diffStats.deletions}</span>
       </span>
     );
   }
   if (updatedAt) {
     return (
-      <span className="text-[11px] text-muted-foreground/60">
-        {formatRelativeTime(updatedAt)}
-      </span>
+      <span className="text-[11px] text-muted-foreground/60">{formatRelativeTime(updatedAt)}</span>
     );
   }
   return null;

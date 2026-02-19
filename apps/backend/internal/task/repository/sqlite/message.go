@@ -341,4 +341,3 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 	}
 	return nil
 }
-

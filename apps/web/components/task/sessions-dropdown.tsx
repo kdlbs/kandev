@@ -1,26 +1,26 @@
-'use client';
+"use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { IconStack2, IconPlus, IconStar } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { IconStack2, IconPlus, IconStar } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { Badge } from '@kandev/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { TaskCreateDialog } from '../task-create-dialog';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { linkToSession } from '@/lib/links';
-import { useTaskSessions } from '@/hooks/use-task-sessions';
-import { performLayoutSwitch } from '@/lib/state/dockview-store';
-import type { TaskSession, TaskSessionState } from '@/lib/types/http';
-import type { AgentProfileOption } from '@/lib/state/slices';
-import { getSessionStateIcon } from '@/lib/ui/state-icons';
+} from "@kandev/ui/dropdown-menu";
+import { Badge } from "@kandev/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { TaskCreateDialog } from "../task-create-dialog";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { linkToSession } from "@/lib/links";
+import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { AgentProfileOption } from "@/lib/state/slices";
+import { getSessionStateIcon } from "@/lib/ui/state-icons";
 
-type SessionStatus = 'running' | 'waiting_input' | 'complete' | 'failed' | 'cancelled';
+type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
 const STATUS_ORDER: Record<TaskSessionState, number> = {
   RUNNING: 1,
@@ -52,34 +52,34 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number): str
 
 function getStatusLabel(status: SessionStatus) {
   switch (status) {
-    case 'running':
-      return 'Running';
-    case 'complete':
-      return 'Complete';
-    case 'waiting_input':
-      return 'Waiting for input';
-    case 'failed':
-      return 'Failed';
-    case 'cancelled':
-      return 'Cancelled';
+    case "running":
+      return "Running";
+    case "complete":
+      return "Complete";
+    case "waiting_input":
+      return "Waiting for input";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
   }
 }
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
   switch (state) {
-    case 'RUNNING':
-    case 'STARTING':
-      return 'running';
-    case 'WAITING_FOR_INPUT':
-      return 'waiting_input';
-    case 'COMPLETED':
-      return 'complete';
-    case 'FAILED':
-      return 'failed';
-    case 'CANCELLED':
-      return 'cancelled';
+    case "RUNNING":
+    case "STARTING":
+      return "running";
+    case "WAITING_FOR_INPUT":
+      return "waiting_input";
+    case "COMPLETED":
+      return "complete";
+    case "FAILED":
+      return "failed";
+    case "CANCELLED":
+      return "cancelled";
     default:
-      return 'running';
+      return "running";
   }
 }
 
@@ -95,8 +95,8 @@ type SessionsDropdownProps = {
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
-  taskTitle = '',
-  taskDescription = '',
+  taskTitle = "",
+  taskDescription = "",
   primarySessionId = null,
   onSetPrimary,
 }: SessionsDropdownProps) {
@@ -109,7 +109,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   const { sessions, loadSessions } = useTaskSessions(taskId);
 
   const agentLabelsById = useMemo(() => {
-    return Object.fromEntries(agentProfiles.map((profile: AgentProfileOption) => [profile.id, profile.label]));
+    return Object.fromEntries(
+      agentProfiles.map((profile: AgentProfileOption) => [profile.id, profile.label]),
+    );
   }, [agentProfiles]);
 
   const handleOpenChange = useCallback(
@@ -118,13 +120,13 @@ export const SessionsDropdown = memo(function SessionsDropdown({
       if (!nextOpen || !taskId) return;
       loadSessions(true);
     },
-    [loadSessions, taskId]
+    [loadSessions, taskId],
   );
 
   // Update timer every second for running sessions
   useEffect(() => {
     const hasRunningSessions = sessions.some(
-      (session: TaskSession) => session.state === 'RUNNING' || session.state === 'STARTING'
+      (session: TaskSession) => session.state === "RUNNING" || session.state === "STARTING",
     );
     if (!hasRunningSessions) return;
 
@@ -136,8 +138,8 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   }, [sessions]);
 
   const updateUrl = useCallback((sessionId: string) => {
-    if (typeof window === 'undefined') return;
-    window.history.replaceState({}, '', linkToSession(sessionId));
+    if (typeof window === "undefined") return;
+    window.history.replaceState({}, "", linkToSession(sessionId));
   }, []);
 
   const handleSelectSession = (sessionId: string) => {
@@ -163,16 +165,20 @@ export const SessionsDropdown = memo(function SessionsDropdown({
       if (session.agent_profile_id && agentLabelsById[session.agent_profile_id]) {
         return agentLabelsById[session.agent_profile_id];
       }
-      return 'Unknown agent';
+      return "Unknown agent";
     },
-    [agentLabelsById]
+    [agentLabelsById],
   );
 
   return (
     <>
       <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+          >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
               {sortedSessions.length}
@@ -298,9 +304,7 @@ function SessionDropdownList({
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
-        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-          No sessions yet
-        </div>
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No sessions yet</div>
       </div>
     );
   }
@@ -346,32 +350,31 @@ function SessionRow({
   onSetPrimary?: (sessionId: string) => void;
 }) {
   const status = mapSessionStatus(session.state);
-  const duration = formatDuration(session.started_at, status === 'running', currentTime);
-  const showDuration = duration !== '0s';
+  const duration = formatDuration(session.started_at, status === "running", currentTime);
+  const showDuration = duration !== "0s";
 
   return (
     <div
       onClick={() => onSelect(session.id)}
-      className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? 'bg-muted/50' : ''}`}
+      className={`w-full flex items-center gap-3 px-2 py-1.5 hover:bg-muted/50 rounded-sm cursor-pointer transition-colors ${isActive ? "bg-muted/50" : ""}`}
     >
-      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">
-        #{number}
-      </span>
+      <span className="text-xs font-medium text-muted-foreground w-8 shrink-0">#{number}</span>
       <span className="text-xs text-foreground flex-1 text-left flex items-center gap-1.5">
         {agentLabel}
         {isPrimary && <IconStar className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />}
       </span>
       {showDuration && (
-        <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
-          {duration}
-        </span>
+        <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{duration}</span>
       )}
       {!isPrimary && onSetPrimary && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onSetPrimary(session.id); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetPrimary(session.id);
+              }}
               className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
             >
               <IconStar className="h-3.5 w-3.5" />
@@ -383,7 +386,7 @@ function SessionRow({
       <div className="w-5 shrink-0 flex items-center justify-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div>{getSessionStateIcon(session.state, 'h-3.5 w-3.5')}</div>
+            <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
           </TooltipTrigger>
           <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
         </Tooltip>

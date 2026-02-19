@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { IconFileOff } from '@tabler/icons-react';
-import { toRelativePath } from '@/lib/utils';
+import { IconFileOff } from "@tabler/icons-react";
+import { toRelativePath } from "@/lib/utils";
 
 type FileBinaryViewerProps = {
   path: string;

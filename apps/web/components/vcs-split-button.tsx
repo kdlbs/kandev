@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { memo, useCallback } from 'react';
+import { memo, useCallback } from "react";
 import {
   IconGitCommit,
   IconGitPullRequest,
@@ -11,8 +11,8 @@ import {
   IconCloudDownload,
   IconCloudUpload,
   IconAlertTriangle,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,30 +22,46 @@ import {
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
-} from '@kandev/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
-import { useGitOperations } from '@/hooks/use-git-operations';
-import { useGitWithFeedback } from '@/hooks/use-git-with-feedback';
-import { useVcsDialogs } from '@/components/vcs/vcs-dialogs';
+} from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useGitOperations } from "@/hooks/use-git-operations";
+import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
-function determinePrimaryAction(uncommittedFileCount: number, aheadCount: number, behindCount: number): 'commit' | 'pr' | 'rebase' {
-  if (uncommittedFileCount > 0) return 'commit';
-  if (aheadCount > 0) return 'pr';
-  if (behindCount > 0) return 'rebase';
-  return 'commit';
+function determinePrimaryAction(
+  uncommittedFileCount: number,
+  aheadCount: number,
+  behindCount: number,
+): "commit" | "pr" | "rebase" {
+  if (uncommittedFileCount > 0) return "commit";
+  if (aheadCount > 0) return "pr";
+  if (behindCount > 0) return "rebase";
+  return "commit";
 }
 
-type PrimaryButtonConfig = { icon: ReactNode; label: string; badge: number | null; tooltip: string; onClick: () => void };
+type PrimaryButtonConfig = {
+  icon: ReactNode;
+  label: string;
+  badge: number | null;
+  tooltip: string;
+  onClick: () => void;
+};
 
-function buildCommitConfig(uncommittedFileCount: number, openCommitDialog: () => void): PrimaryButtonConfig {
+function buildCommitConfig(
+  uncommittedFileCount: number,
+  openCommitDialog: () => void,
+): PrimaryButtonConfig {
   return {
     icon: <IconGitCommit className="h-4 w-4" />,
-    label: 'Commit',
+    label: "Commit",
     badge: uncommittedFileCount > 0 ? uncommittedFileCount : null,
-    tooltip: uncommittedFileCount > 0 ? `Commit ${uncommittedFileCount} changed file${uncommittedFileCount !== 1 ? 's' : ''}` : 'No changes to commit',
+    tooltip:
+      uncommittedFileCount > 0
+        ? `Commit ${uncommittedFileCount} changed file${uncommittedFileCount !== 1 ? "s" : ""}`
+        : "No changes to commit",
     onClick: openCommitDialog,
   };
 }
@@ -53,33 +69,50 @@ function buildCommitConfig(uncommittedFileCount: number, openCommitDialog: () =>
 function buildPrConfig(aheadCount: number, openPRDialog: () => void): PrimaryButtonConfig {
   return {
     icon: <IconGitPullRequest className="h-4 w-4" />,
-    label: 'Create PR',
+    label: "Create PR",
     badge: aheadCount > 0 ? aheadCount : null,
-    tooltip: `Create PR (${aheadCount} commit${aheadCount !== 1 ? 's' : ''} ahead)`,
+    tooltip: `Create PR (${aheadCount} commit${aheadCount !== 1 ? "s" : ""} ahead)`,
     onClick: openPRDialog,
   };
 }
 
-function buildRebaseConfig(behindCount: number, baseBranch: string | undefined, handleRebase: () => void): PrimaryButtonConfig {
+function buildRebaseConfig(
+  behindCount: number,
+  baseBranch: string | undefined,
+  handleRebase: () => void,
+): PrimaryButtonConfig {
   return {
     icon: <IconGitCherryPick className="h-4 w-4" />,
-    label: 'Rebase',
+    label: "Rebase",
     badge: behindCount > 0 ? behindCount : null,
-    tooltip: `Rebase onto ${baseBranch || 'origin/main'} (${behindCount} behind)`,
+    tooltip: `Rebase onto ${baseBranch || "origin/main"} (${behindCount} behind)`,
     onClick: handleRebase,
   };
 }
 
 type PrimaryConfigArgs = {
-  primaryAction: 'commit' | 'pr' | 'rebase';
-  uncommittedFileCount: number; aheadCount: number; behindCount: number;
+  primaryAction: "commit" | "pr" | "rebase";
+  uncommittedFileCount: number;
+  aheadCount: number;
+  behindCount: number;
   baseBranch: string | undefined;
-  openCommitDialog: () => void; openPRDialog: () => void; handleRebase: () => void;
+  openCommitDialog: () => void;
+  openPRDialog: () => void;
+  handleRebase: () => void;
 };
 
-function buildPrimaryButtonConfig({ primaryAction, uncommittedFileCount, aheadCount, behindCount, baseBranch, openCommitDialog, openPRDialog, handleRebase }: PrimaryConfigArgs): PrimaryButtonConfig {
-  if (primaryAction === 'pr') return buildPrConfig(aheadCount, openPRDialog);
-  if (primaryAction === 'rebase') return buildRebaseConfig(behindCount, baseBranch, handleRebase);
+function buildPrimaryButtonConfig({
+  primaryAction,
+  uncommittedFileCount,
+  aheadCount,
+  behindCount,
+  baseBranch,
+  openCommitDialog,
+  openPRDialog,
+  handleRebase,
+}: PrimaryConfigArgs): PrimaryButtonConfig {
+  if (primaryAction === "pr") return buildPrConfig(aheadCount, openPRDialog);
+  if (primaryAction === "rebase") return buildRebaseConfig(behindCount, baseBranch, handleRebase);
   return buildCommitConfig(uncommittedFileCount, openCommitDialog);
 }
 
@@ -97,9 +130,16 @@ type VcsDropdownItemsProps = {
 };
 
 function VcsDropdownItems({
-  disabled, baseBranch, hasMatchingUpstream,
-  behindCount, aheadCount,
-  onPR, onPull, onPush, onRebase, onMerge,
+  disabled,
+  baseBranch,
+  hasMatchingUpstream,
+  behindCount,
+  aheadCount,
+  onPR,
+  onPull,
+  onPush,
+  onRebase,
+  onMerge,
 }: VcsDropdownItemsProps) {
   return (
     <DropdownMenuContent align="end" className="w-56">
@@ -128,11 +168,19 @@ function VcsDropdownItems({
           )}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
-          <DropdownMenuItem className="cursor-pointer gap-3" onClick={() => onPush(false)} disabled={disabled}>
+          <DropdownMenuItem
+            className="cursor-pointer gap-3"
+            onClick={() => onPush(false)}
+            disabled={disabled}
+          >
             <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
             <span>Push</span>
           </DropdownMenuItem>
-          <DropdownMenuItem className="cursor-pointer gap-3" onClick={() => onPush(true)} disabled={disabled}>
+          <DropdownMenuItem
+            className="cursor-pointer gap-3"
+            onClick={() => onPush(true)}
+            disabled={disabled}
+          >
             <IconAlertTriangle className="h-4 w-4 text-muted-foreground" />
             <span>Force Push</span>
           </DropdownMenuItem>
@@ -142,12 +190,12 @@ function VcsDropdownItems({
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
         <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Rebase</span>
-        <span className="text-xs text-muted-foreground">onto {baseBranch || 'origin/main'}</span>
+        <span className="text-xs text-muted-foreground">onto {baseBranch || "origin/main"}</span>
       </DropdownMenuItem>
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
         <IconGitMerge className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">Merge</span>
-        <span className="text-xs text-muted-foreground">from {baseBranch || 'origin/main'}</span>
+        <span className="text-xs text-muted-foreground">from {baseBranch || "origin/main"}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   );
@@ -164,8 +212,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
 }: VcsSplitButtonProps) {
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
-  const { pull, push, rebase, merge, isLoading: isGitLoading } =
-    useGitOperations(sessionId);
+  const { pull, push, rebase, merge, isLoading: isGitLoading } = useGitOperations(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
 
   const currentBranch = gitStatus?.branch;
@@ -173,36 +220,43 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const hasMatchingUpstream =
     remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
 
-  const uncommittedFileCount = gitStatus?.files
-    ? Object.keys(gitStatus.files).length
-    : 0;
+  const uncommittedFileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const aheadCount = gitStatus?.ahead ?? 0;
   const behindCount = gitStatus?.behind ?? 0;
   const isDisabled = isGitLoading || !sessionId;
 
   const handlePull = useCallback(() => {
-    gitWithFeedback(() => pull(), 'Pull');
+    gitWithFeedback(() => pull(), "Pull");
   }, [gitWithFeedback, pull]);
 
   const handlePush = useCallback(
     (force = false) => {
-      gitWithFeedback(() => push({ force }), force ? 'Force Push' : 'Push');
+      gitWithFeedback(() => push({ force }), force ? "Force Push" : "Push");
     },
-    [gitWithFeedback, push]
+    [gitWithFeedback, push],
   );
 
   const handleRebase = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, '') || 'main';
-    gitWithFeedback(() => rebase(targetBranch), 'Rebase');
+    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+    gitWithFeedback(() => rebase(targetBranch), "Rebase");
   }, [gitWithFeedback, rebase, baseBranch]);
 
   const handleMerge = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, '') || 'main';
-    gitWithFeedback(() => merge(targetBranch), 'Merge');
+    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
+    gitWithFeedback(() => merge(targetBranch), "Merge");
   }, [gitWithFeedback, merge, baseBranch]);
 
   const primaryAction = determinePrimaryAction(uncommittedFileCount, aheadCount, behindCount);
-  const primaryButtonConfig = buildPrimaryButtonConfig({ primaryAction, uncommittedFileCount, aheadCount, behindCount, baseBranch, openCommitDialog, openPRDialog, handleRebase });
+  const primaryButtonConfig = buildPrimaryButtonConfig({
+    primaryAction,
+    uncommittedFileCount,
+    aheadCount,
+    behindCount,
+    baseBranch,
+    openCommitDialog,
+    openPRDialog,
+    handleRebase,
+  });
 
   return (
     <div className="inline-flex rounded-md border border-border overflow-hidden">

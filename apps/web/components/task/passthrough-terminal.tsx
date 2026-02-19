@@ -1,29 +1,29 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { AttachAddon } from '@xterm/addon-attach';
-import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { WebglAddon } from '@xterm/addon-webgl';
-import '@xterm/xterm/css/xterm.css';
-import { useAppStore } from '@/components/state-provider';
-import { useSession } from '@/hooks/domains/session/use-session';
-import { useSessionAgentctl } from '@/hooks/domains/session/use-session-agentctl';
-import { getBackendConfig } from '@/lib/config';
-import { getTerminalTheme } from '@/lib/theme/terminal-theme';
+import React, { useEffect, useRef, useCallback, useMemo } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { AttachAddon } from "@xterm/addon-attach";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
+import "@xterm/xterm/css/xterm.css";
+import { useAppStore } from "@/components/state-provider";
+import { useSession } from "@/hooks/domains/session/use-session";
+import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
+import { getBackendConfig } from "@/lib/config";
+import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 
 type BaseProps = {
   sessionId?: string | null;
 };
-type AgentTerminalProps = BaseProps & { mode: 'agent'; label?: string };
-type ShellTerminalProps = BaseProps & { mode: 'shell'; terminalId: string; label?: string };
+type AgentTerminalProps = BaseProps & { mode: "agent"; label?: string };
+type ShellTerminalProps = BaseProps & { mode: "shell"; terminalId: string; label?: string };
 type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
 
 // Debug flag - set to true to see detailed logs
 const DEBUG = false;
 const log = (...args: unknown[]) => {
-  if (DEBUG) console.log('[PassthroughTerminal]', ...args);
+  if (DEBUG) console.log("[PassthroughTerminal]", ...args);
 };
 
 // Minimum dimensions to prevent zero-size issues
@@ -41,41 +41,83 @@ type TerminalInitOptions = {
   fitAndResize: (force?: boolean) => void;
 };
 
-function initTerminalInstance(termContainer: HTMLDivElement, refs: Pick<TerminalInitOptions, 'xtermRef' | 'fitAddonRef' | 'isInitializedRef' | 'lastDimensionsRef' | 'webglAddonRef' | 'resizeTimeoutRef'>, fitAndResize: (force?: boolean) => void) {
+function initTerminalInstance(
+  termContainer: HTMLDivElement,
+  refs: Pick<
+    TerminalInitOptions,
+    | "xtermRef"
+    | "fitAddonRef"
+    | "isInitializedRef"
+    | "lastDimensionsRef"
+    | "webglAddonRef"
+    | "resizeTimeoutRef"
+  >,
+  fitAndResize: (force?: boolean) => void,
+) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
-  log('Creating terminal');
-  const terminal = new Terminal({ allowProposedApi: true, cursorBlink: true, disableStdin: false, convertEol: false, scrollOnUserInput: true, scrollback: 5000, fontSize: 13, fontFamily: 'Menlo, Monaco, "Courier New", monospace', theme: getTerminalTheme(termContainer) });
+  log("Creating terminal");
+  const terminal = new Terminal({
+    allowProposedApi: true,
+    cursorBlink: true,
+    disableStdin: false,
+    convertEol: false,
+    scrollOnUserInput: true,
+    scrollback: 5000,
+    fontSize: 13,
+    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    theme: getTerminalTheme(termContainer),
+  });
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
   const unicode11Addon = new Unicode11Addon();
   terminal.loadAddon(unicode11Addon);
-  terminal.unicode.activeVersion = '11';
-  log('Opening terminal in container');
+  terminal.unicode.activeVersion = "11";
+  log("Opening terminal in container");
   terminal.open(termContainer);
-  try { fitAddon.fit(); refs.lastDimensionsRef.current = { cols: terminal.cols, rows: terminal.rows }; log('Initial fit:', terminal.cols, 'x', terminal.rows); } catch (e) { log('Initial fit failed:', e); }
+  try {
+    fitAddon.fit();
+    refs.lastDimensionsRef.current = { cols: terminal.cols, rows: terminal.rows };
+    log("Initial fit:", terminal.cols, "x", terminal.rows);
+  } catch (e) {
+    log("Initial fit failed:", e);
+  }
   try {
     const webglAddon = new WebglAddon();
-    webglAddon.onContextLoss(() => { log('WebGL context lost'); webglAddon.dispose(); refs.webglAddonRef.current = null; });
+    webglAddon.onContextLoss(() => {
+      log("WebGL context lost");
+      webglAddon.dispose();
+      refs.webglAddonRef.current = null;
+    });
     terminal.loadAddon(webglAddon);
     refs.webglAddonRef.current = webglAddon;
-    log('WebGL addon loaded');
-  } catch (e) { log('WebGL failed, using canvas:', e); }
+    log("WebGL addon loaded");
+  } catch (e) {
+    log("WebGL failed, using canvas:", e);
+  }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();
-    if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) { log('Skipping resize - too small'); return; }
+    if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) {
+      log("Skipping resize - too small");
+      return;
+    }
     if (refs.resizeTimeoutRef.current) clearTimeout(refs.resizeTimeoutRef.current);
-    refs.resizeTimeoutRef.current = setTimeout(() => { fitAndResize(); }, 100);
+    refs.resizeTimeoutRef.current = setTimeout(() => {
+      fitAndResize();
+    }, 100);
   };
   const resizeObserver = new ResizeObserver(handleResize);
   resizeObserver.observe(termContainer);
   return () => {
-    log('Terminal cleanup');
+    log("Terminal cleanup");
     if (refs.resizeTimeoutRef.current) clearTimeout(refs.resizeTimeoutRef.current);
     resizeObserver.disconnect();
-    if (refs.webglAddonRef.current) { refs.webglAddonRef.current.dispose(); refs.webglAddonRef.current = null; }
+    if (refs.webglAddonRef.current) {
+      refs.webglAddonRef.current.dispose();
+      refs.webglAddonRef.current = null;
+    }
     terminal.dispose();
     refs.xtermRef.current = null;
     refs.fitAddonRef.current = null;
@@ -84,17 +126,42 @@ function initTerminalInstance(termContainer: HTMLDivElement, refs: Pick<Terminal
   };
 }
 
-function useTerminalInit({ terminalRef, xtermRef, fitAddonRef, isInitializedRef, lastDimensionsRef, resizeTimeoutRef, webglAddonRef, fitAndResize }: TerminalInitOptions) {
-  const refs = { xtermRef, fitAddonRef, isInitializedRef, lastDimensionsRef, resizeTimeoutRef, webglAddonRef };
+function useTerminalInit({
+  terminalRef,
+  xtermRef,
+  fitAddonRef,
+  isInitializedRef,
+  lastDimensionsRef,
+  resizeTimeoutRef,
+  webglAddonRef,
+  fitAndResize,
+}: TerminalInitOptions) {
+  const refs = {
+    xtermRef,
+    fitAddonRef,
+    isInitializedRef,
+    lastDimensionsRef,
+    resizeTimeoutRef,
+    webglAddonRef,
+  };
   useEffect(() => {
-    log('Terminal init effect');
+    log("Terminal init effect");
     const container = terminalRef.current;
-    if (!container) { log('No container ref'); return; }
-    if (isInitializedRef.current) { log('Already initialized'); return; }
+    if (!container) {
+      log("No container ref");
+      return;
+    }
+    if (isInitializedRef.current) {
+      log("Already initialized");
+      return;
+    }
     const initWhenReady = () => {
       const rect = container.getBoundingClientRect();
-      log('Init check: dimensions', rect.width, 'x', rect.height);
-      if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) { initTerminalInstance(container, refs, fitAndResize); return true; }
+      log("Init check: dimensions", rect.width, "x", rect.height);
+      if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
+        initTerminalInstance(container, refs, fitAndResize);
+        return true;
+      }
       return false;
     };
     if (!initWhenReady()) {
@@ -104,7 +171,10 @@ function useTerminalInit({ terminalRef, xtermRef, fitAddonRef, isInitializedRef,
         if (isInitializedRef.current) return;
         retryCount++;
         if (initWhenReady() || retryCount >= maxRetries) {
-          if (retryCount >= maxRetries) { log('Max retries, forcing init'); initTerminalInstance(container, refs, fitAndResize); }
+          if (retryCount >= maxRetries) {
+            log("Max retries, forcing init");
+            initTerminalInstance(container, refs, fitAndResize);
+          }
           return;
         }
         requestAnimationFrame(retry);
@@ -116,15 +186,21 @@ function useTerminalInit({ terminalRef, xtermRef, fitAddonRef, isInitializedRef,
     const xterm = xtermRef;
     const fitAddon = fitAddonRef;
     return () => {
-      log('Effect cleanup');
+      log("Effect cleanup");
       if (resizeTimeout.current) clearTimeout(resizeTimeout.current);
-      if (webgl.current) { webgl.current.dispose(); webgl.current = null; }
-      if (xterm.current) { xterm.current.dispose(); xterm.current = null; }
+      if (webgl.current) {
+        webgl.current.dispose();
+        webgl.current = null;
+      }
+      if (xterm.current) {
+        xterm.current.dispose();
+        xterm.current = null;
+      }
       fitAddon.current = null;
       isInitializedRef.current = false;
       lastDimensionsRef.current = { cols: 0, rows: 0 };
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitAndResize]);
 }
 
@@ -134,7 +210,7 @@ type WebSocketConnectionOptions = {
   canConnect: boolean;
   fitAndResize: (force?: boolean) => void;
   wsBaseUrl: string;
-  mode: 'agent' | 'shell';
+  mode: "agent" | "shell";
   terminalId: string | undefined;
   label?: string;
   xtermRef: React.MutableRefObject<Terminal | null>;
@@ -143,39 +219,83 @@ type WebSocketConnectionOptions = {
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
 };
 
-function buildWsUrl(wsBaseUrl: string, sessionId: string, mode: 'agent' | 'shell', terminalId: string | undefined, label?: string): string {
-  let wsUrl = mode === 'agent'
-    ? `${wsBaseUrl}/terminal/${sessionId}?mode=agent`
-    : `${wsBaseUrl}/terminal/${sessionId}?mode=shell&terminalId=${encodeURIComponent(terminalId!)}`;
+function buildWsUrl(
+  wsBaseUrl: string,
+  sessionId: string,
+  mode: "agent" | "shell",
+  terminalId: string | undefined,
+  label?: string,
+): string {
+  let wsUrl =
+    mode === "agent"
+      ? `${wsBaseUrl}/terminal/${sessionId}?mode=agent`
+      : `${wsBaseUrl}/terminal/${sessionId}?mode=shell&terminalId=${encodeURIComponent(terminalId!)}`;
   if (label) wsUrl += `&label=${encodeURIComponent(label)}`;
   return wsUrl;
 }
 
-function useWebSocketConnection({ taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, mode, terminalId, label, xtermRef, fitAddonRef, wsRef, attachAddonRef }: WebSocketConnectionOptions) {
+function useWebSocketConnection({
+  taskId,
+  sessionId,
+  canConnect,
+  fitAndResize,
+  wsBaseUrl,
+  mode,
+  terminalId,
+  label,
+  xtermRef,
+  fitAddonRef,
+  wsRef,
+  attachAddonRef,
+}: WebSocketConnectionOptions) {
   useEffect(() => {
-    log('WebSocket effect:', { taskId, sessionId, mode, terminalId, canConnect, hasTerminal: !!xtermRef.current });
-    if (!taskId || !sessionId || !canConnect) { log('WebSocket effect: early return', { taskId, sessionId, canConnect }); return; }
-    if (!xtermRef.current || !fitAddonRef.current) { log('Terminal not ready for WebSocket'); return; }
+    log("WebSocket effect:", {
+      taskId,
+      sessionId,
+      mode,
+      terminalId,
+      canConnect,
+      hasTerminal: !!xtermRef.current,
+    });
+    if (!taskId || !sessionId || !canConnect) {
+      log("WebSocket effect: early return", { taskId, sessionId, canConnect });
+      return;
+    }
+    if (!xtermRef.current || !fitAddonRef.current) {
+      log("Terminal not ready for WebSocket");
+      return;
+    }
     const terminal = xtermRef.current;
     let isMounted = true;
     let connectTimeout: ReturnType<typeof setTimeout> | null = null;
     let refreshInterval: ReturnType<typeof setInterval> | null = null;
     connectTimeout = setTimeout(() => {
       if (!isMounted) return;
-      if (attachAddonRef.current) { attachAddonRef.current.dispose(); attachAddonRef.current = null; }
-      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (attachAddonRef.current) {
+        attachAddonRef.current.dispose();
+        attachAddonRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       const wsUrl = buildWsUrl(wsBaseUrl, sessionId, mode, terminalId, label);
-      log('Connecting to', wsUrl, { mode, terminalId, label });
+      log("Connecting to", wsUrl, { mode, terminalId, label });
       const ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
       ws.onopen = () => {
-        if (!isMounted) { ws.close(); return; }
-        log('WebSocket connected');
+        if (!isMounted) {
+          ws.close();
+          return;
+        }
+        log("WebSocket connected");
         const attachAddon = new AttachAddon(ws, { bidirectional: true });
         terminal.loadAddon(attachAddon);
         attachAddonRef.current = attachAddon;
-        const triggerRefresh = () => { if (isMounted && ws.readyState === WebSocket.OPEN) fitAndResize(true); };
+        const triggerRefresh = () => {
+          if (isMounted && ws.readyState === WebSocket.OPEN) fitAndResize(true);
+        };
         requestAnimationFrame(triggerRefresh);
         setTimeout(triggerRefresh, 100);
         setTimeout(triggerRefresh, 300);
@@ -183,22 +303,52 @@ function useWebSocketConnection({ taskId, sessionId, canConnect, fitAndResize, w
         let refreshCount = 0;
         refreshInterval = setInterval(() => {
           refreshCount++;
-          if (refreshCount > 5 || !isMounted) { if (refreshInterval) clearInterval(refreshInterval); return; }
+          if (refreshCount > 5 || !isMounted) {
+            if (refreshInterval) clearInterval(refreshInterval);
+            return;
+          }
           triggerRefresh();
         }, 1000);
       };
-      ws.onclose = (event) => { log('WebSocket closed:', event.code, event.reason); if (attachAddonRef.current) { attachAddonRef.current.dispose(); attachAddonRef.current = null; } };
-      ws.onerror = (error) => { log('WebSocket error:', error); };
+      ws.onclose = (event) => {
+        log("WebSocket closed:", event.code, event.reason);
+        if (attachAddonRef.current) {
+          attachAddonRef.current.dispose();
+          attachAddonRef.current = null;
+        }
+      };
+      ws.onerror = (error) => {
+        log("WebSocket error:", error);
+      };
     }, 150);
     return () => {
-      log('WebSocket cleanup');
+      log("WebSocket cleanup");
       isMounted = false;
       if (connectTimeout) clearTimeout(connectTimeout);
       if (refreshInterval) clearInterval(refreshInterval);
-      if (attachAddonRef.current) { attachAddonRef.current.dispose(); attachAddonRef.current = null; }
-      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (attachAddonRef.current) {
+        attachAddonRef.current.dispose();
+        attachAddonRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, mode, terminalId, label, xtermRef, fitAddonRef, wsRef, attachAddonRef]);
+  }, [
+    taskId,
+    sessionId,
+    canConnect,
+    fitAndResize,
+    wsBaseUrl,
+    mode,
+    terminalId,
+    label,
+    xtermRef,
+    fitAddonRef,
+    wsRef,
+    attachAddonRef,
+  ]);
 }
 
 /**
@@ -213,9 +363,9 @@ function useWebSocketConnection({ taskId, sessionId, canConnect, fitAndResize, w
  */
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { sessionId: propSessionId, mode, label } = props;
-  const terminalId = mode === 'shell' ? props.terminalId : undefined;
+  const terminalId = mode === "shell" ? props.terminalId : undefined;
   // Debug: log props on every render
-  log('Render - props:', { propSessionId, mode, terminalId, label });
+  log("Render - props:", { propSessionId, mode, terminalId, label });
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -242,19 +392,25 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     try {
       const backendUrl = getBackendConfig().apiBaseUrl;
       const url = new URL(backendUrl);
-      const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      const protocol = url.protocol === "https:" ? "wss:" : "ws:";
       return `${protocol}//${url.host}`;
     } catch {
-      return 'ws://localhost:8080';
+      return "ws://localhost:8080";
     }
   }, []);
 
   // Send resize command via binary protocol
   const sendResize = useCallback((cols: number, rows: number) => {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) { log('sendResize: WebSocket not ready', ws?.readyState); return; }
-    if (cols <= 0 || rows <= 0) { log('sendResize: invalid dimensions', cols, rows); return; }
-    log('sendResize:', cols, 'x', rows);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      log("sendResize: WebSocket not ready", ws?.readyState);
+      return;
+    }
+    if (cols <= 0 || rows <= 0) {
+      log("sendResize: invalid dimensions", cols, rows);
+      return;
+    }
+    log("sendResize:", cols, "x", rows);
     const json = JSON.stringify({ cols, rows });
     const encoder = new TextEncoder();
     const jsonBytes = encoder.encode(json);
@@ -265,22 +421,62 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   }, []);
 
   // Fit terminal and send resize if dimensions changed
-  const fitAndResize = useCallback((force = false) => {
-    const terminal = xtermRef.current;
-    const fitAddon = fitAddonRef.current;
-    const container = terminalRef.current;
-    if (!terminal || !fitAddon || !container) { log('fitAndResize: missing refs'); return; }
-    const rect = container.getBoundingClientRect();
-    log('fitAndResize: container', rect.width, 'x', rect.height);
-    if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) { log('fitAndResize: container too small, skipping'); return; }
-    try { fitAddon.fit(); log('fitAndResize: fit done', terminal.cols, 'x', terminal.rows); } catch (e) { log('fitAndResize: fit failed', e); return; }
-    const { cols, rows } = terminal;
-    const last = lastDimensionsRef.current;
-    if (force || cols !== last.cols || rows !== last.rows) { lastDimensionsRef.current = { cols, rows }; sendResize(cols, rows); }
-  }, [sendResize]);
+  const fitAndResize = useCallback(
+    (force = false) => {
+      const terminal = xtermRef.current;
+      const fitAddon = fitAddonRef.current;
+      const container = terminalRef.current;
+      if (!terminal || !fitAddon || !container) {
+        log("fitAndResize: missing refs");
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      log("fitAndResize: container", rect.width, "x", rect.height);
+      if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) {
+        log("fitAndResize: container too small, skipping");
+        return;
+      }
+      try {
+        fitAddon.fit();
+        log("fitAndResize: fit done", terminal.cols, "x", terminal.rows);
+      } catch (e) {
+        log("fitAndResize: fit failed", e);
+        return;
+      }
+      const { cols, rows } = terminal;
+      const last = lastDimensionsRef.current;
+      if (force || cols !== last.cols || rows !== last.rows) {
+        lastDimensionsRef.current = { cols, rows };
+        sendResize(cols, rows);
+      }
+    },
+    [sendResize],
+  );
 
-  useTerminalInit({ terminalRef, xtermRef, fitAddonRef, isInitializedRef, lastDimensionsRef, resizeTimeoutRef, webglAddonRef, fitAndResize });
-  useWebSocketConnection({ taskId, sessionId, canConnect, fitAndResize, wsBaseUrl, mode, terminalId, label, xtermRef, fitAddonRef, wsRef, attachAddonRef });
+  useTerminalInit({
+    terminalRef,
+    xtermRef,
+    fitAddonRef,
+    isInitializedRef,
+    lastDimensionsRef,
+    resizeTimeoutRef,
+    webglAddonRef,
+    fitAndResize,
+  });
+  useWebSocketConnection({
+    taskId,
+    sessionId,
+    canConnect,
+    fitAndResize,
+    wsBaseUrl,
+    mode,
+    terminalId,
+    label,
+    xtermRef,
+    fitAddonRef,
+    wsRef,
+    attachAddonRef,
+  });
 
   return (
     <div

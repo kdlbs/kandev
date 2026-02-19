@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { Button } from '@kandev/ui/button';
-import { IconTrash, IconEdit, IconMessage } from '@tabler/icons-react';
-import type { DiffComment } from '@/lib/diff/types';
-import { formatLineRange } from '@/lib/diff';
+import { Button } from "@kandev/ui/button";
+import { IconTrash, IconEdit, IconMessage } from "@tabler/icons-react";
+import type { DiffComment } from "@/lib/diff/types";
+import { formatLineRange } from "@/lib/diff";
 
 interface CommentDisplayProps {
   /** The comment to display */
@@ -30,7 +30,7 @@ export function CommentDisplay({
   if (compact) {
     return (
       <div
-        className={`group flex items-start gap-2 rounded border border-border bg-muted/50 px-2 py-1.5 text-xs${onEdit ? ' cursor-pointer hover:bg-muted/80' : ''}`}
+        className={`group flex items-start gap-2 rounded border border-border bg-muted/50 px-2 py-1.5 text-xs${onEdit ? " cursor-pointer hover:bg-muted/80" : ""}`}
         onClick={onEdit}
       >
         <IconMessage className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
@@ -44,7 +44,10 @@ export function CommentDisplay({
             <Button
               size="sm"
               variant="ghost"
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
               className="h-4 w-4 cursor-pointer p-0"
             >
               <IconEdit className="h-3 w-3" />
@@ -54,7 +57,10 @@ export function CommentDisplay({
             <Button
               size="sm"
               variant="ghost"
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
               className="h-4 w-4 cursor-pointer p-0 hover:text-destructive"
             >
               <IconTrash className="h-3 w-3" />
@@ -71,11 +77,9 @@ export function CommentDisplay({
       <div className="mb-1.5 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs">
           <IconMessage className="h-3.5 w-3.5 text-blue-500" />
-          <span className="font-medium">
-            {lineRange}
-          </span>
+          <span className="font-medium">{lineRange}</span>
           <span className="text-muted-foreground">
-            ({comment.side === 'additions' ? 'new' : 'old'})
+            ({comment.side === "additions" ? "new" : "old"})
           </span>
         </div>
         <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -110,9 +114,7 @@ export function CommentDisplay({
       )}
 
       {/* Comment text */}
-      <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">
-        {comment.text}
-      </p>
+      <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{comment.text}</p>
     </div>
   );
 }

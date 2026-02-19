@@ -32,10 +32,7 @@ export type PortConfig = {
  * @param webPort - Optional preferred web port
  * @returns Resolved ports for all services
  */
-export async function pickPorts(
-  backendPort?: number,
-  webPort?: number,
-): Promise<PortConfig> {
+export async function pickPorts(backendPort?: number, webPort?: number): Promise<PortConfig> {
   const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const resolvedWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
@@ -165,7 +162,7 @@ export function attachBackendExitHandler(
 ): void {
   backendProc.on("exit", (code, signal) => {
     console.error(`[kandev] backend exited (code=${code}, signal=${signal})`);
-    const exitCode = signal ? 0 : code ?? 1;
+    const exitCode = signal ? 0 : (code ?? 1);
     void supervisor.shutdown("backend exit").then(() => process.exit(exitCode));
   });
 }

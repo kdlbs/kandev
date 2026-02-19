@@ -1,16 +1,19 @@
-import { useCallback } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useQueue } from './domains/session/use-queue';
-import type { MessageAttachment } from '@/components/task/chat/chat-input-container';
-import type { ActiveDocument } from '@/lib/state/slices/ui/types';
-import type { PlanComment } from '@/lib/state/slices/comments';
-import type { ContextFile } from '@/lib/state/context-files-store';
-import type { CustomPrompt } from '@/lib/types/http';
+import { useCallback } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useQueue } from "./domains/session/use-queue";
+import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
+import type { ActiveDocument } from "@/lib/state/slices/ui/types";
+import type { PlanComment } from "@/lib/state/slices/comments";
+import type { ContextFile } from "@/lib/state/context-files-store";
+import type { CustomPrompt } from "@/lib/types/http";
 
-function buildDocumentContext(activeDocument: ActiveDocument | null, planComments?: PlanComment[]): string {
-  if (!activeDocument) return '';
+function buildDocumentContext(
+  activeDocument: ActiveDocument | null,
+  planComments?: PlanComment[],
+): string {
+  if (!activeDocument) return "";
 
-  if (activeDocument.type === 'plan') {
+  if (activeDocument.type === "plan") {
     let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
 
     if (planComments && planComments.length > 0) {
@@ -28,13 +31,15 @@ function buildDocumentContext(activeDocument: ActiveDocument | null, planComment
 }
 
 function buildContextFilesContext(contextFiles: ContextFile[], prompts: CustomPrompt[]): string {
-  const files = contextFiles.filter((f) => !f.path.startsWith('prompt:') && f.path !== 'plan:context');
-  const promptFiles = contextFiles.filter((f) => f.path.startsWith('prompt:'));
+  const files = contextFiles.filter(
+    (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
+  );
+  const promptFiles = contextFiles.filter((f) => f.path.startsWith("prompt:"));
 
-  let context = '';
+  let context = "";
 
   if (files.length > 0) {
-    const fileList = files.map((f) => `- ${f.path}`).join('\n');
+    const fileList = files.map((f) => `- ${f.path}`).join("\n");
     context += `\n\n<kandev-system>\nCONTEXT FILES: The user has attached the following files as context. Read these files to understand what the user is referring to:\n${fileList}\n</kandev-system>`;
   }
 
@@ -42,14 +47,14 @@ function buildContextFilesContext(contextFiles: ContextFile[], prompts: CustomPr
     const promptsById = new Map(prompts.map((p) => [p.id, p]));
     const resolved = promptFiles
       .map((f) => {
-        const id = f.path.replace('prompt:', '');
+        const id = f.path.replace("prompt:", "");
         const prompt = promptsById.get(id);
         return prompt ? `### ${prompt.name}\n${prompt.content}` : null;
       })
       .filter(Boolean);
 
     if (resolved.length > 0) {
-      context += `\n\n<kandev-system>\nCONTEXT PROMPTS: The user has included the following prompt instructions as context:\n${resolved.join('\n\n')}\n</kandev-system>`;
+      context += `\n\n<kandev-system>\nCONTEXT PROMPTS: The user has included the following prompt instructions as context:\n${resolved.join("\n\n")}\n</kandev-system>`;
     }
   }
 
@@ -84,11 +89,20 @@ async function sendMessageRequest(payload: SendMessagePayload): Promise<void> {
   const client = getWebSocketClient();
   if (!client) return;
 
-  const { taskId, resolvedSessionId, finalMessage, modelToSend, planMode, hasReviewComments, attachments, contextFilesMeta } = payload;
+  const {
+    taskId,
+    resolvedSessionId,
+    finalMessage,
+    modelToSend,
+    planMode,
+    hasReviewComments,
+    attachments,
+    contextFilesMeta,
+  } = payload;
   const hasAttachments = attachments && attachments.length > 0;
 
   await client.request(
-    'message.add',
+    "message.add",
     {
       task_id: taskId,
       session_id: resolvedSessionId,
@@ -99,7 +113,7 @@ async function sendMessageRequest(payload: SendMessagePayload): Promise<void> {
       ...(hasAttachments && { attachments }),
       ...(contextFilesMeta && { context_files: contextFilesMeta }),
     },
-    hasAttachments ? 30000 : 10000
+    hasAttachments ? 30000 : 10000,
   );
 }
 
@@ -122,35 +136,65 @@ export function useMessageHandler({
       const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
       const documentContext = buildDocumentContext(activeDocument, planComments);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
-      return { finalMessage: message.trim() + documentContext + contextFilesContext, allContextFiles };
+      return {
+        finalMessage: message.trim() + documentContext + contextFilesContext,
+        allContextFiles,
+      };
     },
-    [contextFiles, activeDocument, planComments, prompts]
+    [contextFiles, activeDocument, planComments, prompts],
   );
 
   const handleSendMessage = useCallback(
-    async (message: string, attachments?: MessageAttachment[], hasReviewComments?: boolean, inlineMentions?: ContextFile[]) => {
+    async (
+      message: string,
+      attachments?: MessageAttachment[],
+      hasReviewComments?: boolean,
+      inlineMentions?: ContextFile[],
+    ) => {
       if (!taskId || !resolvedSessionId) {
-        console.error('No active task session. Start an agent before sending a message.');
+        console.error("No active task session. Start an agent before sending a message.");
         return;
       }
 
       const { finalMessage, allContextFiles } = buildFinalMessage(message, inlineMentions);
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
-      const realFiles = allContextFiles.filter((f) => !f.path.startsWith('prompt:') && f.path !== 'plan:context');
-      const contextFilesMeta = realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
+      const realFiles = allContextFiles.filter(
+        (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
+      );
+      const contextFilesMeta =
+        realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
 
       if (isAgentBusy) {
-        const queueAttachments = attachments?.map(att => ({ type: att.type, data: att.data, mime_type: att.mime_type }));
+        const queueAttachments = attachments?.map((att) => ({
+          type: att.type,
+          data: att.data,
+          mime_type: att.mime_type,
+        }));
         await queue(taskId, finalMessage, modelToSend, planMode, queueAttachments);
         return;
       }
 
       await sendMessageRequest({
-        taskId, resolvedSessionId, finalMessage, modelToSend, planMode,
-        hasReviewComments, attachments, contextFilesMeta,
+        taskId,
+        resolvedSessionId,
+        finalMessage,
+        modelToSend,
+        planMode,
+        hasReviewComments,
+        attachments,
+        contextFilesMeta,
       });
     },
-    [resolvedSessionId, taskId, activeModel, sessionModel, planMode, isAgentBusy, queue, buildFinalMessage]
+    [
+      resolvedSessionId,
+      taskId,
+      activeModel,
+      sessionModel,
+      planMode,
+      isAgentBusy,
+      queue,
+      buildFinalMessage,
+    ],
   );
 
   return { handleSendMessage };

@@ -61,4 +61,3 @@ func startPTYWithSize(cmd *exec.Cmd, cols, rows int) (PtyHandle, error) {
 
 	return &windowsPTY{cpty: cpty}, nil
 }
-

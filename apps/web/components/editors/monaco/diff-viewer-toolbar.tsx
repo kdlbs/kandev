@@ -1,6 +1,6 @@
-import { cn } from '@kandev/ui/lib/utils';
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@kandev/ui/tooltip';
+import { cn } from "@kandev/ui/lib/utils";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@kandev/ui/tooltip";
 import {
   IconCopy,
   IconTextWrap,
@@ -10,9 +10,9 @@ import {
   IconArrowBackUp,
   IconFoldDown,
   IconFold,
-} from '@tabler/icons-react';
-import type { FileDiffData } from '@/lib/diff/types';
-import type { ViewMode } from '@/hooks/use-global-view-mode';
+} from "@tabler/icons-react";
+import type { FileDiffData } from "@/lib/diff/types";
+import type { ViewMode } from "@/hooks/use-global-view-mode";
 
 interface DiffViewerToolbarProps {
   data: FileDiffData;
@@ -27,7 +27,7 @@ interface DiffViewerToolbarProps {
   onRevert?: (filePath: string) => void;
 }
 
-const iconBtn = 'h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100';
+const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
 export function DiffViewerToolbar({
   data,
@@ -58,18 +58,29 @@ export function DiffViewerToolbar({
             <Button
               variant="ghost"
               size="sm"
-              className={cn(iconBtn, foldUnchanged && 'opacity-100 bg-muted')}
+              className={cn(iconBtn, foldUnchanged && "opacity-100 bg-muted")}
               onClick={() => setFoldUnchanged(!foldUnchanged)}
             >
-              {foldUnchanged ? <IconFoldDown className="h-3.5 w-3.5" /> : <IconFold className="h-3.5 w-3.5" />}
+              {foldUnchanged ? (
+                <IconFoldDown className="h-3.5 w-3.5" />
+              ) : (
+                <IconFold className="h-3.5 w-3.5" />
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{foldUnchanged ? 'Show all lines' : 'Fold unchanged lines'}</TooltipContent>
+          <TooltipContent>
+            {foldUnchanged ? "Show all lines" : "Fold unchanged lines"}
+          </TooltipContent>
         </Tooltip>
         {onRevert && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onRevert(data.filePath)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={iconBtn}
+                onClick={() => onRevert(data.filePath)}
+              >
                 <IconArrowBackUp className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
@@ -81,7 +92,7 @@ export function DiffViewerToolbar({
             <Button
               variant="ghost"
               size="sm"
-              className={cn(iconBtn, wordWrap && 'opacity-100 bg-muted')}
+              className={cn(iconBtn, wordWrap && "opacity-100 bg-muted")}
               onClick={() => setWordWrap(!wordWrap)}
             >
               <IconTextWrap className="h-3.5 w-3.5" />
@@ -95,17 +106,28 @@ export function DiffViewerToolbar({
               variant="ghost"
               size="sm"
               className={cn(iconBtn)}
-              onClick={() => setGlobalViewMode(globalViewMode === 'split' ? 'unified' : 'split')}
+              onClick={() => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split")}
             >
-              {globalViewMode === 'split' ? <IconLayoutRows className="h-3.5 w-3.5" /> : <IconLayoutColumns className="h-3.5 w-3.5" />}
+              {globalViewMode === "split" ? (
+                <IconLayoutRows className="h-3.5 w-3.5" />
+              ) : (
+                <IconLayoutColumns className="h-3.5 w-3.5" />
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{globalViewMode === 'split' ? 'Switch to unified view' : 'Switch to split view'}</TooltipContent>
+          <TooltipContent>
+            {globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
+          </TooltipContent>
         </Tooltip>
         {onOpenFile && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onOpenFile(data.filePath)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={iconBtn}
+                onClick={() => onOpenFile(data.filePath)}
+              >
                 <IconPencil className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>

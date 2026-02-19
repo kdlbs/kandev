@@ -1,8 +1,8 @@
-import type { DiffLineAnnotation } from '@pierre/diffs';
+import type { DiffLineAnnotation } from "@pierre/diffs";
 
 // Re-export DiffComment from unified comment system for backward compat
-export type { DiffComment, AnnotationSide } from '@/lib/state/slices/comments/types';
-import type { DiffComment } from '@/lib/state/slices/comments/types';
+export type { DiffComment, AnnotationSide } from "@/lib/state/slices/comments/types";
+import type { DiffComment } from "@/lib/state/slices/comments/types";
 
 /**
  * File diff data in a unified format for @pierre/diffs.
@@ -63,7 +63,7 @@ export type DiffCommentsSlice = DiffCommentsState & DiffCommentsActions;
  * Rich text input block type for comment blocks
  */
 export interface CommentBlockData {
-  type: 'comment-block';
+  type: "comment-block";
   filePath: string;
   commentIds: string[];
 }
@@ -75,7 +75,7 @@ export interface DiffViewerProps {
   /** Diff data to display */
   data: FileDiffData;
   /** View mode: split or unified */
-  viewMode?: 'split' | 'unified';
+  viewMode?: "split" | "unified";
   /** Enable line selection for comments */
   enableComments?: boolean;
   /** Session ID for comment storage */

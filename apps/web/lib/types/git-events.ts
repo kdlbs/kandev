@@ -1,4 +1,4 @@
-import type { FileInfo } from '@/lib/state/slices/session-runtime/types';
+import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 
 // Base payload with discriminator
 type GitEventBase = {
@@ -64,22 +64,22 @@ export type GitSnapshotData = {
 
 // Individual event variants
 export type GitStatusUpdateEvent = GitEventBase & {
-  type: 'status_update';
+  type: "status_update";
   status: GitStatusData;
 };
 
 export type GitCommitCreatedEvent = GitEventBase & {
-  type: 'commit_created';
+  type: "commit_created";
   commit: GitCommitData;
 };
 
 export type GitCommitsResetEvent = GitEventBase & {
-  type: 'commits_reset';
+  type: "commits_reset";
   reset: GitResetData;
 };
 
 export type GitSnapshotCreatedEvent = GitEventBase & {
-  type: 'snapshot_created';
+  type: "snapshot_created";
   snapshot: GitSnapshotData;
 };
 

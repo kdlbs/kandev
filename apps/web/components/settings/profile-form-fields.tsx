@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Switch } from '@kandev/ui/switch';
-import { ModelCombobox } from '@/components/settings/model-combobox';
-import { PERMISSION_KEYS, type PermissionKey } from '@/lib/agent-permissions';
-import type { ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
+import { ModelCombobox } from "@/components/settings/model-combobox";
+import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
+import type { ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 
 export type ProfileFormData = {
   name: string;
@@ -23,7 +23,7 @@ export type ProfileFormFieldsProps = {
   agentName: string;
   onRemove?: () => void;
   canRemove?: boolean;
-  variant?: 'default' | 'compact';
+  variant?: "default" | "compact";
   hideNameField?: boolean;
   lockPassthrough?: boolean;
 };
@@ -33,7 +33,7 @@ type PermissionToggleProps = {
   onChange: (patch: Partial<ProfileFormData>) => void;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
-  variant: 'default' | 'compact';
+  variant: "default" | "compact";
   lockPassthrough?: boolean;
 };
 
@@ -45,8 +45,8 @@ function PermissionToggles({
   variant,
   lockPassthrough,
 }: PermissionToggleProps) {
-  const isCompact = variant === 'compact';
-  const switchSize = isCompact ? ('sm' as const) : ('default' as const);
+  const isCompact = variant === "compact";
+  const switchSize = isCompact ? ("sm" as const) : ("default" as const);
 
   if (isCompact) {
     return (
@@ -99,9 +99,7 @@ function PermissionToggles({
           <div key={key} className="flex items-center justify-between rounded-md border p-3">
             <div className="space-y-1">
               <Label>{setting.label}</Label>
-              <p className="text-xs text-muted-foreground">
-                {setting.description}
-              </p>
+              <p className="text-xs text-muted-foreground">{setting.description}</p>
             </div>
             <Switch
               checked={profile[key]}
@@ -114,9 +112,7 @@ function PermissionToggles({
         <div className="flex items-center justify-between rounded-md border p-3">
           <div className="space-y-1">
             <Label>{passthroughConfig.label}</Label>
-            <p className="text-xs text-muted-foreground">
-              {passthroughConfig.description}
-            </p>
+            <p className="text-xs text-muted-foreground">{passthroughConfig.description}</p>
           </div>
           <Switch
             checked={profile.cli_passthrough}
@@ -138,14 +134,14 @@ export function ProfileFormFields({
   agentName,
   onRemove,
   canRemove = false,
-  variant = 'default',
+  variant = "default",
   hideNameField = false,
   lockPassthrough = false,
 }: ProfileFormFieldsProps) {
-  const isCompact = variant === 'compact';
+  const isCompact = variant === "compact";
 
   return (
-    <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
+    <div className={isCompact ? "space-y-3" : "space-y-4"}>
       {!hideNameField && (
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1 space-y-2">
@@ -164,7 +160,7 @@ export function ProfileFormFields({
         </div>
       )}
 
-      <div className={isCompact ? 'space-y-1.5' : 'space-y-2'}>
+      <div className={isCompact ? "space-y-1.5" : "space-y-2"}>
         {isCompact ? (
           <Label className="text-xs text-muted-foreground">Model</Label>
         ) : (

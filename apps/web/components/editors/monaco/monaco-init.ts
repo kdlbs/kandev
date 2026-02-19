@@ -1,21 +1,21 @@
-import type { Monaco } from '@monaco-editor/react';
-import type { editor as monacoEditor, Uri, IRange, IPosition } from 'monaco-editor';
-import { KANDEV_MONACO_DARK, KANDEV_MONACO_LIGHT } from '@/lib/theme/editor-theme';
+import type { Monaco } from "@monaco-editor/react";
+import type { editor as monacoEditor, Uri, IRange, IPosition } from "monaco-editor";
+import { KANDEV_MONACO_DARK, KANDEV_MONACO_LIGHT } from "@/lib/theme/editor-theme";
 
 let initialized = false;
 let monacoInstance: Monaco | null = null;
 
 export function initMonacoThemes() {
-  if (initialized || typeof window === 'undefined') return;
+  if (initialized || typeof window === "undefined") return;
   initialized = true;
 
   // Dynamic import ensures monaco-loader runs (which sets MonacoEnvironment +
   // loader.config) before any <Editor> component mounts.
-  import('./monaco-loader').then(({ monaco }) => {
+  import("./monaco-loader").then(({ monaco }) => {
     monacoInstance = monaco;
 
-    monaco.editor.defineTheme('kandev-dark', KANDEV_MONACO_DARK);
-    monaco.editor.defineTheme('kandev-light', KANDEV_MONACO_LIGHT);
+    monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
+    monaco.editor.defineTheme("kandev-light", KANDEV_MONACO_LIGHT);
 
     // Disable Monaco's built-in TS/JS diagnostics — they can't resolve project-level
     // path aliases (@/, tsconfig paths). LSP diagnostics are applied separately via
@@ -45,21 +45,25 @@ export function initMonacoThemes() {
     // When the LSP returns a file:// URI, this opens the file in a dockview tab
     // instead of Monaco trying to navigate to a non-existent model.
     // Dynamic import to avoid circular dependency (lsp-client-manager → monaco-init).
-    import('@/lib/lsp/lsp-client-manager').then(({ lspClientManager }) => {
+    import("@/lib/lsp/lsp-client-manager").then(({ lspClientManager }) => {
       monaco.editor.registerEditorOpener({
-        openCodeEditor(_source: monacoEditor.ICodeEditor, resource: Uri, selectionOrPosition?: IRange | IPosition) {
+        openCodeEditor(
+          _source: monacoEditor.ICodeEditor,
+          resource: Uri,
+          selectionOrPosition?: IRange | IPosition,
+        ) {
           const uri = resource.toString();
           const opener = lspClientManager.getFileOpener();
-          if (opener && uri.startsWith('file:')) {
+          if (opener && uri.startsWith("file:")) {
             // Extract line/column from the selection or position
             let line: number | undefined;
             let column: number | undefined;
             if (selectionOrPosition) {
-              if ('lineNumber' in selectionOrPosition) {
+              if ("lineNumber" in selectionOrPosition) {
                 // IPosition
                 line = selectionOrPosition.lineNumber;
                 column = selectionOrPosition.column;
-              } else if ('startLineNumber' in selectionOrPosition) {
+              } else if ("startLineNumber" in selectionOrPosition) {
                 // IRange
                 line = selectionOrPosition.startLineNumber;
                 column = selectionOrPosition.startColumn;
@@ -102,7 +106,7 @@ export function setMonacoDiagnostics(enabled: boolean) {
  * (to decide whether wrapped providers return empty results).
  */
 export function setMonacoBuiltinProviders(enabled: boolean) {
-  import('./builtin-providers').then(({ setBuiltinTsSuppressed }) => {
+  import("./builtin-providers").then(({ setBuiltinTsSuppressed }) => {
     setBuiltinTsSuppressed(!enabled);
   });
 }

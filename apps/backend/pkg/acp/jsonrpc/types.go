@@ -5,7 +5,7 @@ import "encoding/json"
 
 // Request represents a JSON-RPC 2.0 request
 type Request struct {
-	JSONRPC string          `json:"jsonrpc"` // Always "2.0"
+	JSONRPC string          `json:"jsonrpc"`      // Always "2.0"
 	ID      interface{}     `json:"id,omitempty"` // Request ID (int or string), omit for notifications
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
@@ -45,12 +45,12 @@ const (
 // ACP Methods
 const (
 	// Client -> Agent methods
-	MethodInitialize     = "initialize"
-	MethodSessionNew     = "session/new"
-	MethodSessionPrompt  = "session/prompt"
-	MethodSessionLoad    = "session/load"
-	MethodSessionCancel  = "session/cancel"
-	MethodAuthenticate   = "authenticate"
+	MethodInitialize    = "initialize"
+	MethodSessionNew    = "session/new"
+	MethodSessionPrompt = "session/prompt"
+	MethodSessionLoad   = "session/load"
+	MethodSessionCancel = "session/cancel"
+	MethodAuthenticate  = "authenticate"
 
 	// Agent -> Client notifications
 	NotificationSessionUpdate = "session/update"
@@ -61,9 +61,9 @@ const (
 
 // InitializeParams for initialize method
 type InitializeParams struct {
-	ProtocolVersion int                 `json:"protocolVersion"`
-	ClientInfo      ClientInfo          `json:"clientInfo"`
-	Capabilities    ClientCapabilities  `json:"capabilities,omitempty"`
+	ProtocolVersion int                `json:"protocolVersion"`
+	ClientInfo      ClientInfo         `json:"clientInfo"`
+	Capabilities    ClientCapabilities `json:"capabilities,omitempty"`
 }
 
 // ClientInfo identifies the client
@@ -119,7 +119,7 @@ type SessionNewResult struct {
 // ContentBlock represents a content block in ACP protocol
 // The prompt field in session/prompt is an array of ContentBlock
 type ContentBlock struct {
-	Type string `json:"type"` // "text", "resource", "image", etc.
+	Type string `json:"type"`           // "text", "resource", "image", etc.
 	Text string `json:"text,omitempty"` // For type="text"
 	// Resource *ResourceContent `json:"resource,omitempty"` // For type="resource" (not implemented yet)
 }
@@ -186,9 +186,9 @@ type SessionUpdateInputRequested struct {
 
 // RequestPermissionParams for session/request_permission request from agent
 type RequestPermissionParams struct {
-	SessionID string                  `json:"sessionId"`
-	ToolCall  ToolCallUpdate          `json:"toolCall"`
-	Options   []PermissionOption      `json:"options"`
+	SessionID string             `json:"sessionId"`
+	ToolCall  ToolCallUpdate     `json:"toolCall"`
+	Options   []PermissionOption `json:"options"`
 }
 
 // ToolCallUpdate contains tool call information in permission requests
@@ -211,6 +211,6 @@ type RequestPermissionResult struct {
 
 // PermissionOutcome represents the user's decision
 type PermissionOutcome struct {
-	Outcome  string `json:"outcome"`  // "selected" or "cancelled"
+	Outcome  string `json:"outcome"`            // "selected" or "cancelled"
 	OptionID string `json:"optionId,omitempty"` // Only present when outcome="selected"
 }

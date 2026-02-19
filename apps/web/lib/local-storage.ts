@@ -2,7 +2,7 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 
 // Session Storage helpers (cleared when browser tab closes)
 export function getSessionStorage<T extends JsonValue>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return fallback;
@@ -13,7 +13,7 @@ export function getSessionStorage<T extends JsonValue>(key: string, fallback: T)
 }
 
 export function setSessionStorage<T extends JsonValue>(key: string, value: T): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(key, JSON.stringify(value));
   } catch {
@@ -23,7 +23,7 @@ export function setSessionStorage<T extends JsonValue>(key: string, value: T): v
 
 // Local Storage helpers (persists across browser sessions)
 export function getLocalStorage<T extends JsonValue>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return fallback;
@@ -34,7 +34,7 @@ export function getLocalStorage<T extends JsonValue>(key: string, fallback: T): 
 }
 
 export function setLocalStorage<T extends JsonValue>(key: string, value: T): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
@@ -43,7 +43,7 @@ export function setLocalStorage<T extends JsonValue>(key: string, value: T): voi
 }
 
 export function removeSessionStorage(key: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.sessionStorage.removeItem(key);
   } catch {
@@ -52,7 +52,7 @@ export function removeSessionStorage(key: string): void {
 }
 
 export function removeLocalStorage(key: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(key);
   } catch {
@@ -62,9 +62,9 @@ export function removeLocalStorage(key: string): void {
 
 // Internal storage keys for kanban preview (not exported - encapsulated)
 const KANBAN_PREVIEW_KEYS = {
-  OPEN: 'kandev.kanban.preview.open',
-  WIDTH: 'kandev.kanban.preview.width',
-  SELECTED_TASK: 'kandev.kanban.preview.selectedTask',
+  OPEN: "kandev.kanban.preview.open",
+  WIDTH: "kandev.kanban.preview.width",
+  SELECTED_TASK: "kandev.kanban.preview.selectedTask",
 } as const;
 
 // Kanban preview state type
@@ -108,7 +108,7 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
 }
 
 // Internal storage key for plan notifications (not exported - encapsulated)
-const PLAN_NOTIFICATION_KEY = 'kandev.plan.lastSeenByTask';
+const PLAN_NOTIFICATION_KEY = "kandev.plan.lastSeenByTask";
 
 /**
  * Plan notification state - tracks when user last viewed each task's plan
@@ -150,7 +150,7 @@ export function getPlanLastSeen(taskId: string): string | null {
 }
 
 // Internal storage key for center panel tab (uses sessionStorage)
-const CENTER_PANEL_TAB_KEY = 'kandev.centerPanel.tab';
+const CENTER_PANEL_TAB_KEY = "kandev.centerPanel.tab";
 
 /**
  * Get the saved center panel tab from sessionStorage
@@ -158,7 +158,7 @@ const CENTER_PANEL_TAB_KEY = 'kandev.centerPanel.tab';
  * @returns The saved tab id
  */
 export function getCenterPanelTab(fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = window.sessionStorage.getItem(CENTER_PANEL_TAB_KEY);
     if (!raw) return fallback;
@@ -173,7 +173,7 @@ export function getCenterPanelTab(fallback: string): string {
  * @param tab - The tab id to save
  */
 export function setCenterPanelTab(tab: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(CENTER_PANEL_TAB_KEY, JSON.stringify(tab));
   } catch {
@@ -183,10 +183,10 @@ export function setCenterPanelTab(tab: string): void {
 
 // Internal storage keys for files panel (uses sessionStorage for per-tab persistence)
 const FILES_PANEL_KEYS = {
-  TAB: 'kandev.filesPanel.tab',
-  USER_SELECTED: 'kandev.filesPanel.userSelected',
-  EXPANDED: 'kandev.filesPanel.expanded',
-  SCROLL: 'kandev.filesPanel.scroll',
+  TAB: "kandev.filesPanel.tab",
+  USER_SELECTED: "kandev.filesPanel.userSelected",
+  EXPANDED: "kandev.filesPanel.expanded",
+  SCROLL: "kandev.filesPanel.scroll",
 } as const;
 
 /**
@@ -195,14 +195,14 @@ const FILES_PANEL_KEYS = {
  * @param fallback - Default tab if not found
  * @returns The saved tab ('diff' or 'files')
  */
-export function getFilesPanelTab(sessionId: string, fallback: 'diff' | 'files'): 'diff' | 'files' {
-  if (typeof window === 'undefined') return fallback;
+export function getFilesPanelTab(sessionId: string, fallback: "diff" | "files"): "diff" | "files" {
+  if (typeof window === "undefined") return fallback;
   try {
     const key = `${FILES_PANEL_KEYS.TAB}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return fallback;
     const value = JSON.parse(raw) as string;
-    return value === 'diff' || value === 'files' ? value : fallback;
+    return value === "diff" || value === "files" ? value : fallback;
   } catch {
     return fallback;
   }
@@ -213,8 +213,8 @@ export function getFilesPanelTab(sessionId: string, fallback: 'diff' | 'files'):
  * @param sessionId - The session ID
  * @param tab - The tab to save ('diff' or 'files')
  */
-export function setFilesPanelTab(sessionId: string, tab: 'diff' | 'files'): void {
-  if (typeof window === 'undefined') return;
+export function setFilesPanelTab(sessionId: string, tab: "diff" | "files"): void {
+  if (typeof window === "undefined") return;
   try {
     const key = `${FILES_PANEL_KEYS.TAB}.${sessionId}`;
     window.sessionStorage.setItem(key, JSON.stringify(tab));
@@ -229,10 +229,10 @@ export function setFilesPanelTab(sessionId: string, tab: 'diff' | 'files'): void
  * @returns true if user has made a selection
  */
 export function hasUserSelectedFilesPanelTab(sessionId: string): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === "undefined") return false;
   try {
     const key = `${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`;
-    return window.sessionStorage.getItem(key) === 'true';
+    return window.sessionStorage.getItem(key) === "true";
   } catch {
     return false;
   }
@@ -243,10 +243,10 @@ export function hasUserSelectedFilesPanelTab(sessionId: string): boolean {
  * @param sessionId - The session ID
  */
 export function setUserSelectedFilesPanelTab(sessionId: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     const key = `${FILES_PANEL_KEYS.USER_SELECTED}.${sessionId}`;
-    window.sessionStorage.setItem(key, 'true');
+    window.sessionStorage.setItem(key, "true");
   } catch {
     // Ignore write failures
   }
@@ -258,7 +258,7 @@ export function setUserSelectedFilesPanelTab(sessionId: string): void {
  * @returns Array of expanded folder paths
  */
 export function getFilesPanelExpandedPaths(sessionId: string): string[] {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === "undefined") return [];
   try {
     const key = `${FILES_PANEL_KEYS.EXPANDED}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
@@ -275,7 +275,7 @@ export function getFilesPanelExpandedPaths(sessionId: string): string[] {
  * @param paths - Array of expanded folder paths
  */
 export function setFilesPanelExpandedPaths(sessionId: string, paths: string[]): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     const key = `${FILES_PANEL_KEYS.EXPANDED}.${sessionId}`;
     window.sessionStorage.setItem(key, JSON.stringify(paths));
@@ -290,7 +290,7 @@ export function setFilesPanelExpandedPaths(sessionId: string, paths: string[]): 
  * @returns The scroll position in pixels
  */
 export function getFilesPanelScrollPosition(sessionId: string): number {
-  if (typeof window === 'undefined') return 0;
+  if (typeof window === "undefined") return 0;
   try {
     const key = `${FILES_PANEL_KEYS.SCROLL}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
@@ -307,7 +307,7 @@ export function getFilesPanelScrollPosition(sessionId: string): number {
  * @param position - The scroll position in pixels
  */
 export function setFilesPanelScrollPosition(sessionId: string, position: number): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     const key = `${FILES_PANEL_KEYS.SCROLL}.${sessionId}`;
     window.sessionStorage.setItem(key, JSON.stringify(position));
@@ -317,7 +317,7 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 }
 
 // --- Dockview per-session layout (sessionStorage) ---
-const DOCKVIEW_SESSION_LAYOUT_PREFIX = 'kandev.dockview.layout.';
+const DOCKVIEW_SESSION_LAYOUT_PREFIX = "kandev.dockview.layout.";
 
 /**
  * Get the saved dockview layout for a session
@@ -325,7 +325,7 @@ const DOCKVIEW_SESSION_LAYOUT_PREFIX = 'kandev.dockview.layout.';
  * @returns The serialized layout object, or null if not found
  */
 export function getSessionLayout(sessionId: string): object | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`);
     if (!raw) return null;
@@ -341,7 +341,7 @@ export function getSessionLayout(sessionId: string): object | null {
  * @param layout - The serialized layout object from api.toJSON()
  */
 export function setSessionLayout(sessionId: string, layout: object): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(
       `${DOCKVIEW_SESSION_LAYOUT_PREFIX}${sessionId}`,
@@ -353,8 +353,8 @@ export function setSessionLayout(sessionId: string, layout: object): void {
 }
 
 // Internal storage keys for open file tabs
-const OPEN_FILES_KEY = 'kandev.openFiles';
-const ACTIVE_TAB_KEY = 'kandev.activeTab';
+const OPEN_FILES_KEY = "kandev.openFiles";
+const ACTIVE_TAB_KEY = "kandev.activeTab";
 
 /**
  * Minimal tab info stored in sessionStorage (no content - reloaded on restore)
@@ -370,7 +370,7 @@ export interface StoredFileTab {
  * @returns Array of stored file tabs (path and name only)
  */
 export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
-  if (typeof window === 'undefined') return [];
+  if (typeof window === "undefined") return [];
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
@@ -387,7 +387,7 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
  * @param tabs - Array of tabs (only path and name are stored)
  */
 export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
     window.sessionStorage.setItem(key, JSON.stringify(tabs));
@@ -403,7 +403,7 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
  * @returns The saved active tab id (e.g., 'chat', 'plan', 'file:/path/to/file')
  */
 export function getActiveTabForSession(sessionId: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
+  if (typeof window === "undefined") return fallback;
   try {
     const key = `${ACTIVE_TAB_KEY}.${sessionId}`;
     const raw = window.sessionStorage.getItem(key);
@@ -420,7 +420,7 @@ export function getActiveTabForSession(sessionId: string, fallback: string): str
  * @param tabId - The tab id to save
  */
 export function setActiveTabForSession(sessionId: string, tabId: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   try {
     const key = `${ACTIVE_TAB_KEY}.${sessionId}`;
     window.sessionStorage.setItem(key, JSON.stringify(tabId));
@@ -431,10 +431,10 @@ export function setActiveTabForSession(sessionId: string, tabId: string): void {
 
 // --- Chat draft persistence (sessionStorage, per task) ---
 
-const CHAT_DRAFT_TEXT_KEY = 'kandev.chatDraft.text';
-const CHAT_DRAFT_CONTENT_KEY = 'kandev.chatDraft.content';
-const CHAT_DRAFT_ATTACHMENTS_KEY = 'kandev.chatDraft.attachments';
-const CHAT_INPUT_HEIGHT_KEY = 'kandev.chatInput.height';
+const CHAT_DRAFT_TEXT_KEY = "kandev.chatDraft.text";
+const CHAT_DRAFT_CONTENT_KEY = "kandev.chatDraft.content";
+const CHAT_DRAFT_ATTACHMENTS_KEY = "kandev.chatDraft.attachments";
+const CHAT_INPUT_HEIGHT_KEY = "kandev.chatInput.height";
 
 /** Stored attachment — same as ImageAttachment but without `preview` (reconstructed on load) */
 type StoredImageAttachment = {
@@ -447,11 +447,11 @@ type StoredImageAttachment = {
 };
 
 export function getChatDraftText(sessionId: string): string {
-  return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, '');
+  return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, "");
 }
 
 export function setChatDraftText(sessionId: string, text: string): void {
-  if (text === '') {
+  if (text === "") {
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
   } else {
     setSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, text);
@@ -472,17 +472,38 @@ export function setChatDraftContent(sessionId: string, content: unknown): void {
 }
 
 export function getChatDraftAttachments(sessionId: string): StoredImageAttachment[] {
-  return getSessionStorage<StoredImageAttachment[]>(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, []);
+  return getSessionStorage<StoredImageAttachment[]>(
+    `${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`,
+    [],
+  );
 }
 
-export function setChatDraftAttachments(sessionId: string, attachments: Array<{ id: string; data: string; mimeType: string; size: number; width: number; height: number; preview?: string }>): void {
+export function setChatDraftAttachments(
+  sessionId: string,
+  attachments: Array<{
+    id: string;
+    data: string;
+    mimeType: string;
+    size: number;
+    width: number;
+    height: number;
+    preview?: string;
+  }>,
+): void {
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
   } else {
     // Strip `preview` to halve storage cost — reconstructed on load
-    const stored: StoredImageAttachment[] = attachments.map(({ id, data, mimeType, size, width, height }) => ({
-      id, data, mimeType, size, width, height,
-    }));
+    const stored: StoredImageAttachment[] = attachments.map(
+      ({ id, data, mimeType, size, width, height }) => ({
+        id,
+        data,
+        mimeType,
+        size,
+        width,
+        height,
+      }),
+    );
     setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
   }
 }
@@ -490,7 +511,9 @@ export function setChatDraftAttachments(sessionId: string, attachments: Array<{ 
 /**
  * Reconstruct the `preview` data URL from stored attachment data.
  */
-export function restoreAttachmentPreview(att: StoredImageAttachment): StoredImageAttachment & { preview: string } {
+export function restoreAttachmentPreview(
+  att: StoredImageAttachment,
+): StoredImageAttachment & { preview: string } {
   return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
 }
 

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useState, useCallback, memo } from 'react';
-import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import { cn } from '@/lib/utils';
-import type { Message } from '@/lib/types/http';
-import type { ToolCallMetadata } from '@/components/task/chat/types';
+import { useState, useCallback, memo } from "react";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import { cn } from "@/lib/utils";
+import type { Message } from "@/lib/types/http";
+import type { ToolCallMetadata } from "@/components/task/chat/types";
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -18,7 +18,7 @@ type ToolSubagentMessageProps = {
 // Custom comparison function that ignores renderChild (it's always recreated but referentially stable in behavior)
 function arePropsEqual(
   prevProps: ToolSubagentMessageProps,
-  nextProps: ToolSubagentMessageProps
+  nextProps: ToolSubagentMessageProps,
 ): boolean {
   return (
     prevProps.comment === nextProps.comment &&
@@ -37,20 +37,28 @@ type SubagentHeaderProps = {
   onToggle: () => void;
 };
 
-function SubagentHeader({ isExpanded, subagentType, description, isActive, childCount, onToggle }: SubagentHeaderProps) {
+function SubagentHeader({
+  isExpanded,
+  subagentType,
+  description,
+  isActive,
+  childCount,
+  onToggle,
+}: SubagentHeaderProps) {
   return (
     <button
       type="button"
       onClick={onToggle}
       className={cn(
-        'flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded',
-        'hover:bg-muted/30 transition-colors cursor-pointer'
+        "flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded",
+        "hover:bg-muted/30 transition-colors cursor-pointer",
       )}
     >
-      {isExpanded
-        ? <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-        : <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-      }
+      {isExpanded ? (
+        <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
+      ) : (
+        <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
+      )}
       <span className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide">
         {subagentType}
       </span>
@@ -60,7 +68,7 @@ function SubagentHeader({ isExpanded, subagentType, description, isActive, child
       </span>
       {childCount > 0 && (
         <span className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono">
-          {childCount} tool call{childCount !== 1 ? 's' : ''}
+          {childCount} tool call{childCount !== 1 ? "s" : ""}
         </span>
       )}
     </button>
@@ -74,7 +82,12 @@ type SubagentContentProps = {
   renderChild: (message: Message) => React.ReactNode;
 };
 
-function SubagentContent({ isExpanded, childMessages, isActive, renderChild }: SubagentContentProps) {
+function SubagentContent({
+  isExpanded,
+  childMessages,
+  isActive,
+  renderChild,
+}: SubagentContentProps) {
   if (!isExpanded) return null;
   if (childMessages.length > 0) {
     return (
@@ -109,11 +122,11 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   const normalized = metadata?.normalized;
   const subagentTask = normalized?.subagent_task;
 
-  const description = subagentTask?.description || comment.content || 'Subagent';
-  const subagentType = subagentTask?.subagent_type || 'Task';
+  const description = subagentTask?.description || comment.content || "Subagent";
+  const subagentType = subagentTask?.subagent_type || "Task";
   const childCount = childMessages.length;
 
-  const isActive = status === 'running';
+  const isActive = status === "running";
 
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);

@@ -21,16 +21,15 @@ Downloads the latest release, starts the backend + web app, and opens your brows
 
 ## Supported Agents
 
-| Agent | Default Model | Protocol |
-|-------|--------------|----------|
-| **Claude Code** | Sonnet 4.5 | stream-json |
-| **Codex** | GPT-5.2 Codex | Codex |
-| **GitHub Copilot** | GPT-4.1 | Copilot SDK |
-| **Gemini CLI** | Gemini 3 Flash | ACP |
-| **Amp** | Smart Mode | stream-json |
-| **Auggie** | Sonnet 4.5 | ACP |
-| **OpenCode** | GPT-5 Nano | REST/SSE |
-
+| Agent              | Default Model  | Protocol    |
+| ------------------ | -------------- | ----------- |
+| **Claude Code**    | Sonnet 4.5     | stream-json |
+| **Codex**          | GPT-5.2 Codex  | Codex       |
+| **GitHub Copilot** | GPT-4.1        | Copilot SDK |
+| **Gemini CLI**     | Gemini 3 Flash | ACP         |
+| **Amp**            | Smart Mode     | stream-json |
+| **Auggie**         | Sonnet 4.5     | ACP         |
+| **OpenCode**       | GPT-5 Nano     | REST/SSE    |
 
 > **Beta** - Under active development. Expect rough edges and breaking changes.
 

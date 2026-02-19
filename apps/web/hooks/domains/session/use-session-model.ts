@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { AgentProfile } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { AgentProfile } from "@/lib/types/http";
 
 export function useSessionModel(
   resolvedSessionId: string | null,
-  agentProfileId: string | null | undefined
+  agentProfileId: string | null | undefined,
 ) {
   // Get model from agent profile using agent_profile_id
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
@@ -21,7 +21,7 @@ export function useSessionModel(
 
   // Get active model state for this session (user's selected model)
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
-  const activeModel = resolvedSessionId ? activeModels[resolvedSessionId] ?? null : null;
+  const activeModel = resolvedSessionId ? (activeModels[resolvedSessionId] ?? null) : null;
 
   return {
     sessionModel,

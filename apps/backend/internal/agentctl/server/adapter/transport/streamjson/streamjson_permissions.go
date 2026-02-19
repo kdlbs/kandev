@@ -159,4 +159,3 @@ func (a *Adapter) handleHookCallback(requestID string, req *claudecode.ControlRe
 		a.logger.Warn("failed to send hook callback response", zap.Error(err))
 	}
 }
-

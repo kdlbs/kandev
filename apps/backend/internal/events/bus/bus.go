@@ -58,4 +58,3 @@ type EventBus interface {
 	// IsConnected returns connection status
 	IsConnected() bool
 }
-

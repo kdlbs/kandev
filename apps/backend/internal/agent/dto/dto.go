@@ -73,8 +73,8 @@ type ListAgentTypesRequest struct{}
 
 // AgentTypeDTO represents an agent type
 type AgentTypeDTO struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Image       string `json:"image"`
 	Enabled     bool   `json:"enabled"`
@@ -124,7 +124,7 @@ type AgentExecutionData struct {
 // FromAgentType converts a registry.AgentType to AgentTypeDTO
 func FromAgentType(t *AgentTypeData) AgentTypeDTO {
 	return AgentTypeDTO{
-		ID:           t.ID,
+		ID:          t.ID,
 		Name:        t.Name,
 		Description: t.Description,
 		Image:       t.Image,
@@ -140,4 +140,3 @@ type AgentTypeData struct {
 	Image       string
 	Enabled     bool
 }
-

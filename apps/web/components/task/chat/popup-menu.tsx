@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { cn } from '@/lib/utils';
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 
 const MENU_HEIGHT = 280;
 const MENU_MAX_WIDTH = 700;
@@ -19,7 +19,7 @@ export type PopupMenuProps = {
   emptyState?: ReactNode;
   hasItems?: boolean;
   /** 'above' (default) positions bottom edge above cursor; 'below' positions top edge below cursor. */
-  placement?: 'above' | 'below';
+  placement?: "above" | "below";
 };
 
 export function PopupMenu({
@@ -31,7 +31,7 @@ export function PopupMenu({
   children,
   emptyState,
   hasItems = true,
-  placement = 'above',
+  placement = "above",
 }: PopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -45,8 +45,8 @@ export function PopupMenu({
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen, onClose]);
 
   // Resolve position from clientRect function or direct position
@@ -54,7 +54,7 @@ export function PopupMenu({
     if (position) return position;
     if (clientRectFn) {
       const rect = clientRectFn();
-      if (rect) return { x: rect.left, y: placement === 'below' ? rect.bottom : rect.top };
+      if (rect) return { x: rect.left, y: placement === "below" ? rect.bottom : rect.top };
     }
     return null;
   })();
@@ -65,12 +65,12 @@ export function PopupMenu({
 
   // Calculate position with content-based width
   const menuStyle: React.CSSProperties = {
-    position: 'fixed',
+    position: "fixed",
     left: Math.max(8, resolvedPosition.x),
     maxWidth: Math.min(MENU_MAX_WIDTH, window.innerWidth - resolvedPosition.x - 8),
     maxHeight: MENU_HEIGHT,
     zIndex: 50,
-    ...(placement === 'below'
+    ...(placement === "below"
       ? { top: resolvedPosition.y + 8 }
       : { bottom: window.innerHeight - resolvedPosition.y + 8 }),
   };
@@ -94,7 +94,7 @@ export function PopupMenu({
   );
 
   // Render via portal to escape any overflow containers
-  if (typeof document === 'undefined') return null;
+  if (typeof document === "undefined") return null;
   return createPortal(menu, document.body);
 }
 
@@ -122,11 +122,11 @@ export function PopupMenuItem({
       ref={itemRef}
       type="button"
       className={cn(
-        'flex w-full cursor-pointer select-none items-center gap-3 rounded-[6px] mx-1 px-2 py-1.5 text-xs text-left',
-        'hover:bg-muted/50',
-        isSelected && 'bg-muted/50'
+        "flex w-full cursor-pointer select-none items-center gap-3 rounded-[6px] mx-1 px-2 py-1.5 text-xs text-left",
+        "hover:bg-muted/50",
+        isSelected && "bg-muted/50",
       )}
-      style={{ width: 'calc(100% - 8px)' }}
+      style={{ width: "calc(100% - 8px)" }}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
     >
@@ -136,9 +136,7 @@ export function PopupMenuItem({
       <div className="flex items-baseline gap-2 min-w-0 flex-1">
         <span className="shrink-0 font-medium">{label}</span>
         {description && (
-          <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-            {description}
-          </span>
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap">{description}</span>
         )}
       </div>
     </button>
@@ -152,7 +150,7 @@ export function useMenuItemRefs(selectedIndex: number) {
   useEffect(() => {
     const selectedItem = itemRefs.current.get(selectedIndex);
     if (selectedItem) {
-      selectedItem.scrollIntoView({ block: 'nearest' });
+      selectedItem.scrollIntoView({ block: "nearest" });
     }
   }, [selectedIndex]);
 

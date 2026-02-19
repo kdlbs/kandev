@@ -1,39 +1,39 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { IconTrash } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { Textarea } from '@kandev/ui/textarea';
-import { Checkbox } from '@kandev/ui/checkbox';
-import { Label } from '@kandev/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
-import type { WorkflowStep, OnEnterAction, OnTurnStartAction, OnTurnCompleteAction, OnExitAction } from '@/lib/types/http';
-import { useDebouncedCallback } from '@/hooks/use-debounce';
-import { cn } from '@/lib/utils';
-import { HelpTip } from './workflow-pipeline-editor-helpers';
+import { useState } from "react";
+import { IconTrash } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { Textarea } from "@kandev/ui/textarea";
+import { Checkbox } from "@kandev/ui/checkbox";
+import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import type {
+  WorkflowStep,
+  OnEnterAction,
+  OnTurnStartAction,
+  OnTurnCompleteAction,
+  OnExitAction,
+} from "@/lib/types/http";
+import { useDebouncedCallback } from "@/hooks/use-debounce";
+import { cn } from "@/lib/utils";
+import { HelpTip } from "./workflow-pipeline-editor-helpers";
 
 const STEP_COLORS = [
-  { value: 'bg-slate-500', label: 'Gray' },
-  { value: 'bg-red-500', label: 'Red' },
-  { value: 'bg-orange-500', label: 'Orange' },
-  { value: 'bg-yellow-500', label: 'Yellow' },
-  { value: 'bg-green-500', label: 'Green' },
-  { value: 'bg-cyan-500', label: 'Cyan' },
-  { value: 'bg-blue-500', label: 'Blue' },
-  { value: 'bg-indigo-500', label: 'Indigo' },
-  { value: 'bg-purple-500', label: 'Purple' },
+  { value: "bg-slate-500", label: "Gray" },
+  { value: "bg-red-500", label: "Red" },
+  { value: "bg-orange-500", label: "Orange" },
+  { value: "bg-yellow-500", label: "Yellow" },
+  { value: "bg-green-500", label: "Green" },
+  { value: "bg-cyan-500", label: "Cyan" },
+  { value: "bg-blue-500", label: "Blue" },
+  { value: "bg-indigo-500", label: "Indigo" },
+  { value: "bg-purple-500", label: "Purple" },
 ];
 
 const PROMPT_TEMPLATES = [
   {
-    label: 'Plan',
+    label: "Plan",
     prompt: `Analyze the task and create a detailed implementation plan.
 
 {{task_prompt}}
@@ -47,7 +47,7 @@ INSTRUCTIONS:
 Output the plan as a numbered list. Be specific about file paths, function names, and the approach for each step. Do NOT implement anything yet — only plan.`,
   },
   {
-    label: 'Code Review',
+    label: "Code Review",
     prompt: `Please review the changed files in the current git worktree.
 
 STEP 1: Determine what to review
@@ -85,7 +85,7 @@ PERFORMANCE: Algorithmic or resource usage problems with measurable impact
 Now review the changes.`,
   },
   {
-    label: 'Security Audit',
+    label: "Security Audit",
     prompt: `Perform a security audit on the changed files in the current git worktree.
 
 {{task_prompt}}
@@ -118,20 +118,20 @@ function hasOnEnterAction(step: WorkflowStep, type: string): boolean {
 
 function getTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_complete?.find((a) =>
-    ['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
+    ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
-  return action?.type ?? 'none';
+  return action?.type ?? "none";
 }
 
 function getOnTurnStartTransitionType(step: WorkflowStep): string {
   const action = step.events?.on_turn_start?.find((a) =>
-    ['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
+    ["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
   );
-  return action?.type ?? 'none';
+  return action?.type ?? "none";
 }
 
 function hasDisablePlanMode(step: WorkflowStep): boolean {
-  return step.events?.on_turn_complete?.some((a) => a.type === 'disable_plan_mode') ?? false;
+  return step.events?.on_turn_complete?.some((a) => a.type === "disable_plan_mode") ?? false;
 }
 
 function hasOnExitAction(step: WorkflowStep, type: string): boolean {
@@ -159,28 +159,28 @@ function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
   const setTransition = (type: string) => {
     const currentEvents = step.events ?? {};
     const onTurnComplete = (currentEvents.on_turn_complete ?? []).filter(
-      (a) => !['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
+      (a) => !["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
     );
-    if (type !== 'none') onTurnComplete.push({ type } as OnTurnCompleteAction);
+    if (type !== "none") onTurnComplete.push({ type } as OnTurnCompleteAction);
     onUpdate({ events: { ...currentEvents, on_turn_complete: onTurnComplete } });
   };
 
   const setOnTurnStartTransition = (type: string) => {
     const currentEvents = step.events ?? {};
     const onTurnStart = (currentEvents.on_turn_start ?? []).filter(
-      (a) => !['move_to_next', 'move_to_previous', 'move_to_step'].includes(a.type)
+      (a) => !["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
     );
-    if (type !== 'none') onTurnStart.push({ type } as OnTurnStartAction);
+    if (type !== "none") onTurnStart.push({ type } as OnTurnStartAction);
     onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } });
   };
 
   const toggleDisablePlanMode = () => {
     const currentEvents = step.events ?? {};
     const onTurnComplete = currentEvents.on_turn_complete ?? [];
-    const exists = onTurnComplete.some((a) => a.type === 'disable_plan_mode');
+    const exists = onTurnComplete.some((a) => a.type === "disable_plan_mode");
     const newOnTurnComplete = exists
-      ? onTurnComplete.filter((a) => a.type !== 'disable_plan_mode')
-      : [...onTurnComplete, { type: 'disable_plan_mode' } as OnTurnCompleteAction];
+      ? onTurnComplete.filter((a) => a.type !== "disable_plan_mode")
+      : [...onTurnComplete, { type: "disable_plan_mode" } as OnTurnCompleteAction];
     onUpdate({ events: { ...currentEvents, on_turn_complete: newOnTurnComplete } });
   };
 
@@ -194,7 +194,13 @@ function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     onUpdate({ events: { ...currentEvents, on_exit: newOnExit } });
   };
 
-  return { toggleOnEnterAction, setTransition, setOnTurnStartTransition, toggleDisablePlanMode, toggleOnExitAction };
+  return {
+    toggleOnEnterAction,
+    setTransition,
+    setOnTurnStartTransition,
+    toggleDisablePlanMode,
+    toggleOnExitAction,
+  };
 }
 
 // --- StepConfigHeader ---
@@ -209,7 +215,15 @@ type StepConfigHeaderProps = {
   debouncedUpdateName: (name: string) => void;
 };
 
-function StepConfigHeader({ step, localName, onLocalNameChange, onUpdate, onRemove, readOnly, debouncedUpdateName }: StepConfigHeaderProps) {
+function StepConfigHeader({
+  step,
+  localName,
+  onLocalNameChange,
+  onUpdate,
+  onRemove,
+  readOnly,
+  debouncedUpdateName,
+}: StepConfigHeaderProps) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
       <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -225,13 +239,22 @@ function StepConfigHeader({ step, localName, onLocalNameChange, onUpdate, onRemo
           disabled={readOnly}
           className="max-w-[240px] h-8"
         />
-        <Select value={step.color} onValueChange={(value) => { if (readOnly) return; onUpdate({ color: value }); }} disabled={readOnly}>
-          <SelectTrigger className="w-[120px] h-8"><SelectValue placeholder="Color" /></SelectTrigger>
+        <Select
+          value={step.color}
+          onValueChange={(value) => {
+            if (readOnly) return;
+            onUpdate({ color: value });
+          }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="w-[120px] h-8">
+            <SelectValue placeholder="Color" />
+          </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
             {STEP_COLORS.map((color) => (
               <SelectItem key={color.value} value={color.value}>
                 <div className="flex items-center gap-2">
-                  <div className={cn('w-3 h-3 rounded-full', color.value)} />
+                  <div className={cn("w-3 h-3 rounded-full", color.value)} />
                   {color.label}
                 </div>
               </SelectItem>
@@ -239,8 +262,16 @@ function StepConfigHeader({ step, localName, onLocalNameChange, onUpdate, onRemo
           </SelectContent>
         </Select>
       </div>
-      <Button type="button" variant="ghost" size="sm" onClick={onRemove} disabled={readOnly} className="text-destructive hover:text-destructive h-8">
-        <IconTrash className="h-3.5 w-3.5 mr-1" />Delete
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onRemove}
+        disabled={readOnly}
+        className="text-destructive hover:text-destructive h-8"
+      >
+        <IconTrash className="h-3.5 w-3.5 mr-1" />
+        Delete
       </Button>
     </div>
   );
@@ -255,40 +286,106 @@ type StepBehaviorSectionProps = {
   readOnly: boolean;
 };
 
-function StepBehaviorSection({ step, onUpdate, toggleOnEnterAction, readOnly }: StepBehaviorSectionProps) {
+function StepBehaviorSection({
+  step,
+  onUpdate,
+  toggleOnEnterAction,
+  readOnly,
+}: StepBehaviorSectionProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
-          <Checkbox id={`${step.id}-start-step`} checked={step.is_start_step === true} onCheckedChange={(checked) => { if (readOnly) return; onUpdate({ is_start_step: checked === true }); }} disabled={readOnly} />
-          <Label htmlFor={`${step.id}-start-step`} className="text-sm">Start step</Label>
+          <Checkbox
+            id={`${step.id}-start-step`}
+            checked={step.is_start_step === true}
+            onCheckedChange={(checked) => {
+              if (readOnly) return;
+              onUpdate({ is_start_step: checked === true });
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-start-step`} className="text-sm">
+            Start step
+          </Label>
           <HelpTip text="New tasks start in this step. Only one step per workflow can be the start step." />
         </div>
         <div className="flex items-center gap-2">
-          <Checkbox id={`${step.id}-auto-start`} checked={hasOnEnterAction(step, 'auto_start_agent')} onCheckedChange={() => { if (readOnly) return; toggleOnEnterAction('auto_start_agent'); }} disabled={readOnly} />
-          <Label htmlFor={`${step.id}-auto-start`} className="text-sm">Auto-start agent</Label>
+          <Checkbox
+            id={`${step.id}-auto-start`}
+            checked={hasOnEnterAction(step, "auto_start_agent")}
+            onCheckedChange={() => {
+              if (readOnly) return;
+              toggleOnEnterAction("auto_start_agent");
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-auto-start`} className="text-sm">
+            Auto-start agent
+          </Label>
           <HelpTip text="Automatically start the agent when a task enters this step." />
         </div>
         <div className="flex items-center gap-2">
-          <Checkbox id={`${step.id}-plan-mode`} checked={hasOnEnterAction(step, 'enable_plan_mode')} onCheckedChange={() => { if (readOnly) return; toggleOnEnterAction('enable_plan_mode'); }} disabled={readOnly} />
-          <Label htmlFor={`${step.id}-plan-mode`} className="text-sm">Plan mode</Label>
+          <Checkbox
+            id={`${step.id}-plan-mode`}
+            checked={hasOnEnterAction(step, "enable_plan_mode")}
+            onCheckedChange={() => {
+              if (readOnly) return;
+              toggleOnEnterAction("enable_plan_mode");
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-plan-mode`} className="text-sm">
+            Plan mode
+          </Label>
           <HelpTip text="Agent proposes a plan instead of making changes directly." />
         </div>
         <div className="flex items-center gap-2">
-          <Checkbox id={`${step.id}-manual-move`} checked={step.allow_manual_move !== false} onCheckedChange={(checked) => { if (readOnly) return; onUpdate({ allow_manual_move: checked === true }); }} disabled={readOnly} />
-          <Label htmlFor={`${step.id}-manual-move`} className="text-sm">Allow manual move</Label>
+          <Checkbox
+            id={`${step.id}-manual-move`}
+            checked={step.allow_manual_move !== false}
+            onCheckedChange={(checked) => {
+              if (readOnly) return;
+              onUpdate({ allow_manual_move: checked === true });
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-manual-move`} className="text-sm">
+            Allow manual move
+          </Label>
           <HelpTip text="Allow dragging tasks into this step on the board." />
         </div>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <Checkbox id={`${step.id}-auto-archive`} checked={(step.auto_archive_after_hours ?? 0) > 0} onCheckedChange={(checked) => { if (readOnly) return; onUpdate({ auto_archive_after_hours: checked ? 24 : 0 }); }} disabled={readOnly} />
-        <Label htmlFor={`${step.id}-auto-archive`} className="text-sm">Auto-archive</Label>
+        <Checkbox
+          id={`${step.id}-auto-archive`}
+          checked={(step.auto_archive_after_hours ?? 0) > 0}
+          onCheckedChange={(checked) => {
+            if (readOnly) return;
+            onUpdate({ auto_archive_after_hours: checked ? 24 : 0 });
+          }}
+          disabled={readOnly}
+        />
+        <Label htmlFor={`${step.id}-auto-archive`} className="text-sm">
+          Auto-archive
+        </Label>
         <HelpTip text="Automatically archive tasks after they have been in this step for a set number of hours. Useful for the last step of a workflow (e.g., Done) to keep the board clean." />
         {(step.auto_archive_after_hours ?? 0) > 0 && (
           <>
             <span className="text-sm text-muted-foreground">after</span>
-            <Input id={`${step.id}-auto-archive-hours`} type="number" min={1} className="w-20 h-7 text-sm" value={step.auto_archive_after_hours ?? 24}
-              onChange={(e) => { if (readOnly) return; const val = parseInt(e.target.value, 10); onUpdate({ auto_archive_after_hours: isNaN(val) || val < 1 ? 1 : val }); }} disabled={readOnly} />
+            <Input
+              id={`${step.id}-auto-archive-hours`}
+              type="number"
+              min={1}
+              className="w-20 h-7 text-sm"
+              value={step.auto_archive_after_hours ?? 24}
+              onChange={(e) => {
+                if (readOnly) return;
+                const val = parseInt(e.target.value, 10);
+                onUpdate({ auto_archive_after_hours: isNaN(val) || val < 1 ? 1 : val });
+              }}
+              disabled={readOnly}
+            />
             <span className="text-sm text-muted-foreground">hours</span>
           </>
         )}
@@ -310,18 +407,43 @@ type StepTransitionsSectionProps = {
   readOnly: boolean;
 };
 
-function StepTransitionsSection({ step, steps, onUpdate, setTransition, setOnTurnStartTransition, toggleDisablePlanMode, toggleOnExitAction, readOnly }: StepTransitionsSectionProps) {
+function StepTransitionsSection({
+  step,
+  steps,
+  onUpdate,
+  setTransition,
+  setOnTurnStartTransition,
+  toggleDisablePlanMode,
+  toggleOnExitAction,
+  readOnly,
+}: StepTransitionsSectionProps) {
   const otherSteps = steps.filter((s) => s.id !== step.id);
-  const planModeEnabled = hasOnEnterAction(step, 'enable_plan_mode');
+  const planModeEnabled = hasOnEnterAction(step, "enable_plan_mode");
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Transitions</Label>
+        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Transitions
+        </Label>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <TurnStartSelect step={step} otherSteps={otherSteps} onUpdate={onUpdate} setOnTurnStartTransition={setOnTurnStartTransition} readOnly={readOnly} />
-        <TurnCompleteSelect step={step} otherSteps={otherSteps} onUpdate={onUpdate} setTransition={setTransition} toggleDisablePlanMode={toggleDisablePlanMode} planModeEnabled={planModeEnabled} readOnly={readOnly} />
+        <TurnStartSelect
+          step={step}
+          otherSteps={otherSteps}
+          onUpdate={onUpdate}
+          setOnTurnStartTransition={setOnTurnStartTransition}
+          readOnly={readOnly}
+        />
+        <TurnCompleteSelect
+          step={step}
+          otherSteps={otherSteps}
+          onUpdate={onUpdate}
+          setTransition={setTransition}
+          toggleDisablePlanMode={toggleDisablePlanMode}
+          planModeEnabled={planModeEnabled}
+          readOnly={readOnly}
+        />
       </div>
       {planModeEnabled && (
         <div className="space-y-2">
@@ -330,8 +452,18 @@ function StepTransitionsSection({ step, steps, onUpdate, setTransition, setOnTur
             <HelpTip text="Runs when leaving this step (before entering the next step)." />
           </div>
           <div className="flex items-center gap-2">
-            <Checkbox id={`${step.id}-exit-disable-plan`} checked={hasOnExitAction(step, 'disable_plan_mode')} onCheckedChange={() => { if (readOnly) return; toggleOnExitAction('disable_plan_mode'); }} disabled={readOnly} />
-            <Label htmlFor={`${step.id}-exit-disable-plan`} className="text-sm">Disable plan mode</Label>
+            <Checkbox
+              id={`${step.id}-exit-disable-plan`}
+              checked={hasOnExitAction(step, "disable_plan_mode")}
+              onCheckedChange={() => {
+                if (readOnly) return;
+                toggleOnExitAction("disable_plan_mode");
+              }}
+              disabled={readOnly}
+            />
+            <Label htmlFor={`${step.id}-exit-disable-plan`} className="text-sm">
+              Disable plan mode
+            </Label>
             <HelpTip text="Turn off plan mode when leaving this step." />
           </div>
         </div>
@@ -347,7 +479,13 @@ type StepSelectProps = {
   readOnly: boolean;
 };
 
-function TurnStartSelect({ step, otherSteps, onUpdate, setOnTurnStartTransition, readOnly }: StepSelectProps & { setOnTurnStartTransition: (t: string) => void }) {
+function TurnStartSelect({
+  step,
+  otherSteps,
+  onUpdate,
+  setOnTurnStartTransition,
+  readOnly,
+}: StepSelectProps & { setOnTurnStartTransition: (t: string) => void }) {
   const transitionType = getOnTurnStartTransitionType(step);
   return (
     <div className="space-y-2">
@@ -355,8 +493,17 @@ function TurnStartSelect({ step, otherSteps, onUpdate, setOnTurnStartTransition,
         <Label className="text-xs font-medium">On Turn Start</Label>
         <HelpTip text="Runs when a user sends a message. Use for review cycles (e.g., move back to In Progress on feedback)." />
       </div>
-      <Select value={transitionType} onValueChange={(value) => { if (readOnly) return; setOnTurnStartTransition(value); }} disabled={readOnly}>
-        <SelectTrigger className="w-full h-8"><SelectValue placeholder="Select action" /></SelectTrigger>
+      <Select
+        value={transitionType}
+        onValueChange={(value) => {
+          if (readOnly) return;
+          setOnTurnStartTransition(value);
+        }}
+        disabled={readOnly}
+      >
+        <SelectTrigger className="w-full h-8">
+          <SelectValue placeholder="Select action" />
+        </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
           <SelectItem value="none">Do nothing</SelectItem>
           <SelectItem value="move_to_next">Move to next step</SelectItem>
@@ -364,12 +511,34 @@ function TurnStartSelect({ step, otherSteps, onUpdate, setOnTurnStartTransition,
           <SelectItem value="move_to_step">Move to specific step</SelectItem>
         </SelectContent>
       </Select>
-      {transitionType === 'move_to_step' && (
-        <Select value={step.events?.on_turn_start?.find((a) => a.type === 'move_to_step')?.config?.step_id as string ?? ''}
-          onValueChange={(value) => { if (readOnly) return; const currentEvents = step.events ?? {}; const onTurnStart = (currentEvents.on_turn_start ?? []).map((a) => a.type === 'move_to_step' ? { ...a, config: { step_id: value } } : a); onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } }); }} disabled={readOnly}>
-          <SelectTrigger className="w-full h-8"><SelectValue placeholder="Select step" /></SelectTrigger>
+      {transitionType === "move_to_step" && (
+        <Select
+          value={
+            (step.events?.on_turn_start?.find((a) => a.type === "move_to_step")?.config
+              ?.step_id as string) ?? ""
+          }
+          onValueChange={(value) => {
+            if (readOnly) return;
+            const currentEvents = step.events ?? {};
+            const onTurnStart = (currentEvents.on_turn_start ?? []).map((a) =>
+              a.type === "move_to_step" ? { ...a, config: { step_id: value } } : a,
+            );
+            onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } });
+          }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="w-full h-8">
+            <SelectValue placeholder="Select step" />
+          </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
-            {otherSteps.map((s) => (<SelectItem key={s.id} value={s.id}><div className="flex items-center gap-2"><div className={cn('w-2 h-2 rounded-full', s.color)} />{s.name}</div></SelectItem>))}
+            {otherSteps.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <div className="flex items-center gap-2">
+                  <div className={cn("w-2 h-2 rounded-full", s.color)} />
+                  {s.name}
+                </div>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
@@ -383,7 +552,15 @@ type TurnCompleteSelectProps = StepSelectProps & {
   planModeEnabled: boolean;
 };
 
-function TurnCompleteSelect({ step, otherSteps, onUpdate, setTransition, toggleDisablePlanMode, planModeEnabled, readOnly }: TurnCompleteSelectProps) {
+function TurnCompleteSelect({
+  step,
+  otherSteps,
+  onUpdate,
+  setTransition,
+  toggleDisablePlanMode,
+  planModeEnabled,
+  readOnly,
+}: TurnCompleteSelectProps) {
   const transitionType = getTransitionType(step);
   return (
     <div className="space-y-2">
@@ -391,8 +568,17 @@ function TurnCompleteSelect({ step, otherSteps, onUpdate, setTransition, toggleD
         <Label className="text-xs font-medium">On Turn Complete</Label>
         <HelpTip text="Runs after the agent finishes a turn. Use to auto-advance tasks through the pipeline." />
       </div>
-      <Select value={transitionType} onValueChange={(value) => { if (readOnly) return; setTransition(value); }} disabled={readOnly}>
-        <SelectTrigger className="w-full h-8"><SelectValue placeholder="Select action" /></SelectTrigger>
+      <Select
+        value={transitionType}
+        onValueChange={(value) => {
+          if (readOnly) return;
+          setTransition(value);
+        }}
+        disabled={readOnly}
+      >
+        <SelectTrigger className="w-full h-8">
+          <SelectValue placeholder="Select action" />
+        </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
           <SelectItem value="none">Do nothing (wait for user)</SelectItem>
           <SelectItem value="move_to_next">Move to next step</SelectItem>
@@ -400,19 +586,51 @@ function TurnCompleteSelect({ step, otherSteps, onUpdate, setTransition, toggleD
           <SelectItem value="move_to_step">Move to specific step</SelectItem>
         </SelectContent>
       </Select>
-      {transitionType === 'move_to_step' && (
-        <Select value={step.events?.on_turn_complete?.find((a) => a.type === 'move_to_step')?.config?.step_id as string ?? ''}
-          onValueChange={(value) => { if (readOnly) return; const currentEvents = step.events ?? {}; const onTurnComplete = (currentEvents.on_turn_complete ?? []).map((a) => a.type === 'move_to_step' ? { ...a, config: { step_id: value } } : a); onUpdate({ events: { ...currentEvents, on_turn_complete: onTurnComplete } }); }} disabled={readOnly}>
-          <SelectTrigger className="w-full h-8"><SelectValue placeholder="Select step" /></SelectTrigger>
+      {transitionType === "move_to_step" && (
+        <Select
+          value={
+            (step.events?.on_turn_complete?.find((a) => a.type === "move_to_step")?.config
+              ?.step_id as string) ?? ""
+          }
+          onValueChange={(value) => {
+            if (readOnly) return;
+            const currentEvents = step.events ?? {};
+            const onTurnComplete = (currentEvents.on_turn_complete ?? []).map((a) =>
+              a.type === "move_to_step" ? { ...a, config: { step_id: value } } : a,
+            );
+            onUpdate({ events: { ...currentEvents, on_turn_complete: onTurnComplete } });
+          }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="w-full h-8">
+            <SelectValue placeholder="Select step" />
+          </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
-            {otherSteps.map((s) => (<SelectItem key={s.id} value={s.id}><div className="flex items-center gap-2"><div className={cn('w-2 h-2 rounded-full', s.color)} />{s.name}</div></SelectItem>))}
+            {otherSteps.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <div className="flex items-center gap-2">
+                  <div className={cn("w-2 h-2 rounded-full", s.color)} />
+                  {s.name}
+                </div>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       )}
       {planModeEnabled && (
         <div className="flex items-center gap-2 pt-1">
-          <Checkbox id={`${step.id}-disable-plan`} checked={hasDisablePlanMode(step)} onCheckedChange={() => { if (readOnly) return; toggleDisablePlanMode(); }} disabled={readOnly} />
-          <Label htmlFor={`${step.id}-disable-plan`} className="text-sm">Disable plan mode on complete</Label>
+          <Checkbox
+            id={`${step.id}-disable-plan`}
+            checked={hasDisablePlanMode(step)}
+            onCheckedChange={() => {
+              if (readOnly) return;
+              toggleDisablePlanMode();
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-disable-plan`} className="text-sm">
+            Disable plan mode on complete
+          </Label>
           <HelpTip text="Turn off plan mode after the agent finishes this step." />
         </div>
       )}
@@ -430,28 +648,61 @@ type StepPromptSectionProps = {
   readOnly: boolean;
 };
 
-function StepPromptSection({ step, localPrompt, onLocalPromptChange, debouncedUpdatePrompt, readOnly }: StepPromptSectionProps) {
+function StepPromptSection({
+  step,
+  localPrompt,
+  onLocalPromptChange,
+  debouncedUpdatePrompt,
+  readOnly,
+}: StepPromptSectionProps) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label htmlFor={`${step.id}-prompt`} className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Step Prompt</Label>
+        <Label
+          htmlFor={`${step.id}-prompt`}
+          className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+        >
+          Step Prompt
+        </Label>
         <HelpTip text="Custom instructions for the agent on this step. Use {{task_prompt}} to include the task description." />
       </div>
       {!readOnly && (
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[11px] text-muted-foreground/60">Templates:</span>
           {PROMPT_TEMPLATES.map((template) => (
-            <button key={template.label} type="button" onClick={() => { onLocalPromptChange(template.prompt); debouncedUpdatePrompt(template.prompt); }}
-              className="text-[11px] px-2 py-0.5 rounded-md border border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer">
+            <button
+              key={template.label}
+              type="button"
+              onClick={() => {
+                onLocalPromptChange(template.prompt);
+                debouncedUpdatePrompt(template.prompt);
+              }}
+              className="text-[11px] px-2 py-0.5 rounded-md border border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+            >
               {template.label}
             </button>
           ))}
         </div>
       )}
-      <Textarea id={`${step.id}-prompt`} value={localPrompt} onChange={(e) => { if (readOnly) return; onLocalPromptChange(e.target.value); debouncedUpdatePrompt(e.target.value); }}
-        placeholder={'Instructions for the agent on this step.\nUse {{task_prompt}} to include the task description.'} rows={3} disabled={readOnly} className="font-mono text-xs max-h-[200px] overflow-y-auto resize-y" />
+      <Textarea
+        id={`${step.id}-prompt`}
+        value={localPrompt}
+        onChange={(e) => {
+          if (readOnly) return;
+          onLocalPromptChange(e.target.value);
+          debouncedUpdatePrompt(e.target.value);
+        }}
+        placeholder={
+          "Instructions for the agent on this step.\nUse {{task_prompt}} to include the task description."
+        }
+        rows={3}
+        disabled={readOnly}
+        className="font-mono text-xs max-h-[200px] overflow-y-auto resize-y"
+      />
       <p className="text-[11px] text-muted-foreground/60">
-        If set, this prompt will be used instead of the task description. Use <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{'{{task_prompt}}'}</code> to include the original task description within it.
+        If set, this prompt will be used instead of the task description. Use{" "}
+        <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code> to
+        include the original task description within it.
       </p>
     </div>
   );
@@ -467,22 +718,63 @@ type StepConfigPanelProps = {
   readOnly?: boolean;
 };
 
-export function StepConfigPanel({ step, steps, onUpdate, onRemove, readOnly = false }: StepConfigPanelProps) {
+export function StepConfigPanel({
+  step,
+  steps,
+  onUpdate,
+  onRemove,
+  readOnly = false,
+}: StepConfigPanelProps) {
   const [localName, setLocalName] = useState(step.name);
-  const [localPrompt, setLocalPrompt] = useState(step.prompt ?? '');
+  const [localPrompt, setLocalPrompt] = useState(step.prompt ?? "");
 
-  const debouncedUpdateName = useDebouncedCallback((name: string) => { onUpdate({ name }); }, 500);
-  const debouncedUpdatePrompt = useDebouncedCallback((prompt: string) => { onUpdate({ prompt }); }, 500);
+  const debouncedUpdateName = useDebouncedCallback((name: string) => {
+    onUpdate({ name });
+  }, 500);
+  const debouncedUpdatePrompt = useDebouncedCallback((prompt: string) => {
+    onUpdate({ prompt });
+  }, 500);
 
   const actions = useStepActions({ step, onUpdate });
 
   return (
-    <div key={step.id} className="rounded-lg border bg-card animate-in fade-in-0 slide-in-from-top-2 duration-200">
-      <StepConfigHeader step={step} localName={localName} onLocalNameChange={setLocalName} onUpdate={onUpdate} onRemove={onRemove} readOnly={readOnly} debouncedUpdateName={debouncedUpdateName} />
+    <div
+      key={step.id}
+      className="rounded-lg border bg-card animate-in fade-in-0 slide-in-from-top-2 duration-200"
+    >
+      <StepConfigHeader
+        step={step}
+        localName={localName}
+        onLocalNameChange={setLocalName}
+        onUpdate={onUpdate}
+        onRemove={onRemove}
+        readOnly={readOnly}
+        debouncedUpdateName={debouncedUpdateName}
+      />
       <div className="p-4 space-y-5">
-        <StepBehaviorSection step={step} onUpdate={onUpdate} toggleOnEnterAction={actions.toggleOnEnterAction} readOnly={readOnly} />
-        <StepTransitionsSection step={step} steps={steps} onUpdate={onUpdate} setTransition={actions.setTransition} setOnTurnStartTransition={actions.setOnTurnStartTransition} toggleDisablePlanMode={actions.toggleDisablePlanMode} toggleOnExitAction={actions.toggleOnExitAction} readOnly={readOnly} />
-        <StepPromptSection step={step} localPrompt={localPrompt} onLocalPromptChange={setLocalPrompt} debouncedUpdatePrompt={debouncedUpdatePrompt} readOnly={readOnly} />
+        <StepBehaviorSection
+          step={step}
+          onUpdate={onUpdate}
+          toggleOnEnterAction={actions.toggleOnEnterAction}
+          readOnly={readOnly}
+        />
+        <StepTransitionsSection
+          step={step}
+          steps={steps}
+          onUpdate={onUpdate}
+          setTransition={actions.setTransition}
+          setOnTurnStartTransition={actions.setOnTurnStartTransition}
+          toggleDisablePlanMode={actions.toggleDisablePlanMode}
+          toggleOnExitAction={actions.toggleOnExitAction}
+          readOnly={readOnly}
+        />
+        <StepPromptSection
+          step={step}
+          localPrompt={localPrompt}
+          onLocalPromptChange={setLocalPrompt}
+          debouncedUpdatePrompt={debouncedUpdatePrompt}
+          readOnly={readOnly}
+        />
       </div>
     </div>
   );

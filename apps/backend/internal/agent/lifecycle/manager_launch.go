@@ -388,4 +388,3 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 	m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, containerStateExited)
 	return nil
 }
-

@@ -2,7 +2,7 @@ package protocol
 
 // ProgressData represents progress update data
 type ProgressData struct {
-	Progress       int    `json:"progress"`                  // 0-100
+	Progress       int    `json:"progress"` // 0-100
 	Message        string `json:"message"`
 	CurrentFile    string `json:"current_file,omitempty"`
 	FilesProcessed int    `json:"files_processed,omitempty"`
@@ -51,15 +51,15 @@ type ControlData struct {
 
 // InputRequiredData represents a request for user input (Agent → Backend)
 type InputRequiredData struct {
-	PromptID    string   `json:"prompt_id"`              // Unique ID for this prompt
-	Prompt      string   `json:"prompt"`                 // Question/prompt for the user
-	InputType   string   `json:"input_type"`             // text, choice, confirm, file
-	Options     []string `json:"options,omitempty"`      // For choice type
-	Default     string   `json:"default,omitempty"`      // Default value
-	Required    bool     `json:"required"`               // Whether input is required
-	Timeout     int      `json:"timeout,omitempty"`      // Timeout in seconds (0 = no timeout)
-	Context     string   `json:"context,omitempty"`      // Additional context for the prompt
-	Validation  string   `json:"validation,omitempty"`   // Validation pattern (regex)
+	PromptID   string   `json:"prompt_id"`            // Unique ID for this prompt
+	Prompt     string   `json:"prompt"`               // Question/prompt for the user
+	InputType  string   `json:"input_type"`           // text, choice, confirm, file
+	Options    []string `json:"options,omitempty"`    // For choice type
+	Default    string   `json:"default,omitempty"`    // Default value
+	Required   bool     `json:"required"`             // Whether input is required
+	Timeout    int      `json:"timeout,omitempty"`    // Timeout in seconds (0 = no timeout)
+	Context    string   `json:"context,omitempty"`    // Additional context for the prompt
+	Validation string   `json:"validation,omitempty"` // Validation pattern (regex)
 }
 
 // InputResponseData represents user's response to input request (Backend → Agent)
@@ -71,10 +71,10 @@ type InputResponseData struct {
 
 // SessionInfoData represents session information from the agent
 type SessionInfoData struct {
-	SessionID   string                 `json:"session_id"`
-	Resumable   bool                   `json:"resumable"`
-	StartedAt   string                 `json:"started_at,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	SessionID string                 `json:"session_id"`
+	Resumable bool                   `json:"resumable"`
+	StartedAt string                 `json:"started_at,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // AgentCapabilities represents what the agent can do

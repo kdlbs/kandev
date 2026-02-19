@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
+import { useState, useEffect, useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 /**
  * Custom hook that centralizes task session fetching logic.
@@ -13,7 +13,7 @@ import { getWebSocketClient } from '@/lib/ws/connection';
  */
 export function useTaskSession(taskId: string | null) {
   const sessionsFromStore = useAppStore((state) =>
-    taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null
+    taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null,
   );
 
   const [fetchedSessionId, setFetchedSessionId] = useState<string | null>(null);
@@ -47,9 +47,9 @@ export function useTaskSession(taskId: string | null) {
       try {
         setIsLoading(true);
         const response = await client.request<{ sessions: Array<{ id: string }> }>(
-          'task.session.list',
+          "task.session.list",
           { task_id: taskId },
-          10000
+          10000,
         );
         if (isActive) {
           setFetchedSessionId(response.sessions[0]?.id ?? null);

@@ -349,4 +349,3 @@ func (m *Manager) handleProcessStatus(execution *AgentExecution, status *agentct
 func (m *Manager) handleShellExit(execution *AgentExecution, code int) {
 	m.eventPublisher.PublishShellExit(execution, code)
 }
-

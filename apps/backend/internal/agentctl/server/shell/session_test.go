@@ -550,4 +550,3 @@ func TestDetectShellFallback(t *testing.T) {
 		t.Logf("Detected shell: %q (may be valid if it exists on this system)", shell)
 	}
 }
-

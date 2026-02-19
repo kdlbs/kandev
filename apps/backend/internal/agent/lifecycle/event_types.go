@@ -294,11 +294,11 @@ func (p ContextWindowEventPayload) GetSessionID() string {
 
 // AvailableCommandsEventPayload is the payload for available commands update events.
 type AvailableCommandsEventPayload struct {
-	TaskID            string                    `json:"task_id"`
-	SessionID         string                    `json:"session_id"`
-	AgentID           string                    `json:"agent_id"`
+	TaskID            string                     `json:"task_id"`
+	SessionID         string                     `json:"session_id"`
+	AgentID           string                     `json:"agent_id"`
 	AvailableCommands []streams.AvailableCommand `json:"available_commands"`
-	Timestamp         string                    `json:"timestamp"`
+	Timestamp         string                     `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

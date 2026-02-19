@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import type { PromptContextItem } from '@/lib/types/context';
-import { ContextChip } from './context-chip';
-import { PromptPreview } from './prompt-preview';
+import { memo } from "react";
+import type { PromptContextItem } from "@/lib/types/context";
+import { ContextChip } from "./context-chip";
+import { PromptPreview } from "./prompt-preview";
 
 export const PromptItem = memo(function PromptItem({ item }: { item: PromptContextItem }) {
   return (

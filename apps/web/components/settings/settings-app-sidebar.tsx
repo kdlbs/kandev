@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useEffect } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   IconSettings,
   IconFolder,
@@ -12,7 +12,7 @@ import {
   IconCode,
   IconCpu,
   IconMessageCircle,
-} from '@tabler/icons-react';
+} from "@tabler/icons-react";
 import {
   Sidebar,
   SidebarContent,
@@ -27,13 +27,13 @@ import {
   SidebarMenuSubButton,
   SidebarHeader,
   useSidebar,
-} from '@kandev/ui/sidebar';
-import { ScrollArea } from '@kandev/ui/scroll-area';
-import { ScrollOnOverflow } from '@kandev/ui/scroll-on-overflow';
-import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
-import { AgentLogo } from '@/components/agent-logo';
-import type { Workspace, Agent, AgentProfile, Environment, Executor } from '@/lib/types/http';
+} from "@kandev/ui/sidebar";
+import { ScrollArea } from "@kandev/ui/scroll-area";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { useAppStore } from "@/components/state-provider";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { AgentLogo } from "@/components/agent-logo";
+import type { Workspace, Agent, AgentProfile, Environment, Executor } from "@/lib/types/http";
 
 type GeneralSidebarSectionProps = {
   pathname: string;
@@ -53,7 +53,7 @@ function GeneralSidebarSection({ pathname }: GeneralSidebarSectionProps) {
           <SidebarMenuSubButton
             asChild
             size="sm"
-            isActive={pathname === '/settings/general/notifications'}
+            isActive={pathname === "/settings/general/notifications"}
           >
             <Link href="/settings/general/notifications">
               <IconBell className="h-4 w-4" />
@@ -65,7 +65,7 @@ function GeneralSidebarSection({ pathname }: GeneralSidebarSectionProps) {
           <SidebarMenuSubButton
             asChild
             size="sm"
-            isActive={pathname === '/settings/general/editors'}
+            isActive={pathname === "/settings/general/editors"}
           >
             <Link href="/settings/general/editors">
               <IconCode className="h-4 w-4" />
@@ -101,10 +101,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === workspacePath}
-                >
+                <SidebarMenuSubButton asChild isActive={pathname === workspacePath}>
                   <Link href={workspacePath}>
                     <span>{workspace.name}</span>
                   </Link>
@@ -122,11 +119,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
                   <SidebarMenuSubItem>
-                    <SidebarMenuSubButton
-                      asChild
-                      size="sm"
-                      isActive={pathname === workflowsPath}
-                    >
+                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === workflowsPath}>
                       <Link href={workflowsPath}>
                         <span>Workflows</span>
                       </Link>
@@ -166,7 +159,11 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
               return (
                 <SidebarMenuSubItem key={profile.id} className="min-w-0">
                   <SidebarMenuSubButton asChild isActive={pathname === profilePath}>
-                    <Link href={profilePath} className="!flex min-w-0 items-center gap-1.5" title={`${agentLabel} • ${profile.name}`}>
+                    <Link
+                      href={profilePath}
+                      className="!flex min-w-0 items-center gap-1.5"
+                      title={`${agentLabel} • ${profile.name}`}
+                    >
                       <AgentLogo agentName={agent.name} className="shrink-0" />
                       <ScrollOnOverflow className="min-w-0">
                         {agentLabel} • {profile.name}
@@ -175,7 +172,7 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
                   </SidebarMenuSubButton>
                 </SidebarMenuSubItem>
               );
-            })
+            }),
           )}
         </SidebarMenuSub>
       )}
@@ -189,7 +186,11 @@ type ResourceSidebarSectionProps = {
   environments: Environment[];
 };
 
-function ResourceSidebarSection({ pathname, executors, environments }: ResourceSidebarSectionProps) {
+function ResourceSidebarSection({
+  pathname,
+  executors,
+  environments,
+}: ResourceSidebarSectionProps) {
   return (
     <>
       {/* Executors */}
@@ -279,7 +280,10 @@ export function SettingsAppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className="overflow-hidden">
-        <ScrollArea className="h-full [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0" type="always">
+        <ScrollArea
+          className="h-full [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!min-w-0"
+          type="always"
+        >
           <SidebarGroup>
             <SidebarGroupLabel>Settings</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -290,7 +294,7 @@ export function SettingsAppSidebar() {
 
                 {/* Prompts */}
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === '/settings/prompts'}>
+                  <SidebarMenuButton asChild isActive={pathname === "/settings/prompts"}>
                     <Link href="/settings/prompts">
                       <IconMessageCircle className="h-4 w-4" />
                       <span>Prompts</span>
@@ -298,7 +302,11 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
-                <ResourceSidebarSection pathname={pathname} executors={executors} environments={environments} />
+                <ResourceSidebarSection
+                  pathname={pathname}
+                  executors={executors}
+                  environments={environments}
+                />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useCallback } from 'react';
-import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
-import { useDockviewStore } from '@/lib/state/dockview-store';
-import { useLayoutStore } from '@/lib/state/layout-store';
-import { useAppStore } from '@/components/state-provider';
-import { useFileEditors } from '@/hooks/use-file-editors';
+import { useCallback } from "react";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useLayoutStore } from "@/lib/state/layout-store";
+import { useAppStore } from "@/components/state-provider";
+import { useFileEditors } from "@/hooks/use-file-editors";
 
 /**
  * Unified hook returning add-only panel action functions.
@@ -42,7 +42,7 @@ export function usePanelActions() {
         useLayoutStore.getState().openPreview(activeSessionId);
       }
     },
-    [isDesktop, dockAddBrowser, activeSessionId]
+    [isDesktop, dockAddBrowser, activeSessionId],
   );
 
   const addPlan = useCallback(() => {
@@ -50,11 +50,19 @@ export function usePanelActions() {
       dockAddPlan();
     } else if (activeSessionId && activeTaskId) {
       // Mobile/tablet: open document panel with plan
-      setActiveDocument(activeSessionId, { type: 'plan', taskId: activeTaskId });
+      setActiveDocument(activeSessionId, { type: "plan", taskId: activeTaskId });
       openDocument(activeSessionId);
       setPlanMode(activeSessionId, true);
     }
-  }, [isDesktop, dockAddPlan, activeSessionId, activeTaskId, setActiveDocument, openDocument, setPlanMode]);
+  }, [
+    isDesktop,
+    dockAddPlan,
+    activeSessionId,
+    activeTaskId,
+    setActiveDocument,
+    openDocument,
+    setPlanMode,
+  ]);
 
   const addChat = useCallback(() => {
     if (isDesktop) {
@@ -74,7 +82,7 @@ export function usePanelActions() {
         dockAddTerminal(terminalId);
       }
     },
-    [isDesktop, dockAddTerminal]
+    [isDesktop, dockAddTerminal],
   );
 
   const openFile = useCallback(
@@ -83,7 +91,7 @@ export function usePanelActions() {
         dockOpenFile(filePath);
       }
     },
-    [isDesktop, dockOpenFile]
+    [isDesktop, dockOpenFile],
   );
 
   return {

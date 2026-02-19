@@ -36,12 +36,12 @@ type interactiveProcess struct {
 
 	// Deferred start - process created lazily on first resize
 	// This ensures PTY is created at exact frontend dimensions
-	started       bool
-	startOnce     sync.Once
-	startCmd      []string
-	startDir      string
-	startEnv      map[string]string
-	startReq      InteractiveStartRequest // Full request for deferred initialization
+	started   bool
+	startOnce sync.Once
+	startCmd  []string
+	startDir  string
+	startEnv  map[string]string
+	startReq  InteractiveStartRequest // Full request for deferred initialization
 
 	// Direct output - when set, raw output goes here instead of event bus
 	directOutput   DirectOutputWriter

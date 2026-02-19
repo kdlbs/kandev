@@ -1,14 +1,30 @@
-import { useMemo } from 'react';
-import type { Message, ClarificationRequestMetadata, MessageType } from '@/lib/types/http';
-import type { ToolCallMetadata } from '@/components/task/chat/types';
+import { useMemo } from "react";
+import type { Message, ClarificationRequestMetadata, MessageType } from "@/lib/types/http";
+import type { ToolCallMetadata } from "@/components/task/chat/types";
 
 const ACTIVITY_MESSAGE_TYPES: Set<MessageType> = new Set([
-  'thinking', 'tool_call', 'tool_edit', 'tool_read', 'tool_execute', 'tool_search',
+  "thinking",
+  "tool_call",
+  "tool_edit",
+  "tool_read",
+  "tool_execute",
+  "tool_search",
 ]);
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
-  'message', 'content', 'tool_call', 'tool_read', 'tool_edit', 'tool_execute',
-  'tool_search', 'progress', 'status', 'error', 'thinking', 'todo', 'script_execution',
+  "message",
+  "content",
+  "tool_call",
+  "tool_read",
+  "tool_edit",
+  "tool_execute",
+  "tool_search",
+  "progress",
+  "status",
+  "error",
+  "thinking",
+  "todo",
+  "script_execution",
 ]);
 
 function isVisibleMessageType(type: MessageType | undefined): boolean {
@@ -20,25 +36,23 @@ function isPermissionVisible(message: Message, toolCallIds: Set<string>): boolea
   const toolCallId = metadata?.tool_call_id;
   if (toolCallId && toolCallIds.has(toolCallId)) return false;
   const status = metadata?.status;
-  if (status === 'approved' || status === 'denied' || status === 'cancelled') return false;
+  if (status === "approved" || status === "denied" || status === "cancelled") return false;
   return true;
 }
 
 export type TurnGroup = {
-  type: 'turn_group';
+  type: "turn_group";
   id: string;
   turnId: string | null;
   messages: Message[];
 };
 
-export type RenderItem =
-  | { type: 'message'; message: Message }
-  | TurnGroup;
+export type RenderItem = { type: "message"; message: Message } | TurnGroup;
 
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
   for (const message of messages) {
-    if (message.type === 'tool_call') {
+    if (message.type === "tool_call") {
       const toolCallId = (message.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
       if (toolCallId) set.add(toolCallId);
     }
@@ -49,7 +63,7 @@ function buildToolCallIds(messages: Message[]): Set<string> {
 function buildPermissionsByToolCallId(messages: Message[]): Map<string, Message> {
   const map = new Map<string, Message>();
   for (const message of messages) {
-    if (message.type === 'permission_request') {
+    if (message.type === "permission_request") {
       const toolCallId = (message.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
       if (toolCallId) map.set(toolCallId, message);
     }
@@ -82,9 +96,9 @@ function buildSubagentChildIds(childrenByParentToolCallId: Map<string, Message[]
 function findPendingClarification(messages: Message[]): Message | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message.type === 'clarification_request') {
+    if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      if (!metadata?.status || metadata.status === 'pending') return message;
+      if (!metadata?.status || metadata.status === "pending") return message;
     }
   }
   return null;
@@ -97,13 +111,17 @@ function filterVisibleMessages(
 ): Message[] {
   return messages.filter((message) => {
     if (subagentChildIds.has(message.id)) return false;
-    if (message.type === 'clarification_request') {
+    if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      return !(!metadata?.status || metadata.status === 'pending');
+      return !(!metadata?.status || metadata.status === "pending");
     }
-    if (message.type === 'status' && (message.content === 'New session started' || message.content === 'Session resumed')) return false;
+    if (
+      message.type === "status" &&
+      (message.content === "New session started" || message.content === "Session resumed")
+    )
+      return false;
     if (isVisibleMessageType(message.type)) return true;
-    if (message.type === 'permission_request') return isPermissionVisible(message, toolCallIds);
+    if (message.type === "permission_request") return isPermissionVisible(message, toolCallIds);
     return false;
   });
 }
@@ -115,9 +133,14 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
 
   const flushGroup = () => {
     if (currentGroup.length >= 2) {
-      items.push({ type: 'turn_group', id: `turn-group-${currentGroup[0].id}`, turnId: currentGroup[0].turn_id ?? null, messages: currentGroup });
+      items.push({
+        type: "turn_group",
+        id: `turn-group-${currentGroup[0].id}`,
+        turnId: currentGroup[0].turn_id ?? null,
+        messages: currentGroup,
+      });
     } else if (currentGroup.length === 1) {
-      items.push({ type: 'message', message: currentGroup[0] });
+      items.push({ type: "message", message: currentGroup[0] });
     }
     currentGroup = [];
     currentTurnId = null;
@@ -136,7 +159,7 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
       }
     } else {
       flushGroup();
-      items.push({ type: 'message', message });
+      items.push({ type: "message", message });
     }
   }
   flushGroup();
@@ -147,22 +170,36 @@ export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
   resolvedSessionId: string | null,
-  taskDescription: string | null
+  taskDescription: string | null,
 ) {
   const toolCallIds = useMemo(() => buildToolCallIds(messages), [messages]);
   const permissionsByToolCallId = useMemo(() => buildPermissionsByToolCallId(messages), [messages]);
-  const childrenByParentToolCallId = useMemo(() => buildChildrenByParentToolCallId(messages), [messages]);
-  const subagentChildIds = useMemo(() => buildSubagentChildIds(childrenByParentToolCallId), [childrenByParentToolCallId]);
+  const childrenByParentToolCallId = useMemo(
+    () => buildChildrenByParentToolCallId(messages),
+    [messages],
+  );
+  const subagentChildIds = useMemo(
+    () => buildSubagentChildIds(childrenByParentToolCallId),
+    [childrenByParentToolCallId],
+  );
   const pendingClarification = useMemo(() => findPendingClarification(messages), [messages]);
 
   const visibleMessages = useMemo(
     () => filterVisibleMessages(messages, toolCallIds, subagentChildIds),
-    [messages, toolCallIds, subagentChildIds]
+    [messages, toolCallIds, subagentChildIds],
   );
 
   const taskDescriptionMessage: Message | null = useMemo(() => {
     return taskDescription && visibleMessages.length === 0
-      ? { id: 'task-description', task_id: taskId ?? '', session_id: resolvedSessionId ?? '', author_type: 'user', content: taskDescription, type: 'message', created_at: '' }
+      ? {
+          id: "task-description",
+          task_id: taskId ?? "",
+          session_id: resolvedSessionId ?? "",
+          author_type: "user",
+          content: taskDescription,
+          type: "message",
+          created_at: "",
+        }
       : null;
   }, [taskDescription, visibleMessages.length, taskId, resolvedSessionId]);
 
@@ -171,24 +208,40 @@ export function useProcessedMessages(
   }, [taskDescriptionMessage, visibleMessages]);
 
   const todoItems = useMemo(() => {
-    const latestTodos = [...visibleMessages].reverse()
-      .find((message) => message.type === 'todo' || (message.metadata as { todos?: unknown })?.todos);
+    const latestTodos = [...visibleMessages]
+      .reverse()
+      .find(
+        (message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos,
+      );
     return (
-      (latestTodos?.metadata as { todos?: Array<{ text: string; done?: boolean } | string> } | undefined)?.todos
-        ?.map((item) => (typeof item === 'string' ? { text: item, done: false } : item))
+      (
+        latestTodos?.metadata as
+          | { todos?: Array<{ text: string; done?: boolean } | string> }
+          | undefined
+      )?.todos
+        ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
         .filter((item) => item.text) ?? []
     );
   }, [visibleMessages]);
 
   const agentMessageCount = useMemo(() => {
-    return visibleMessages.filter((c) => c.author_type !== 'user').length;
+    return visibleMessages.filter((c) => c.author_type !== "user").length;
   }, [visibleMessages]);
 
-  const groupedItems = useMemo<RenderItem[]>(() => groupActivityMessages(allMessages), [allMessages]);
+  const groupedItems = useMemo<RenderItem[]>(
+    () => groupActivityMessages(allMessages),
+    [allMessages],
+  );
 
   return {
-    visibleMessages, allMessages, groupedItems, toolCallIds,
-    permissionsByToolCallId, childrenByParentToolCallId, todoItems,
-    agentMessageCount, pendingClarification,
+    visibleMessages,
+    allMessages,
+    groupedItems,
+    toolCallIds,
+    permissionsByToolCallId,
+    childrenByParentToolCallId,
+    todoItems,
+    agentMessageCount,
+    pendingClarification,
   };
 }

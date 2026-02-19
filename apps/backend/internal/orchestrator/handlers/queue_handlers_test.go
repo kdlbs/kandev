@@ -17,10 +17,10 @@ import (
 
 // mockQueueService is a simple mock implementation of QueueService
 type mockQueueService struct {
-	queueMessageFunc   func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	cancelQueuedFunc   func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
-	getStatusFunc      func(ctx context.Context, sessionID string) *messagequeue.QueueStatus
-	updateMessageFunc  func(ctx context.Context, sessionID, content string) error
+	queueMessageFunc  func(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
+	cancelQueuedFunc  func(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, error)
+	getStatusFunc     func(ctx context.Context, sessionID string) *messagequeue.QueueStatus
+	updateMessageFunc func(ctx context.Context, sessionID, content string) error
 }
 
 func (m *mockQueueService) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {

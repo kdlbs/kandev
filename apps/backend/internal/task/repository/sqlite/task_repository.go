@@ -148,7 +148,6 @@ func (r *Repository) DeleteTaskRepositoriesByTask(ctx context.Context, taskID st
 	return err
 }
 
-
 // GetPrimaryTaskRepository returns the first (primary) repository for a task
 func (r *Repository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
 	repos, err := r.ListTaskRepositories(ctx, taskID)
@@ -160,4 +159,3 @@ func (r *Repository) GetPrimaryTaskRepository(ctx context.Context, taskID string
 	}
 	return repos[0], nil
 }
-

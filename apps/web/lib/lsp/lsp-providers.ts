@@ -3,16 +3,19 @@
  * Extracted from lsp-client-manager.ts to keep file size under limits.
  */
 
-import type { editor as monacoEditor, IDisposable, languages } from 'monaco-editor';
-import { getMonacoInstance } from '@/components/editors/monaco/monaco-init';
+import type { editor as monacoEditor, IDisposable, languages } from "monaco-editor";
+import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
-type MonacoModule = typeof import('monaco-editor');
+type MonacoModule = typeof import("monaco-editor");
 
 // ---------------------------------------------------------------------------
 // Types re-exported from the manager (kept minimal to avoid circular deps)
 // ---------------------------------------------------------------------------
 
-type LspRange = { start: { line: number; character: number }; end: { line: number; character: number } };
+type LspRange = {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+};
 
 type JsonRpcConnection = {
   sendRequest(method: string, params: unknown): Promise<unknown>;
@@ -50,30 +53,53 @@ function toLspPosition(lineNumber: number, column: number) {
 
 function toMonacoCompletionKind(lspKind: number | undefined): number {
   const map: Record<number, number> = {
-    1: 14, 2: 1, 3: 0, 4: 8, 5: 4, 6: 5, 7: 7, 8: 7, 9: 8, 10: 9,
-    11: 12, 12: 14, 13: 15, 14: 17, 15: 27, 16: 19, 17: 20, 18: 21,
-    19: 23, 20: 16, 21: 14, 22: 6, 23: 24, 24: 25, 25: 26,
+    1: 14,
+    2: 1,
+    3: 0,
+    4: 8,
+    5: 4,
+    6: 5,
+    7: 7,
+    8: 7,
+    9: 8,
+    10: 9,
+    11: 12,
+    12: 14,
+    13: 15,
+    14: 17,
+    15: 27,
+    16: 19,
+    17: 20,
+    18: 21,
+    19: 23,
+    20: 16,
+    21: 14,
+    22: 6,
+    23: 24,
+    24: 25,
+    25: 26,
   };
   return map[lspKind ?? 1] ?? 14;
 }
 
 function extractDocumentation(doc: unknown): string | { value: string } | undefined {
-  if (typeof doc === 'string') return doc;
-  if (doc && typeof doc === 'object' && 'value' in doc) {
+  if (typeof doc === "string") return doc;
+  if (doc && typeof doc === "object" && "value" in doc) {
     return { value: (doc as { value: string }).value };
   }
   return undefined;
 }
 
 function extractHoverContents(contents: unknown): { value: string }[] {
-  if (typeof contents === 'string') return [{ value: contents }];
-  if (contents && typeof contents === 'object' && 'value' in contents) {
+  if (typeof contents === "string") return [{ value: contents }];
+  if (contents && typeof contents === "object" && "value" in contents) {
     return [{ value: (contents as { value: string }).value }];
   }
   if (Array.isArray(contents)) {
     return contents.map((item) => {
-      if (typeof item === 'string') return { value: item };
-      if (item && typeof item === 'object' && 'value' in item) return { value: (item as { value: string }).value };
+      if (typeof item === "string") return { value: item };
+      if (item && typeof item === "object" && "value" in item)
+        return { value: (item as { value: string }).value };
       return { value: String(item) };
     });
   }
@@ -98,7 +124,7 @@ type LspCompletionItem = {
 };
 
 function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
-  const label = typeof item.label === 'string' ? item.label : item.label.label;
+  const label = typeof item.label === "string" ? item.label : item.label.label;
   const insertText = item.textEdit?.newText ?? item.insertText ?? label;
   const isSnippet = item.insertTextFormat === 2;
   return {
@@ -125,17 +151,19 @@ function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
 function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   return monaco.languages.registerCompletionItemProvider(lang, {
-    triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#', ' '],
+    triggerCharacters: [".", ":", "<", '"', "'", "/", "@", "#", " "],
     provideCompletionItems: async (model, position, _context, token) => {
       const uri = getDocumentUri(model);
       if (!uri) return { suggestions: [] };
       try {
-        const result = await rpc.sendRequest('textDocument/completion', {
+        const result = await rpc.sendRequest("textDocument/completion", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
         });
         if (token.isCancellationRequested) return { suggestions: [] };
-        const items = Array.isArray(result) ? result : ((result as { items?: unknown[] })?.items ?? []);
+        const items = Array.isArray(result)
+          ? result
+          : ((result as { items?: unknown[] })?.items ?? []);
         return { suggestions: (items as LspCompletionItem[]).map(mapCompletionItem) };
       } catch {
         return { suggestions: [] };
@@ -151,10 +179,10 @@ function registerHoverProvider(ctx: ProviderCtx): IDisposable {
       const uri = getDocumentUri(model);
       if (!uri) return null;
       try {
-        const result = await rpc.sendRequest('textDocument/hover', {
+        const result = (await rpc.sendRequest("textDocument/hover", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
-        }) as { contents: unknown; range?: LspRange } | null;
+        })) as { contents: unknown; range?: LspRange } | null;
         if (token.isCancellationRequested || !result) return null;
         return {
           range: result.range ? toMonacoRange(result.range) : undefined,
@@ -174,13 +202,16 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
       const uri = getDocumentUri(model);
       if (!uri) return null;
       try {
-        const result = await rpc.sendRequest('textDocument/definition', {
+        const result = await rpc.sendRequest("textDocument/definition", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
         });
         if (token.isCancellationRequested || !result) return null;
         const defs = Array.isArray(result) ? result : [result];
-        ensureModelsExist(defs.map((d: { uri: string }) => d.uri), connectionKey);
+        ensureModelsExist(
+          defs.map((d: { uri: string }) => d.uri),
+          connectionKey,
+        );
         return defs.map((d: { uri: string; range: LspRange }) => ({
           uri: monaco.Uri.parse(d.uri),
           range: toMonacoRange(d.range),
@@ -199,14 +230,17 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
       const uri = getDocumentUri(model);
       if (!uri) return null;
       try {
-        const result = await rpc.sendRequest('textDocument/references', {
+        const result = await rpc.sendRequest("textDocument/references", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
           context: { includeDeclaration: context.includeDeclaration },
         });
         if (token.isCancellationRequested || !result) return null;
         const refs = Array.isArray(result) ? result : [];
-        ensureModelsExist(refs.map((r: { uri: string }) => r.uri), connectionKey);
+        ensureModelsExist(
+          refs.map((r: { uri: string }) => r.uri),
+          connectionKey,
+        );
         return refs.map((r: { uri: string; range: LspRange }) => ({
           uri: monaco.Uri.parse(r.uri),
           range: toMonacoRange(r.range),
@@ -221,7 +255,7 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
 function registerSignatureHelpProvider(ctx: ProviderCtx): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   return monaco.languages.registerSignatureHelpProvider(lang, {
-    signatureHelpTriggerCharacters: ['(', ','],
+    signatureHelpTriggerCharacters: ["(", ","],
     provideSignatureHelp: async (model, position) => {
       const uri = getDocumentUri(model);
       if (!uri) return null;
@@ -235,10 +269,10 @@ function registerSignatureHelpProvider(ctx: ProviderCtx): IDisposable {
           activeSignature?: number;
           activeParameter?: number;
         };
-        const result = await rpc.sendRequest('textDocument/signatureHelp', {
+        const result = (await rpc.sendRequest("textDocument/signatureHelp", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
-        }) as SigResult | null;
+        })) as SigResult | null;
         if (!result || !result.signatures?.length) return null;
         return {
           value: {
@@ -247,7 +281,7 @@ function registerSignatureHelpProvider(ctx: ProviderCtx): IDisposable {
               documentation: extractDocumentation(sig.documentation),
               parameters: (sig.parameters ?? []).map((p) => ({
                 label: p.label,
-                documentation: typeof p.documentation === 'string' ? p.documentation : undefined,
+                documentation: typeof p.documentation === "string" ? p.documentation : undefined,
               })),
             })),
             activeSignature: result.activeSignature ?? 0,
@@ -269,7 +303,8 @@ function registerSemanticTokensProvider(
 ): IDisposable[] {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   const semTokensCap = serverCapabilities?.semanticTokensProvider as
-    { legend?: { tokenTypes: string[]; tokenModifiers: string[] }; full?: boolean | object } | undefined;
+    | { legend?: { tokenTypes: string[]; tokenModifiers: string[] }; full?: boolean | object }
+    | undefined;
   if (!semTokensCap?.legend || !semTokensCap.full) return [];
 
   const legend = semTokensCap.legend;
@@ -289,14 +324,16 @@ function registerSemanticTokensProvider(
   disposables.push(
     monaco.languages.registerDocumentSemanticTokensProvider(lang, {
       onDidChange,
-      getLegend() { return legend; },
+      getLegend() {
+        return legend;
+      },
       provideDocumentSemanticTokens: async (model, _lastResultId, token) => {
         const uri = getDocumentUri(model);
         if (!uri) return null;
         try {
-          const result = await rpc.sendRequest('textDocument/semanticTokens/full', {
+          const result = (await rpc.sendRequest("textDocument/semanticTokens/full", {
             textDocument: { uri },
-          }) as { resultId?: string; data: number[] } | null;
+          })) as { resultId?: string; data: number[] } | null;
           if (token.isCancellationRequested) return null;
           if (!result?.data?.length) {
             const timer = setTimeout(() => {
@@ -312,9 +349,14 @@ function registerSemanticTokensProvider(
         }
       },
       releaseDocumentSemanticTokens() {},
-    })
+    }),
   );
-  disposables.push({ dispose: () => { for (const t of retryTimers) clearTimeout(t); retryTimers.clear(); } });
+  disposables.push({
+    dispose: () => {
+      for (const t of retryTimers) clearTimeout(t);
+      retryTimers.clear();
+    },
+  });
 
   return disposables;
 }
@@ -342,7 +384,9 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 
   for (const lang of monacoLanguages) {
     const ctx: ProviderCtx = {
-      monaco, lang, rpc: opts.rpc,
+      monaco,
+      lang,
+      rpc: opts.rpc,
       getDocumentUri: opts.getDocumentUri,
       ensureModelsExist: opts.ensureModelsExist,
       connectionKey: opts.connectionKey,
@@ -352,7 +396,13 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
     disposables.push(registerDefinitionProvider(ctx));
     disposables.push(registerReferenceProvider(ctx));
     disposables.push(registerSignatureHelpProvider(ctx));
-    disposables.push(...registerSemanticTokensProvider(ctx, opts.serverCapabilities, opts.semanticRefreshCallbacks));
+    disposables.push(
+      ...registerSemanticTokensProvider(
+        ctx,
+        opts.serverCapabilities,
+        opts.semanticRefreshCallbacks,
+      ),
+    );
   }
 
   return disposables;
@@ -364,10 +414,15 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 
 function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
   switch (lspLanguage) {
-    case 'typescript': return ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'];
-    case 'go': return ['go'];
-    case 'rust': return ['rust'];
-    case 'python': return ['python'];
-    default: return [];
+    case "typescript":
+      return ["typescript", "javascript", "typescriptreact", "javascriptreact"];
+    case "go":
+      return ["go"];
+    case "rust":
+      return ["rust"];
+    case "python":
+      return ["python"];
+    default:
+      return [];
   }
 }

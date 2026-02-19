@@ -364,4 +364,3 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 		return mcp.NewToolResultText("Plan deleted successfully."), nil
 	}
 }
-

@@ -1,11 +1,11 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
-import type { Environment } from '@/lib/types/http';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { Environment } from "@/lib/types/http";
 
 export function registerEnvironmentsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'environment.created': (message) => {
+    "environment.created": (message) => {
       const payload = message.payload;
       const environment: Environment = {
         id: payload.id,
@@ -22,21 +22,24 @@ export function registerEnvironmentsHandlers(store: StoreApi<AppState>): WsHandl
       store.setState((state) => ({
         ...state,
         environments: {
-          items: [...state.environments.items.filter((item) => item.id !== environment.id), environment],
+          items: [
+            ...state.environments.items.filter((item) => item.id !== environment.id),
+            environment,
+          ],
         },
       }));
     },
-    'environment.updated': (message) => {
+    "environment.updated": (message) => {
       store.setState((state) => ({
         ...state,
         environments: {
           items: state.environments.items.map((item) =>
-            item.id === message.payload.id ? { ...item, ...message.payload } : item
+            item.id === message.payload.id ? { ...item, ...message.payload } : item,
           ),
         },
       }));
     },
-    'environment.deleted': (message) => {
+    "environment.deleted": (message) => {
       store.setState((state) => ({
         ...state,
         environments: {

@@ -19,8 +19,8 @@ type testAgent struct {
 	runtime      *agents.RuntimeConfig
 }
 
-func (a *testAgent) ID() string                    { return a.id }
-func (a *testAgent) Name() string                  { return a.name }
+func (a *testAgent) ID() string                     { return a.id }
+func (a *testAgent) Name() string                   { return a.name }
 func (a *testAgent) DisplayName() string            { return a.name }
 func (a *testAgent) Description() string            { return a.description }
 func (a *testAgent) Enabled() bool                  { return a.enabled }
@@ -58,9 +58,9 @@ func validAgentConfig(id, name string) *testAgent {
 			Tag:        "latest",
 			WorkingDir: "/workspace",
 			ResourceLimits: agents.ResourceLimits{
-				MemoryMB:       1024,
-				CPUCores:       1.0,
-				Timeout: time.Hour,
+				MemoryMB: 1024,
+				CPUCores: 1.0,
+				Timeout:  time.Hour,
 			},
 		},
 	}

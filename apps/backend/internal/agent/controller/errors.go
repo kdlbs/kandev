@@ -12,4 +12,3 @@ var (
 	// ErrAgentNotFound is returned when agent is not found
 	ErrAgentNotFound = errors.New("agent not found")
 )
-

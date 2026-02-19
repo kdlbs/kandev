@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { getTaskStateIcon } from '@/lib/ui/state-icons';
-import type { TaskState } from '@/lib/types/http';
+import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import type { TaskState } from "@/lib/types/http";
 
 type TaskStateActionsProps = {
   state?: TaskState;
@@ -9,9 +9,5 @@ type TaskStateActionsProps = {
 };
 
 export function TaskStateActions({ state, className }: TaskStateActionsProps) {
-  return (
-    <div className="flex items-center justify-end">
-      {getTaskStateIcon(state, className)}
-    </div>
-  );
+  return <div className="flex items-center justify-end">{getTaskStateIcon(state, className)}</div>;
 }

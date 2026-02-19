@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import {
   forwardRef,
@@ -7,40 +7,61 @@ import {
   type KeyboardEvent,
   type ChangeEvent,
   useCallback,
-} from 'react';
-import { cn } from '@/lib/utils';
+} from "react";
+import { cn } from "@/lib/utils";
 
-function isSubmitKeyPress(event: KeyboardEvent<HTMLTextAreaElement>, submitKey: 'enter' | 'cmd_enter'): boolean {
-  if (submitKey === 'enter') {
-    return event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey;
+function isSubmitKeyPress(
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  submitKey: "enter" | "cmd_enter",
+): boolean {
+  if (submitKey === "enter") {
+    return event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey;
   }
-  return event.key === 'Enter' && (event.metaKey || event.ctrlKey);
+  return event.key === "Enter" && (event.metaKey || event.ctrlKey);
 }
 
 const MIRROR_STYLES = [
-  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
-  'textTransform', 'wordSpacing', 'textIndent', 'whiteSpace', 'wordWrap',
-  'wordBreak', 'overflowWrap', 'lineHeight', 'padding', 'paddingTop',
-  'paddingRight', 'paddingBottom', 'paddingLeft', 'borderWidth', 'boxSizing',
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "letterSpacing",
+  "textTransform",
+  "wordSpacing",
+  "textIndent",
+  "whiteSpace",
+  "wordWrap",
+  "wordBreak",
+  "overflowWrap",
+  "lineHeight",
+  "padding",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderWidth",
+  "boxSizing",
 ] as const;
 
 function measureCaretRect(textarea: HTMLTextAreaElement, value: string): DOMRect {
   const selectionStart = textarea.selectionStart;
   const computed = window.getComputedStyle(textarea);
-  const mirror = document.createElement('div');
+  const mirror = document.createElement("div");
 
-  mirror.style.position = 'absolute';
-  mirror.style.visibility = 'hidden';
-  mirror.style.whiteSpace = 'pre-wrap';
-  mirror.style.wordWrap = 'break-word';
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.wordWrap = "break-word";
   mirror.style.width = `${textarea.clientWidth}px`;
-  MIRROR_STYLES.forEach((prop) => { mirror.style[prop as unknown as number] = computed[prop]; });
+  MIRROR_STYLES.forEach((prop) => {
+    mirror.style[prop as unknown as number] = computed[prop];
+  });
 
   document.body.appendChild(mirror);
 
   mirror.textContent = value.substring(0, selectionStart);
-  const marker = document.createElement('span');
-  marker.textContent = '\u200B';
+  const marker = document.createElement("span");
+  marker.textContent = "\u200B";
   mirror.appendChild(marker);
 
   const textareaRect = textarea.getBoundingClientRect();
@@ -54,7 +75,7 @@ function measureCaretRect(textarea: HTMLTextAreaElement, value: string): DOMRect
     textareaRect.left + (markerRect.left - mirrorRect.left),
     textareaRect.top + (markerRect.top - mirrorRect.top) - scrollTop,
     0,
-    parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) * 1.2
+    parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) * 1.2,
   );
 }
 
@@ -80,15 +101,27 @@ type RichTextInputProps = {
   disabled?: boolean;
   className?: string;
   planModeEnabled?: boolean;
-  submitKey?: 'enter' | 'cmd_enter';
+  submitKey?: "enter" | "cmd_enter";
   onFocus?: () => void;
   onBlur?: () => void;
 };
 
 export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>(
   function RichTextInput(
-    { value, onChange, onKeyDown, onSubmit, placeholder, disabled = false, className, planModeEnabled = false, submitKey = 'cmd_enter', onFocus, onBlur },
-    ref
+    {
+      value,
+      onChange,
+      onKeyDown,
+      onSubmit,
+      placeholder,
+      disabled = false,
+      className,
+      planModeEnabled = false,
+      submitKey = "cmd_enter",
+      onFocus,
+      onBlur,
+    },
+    ref,
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -98,24 +131,34 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
       return measureCaretRect(textarea, value);
     }, [value]);
 
-    useImperativeHandle(ref, () => ({
-      focus: () => textareaRef.current?.focus(),
-      blur: () => textareaRef.current?.blur(),
-      getSelectionStart: () => textareaRef.current?.selectionStart ?? 0,
-      getSelectionEnd: () => textareaRef.current?.selectionEnd ?? 0,
-      setSelectionRange: (start: number, end: number) => { textareaRef.current?.setSelectionRange(start, end); },
-      getCaretRect,
-      getValue: () => textareaRef.current?.value ?? '',
-      setValue: (newValue: string) => onChange(newValue),
-      insertText: (text: string, from: number, to: number) => {
-        const newValue = value.substring(0, from) + text + value.substring(to);
-        onChange(newValue);
-        requestAnimationFrame(() => { textareaRef.current?.setSelectionRange(from + text.length, from + text.length); });
-      },
-      getTextareaElement: () => textareaRef.current,
-    }), [getCaretRect, onChange, value]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: () => textareaRef.current?.focus(),
+        blur: () => textareaRef.current?.blur(),
+        getSelectionStart: () => textareaRef.current?.selectionStart ?? 0,
+        getSelectionEnd: () => textareaRef.current?.selectionEnd ?? 0,
+        setSelectionRange: (start: number, end: number) => {
+          textareaRef.current?.setSelectionRange(start, end);
+        },
+        getCaretRect,
+        getValue: () => textareaRef.current?.value ?? "",
+        setValue: (newValue: string) => onChange(newValue),
+        insertText: (text: string, from: number, to: number) => {
+          const newValue = value.substring(0, from) + text + value.substring(to);
+          onChange(newValue);
+          requestAnimationFrame(() => {
+            textareaRef.current?.setSelectionRange(from + text.length, from + text.length);
+          });
+        },
+        getTextareaElement: () => textareaRef.current,
+      }),
+      [getCaretRect, onChange, value],
+    );
 
-    const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => { onChange(event.target.value); };
+    const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+      onChange(event.target.value);
+    };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (onKeyDown) {
@@ -127,7 +170,10 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         if (isSubmitKey) event.preventDefault();
         return;
       }
-      if (isSubmitKey) { event.preventDefault(); onSubmit?.(); }
+      if (isSubmitKey) {
+        event.preventDefault();
+        onSubmit?.();
+      }
     };
 
     return (
@@ -141,15 +187,15 @@ export const RichTextInput = forwardRef<RichTextInputHandle, RichTextInputProps>
         placeholder={placeholder}
         disabled={disabled}
         className={cn(
-          'w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto',
-          'text-sm leading-relaxed',
-          'placeholder:text-muted-foreground',
-          'focus:outline-none',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          planModeEnabled && 'border-primary/40',
-          className
+          "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
+          "text-sm leading-relaxed",
+          "placeholder:text-muted-foreground",
+          "focus:outline-none",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          planModeEnabled && "border-primary/40",
+          className,
         )}
       />
     );
-  }
+  },
 );

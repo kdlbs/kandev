@@ -12,10 +12,10 @@
 //   - Per-session process tracking
 //
 // Lifecycle:
-//   1. Start() - Spawns process, creates output pipes, returns immediately
-//   2. Background goroutines - Stream stdout/stderr, wait for exit
-//   3. Stop() - Sends SIGTERM to process group, escalates to SIGKILL after 2s
-//   4. Automatic cleanup - Process removed from tracking after exit
+//  1. Start() - Spawns process, creates output pipes, returns immediately
+//  2. Background goroutines - Stream stdout/stderr, wait for exit
+//  3. Stop() - Sends SIGTERM to process group, escalates to SIGKILL after 2s
+//  4. Automatic cleanup - Process removed from tracking after exit
 //
 // Use Cases:
 //   - Agent-triggered builds (npm run build, go test ./...)
@@ -43,12 +43,12 @@ import (
 
 // StartProcessRequest contains parameters for starting a new background process.
 type StartProcessRequest struct {
-	SessionID      string            `json:"session_id"`       // Required: Agent session owning this process
-	Kind           types.ProcessKind `json:"kind"`             // Process type (user_command, agent_script, etc.)
-	ScriptName     string            `json:"script_name,omitempty"` // Human-readable script identifier
-	Command        string            `json:"command"`          // Required: Shell command to execute (passed to sh -lc)
-	WorkingDir     string            `json:"working_dir"`      // Working directory (defaults to current dir)
-	Env            map[string]string `json:"env,omitempty"`    // Additional environment variables (merged with parent env)
+	SessionID      string            `json:"session_id"`                 // Required: Agent session owning this process
+	Kind           types.ProcessKind `json:"kind"`                       // Process type (user_command, agent_script, etc.)
+	ScriptName     string            `json:"script_name,omitempty"`      // Human-readable script identifier
+	Command        string            `json:"command"`                    // Required: Shell command to execute (passed to sh -lc)
+	WorkingDir     string            `json:"working_dir"`                // Working directory (defaults to current dir)
+	Env            map[string]string `json:"env,omitempty"`              // Additional environment variables (merged with parent env)
 	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"` // Max output buffer size (defaults to runner's default)
 }
 
@@ -59,17 +59,17 @@ type StopProcessRequest struct {
 
 // ProcessInfo represents the complete state of a background process.
 type ProcessInfo struct {
-	ID         string               `json:"id"`          // Unique process identifier (UUID)
-	SessionID  string               `json:"session_id"`  // Agent session that owns this process
-	Kind       types.ProcessKind    `json:"kind"`        // Process classification
+	ID         string               `json:"id"`                    // Unique process identifier (UUID)
+	SessionID  string               `json:"session_id"`            // Agent session that owns this process
+	Kind       types.ProcessKind    `json:"kind"`                  // Process classification
 	ScriptName string               `json:"script_name,omitempty"` // User-friendly name
-	Command    string               `json:"command"`     // The shell command being executed
-	WorkingDir string               `json:"working_dir"` // Execution directory
-	Status     types.ProcessStatus  `json:"status"`      // Current state (starting, running, exited, failed)
-	ExitCode   *int                 `json:"exit_code,omitempty"` // Process exit code (nil if still running)
-	StartedAt  time.Time            `json:"started_at"`  // When the process was launched
-	UpdatedAt  time.Time            `json:"updated_at"`  // Last status change timestamp
-	Output     []ProcessOutputChunk `json:"output,omitempty"` // Buffered output (only included if requested)
+	Command    string               `json:"command"`               // The shell command being executed
+	WorkingDir string               `json:"working_dir"`           // Execution directory
+	Status     types.ProcessStatus  `json:"status"`                // Current state (starting, running, exited, failed)
+	ExitCode   *int                 `json:"exit_code,omitempty"`   // Process exit code (nil if still running)
+	StartedAt  time.Time            `json:"started_at"`            // When the process was launched
+	UpdatedAt  time.Time            `json:"updated_at"`            // Last status change timestamp
+	Output     []ProcessOutputChunk `json:"output,omitempty"`      // Buffered output (only included if requested)
 }
 
 // ProcessOutputChunk represents a single piece of process output (stdout or stderr).
@@ -134,12 +134,12 @@ func (b *ringBuffer) snapshot() []ProcessOutputChunk {
 
 // commandProcess represents a single running background process and its state.
 type commandProcess struct {
-	info       ProcessInfo      // Process metadata and current status
-	cmd        *exec.Cmd        // Underlying OS process (nil after completion)
-	buffer     *ringBuffer      // Memory-bounded output storage
-	stopOnce   sync.Once        // Ensures stopSignal is only closed once
-	stopSignal chan struct{}    // Signals output readers to exit before process termination
-	mu         sync.Mutex       // Protects info fields during updates
+	info       ProcessInfo   // Process metadata and current status
+	cmd        *exec.Cmd     // Underlying OS process (nil after completion)
+	buffer     *ringBuffer   // Memory-bounded output storage
+	stopOnce   sync.Once     // Ensures stopSignal is only closed once
+	stopSignal chan struct{} // Signals output readers to exit before process termination
+	mu         sync.Mutex    // Protects info fields during updates
 }
 
 // ProcessRunner manages multiple background processes with output streaming.
@@ -147,11 +147,11 @@ type commandProcess struct {
 // Thread-safe: All public methods can be called concurrently from multiple goroutines.
 //
 // Process Lifecycle:
-//   1. Start() creates a process in "starting" state
-//   2. Transitions to "running" after successful spawn
-//   3. Background goroutines stream output and wait for exit
-//   4. Final status is "exited" (exit code 0) or "failed" (non-zero exit code)
-//   5. Process is automatically removed from tracking after completion
+//  1. Start() creates a process in "starting" state
+//  2. Transitions to "running" after successful spawn
+//  3. Background goroutines stream output and wait for exit
+//  4. Final status is "exited" (exit code 0) or "failed" (non-zero exit code)
+//  5. Process is automatically removed from tracking after completion
 //
 // Output Handling:
 //   - Stdout and stderr are captured separately and streamed to WebSocket
@@ -167,18 +167,18 @@ type ProcessRunner struct {
 	workspaceTracker *WorkspaceTracker // WebSocket stream coordinator (can be nil)
 	bufferMaxBytes   int64             // Default output buffer size for new processes
 
-	mu        sync.RWMutex                  // Protects processes map
-	processes map[string]*commandProcess    // Active processes by ID
+	mu        sync.RWMutex               // Protects processes map
+	processes map[string]*commandProcess // Active processes by ID
 }
 
 // NewProcessRunner creates a new process runner.
 //
 // Parameters:
 //   - workspaceTracker: Optional coordinator for streaming output to WebSocket clients.
-//                       If nil, processes run but output isn't streamed (only buffered).
+//     If nil, processes run but output isn't streamed (only buffered).
 //   - log: Logger instance for process lifecycle events
 //   - bufferMaxBytes: Default output buffer size (typically 2MB). Individual processes
-//                     can override via StartProcessRequest.BufferMaxBytes.
+//     can override via StartProcessRequest.BufferMaxBytes.
 func NewProcessRunner(workspaceTracker *WorkspaceTracker, log *logger.Logger, bufferMaxBytes int64) *ProcessRunner {
 	return &ProcessRunner{
 		logger:           log.WithFields(zap.String("component", "process-runner")),
@@ -409,7 +409,7 @@ func (r *ProcessRunner) StopAll(ctx context.Context) error {
 // Parameters:
 //   - id: Process UUID returned by Start()
 //   - includeOutput: If true, includes buffered stdout/stderr in the response.
-//                    Set to false for status checks to avoid copying large buffers.
+//     Set to false for status checks to avoid copying large buffers.
 //
 // Returns (ProcessInfo, true) if found, or (nil, false) if not found.
 //
@@ -428,7 +428,7 @@ func (r *ProcessRunner) Get(id string, includeOutput bool) (*ProcessInfo, bool) 
 //
 // Parameters:
 //   - sessionID: If non-empty, returns only processes for this session.
-//                If empty, returns all processes across all sessions.
+//     If empty, returns all processes across all sessions.
 //
 // Output is always returned without buffered output (includeOutput=false).
 // Use Get(id, true) to retrieve output for a specific process.
@@ -486,11 +486,11 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 // wait blocks until the process exits, then updates final status and cleans up.
 //
 // This runs in a background goroutine spawned by Start(). Responsibilities:
-//   1. Wait for process termination (blocks on cmd.Wait())
-//   2. Extract exit code from process state
-//   3. Determine final status: "exited" (code 0) vs "failed" (non-zero)
-//   4. Publish final status update to WebSocket clients
-//   5. Remove process from tracking map (makes ID unavailable for future lookups)
+//  1. Wait for process termination (blocks on cmd.Wait())
+//  2. Extract exit code from process state
+//  3. Determine final status: "exited" (code 0) vs "failed" (non-zero)
+//  4. Publish final status update to WebSocket clients
+//  5. Remove process from tracking map (makes ID unavailable for future lookups)
 //
 // Exit Code Extraction:
 //   - Success (exit code 0): Status = "exited"
@@ -596,7 +596,7 @@ func (r *ProcessRunner) publishStatus(proc *commandProcess) {
 //
 // Parameters:
 //   - includeOutput: If true, includes buffered output chunks (can be large).
-//                    If false, returns info without output (faster, smaller).
+//     If false, returns info without output (faster, smaller).
 //
 // Thread-safe: Locks process mutex to prevent races with status updates.
 func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
@@ -612,14 +612,15 @@ func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
 // mergeEnv merges custom environment variables with the parent process environment.
 //
 // Strategy:
-//   1. Start with all environment variables from os.Environ() (parent process)
-//   2. Override/add variables from the env map (custom variables)
-//   3. Return as []string in "KEY=VALUE" format (required by exec.Cmd.Env)
+//  1. Start with all environment variables from os.Environ() (parent process)
+//  2. Override/add variables from the env map (custom variables)
+//  3. Return as []string in "KEY=VALUE" format (required by exec.Cmd.Env)
 //
 // Example:
-//   Parent env: PATH=/usr/bin, HOME=/home/user
-//   Custom env: PATH=/custom/bin, FOO=bar
-//   Result:     PATH=/custom/bin, HOME=/home/user, FOO=bar
+//
+//	Parent env: PATH=/usr/bin, HOME=/home/user
+//	Custom env: PATH=/custom/bin, FOO=bar
+//	Result:     PATH=/custom/bin, HOME=/home/user, FOO=bar
 //
 // This allows processes to inherit the agentctl server's environment (including PATH,
 // HOME, etc.) while also supporting custom variables per process.

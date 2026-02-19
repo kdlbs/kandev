@@ -1,15 +1,19 @@
-'use client';
+"use client";
 
-import { memo, useState, useEffect, useMemo } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
-import { IconRefresh, IconExternalLink } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { PanelRoot, PanelBody, PanelHeaderBar } from './panel-primitives';
-import { useAppStore } from '@/components/state-provider';
-import { detectPreviewUrlFromOutput } from '@/lib/preview-url-detector';
+import { memo, useState, useEffect, useMemo } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
+import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { PanelRoot, PanelBody, PanelHeaderBar } from "./panel-primitives";
+import { useAppStore } from "@/components/state-provider";
+import { detectPreviewUrlFromOutput } from "@/lib/preview-url-detector";
 
-function BrowserPanelContent({ showIframeDelayed, effectiveUrl, refreshKey }: {
+function BrowserPanelContent({
+  showIframeDelayed,
+  effectiveUrl,
+  refreshKey,
+}: {
   showIframeDelayed: string | false;
   effectiveUrl: string;
   refreshKey: number;
@@ -42,9 +46,9 @@ function BrowserPanelContent({ showIframeDelayed, effectiveUrl, refreshKey }: {
 }
 
 export const BrowserPanel = memo(function BrowserPanel(
-  props: IDockviewPanelProps<{ url?: string }>
+  props: IDockviewPanelProps<{ url?: string }>,
 ) {
-  const initialUrl = props.params.url || '';
+  const initialUrl = props.params.url || "";
   const [userUrl, setUserUrl] = useState(initialUrl);
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -52,16 +56,16 @@ export const BrowserPanel = memo(function BrowserPanel(
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const devProcessId = useAppStore((state) =>
-    activeSessionId ? state.processes.devProcessBySessionId[activeSessionId] : undefined
+    activeSessionId ? state.processes.devProcessBySessionId[activeSessionId] : undefined,
   );
   const devOutput = useAppStore((state) =>
-    devProcessId ? state.processes.outputsByProcessId[devProcessId] ?? '' : ''
+    devProcessId ? (state.processes.outputsByProcessId[devProcessId] ?? "") : "",
   );
 
   // Auto-detect URL from dev server output
   const detectedUrl = detectPreviewUrlFromOutput(devOutput);
   // Use user-set URL if available, otherwise fall back to detected URL
-  const effectiveUrl = useMemo(() => userUrl || detectedUrl || '', [userUrl, detectedUrl]);
+  const effectiveUrl = useMemo(() => userUrl || detectedUrl || "", [userUrl, detectedUrl]);
 
   // Derive iframe visibility: show after a delay when URL is available
   const showIframeDelayed: string | false = showIframe ? effectiveUrl : false;
@@ -77,7 +81,7 @@ export const BrowserPanel = memo(function BrowserPanel(
   }, [effectiveUrl, refreshKey]);
 
   // Sync draft with detected URL when user hasn't typed anything
-  const displayDraft = urlDraft || detectedUrl || '';
+  const displayDraft = urlDraft || detectedUrl || "";
 
   const handleUrlSubmit = () => {
     const trimmed = urlDraft.trim();
@@ -88,7 +92,7 @@ export const BrowserPanel = memo(function BrowserPanel(
 
   const handleOpenInTab = () => {
     if (effectiveUrl) {
-      window.open(effectiveUrl, '_blank', 'noopener,noreferrer');
+      window.open(effectiveUrl, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -99,12 +103,12 @@ export const BrowserPanel = memo(function BrowserPanel(
           value={displayDraft}
           onChange={(e) => setUrlDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === "Enter") {
               e.preventDefault();
               handleUrlSubmit();
             }
           }}
-          placeholder={detectedUrl || 'http://localhost:3000'}
+          placeholder={detectedUrl || "http://localhost:3000"}
           className="h-6 flex-1 min-w-[180px]"
         />
         <Button
@@ -130,7 +134,11 @@ export const BrowserPanel = memo(function BrowserPanel(
       </PanelHeaderBar>
 
       <PanelBody padding={false} scroll={false}>
-        <BrowserPanelContent showIframeDelayed={showIframeDelayed} effectiveUrl={effectiveUrl} refreshKey={refreshKey} />
+        <BrowserPanelContent
+          showIframeDelayed={showIframeDelayed}
+          effectiveUrl={effectiveUrl}
+          refreshKey={refreshKey}
+        />
       </PanelBody>
     </PanelRoot>
   );

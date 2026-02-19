@@ -99,4 +99,3 @@ func (p *AugmentSessionProvider) ListAvailable(ctx context.Context) ([]string, e
 
 	return []string{}, nil
 }
-

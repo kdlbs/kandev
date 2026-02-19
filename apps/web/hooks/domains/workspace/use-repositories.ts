@@ -1,21 +1,21 @@
-import { useEffect, useRef } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { Repository } from '@/lib/types/http';
-import { listRepositories } from '@/lib/api';
+import { useEffect, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { Repository } from "@/lib/types/http";
+import { listRepositories } from "@/lib/api";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
 export function useRepositories(workspaceId: string | null, enabled = true) {
   const repositories = useAppStore((state) =>
     workspaceId
-      ? state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES
-      : EMPTY_REPOSITORIES
+      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
   );
   const isLoading = useAppStore((state) =>
-    workspaceId ? state.repositories.loadingByWorkspaceId[workspaceId] ?? false : false
+    workspaceId ? (state.repositories.loadingByWorkspaceId[workspaceId] ?? false) : false,
   );
   const isLoaded = useAppStore((state) =>
-    workspaceId ? state.repositories.loadedByWorkspaceId[workspaceId] ?? false : false
+    workspaceId ? (state.repositories.loadedByWorkspaceId[workspaceId] ?? false) : false,
   );
   const setRepositories = useAppStore((state) => state.setRepositories);
   const setRepositoriesLoading = useAppStore((state) => state.setRepositoriesLoading);
@@ -34,7 +34,7 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
     let cancelled = false;
     inFlightRef.current = true;
     setRepositoriesLoading(workspaceId, true);
-    listRepositories(workspaceId, undefined, { cache: 'no-store' })
+    listRepositories(workspaceId, undefined, { cache: "no-store" })
       .then((response) => {
         if (cancelled) return;
         setRepositories(workspaceId, response.repositories);

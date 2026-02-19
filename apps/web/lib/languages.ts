@@ -2,18 +2,18 @@
  * Centralized language utilities for file extension mapping and syntax highlighting.
  */
 
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { go } from '@codemirror/lang-go';
-import { rust } from '@codemirror/lang-rust';
-import { java } from '@codemirror/lang-java';
-import { cpp } from '@codemirror/lang-cpp';
-import { css } from '@codemirror/lang-css';
-import { html } from '@codemirror/lang-html';
-import { json } from '@codemirror/lang-json';
-import { markdown } from '@codemirror/lang-markdown';
-import { yaml } from '@codemirror/lang-yaml';
-import type { Extension } from '@codemirror/state';
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
+import { go } from "@codemirror/lang-go";
+import { rust } from "@codemirror/lang-rust";
+import { java } from "@codemirror/lang-java";
+import { cpp } from "@codemirror/lang-cpp";
+import { css } from "@codemirror/lang-css";
+import { html } from "@codemirror/lang-html";
+import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
+import { yaml } from "@codemirror/lang-yaml";
+import type { Extension } from "@codemirror/state";
 
 /**
  * Map of file extensions to language identifiers.
@@ -21,96 +21,96 @@ import type { Extension } from '@codemirror/state';
  */
 export const EXTENSION_TO_LANGUAGE: Record<string, string> = {
   // JavaScript/TypeScript
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'jsx',
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'tsx',
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  jsx: "jsx",
+  ts: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  tsx: "tsx",
 
   // Python
-  py: 'python',
-  pyw: 'python',
-  pyi: 'python',
+  py: "python",
+  pyw: "python",
+  pyi: "python",
 
   // Go
-  go: 'go',
+  go: "go",
 
   // Rust
-  rs: 'rust',
+  rs: "rust",
 
   // Ruby
-  rb: 'ruby',
-  erb: 'ruby',
+  rb: "ruby",
+  erb: "ruby",
 
   // Java/JVM
-  java: 'java',
-  kt: 'kotlin',
-  kts: 'kotlin',
-  scala: 'scala',
-  groovy: 'groovy',
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  scala: "scala",
+  groovy: "groovy",
 
   // Swift
-  swift: 'swift',
+  swift: "swift",
 
   // C/C++
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  cxx: 'cpp',
-  hpp: 'cpp',
-  hxx: 'cpp',
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  hxx: "cpp",
 
   // C#
-  cs: 'csharp',
+  cs: "csharp",
 
   // PHP
-  php: 'php',
+  php: "php",
 
   // Web
-  html: 'html',
-  htm: 'html',
-  css: 'css',
-  scss: 'scss',
-  sass: 'sass',
-  less: 'less',
+  html: "html",
+  htm: "html",
+  css: "css",
+  scss: "scss",
+  sass: "sass",
+  less: "less",
 
   // Data formats
-  json: 'json',
-  jsonc: 'json',
-  yaml: 'yaml',
-  yml: 'yaml',
-  xml: 'xml',
-  toml: 'toml',
-  ini: 'ini',
-  env: 'properties',
+  json: "json",
+  jsonc: "json",
+  yaml: "yaml",
+  yml: "yaml",
+  xml: "xml",
+  toml: "toml",
+  ini: "ini",
+  env: "properties",
 
   // Markup
-  md: 'markdown',
-  mdx: 'markdown',
+  md: "markdown",
+  mdx: "markdown",
 
   // Shell
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  fish: 'fish',
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  fish: "fish",
 
   // SQL
-  sql: 'sql',
+  sql: "sql",
 
   // Docker
-  dockerfile: 'dockerfile',
+  dockerfile: "dockerfile",
 
   // GraphQL
-  graphql: 'graphql',
-  gql: 'graphql',
+  graphql: "graphql",
+  gql: "graphql",
 
   // Misc
-  vue: 'vue',
-  svelte: 'svelte',
+  vue: "vue",
+  svelte: "svelte",
 };
 
 /**
@@ -119,7 +119,7 @@ export const EXTENSION_TO_LANGUAGE: Record<string, string> = {
  * @returns Language identifier or 'plaintext' if unknown
  */
 export function getLanguageFromExtension(ext: string): string {
-  return EXTENSION_TO_LANGUAGE[ext.toLowerCase()] || 'plaintext';
+  return EXTENSION_TO_LANGUAGE[ext.toLowerCase()] || "plaintext";
 }
 
 /**
@@ -128,7 +128,7 @@ export function getLanguageFromExtension(ext: string): string {
  * @returns Language identifier or 'plaintext' if unknown
  */
 export function getLanguageFromPath(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
   return getLanguageFromExtension(ext);
 }
 
@@ -151,7 +151,7 @@ const CODEMIRROR_EXTENSION_MAP: Record<string, () => Extension> = {
   rs: () => rust(),
   java: () => java(),
   cpp: () => cpp(),
-  'c++': () => cpp(),
+  "c++": () => cpp(),
   c: () => cpp(),
   cc: () => cpp(),
   cxx: () => cpp(),

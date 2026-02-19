@@ -1,14 +1,19 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { IconChevronDown, IconCode, IconLoader2 } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@kandev/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { useEditors } from '@/hooks/domains/settings/use-editors';
-import { useOpenSessionInEditor } from '@/hooks/use-open-session-in-editor';
-import { useAppStore } from '@/components/state-provider';
-import type { EditorOption } from '@/lib/types/http';
+import { useMemo } from "react";
+import { IconChevronDown, IconCode, IconLoader2 } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useEditors } from "@/hooks/domains/settings/use-editors";
+import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
+import { useAppStore } from "@/components/state-provider";
+import type { EditorOption } from "@/lib/types/http";
 
 type EditorsMenuProps = {
   activeSessionId: string | null;
@@ -23,17 +28,20 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
     () =>
       editors.filter((editor: EditorOption) => {
         if (!editor.enabled) return false;
-        if (editor.kind === 'built_in') return editor.installed;
+        if (editor.kind === "built_in") return editor.installed;
         return true;
       }),
-    [editors]
+    [editors],
   );
 
   const resolvedEditorId = useMemo(() => {
-    if (defaultEditorId && enabledEditors.some((editor: EditorOption) => editor.id === defaultEditorId)) {
+    if (
+      defaultEditorId &&
+      enabledEditors.some((editor: EditorOption) => editor.id === defaultEditorId)
+    ) {
       return defaultEditorId;
     }
-    return enabledEditors[0]?.id ?? '';
+    return enabledEditors[0]?.id ?? "";
   }, [defaultEditorId, enabledEditors]);
 
   return (
@@ -58,7 +66,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {activeSessionId ? 'Open in editor' : 'Select a session to open its worktree'}
+          {activeSessionId ? "Open in editor" : "Select a session to open its worktree"}
         </TooltipContent>
       </Tooltip>
       <DropdownMenu>

@@ -1,12 +1,12 @@
-import { useCallback, type ReactNode } from 'react';
-import type { DiffLineAnnotation } from '@pierre/diffs';
-import type { DiffComment } from '@/lib/diff/types';
-import { CommentForm } from './comment-form';
-import { CommentDisplay } from './comment-display';
-import { HunkActionBar } from './hunk-action-bar';
+import { useCallback, type ReactNode } from "react";
+import type { DiffLineAnnotation } from "@pierre/diffs";
+import type { DiffComment } from "@/lib/diff/types";
+import { CommentForm } from "./comment-form";
+import { CommentDisplay } from "./comment-display";
+import { HunkActionBar } from "./hunk-action-bar";
 
 type AnnotationMetadata = {
-  type: 'comment' | 'new-comment-form' | 'hunk-actions';
+  type: "comment" | "new-comment-form" | "hunk-actions";
   comment?: DiffComment;
   isEditing?: boolean;
   changeBlockId?: string;
@@ -28,16 +28,22 @@ export type { AnnotationMetadata };
 
 export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
   const {
-    handleRevertBlock, onButtonEnter, onButtonLeave,
-    handleCommentSubmit, handleCommentUpdate, handleCommentDelete,
-    setShowCommentForm, setSelectedLines, setEditingComment,
+    handleRevertBlock,
+    onButtonEnter,
+    onButtonLeave,
+    handleCommentSubmit,
+    handleCommentUpdate,
+    handleCommentDelete,
+    setShowCommentForm,
+    setSelectedLines,
+    setEditingComment,
   } = opts;
 
   return useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
       const { type, comment, isEditing, changeBlockId } = annotation.metadata;
 
-      if (type === 'hunk-actions' && changeBlockId) {
+      if (type === "hunk-actions" && changeBlockId) {
         return (
           <HunkActionBar
             key={changeBlockId}
@@ -49,7 +55,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
         );
       }
 
-      if (type === 'new-comment-form') {
+      if (type === "new-comment-form") {
         return (
           <div className="my-1 px-2">
             <CommentForm
@@ -91,6 +97,16 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
 
       return null;
     },
-    [setEditingComment, handleCommentDelete, handleCommentUpdate, handleCommentSubmit, handleRevertBlock, onButtonEnter, onButtonLeave, setShowCommentForm, setSelectedLines]
+    [
+      setEditingComment,
+      handleCommentDelete,
+      handleCommentUpdate,
+      handleCommentSubmit,
+      handleRevertBlock,
+      onButtonEnter,
+      onButtonLeave,
+      setShowCommentForm,
+      setSelectedLines,
+    ],
   );
 }

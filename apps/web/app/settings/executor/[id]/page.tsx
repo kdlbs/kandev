@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { use, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { IconTrash } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@kandev/ui/card';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Separator } from '@kandev/ui/separator';
-import { Textarea } from '@kandev/ui/textarea';
+import { use, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { IconTrash } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Separator } from "@kandev/ui/separator";
+import { Textarea } from "@kandev/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -16,19 +16,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@kandev/ui/dialog';
-import { updateExecutorAction, deleteExecutorAction } from '@/app/actions/executors';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useAppStore } from '@/components/state-provider';
-import type { Executor } from '@/lib/types/http';
-import { EXECUTOR_ICON_MAP } from '@/lib/executor-icons';
+} from "@kandev/ui/dialog";
+import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/executors";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStore } from "@/components/state-provider";
+import type { Executor } from "@/lib/types/http";
+import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
-const EXECUTORS_ROUTE = '/settings/executors';
+const EXECUTORS_ROUTE = "/settings/executors";
 
 export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const executor = useAppStore((state) => state.executors.items.find((item: Executor) => item.id === id) ?? null);
+  const executor = useAppStore(
+    (state) => state.executors.items.find((item: Executor) => item.id === id) ?? null,
+  );
 
   if (!executor) {
     return (
@@ -53,11 +55,11 @@ type ExecutorEditFormProps = {
 };
 
 function getExecutorDescription(type: string): string {
-  if (type === 'local') return 'Runs agents directly in the repository folder.';
-  if (type === 'worktree') return 'Creates git worktrees for isolated agent sessions.';
-  if (type === 'local_docker') return 'Runs Docker containers on this machine.';
-  if (type === 'remote_docker') return 'Connects to a remote Docker host.';
-  return 'Custom executor.';
+  if (type === "local") return "Runs agents directly in the repository folder.";
+  if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
+  if (type === "local_docker") return "Runs Docker containers on this machine.";
+  if (type === "remote_docker") return "Connects to a remote Docker host.";
+  return "Custom executor.";
 }
 
 function parseMcpPolicyJson(currentPolicy: string | undefined): Record<string, unknown> {
@@ -112,8 +114,8 @@ function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyC
           </span>
         </CardTitle>
         <CardDescription>
-          JSON policy overrides for MCP servers on this executor. Use it to enforce transport
-          rules, restrict which servers can run, or rewrite URLs for this runtime.
+          JSON policy overrides for MCP servers on this executor. Use it to enforce transport rules,
+          restrict which servers can run, or rewrite URLs for this runtime.
           <p className="text-xs text-muted-foreground mt-2">
             Examples: block stdio on remote runners, allowlist approved servers, or rewrite
             localhost URLs for Docker/K8s networking.
@@ -134,25 +136,47 @@ function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyC
           <p className="text-xs font-medium text-muted-foreground">Quick presets</p>
           <McpPresetButton
             label="Only HTTP/SSE"
-            onClick={() => applyPreset((p) => ({ ...p, allow_stdio: false, allow_http: true, allow_sse: true }))}
+            onClick={() =>
+              applyPreset((p) => ({ ...p, allow_stdio: false, allow_http: true, allow_sse: true }))
+            }
           />
           <McpPresetButton
             label="Only stdio"
-            onClick={() => applyPreset((p) => ({ ...p, allow_stdio: true, allow_http: false, allow_sse: false }))}
+            onClick={() =>
+              applyPreset((p) => ({ ...p, allow_stdio: true, allow_http: false, allow_sse: false }))
+            }
           />
           <McpPresetButton
             label="Allowlist GitHub + Playwright"
-            onClick={() => applyPreset((p) => {
-              const existing = Array.isArray(p.allowlist_servers) ? (p.allowlist_servers as string[]) : [];
-              return { ...p, allowlist_servers: Array.from(new Set([...existing, 'github', 'playwright'])) };
-            })}
+            onClick={() =>
+              applyPreset((p) => {
+                const existing = Array.isArray(p.allowlist_servers)
+                  ? (p.allowlist_servers as string[])
+                  : [];
+                return {
+                  ...p,
+                  allowlist_servers: Array.from(new Set([...existing, "github", "playwright"])),
+                };
+              })
+            }
           />
           <McpPresetButton
             label="Rewrite localhost for Docker"
-            onClick={() => applyPreset((p) => {
-              const existing = p.url_rewrite && typeof p.url_rewrite === 'object' ? (p.url_rewrite as Record<string, string>) : {};
-              return { ...p, url_rewrite: { ...existing, 'http://localhost:3000': 'http://host.docker.internal:3000' } };
-            })}
+            onClick={() =>
+              applyPreset((p) => {
+                const existing =
+                  p.url_rewrite && typeof p.url_rewrite === "object"
+                    ? (p.url_rewrite as Record<string, string>)
+                    : {};
+                return {
+                  ...p,
+                  url_rewrite: {
+                    ...existing,
+                    "http://localhost:3000": "http://host.docker.internal:3000",
+                  },
+                };
+              })
+            }
           />
         </div>
         <p className="text-xs text-muted-foreground">
@@ -206,9 +230,9 @@ function DeleteExecutorDialog({
           <Button
             variant="destructive"
             onClick={onDelete}
-            disabled={confirmText !== 'delete' || isDeleting}
+            disabled={confirmText !== "delete" || isDeleting}
           >
-            {isDeleting ? 'Deleting...' : 'Delete'}
+            {isDeleting ? "Deleting..." : "Delete"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -236,30 +260,54 @@ function ExecutorDetailsCard({ draft, isSystem, onNameChange }: ExecutorDetailsC
         </div>
         <div className="space-y-2">
           <Label htmlFor="executor-name">Executor name</Label>
-          <Input id="executor-name" value={draft.name} onChange={(event) => onNameChange(event.target.value)} disabled={isSystem} />
-          {isSystem && <p className="text-xs text-muted-foreground">System executor names cannot be edited.</p>}
+          <Input
+            id="executor-name"
+            value={draft.name}
+            onChange={(event) => onNameChange(event.target.value)}
+            disabled={isSystem}
+          />
+          {isSystem && (
+            <p className="text-xs text-muted-foreground">System executor names cannot be edited.</p>
+          )}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function DockerConfigCard({ draft, onDraftChange }: { draft: Executor; onDraftChange: (next: Executor) => void }) {
+function DockerConfigCard({
+  draft,
+  onDraftChange,
+}: {
+  draft: Executor;
+  onDraftChange: (next: Executor) => void;
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Docker Configuration</CardTitle>
-        <CardDescription>{draft.type === 'remote_docker' ? 'Remote Docker host settings.' : 'Local Docker host settings.'}</CardDescription>
+        <CardDescription>
+          {draft.type === "remote_docker"
+            ? "Remote Docker host settings."
+            : "Local Docker host settings."}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
         <Label htmlFor="docker-host">Docker host env value</Label>
         <Input
           id="docker-host"
-          value={draft.config?.docker_host ?? ''}
-          onChange={(event) => onDraftChange({ ...draft, config: { ...(draft.config ?? {}), docker_host: event.target.value } })}
+          value={draft.config?.docker_host ?? ""}
+          onChange={(event) =>
+            onDraftChange({
+              ...draft,
+              config: { ...(draft.config ?? {}), docker_host: event.target.value },
+            })
+          }
           placeholder="unix:///var/run/docker.sock"
         />
-        <p className="text-xs text-muted-foreground">The repository will be mounted as a volume during runtime.</p>
+        <p className="text-xs text-muted-foreground">
+          The repository will be mounted as a volume during runtime.
+        </p>
       </CardContent>
     </Card>
   );
@@ -312,12 +360,15 @@ function DeleteExecutorSection({
 }
 
 function validateMcpPolicy(value: string | undefined): string | null {
-  const raw = value ?? '';
+  const raw = value ?? "";
   if (!raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'MCP policy must be a JSON object';
-  } catch { return 'Invalid JSON'; }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return "MCP policy must be a JSON object";
+  } catch {
+    return "Invalid JSON";
+  }
   return null;
 }
 
@@ -328,46 +379,65 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
   const [draft, setDraft] = useState<Executor>({ ...executor });
   const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const isSystem = draft.is_system ?? false;
-  const isDockerType = draft.type === 'local_docker' || draft.type === 'remote_docker';
-  const mcpPolicyError = useMemo(() => validateMcpPolicy(draft.config?.mcp_policy), [draft.config?.mcp_policy]);
+  const isDockerType = draft.type === "local_docker" || draft.type === "remote_docker";
+  const mcpPolicyError = useMemo(
+    () => validateMcpPolicy(draft.config?.mcp_policy),
+    [draft.config?.mcp_policy],
+  );
 
-  const isDirty = useMemo(() => (
-    draft.name !== savedExecutor.name ||
-    draft.type !== savedExecutor.type ||
-    draft.status !== savedExecutor.status ||
-    JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {})
-  ), [draft, savedExecutor]);
+  const isDirty = useMemo(
+    () =>
+      draft.name !== savedExecutor.name ||
+      draft.type !== savedExecutor.type ||
+      draft.status !== savedExecutor.status ||
+      JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {}),
+    [draft, savedExecutor],
+  );
 
   const handleSaveExecutor = async () => {
     if (!draft) return;
     setIsSaving(true);
     try {
-      const payload = isSystem ? { config: draft.config ?? {} } : { name: draft.name, type: draft.type, status: draft.status, config: draft.config ?? {} };
+      const payload = isSystem
+        ? { config: draft.config ?? {} }
+        : { name: draft.name, type: draft.type, status: draft.status, config: draft.config ?? {} };
       const client = getWebSocketClient();
       const updated = client
-        ? await client.request<Executor>('executor.update', { id: draft.id, ...payload })
+        ? await client.request<Executor>("executor.update", { id: draft.id, ...payload })
         : await updateExecutorAction(draft.id, payload);
       setDraft(updated);
       setSavedExecutor(updated);
-      setExecutors(executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item)));
-    } finally { setIsSaving(false); }
+      setExecutors(
+        executors.map((item: Executor) =>
+          item.id === updated.id ? { ...item, ...updated } : item,
+        ),
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteExecutor = async () => {
-    if (deleteConfirmText !== 'delete') return;
+    if (deleteConfirmText !== "delete") return;
     setIsDeleting(true);
     try {
       const client = getWebSocketClient();
-      if (client) { await client.request('executor.delete', { id: draft.id }); }
-      else { await deleteExecutorAction(draft.id); }
+      if (client) {
+        await client.request("executor.delete", { id: draft.id });
+      } else {
+        await deleteExecutorAction(draft.id);
+      }
       setExecutors(executors.filter((item: Executor) => item.id !== draft.id));
       router.push(EXECUTORS_ROUTE);
-    } finally { setIsDeleting(false); setDeleteDialogOpen(false); }
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+    }
   };
 
   const handleMcpPolicyChange = (value: string) => {
@@ -381,21 +451,43 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
           <h2 className="text-2xl font-bold">{draft.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">{getExecutorDescription(draft.type)}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)}>Back to Executors</Button>
+        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)}>
+          Back to Executors
+        </Button>
       </div>
       <Separator />
-      <ExecutorDetailsCard draft={draft} isSystem={isSystem} onNameChange={(value) => setDraft({ ...draft, name: value })} />
+      <ExecutorDetailsCard
+        draft={draft}
+        isSystem={isSystem}
+        onNameChange={(value) => setDraft({ ...draft, name: value })}
+      />
       {isDockerType && <DockerConfigCard draft={draft} onDraftChange={setDraft} />}
-      <McpPolicyCard mcpPolicy={draft.config?.mcp_policy ?? ''} mcpPolicyError={mcpPolicyError} onPolicyChange={handleMcpPolicyChange} />
+      <McpPolicyCard
+        mcpPolicy={draft.config?.mcp_policy ?? ""}
+        mcpPolicyError={mcpPolicyError}
+        onPolicyChange={handleMcpPolicyChange}
+      />
       <Separator />
       <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" onClick={() => router.push(EXECUTORS_ROUTE)}>Cancel</Button>
-        <Button onClick={handleSaveExecutor} disabled={!isDirty || Boolean(mcpPolicyError) || isSaving}>{isSaving ? 'Saving...' : 'Save Changes'}</Button>
+        <Button variant="outline" onClick={() => router.push(EXECUTORS_ROUTE)}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSaveExecutor}
+          disabled={!isDirty || Boolean(mcpPolicyError) || isSaving}
+        >
+          {isSaving ? "Saving..." : "Save Changes"}
+        </Button>
       </div>
       {!isSystem && (
         <DeleteExecutorSection
-          onDeleteClick={() => setDeleteDialogOpen(true)} deleteDialogOpen={deleteDialogOpen} setDeleteDialogOpen={setDeleteDialogOpen}
-          onDelete={handleDeleteExecutor} isDeleting={isDeleting} confirmText={deleteConfirmText} onConfirmTextChange={setDeleteConfirmText}
+          onDeleteClick={() => setDeleteDialogOpen(true)}
+          deleteDialogOpen={deleteDialogOpen}
+          setDeleteDialogOpen={setDeleteDialogOpen}
+          onDelete={handleDeleteExecutor}
+          isDeleting={isDeleting}
+          confirmText={deleteConfirmText}
+          onConfirmTextChange={setDeleteConfirmText}
         />
       )}
     </div>

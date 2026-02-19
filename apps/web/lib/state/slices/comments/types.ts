@@ -9,18 +9,18 @@
 // Comment union
 // ---------------------------------------------------------------------------
 
-export type AnnotationSide = 'additions' | 'deletions';
+export type AnnotationSide = "additions" | "deletions";
 
 type CommentBase = {
   id: string;
   sessionId: string;
   text: string;
   createdAt: string;
-  status: 'pending' | 'sent';
+  status: "pending" | "sent";
 };
 
 export type DiffComment = CommentBase & {
-  source: 'diff';
+  source: "diff";
   filePath: string;
   startLine: number;
   endLine: number;
@@ -29,14 +29,14 @@ export type DiffComment = CommentBase & {
 };
 
 export type PlanComment = CommentBase & {
-  source: 'plan';
+  source: "plan";
   selectedText: string;
   from?: number;
   to?: number;
 };
 
 export type FileEditorComment = CommentBase & {
-  source: 'file-editor';
+  source: "file-editor";
   filePath: string;
   selectedText: string;
   startLine?: number;
@@ -50,15 +50,15 @@ export type Comment = DiffComment | PlanComment | FileEditorComment;
 // ---------------------------------------------------------------------------
 
 export function isDiffComment(c: Comment): c is DiffComment {
-  return c.source === 'diff';
+  return c.source === "diff";
 }
 
 export function isPlanComment(c: Comment): c is PlanComment {
-  return c.source === 'plan';
+  return c.source === "plan";
 }
 
 export function isFileEditorComment(c: Comment): c is FileEditorComment {
-  return c.source === 'file-editor';
+  return c.source === "file-editor";
 }
 
 // ---------------------------------------------------------------------------

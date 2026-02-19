@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { TaskSession } from '@/lib/types/http';
+import { useEffect, useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { TaskSession } from "@/lib/types/http";
 
 type UseSessionResult = {
   session: TaskSession | null;
@@ -12,27 +12,27 @@ type UseSessionResult = {
 
 export function useSession(sessionId: string | null): UseSessionResult {
   const session = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId] ?? null : null
+    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
   const agentctlReady = useAppStore((state) =>
-    sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status === 'ready' : false
+    sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status === "ready" : false,
   );
 
   const isActive = useMemo(() => {
     if (!session?.state) return false;
-    if (session.state === 'RUNNING' || session.state === 'WAITING_FOR_INPUT') return true;
+    if (session.state === "RUNNING" || session.state === "WAITING_FOR_INPUT") return true;
     // Workspace infrastructure (agentctl) is ready even though the agent CLI hasn't started
-    if (session.state === 'CREATED' && agentctlReady) return true;
+    if (session.state === "CREATED" && agentctlReady) return true;
     return false;
   }, [session?.state, agentctlReady]);
 
   const isFailed = useMemo(() => {
-    return session?.state === 'FAILED';
+    return session?.state === "FAILED";
   }, [session?.state]);
 
   useEffect(() => {
-    if (connectionStatus !== 'connected') return;
+    if (connectionStatus !== "connected") return;
     if (!session?.id) return;
     const client = getWebSocketClient();
     if (!client) return;

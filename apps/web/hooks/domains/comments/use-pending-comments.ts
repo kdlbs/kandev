@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
-import { useCommentsStore } from '@/lib/state/slices/comments';
-import type { Comment, DiffComment, PlanComment } from '@/lib/state/slices/comments';
-import { isDiffComment, isPlanComment } from '@/lib/state/slices/comments';
+import { useMemo } from "react";
+import { useCommentsStore } from "@/lib/state/slices/comments";
+import type { Comment, DiffComment, PlanComment } from "@/lib/state/slices/comments";
+import { isDiffComment, isPlanComment } from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: Comment[] = [];
 const EMPTY_DIFF_COMMENTS: DiffComment[] = [];

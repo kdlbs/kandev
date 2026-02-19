@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { IconLoader2, IconFileInvoice, IconSend, IconChevronDown } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { DialogClose } from '@kandev/ui/dialog';
+import { memo } from "react";
+import { IconLoader2, IconFileInvoice, IconSend, IconChevronDown } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { DialogClose } from "@kandev/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { SHORTCUTS } from '@/lib/keyboard/constants';
-import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
+} from "@kandev/ui/dropdown-menu";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 
 type UpdateButtonProps = {
   isCreatingTask: boolean;
@@ -34,7 +34,7 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
           Updating...
         </>
       ) : (
-        'Update'
+        "Update"
       )}
     </Button>
   );
@@ -47,7 +47,12 @@ type StartTaskSplitButtonProps = {
   onAltAction: () => void;
 };
 
-function StartTaskSplitButton({ isCreatingTask, disabled, isEditMode, onAltAction }: StartTaskSplitButtonProps) {
+function StartTaskSplitButton({
+  isCreatingTask,
+  disabled,
+  isEditMode,
+  onAltAction,
+}: StartTaskSplitButtonProps) {
   return (
     <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
       <Button
@@ -56,8 +61,12 @@ function StartTaskSplitButton({ isCreatingTask, disabled, isEditMode, onAltActio
         className="rounded-none border-0 cursor-pointer gap-1.5 h-full"
         disabled={disabled}
       >
-        {isCreatingTask ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconSend className="h-3.5 w-3.5" />}
-        {isCreatingTask ? 'Starting...' : 'Start task'}
+        {isCreatingTask ? (
+          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <IconSend className="h-3.5 w-3.5" />
+        )}
+        {isCreatingTask ? "Starting..." : "Start task"}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -75,7 +84,7 @@ function StartTaskSplitButton({ isCreatingTask, disabled, isEditMode, onAltActio
             onClick={onAltAction}
             className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
           >
-            {isEditMode ? 'Update task' : 'Create without starting agent'}
+            {isEditMode ? "Update task" : "Create without starting agent"}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -95,31 +104,42 @@ type DefaultSubmitButtonProps = {
 };
 
 function DefaultSubmitButton({
-  isCreatingSession, isCreatingTask,
-  isSessionMode, isCreateMode, isEditMode,
-  hasDescription, isPassthroughProfile, disabled,
+  isCreatingSession,
+  isCreatingTask,
+  isSessionMode,
+  isCreateMode,
+  isEditMode,
+  hasDescription,
+  isPassthroughProfile,
+  disabled,
 }: DefaultSubmitButtonProps) {
-  const planModeStyle = isCreateMode && !hasDescription
-    ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700 hover:text-white'
-    : '';
+  const planModeStyle =
+    isCreateMode && !hasDescription
+      ? "bg-blue-600 border-blue-500 text-white hover:bg-blue-700 hover:text-white"
+      : "";
 
   return (
     <Button
       type="submit"
       variant="default"
       className={`w-full h-10 cursor-pointer sm:w-auto sm:h-7 gap-1.5 ${planModeStyle}`}
-      disabled={disabled || isCreatingSession || isCreatingTask || (isSessionMode ? (!hasDescription && !isPassthroughProfile) : false)}
+      disabled={
+        disabled ||
+        isCreatingSession ||
+        isCreatingTask ||
+        (isSessionMode ? !hasDescription && !isPassthroughProfile : false)
+      }
     >
       {(() => {
         if (isCreatingSession || isCreatingTask) {
           return (
             <>
               <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-              {isEditMode ? 'Updating...' : 'Starting...'}
+              {isEditMode ? "Updating..." : "Starting..."}
             </>
           );
         }
-        if (isSessionMode) return 'Create Session';
+        if (isSessionMode) return "Create Session";
         if (isCreateMode) {
           return (
             <>
@@ -128,7 +148,7 @@ function DefaultSubmitButton({
             </>
           );
         }
-        return 'Update task';
+        return "Update task";
       })()}
     </Button>
   );
@@ -155,65 +175,118 @@ export type TaskCreateDialogFooterProps = {
   onCreateWithoutAgent: () => void;
 };
 
-function isMissingWorkflowCtx(isCreateMode: boolean, workspaceId: string | null, effectiveWorkflowId: string | null) {
+function isMissingWorkflowCtx(
+  isCreateMode: boolean,
+  workspaceId: string | null,
+  effectiveWorkflowId: string | null,
+) {
   return isCreateMode && (!workspaceId || !effectiveWorkflowId);
 }
 
 function computeFooterState(props: TaskCreateDialogFooterProps) {
-  const { isSessionMode, isCreateMode, isEditMode, isPassthroughProfile, isCreatingTask, hasTitle, hasDescription, hasRepositorySelection, branch, agentProfileId, workspaceId, effectiveWorkflowId } = props;
-  const showStartTask = (isCreateMode && (hasDescription || isPassthroughProfile)) || Boolean(isEditMode && agentProfileId);
+  const {
+    isSessionMode,
+    isCreateMode,
+    isEditMode,
+    isPassthroughProfile,
+    isCreatingTask,
+    hasTitle,
+    hasDescription,
+    hasRepositorySelection,
+    branch,
+    agentProfileId,
+    workspaceId,
+    effectiveWorkflowId,
+  } = props;
+  const showStartTask =
+    (isCreateMode && (hasDescription || isPassthroughProfile)) ||
+    Boolean(isEditMode && agentProfileId);
   const missingCtx = isMissingWorkflowCtx(isCreateMode, workspaceId, effectiveWorkflowId);
-  const splitDisabled = isCreatingTask || !hasTitle || !hasRepositorySelection || !branch || !agentProfileId || missingCtx;
-  const defaultDisabled = isSessionMode ? !agentProfileId : !hasTitle || !hasRepositorySelection || !branch || missingCtx;
+  const splitDisabled =
+    isCreatingTask ||
+    !hasTitle ||
+    !hasRepositorySelection ||
+    !branch ||
+    !agentProfileId ||
+    missingCtx;
+  const defaultDisabled = isSessionMode
+    ? !agentProfileId
+    : !hasTitle || !hasRepositorySelection || !branch || missingCtx;
   return { showStartTask, splitDisabled, defaultDisabled };
 }
 
-export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(props: TaskCreateDialogFooterProps) {
-  const { isSessionMode, isCreateMode, isEditMode, isTaskStarted, isPassthroughProfile, isCreatingSession, isCreatingTask, hasTitle, hasDescription, executorHint, onCancel, onUpdateWithoutAgent, onCreateWithoutAgent } = props;
+export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
+  props: TaskCreateDialogFooterProps,
+) {
+  const {
+    isSessionMode,
+    isCreateMode,
+    isEditMode,
+    isTaskStarted,
+    isPassthroughProfile,
+    isCreatingSession,
+    isCreatingTask,
+    hasTitle,
+    hasDescription,
+    executorHint,
+    onCancel,
+    onUpdateWithoutAgent,
+    onCreateWithoutAgent,
+  } = props;
   const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
 
   return (
     <>
       {!isSessionMode && !isTaskStarted && executorHint && (
         <div className="flex flex-1 items-center gap-3 text-sm text-muted-foreground">
-          <span className="text-xs text-muted-foreground">
-            {executorHint}
-          </span>
+          <span className="text-xs text-muted-foreground">{executorHint}</span>
         </div>
       )}
       <DialogClose asChild>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={isCreatingSession || isCreatingTask} className="w-full h-10 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={isCreatingSession || isCreatingTask}
+          className="w-full h-10 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
+        >
           Cancel
         </Button>
       </DialogClose>
       <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
-      {(() => {
-        if (isTaskStarted) {
-          return <UpdateButton isCreatingTask={isCreatingTask} hasTitle={hasTitle} onUpdate={onUpdateWithoutAgent} />;
-        }
-        if (showStartTask) {
+        {(() => {
+          if (isTaskStarted) {
+            return (
+              <UpdateButton
+                isCreatingTask={isCreatingTask}
+                hasTitle={hasTitle}
+                onUpdate={onUpdateWithoutAgent}
+              />
+            );
+          }
+          if (showStartTask) {
+            return (
+              <StartTaskSplitButton
+                isCreatingTask={isCreatingTask}
+                disabled={splitDisabled}
+                isEditMode={isEditMode}
+                onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
+              />
+            );
+          }
           return (
-            <StartTaskSplitButton
+            <DefaultSubmitButton
+              isCreatingSession={isCreatingSession}
               isCreatingTask={isCreatingTask}
-              disabled={splitDisabled}
+              isSessionMode={isSessionMode}
+              isCreateMode={isCreateMode}
               isEditMode={isEditMode}
-              onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
+              hasDescription={hasDescription}
+              isPassthroughProfile={isPassthroughProfile}
+              disabled={defaultDisabled}
             />
           );
-        }
-        return (
-          <DefaultSubmitButton
-            isCreatingSession={isCreatingSession}
-            isCreatingTask={isCreatingTask}
-            isSessionMode={isSessionMode}
-            isCreateMode={isCreateMode}
-            isEditMode={isEditMode}
-            hasDescription={hasDescription}
-            isPassthroughProfile={isPassthroughProfile}
-            disabled={defaultDisabled}
-          />
-        );
-      })()}
+        })()}
       </KeyboardShortcutTooltip>
     </>
   );

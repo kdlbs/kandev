@@ -1,9 +1,7 @@
-'use client';
+"use client";
 
-import { useCallback } from 'react';
-import {
-  type IDockviewHeaderActionsProps,
-} from 'dockview-react';
+import { useCallback } from "react";
+import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
   IconDeviceDesktop,
@@ -16,24 +14,24 @@ import {
   IconLayoutColumns,
   IconLayoutRows,
   IconX,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { useDockviewStore, performLayoutSwitch } from '@/lib/state/dockview-store';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { startProcess } from '@/lib/api';
-import { createUserShell } from '@/lib/api/domains/user-shell-api';
-import { useRepositoryScripts } from '@/hooks/domains/workspace/use-repository-scripts';
-import { linkToSession } from '@/lib/links';
-import type { Task, ProcessInfo } from '@/lib/types/http';
-import type { ProcessStatusEntry } from '@/lib/state/slices';
-import { NewTaskButton } from './task-session-sidebar';
+} from "@kandev/ui/dropdown-menu";
+import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { startProcess } from "@/lib/api";
+import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
+import { linkToSession } from "@/lib/links";
+import type { Task, ProcessInfo } from "@/lib/types/http";
+import type { ProcessStatusEntry } from "@/lib/state/slices";
+import { NewTaskButton } from "./task-session-sidebar";
 
 /** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
 function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
@@ -67,8 +65,10 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
 
-  const hasChanges = Boolean(containerApi.getPanel('changes') ?? containerApi.getPanel('diff-files'));
-  const hasFiles = Boolean(containerApi.getPanel('files') ?? containerApi.getPanel('all-files'));
+  const hasChanges = Boolean(
+    containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
+  );
+  const hasFiles = Boolean(containerApi.getPanel("files") ?? containerApi.getPanel("all-files"));
 
   const isSidebarGroup = group.id === sidebarGroupId;
 
@@ -78,7 +78,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
       const result = await createUserShell(activeSessionId);
       addTerminalPanel(result.terminalId, group.id);
     } catch (error) {
-      console.error('Failed to create terminal:', error);
+      console.error("Failed to create terminal:", error);
     }
   }, [activeSessionId, addTerminalPanel, group.id]);
 
@@ -88,11 +88,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
     <div className="flex items-center gap-1 pl-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0 cursor-pointer"
-          >
+          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 cursor-pointer">
             <IconPlus className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
@@ -101,24 +97,36 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             <IconTerminal2 className="h-3.5 w-3.5 mr-1.5" />
             Terminal
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => addBrowserPanel(undefined, group.id)} className="cursor-pointer text-xs">
+          <DropdownMenuItem
+            onClick={() => addBrowserPanel(undefined, group.id)}
+            className="cursor-pointer text-xs"
+          >
             <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
             Browser
           </DropdownMenuItem>
           {!isPassthrough && (
-            <DropdownMenuItem onClick={() => addPlanPanel(group.id)} className="cursor-pointer text-xs">
+            <DropdownMenuItem
+              onClick={() => addPlanPanel(group.id)}
+              className="cursor-pointer text-xs"
+            >
               <IconFileText className="h-3.5 w-3.5 mr-1.5" />
               Plan
             </DropdownMenuItem>
           )}
           {!hasChanges && (
-            <DropdownMenuItem onClick={() => addChangesPanel(group.id)} className="cursor-pointer text-xs">
+            <DropdownMenuItem
+              onClick={() => addChangesPanel(group.id)}
+              className="cursor-pointer text-xs"
+            >
               <IconGitBranch className="h-3.5 w-3.5 mr-1.5" />
               Changes
             </DropdownMenuItem>
           )}
           {!hasFiles && (
-            <DropdownMenuItem onClick={() => addFilesPanel(group.id)} className="cursor-pointer text-xs">
+            <DropdownMenuItem
+              onClick={() => addFilesPanel(group.id)}
+              className="cursor-pointer text-xs"
+            >
               <IconFolder className="h-3.5 w-3.5 mr-1.5" />
               Files
             </DropdownMenuItem>
@@ -135,21 +143,29 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
   const isChatGroup = group.id === centerGroupId;
 
   const handleSplitRight = useCallback(() => {
-    containerApi.addGroup({ referenceGroup: group, direction: 'right' });
+    containerApi.addGroup({ referenceGroup: group, direction: "right" });
   }, [group, containerApi]);
 
   const handleSplitDown = useCallback(() => {
-    containerApi.addGroup({ referenceGroup: group, direction: 'below' });
+    containerApi.addGroup({ referenceGroup: group, direction: "below" });
   }, [group, containerApi]);
 
   const handleCloseGroup = useCallback(() => {
     const panels = [...group.panels];
     if (panels.length === 0) {
-      try { containerApi.removeGroup(group); } catch { /* already removed */ }
+      try {
+        containerApi.removeGroup(group);
+      } catch {
+        /* already removed */
+      }
       return;
     }
     for (const panel of panels) {
-      try { containerApi.removePanel(panel); } catch { /* already removed */ }
+      try {
+        containerApi.removePanel(panel);
+      } catch {
+        /* already removed */
+      }
     }
   }, [group, containerApi]);
 
@@ -228,24 +244,34 @@ function SidebarRightActions() {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const steps = (kanban?.steps ?? []).map((s: { id: string; title: string; color?: string; events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }>; on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }> } }) => ({
-    id: s.id,
-    title: s.title,
-    color: s.color,
-    events: s.events,
-  }));
+  const steps = (kanban?.steps ?? []).map(
+    (s: {
+      id: string;
+      title: string;
+      color?: string;
+      events?: {
+        on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+      };
+    }) => ({
+      id: s.id,
+      title: s.title,
+      color: s.color,
+      events: s.events,
+    }),
+  );
 
   const handleTaskCreated = useCallback(
-    (task: Task, _mode: 'create' | 'edit', meta?: { taskSessionId?: string | null }) => {
+    (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
       const oldSessionId = appStore.getState().tasks.activeSessionId;
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
         performLayoutSwitch(oldSessionId, meta.taskSessionId);
-        window.history.replaceState({}, '', linkToSession(meta.taskSessionId));
+        window.history.replaceState({}, "", linkToSession(meta.taskSessionId));
       }
     },
-    [setActiveTask, setActiveSession, appStore]
+    [setActiveTask, setActiveSession, appStore],
   );
 
   return (
@@ -300,7 +326,7 @@ function CenterRightActions() {
     addBrowserPanel();
     if (hasDevScript && activeSessionId) {
       try {
-        const resp = await startProcess(activeSessionId, { kind: 'dev' });
+        const resp = await startProcess(activeSessionId, { kind: "dev" });
         if (resp?.process) {
           upsertProcessStatus(mapProcessToStatus(resp.process));
           setActiveProcess(resp.process.session_id, resp.process.id);
@@ -350,21 +376,24 @@ function TerminalGroupRightActions() {
   const setActiveProcess = useAppStore((state) => state.setActiveProcess);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
 
-  const handleRunScript = useCallback(async (scriptId: string) => {
-    if (!activeSessionId) return;
-    try {
-      const result = await createUserShell(activeSessionId, scriptId);
-      addTerminalPanel(result.terminalId, rightBottomGroupId);
-    } catch (error) {
-      console.error('Failed to run script:', error);
-    }
-  }, [activeSessionId, addTerminalPanel, rightBottomGroupId]);
+  const handleRunScript = useCallback(
+    async (scriptId: string) => {
+      if (!activeSessionId) return;
+      try {
+        const result = await createUserShell(activeSessionId, scriptId);
+        addTerminalPanel(result.terminalId, rightBottomGroupId);
+      } catch (error) {
+        console.error("Failed to run script:", error);
+      }
+    },
+    [activeSessionId, addTerminalPanel, rightBottomGroupId],
+  );
 
   const handleStartPreview = useCallback(async () => {
     if (!activeSessionId) return;
     addBrowserPanel();
     try {
-      const resp = await startProcess(activeSessionId, { kind: 'dev' });
+      const resp = await startProcess(activeSessionId, { kind: "dev" });
       if (resp?.process) {
         upsertProcessStatus(mapProcessToStatus(resp.process));
         setActiveProcess(resp.process.session_id, resp.process.id);
@@ -378,7 +407,14 @@ function TerminalGroupRightActions() {
     } catch {
       // Terminal creation is best-effort
     }
-  }, [activeSessionId, addBrowserPanel, upsertProcessStatus, setActiveProcess, addTerminalPanel, rightBottomGroupId]);
+  }, [
+    activeSessionId,
+    addBrowserPanel,
+    upsertProcessStatus,
+    setActiveProcess,
+    addTerminalPanel,
+    rightBottomGroupId,
+  ]);
 
   if (scripts.length === 0 && !hasDevScript) return null;
 

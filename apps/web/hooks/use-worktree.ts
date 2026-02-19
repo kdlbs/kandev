@@ -1,7 +1,5 @@
-import { useAppStore } from '@/components/state-provider';
+import { useAppStore } from "@/components/state-provider";
 
 export function useWorktree(worktreeId: string | null) {
-  return useAppStore((state) =>
-    worktreeId ? state.worktrees.items[worktreeId] ?? null : null
-  );
+  return useAppStore((state) => (worktreeId ? (state.worktrees.items[worktreeId] ?? null) : null));
 }

@@ -1,14 +1,14 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type {
   GitEventPayload,
   GitStatusUpdateEvent,
   GitCommitCreatedEvent,
   GitCommitsResetEvent,
   GitSnapshotCreatedEvent,
-} from '@/lib/types/git-events';
-import { invalidateCumulativeDiffCache } from '@/hooks/domains/session/use-cumulative-diff';
+} from "@/lib/types/git-events";
+import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 
 // Handler functions for each event type
 type GitEventHandlers = {
@@ -67,7 +67,12 @@ const gitEventHandlers: GitEventHandlers = {
     store.getState().addGitSnapshot(event.session_id, {
       id: event.snapshot.id,
       session_id: event.snapshot.session_id,
-      snapshot_type: event.snapshot.snapshot_type as 'status_update' | 'pre_commit' | 'post_commit' | 'pre_stage' | 'post_stage',
+      snapshot_type: event.snapshot.snapshot_type as
+        | "status_update"
+        | "pre_commit"
+        | "post_commit"
+        | "pre_stage"
+        | "post_stage",
       branch: event.snapshot.branch,
       remote_branch: event.snapshot.remote_branch,
       head_commit: event.snapshot.head_commit,
@@ -85,7 +90,7 @@ const gitEventHandlers: GitEventHandlers = {
 
 export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'session.git.event': (message) => {
+    "session.git.event": (message) => {
       const payload = message.payload as GitEventPayload;
       if (!payload.session_id || !payload.type) {
         return;
@@ -93,16 +98,16 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
 
       // Use switch for proper type narrowing
       switch (payload.type) {
-        case 'status_update':
+        case "status_update":
           gitEventHandlers.status_update(store, payload);
           break;
-        case 'commit_created':
+        case "commit_created":
           gitEventHandlers.commit_created(store, payload);
           break;
-        case 'commits_reset':
+        case "commits_reset":
           gitEventHandlers.commits_reset(store, payload);
           break;
-        case 'snapshot_created':
+        case "snapshot_created":
           gitEventHandlers.snapshot_created(store, payload);
           break;
       }

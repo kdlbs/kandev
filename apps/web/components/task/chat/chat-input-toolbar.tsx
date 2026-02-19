@@ -1,23 +1,18 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import {
-  IconArrowUp,
-  IconFileTextSpark,
-  IconPlayerPauseFilled,
-  IconAt,
-} from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { cn } from '@/lib/utils';
-import { SHORTCUTS } from '@/lib/keyboard/constants';
-import { KeyboardShortcutTooltip } from '@/components/keyboard-shortcut-tooltip';
-import { TokenUsageDisplay } from '@/components/task/chat/token-usage-display';
-import { SessionsDropdown } from '@/components/task/sessions-dropdown';
-import { ModelSelector } from '@/components/task/model-selector';
-import { ContextPopover } from './context-popover';
-import type { ContextFile } from '@/lib/state/context-files-store';
+import { memo } from "react";
+import { IconArrowUp, IconFileTextSpark, IconPlayerPauseFilled, IconAt } from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
+import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
+import { SessionsDropdown } from "@/components/task/sessions-dropdown";
+import { ModelSelector } from "@/components/task/model-selector";
+import { ContextPopover } from "./context-popover";
+import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
@@ -31,7 +26,7 @@ export type ChatInputToolbarProps = {
   isSending: boolean;
   onCancel: () => void;
   onSubmit: () => void;
-  submitKey?: 'enter' | 'cmd_enter';
+  submitKey?: "enter" | "cmd_enter";
   contextCount?: number;
   contextPopoverOpen?: boolean;
   onContextPopoverOpenChange?: (open: boolean) => void;
@@ -50,7 +45,14 @@ type SubmitButtonProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
 };
 
-function SubmitButton({ isAgentBusy, isDisabled, isSending, onCancel, onSubmit, submitShortcut }: SubmitButtonProps) {
+function SubmitButton({
+  isAgentBusy,
+  isDisabled,
+  isSending,
+  onCancel,
+  onSubmit,
+  submitShortcut,
+}: SubmitButtonProps) {
   return (
     <KeyboardShortcutTooltip shortcut={submitShortcut} enabled={!isAgentBusy && !isDisabled}>
       {isAgentBusy ? (
@@ -72,7 +74,11 @@ function SubmitButton({ isAgentBusy, isDisabled, isSending, onCancel, onSubmit, 
           disabled={isDisabled}
           onClick={onSubmit}
         >
-          {isSending ? <GridSpinner className="text-primary-foreground" /> : <IconArrowUp className="h-4 w-4" />}
+          {isSending ? (
+            <GridSpinner className="text-primary-foreground" />
+          ) : (
+            <IconArrowUp className="h-4 w-4" />
+          )}
         </Button>
       )}
     </KeyboardShortcutTooltip>
@@ -91,7 +97,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   isSending,
   onCancel,
   onSubmit,
-  submitKey = 'cmd_enter',
+  submitKey = "cmd_enter",
   contextCount = 0,
   contextPopoverOpen = false,
   onContextPopoverOpenChange,
@@ -99,7 +105,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   contextFiles = [],
   onToggleFile,
 }: ChatInputToolbarProps) {
-  const submitShortcut = submitKey === 'enter' ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+  const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
@@ -110,7 +116,10 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
               type="button"
               variant="ghost"
               size="sm"
-              className={cn('h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40', planModeEnabled && 'bg-primary/15 text-primary')}
+              className={cn(
+                "h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40",
+                planModeEnabled && "bg-primary/15 text-primary",
+              )}
               onClick={() => onPlanModeChange(!planModeEnabled)}
             >
               <IconFileTextSpark className="h-4 w-4" />
@@ -123,7 +132,12 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
           open={contextPopoverOpen}
           onOpenChange={onContextPopoverOpenChange ?? (() => {})}
           trigger={
-            <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
+            >
               <IconAt className="h-4 w-4" />
               {contextCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
@@ -142,7 +156,12 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
       <div className="flex-1" />
 
       <div className="flex items-center gap-0.5 shrink-0">
-        <SessionsDropdown taskId={taskId} activeSessionId={sessionId} taskTitle={taskTitle} taskDescription={taskDescription} />
+        <SessionsDropdown
+          taskId={taskId}
+          activeSessionId={sessionId}
+          taskTitle={taskTitle}
+          taskDescription={taskDescription}
+        />
         <TokenUsageDisplay sessionId={sessionId} />
         <ModelSelector sessionId={sessionId} />
         <div className="ml-1">

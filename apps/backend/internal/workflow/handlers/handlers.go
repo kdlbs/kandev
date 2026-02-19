@@ -190,7 +190,7 @@ func (h *Handlers) httpReorderSteps(c *gin.Context) {
 	}
 	if err := h.controller.ReorderSteps(c.Request.Context(), controller.ReorderStepsRequest{
 		WorkflowID: c.Param("id"),
-		StepIDs: req.StepIDs,
+		StepIDs:    req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder steps", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reorder steps"})
@@ -334,4 +334,3 @@ func (h *Handlers) wsListHistory(ctx context.Context, msg *ws.Message) (*ws.Mess
 			return h.controller.ListHistoryBySession(ctx, controller.ListHistoryRequest{SessionID: sessionID})
 		})
 }
-

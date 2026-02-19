@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import type { UserShellInfo } from '@/lib/state/slices';
+import { useEffect, useRef } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import type { UserShellInfo } from "@/lib/state/slices";
 
 interface UseUserShellsReturn {
   shells: UserShellInfo[];
@@ -26,13 +26,13 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
 
   // Read from store
   const shells = useAppStore((state) =>
-    sessionId ? state.userShells.bySessionId[sessionId] ?? EMPTY_SHELLS : EMPTY_SHELLS
+    sessionId ? (state.userShells.bySessionId[sessionId] ?? EMPTY_SHELLS) : EMPTY_SHELLS,
   );
   const isLoading = useAppStore((state) =>
-    sessionId ? state.userShells.loading[sessionId] ?? false : false
+    sessionId ? (state.userShells.loading[sessionId] ?? false) : false,
   );
   const isLoaded = useAppStore((state) =>
-    sessionId ? state.userShells.loaded[sessionId] ?? false : false
+    sessionId ? (state.userShells.loaded[sessionId] ?? false) : false,
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
 
@@ -50,11 +50,11 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
   // Fetch user shells from backend
   useEffect(() => {
     if (!sessionId) return;
-    if (connectionStatus !== 'connected') return;
+    if (connectionStatus !== "connected") return;
 
     // Detect session change to force refetch
-    const sessionChanged = prevSessionIdRef.current !== null &&
-                           prevSessionIdRef.current !== sessionId;
+    const sessionChanged =
+      prevSessionIdRef.current !== null && prevSessionIdRef.current !== sessionId;
     prevSessionIdRef.current = sessionId;
 
     // If session changed, reset fetch guard
@@ -80,25 +80,23 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
       store.getState().setUserShellsLoading(sessionId, true);
 
       try {
-        const response = await client.request<{ shells?: Array<{
-          terminal_id: string;
-          process_id: string;
-          running: boolean;
-          label: string;
-          closable: boolean;
-          initial_command?: string;
-        }> }>(
-          'user_shell.list',
-          { session_id: sessionId },
-          10000
-        );
+        const response = await client.request<{
+          shells?: Array<{
+            terminal_id: string;
+            process_id: string;
+            running: boolean;
+            label: string;
+            closable: boolean;
+            initial_command?: string;
+          }>;
+        }>("user_shell.list", { session_id: sessionId }, 10000);
 
         // Transform backend format (snake_case) to frontend format (camelCase)
         const shells: UserShellInfo[] = (response.shells ?? []).map((s) => ({
           terminalId: s.terminal_id,
           processId: s.process_id,
           running: s.running,
-          label: s.label || 'Terminal',
+          label: s.label || "Terminal",
           closable: s.closable,
           initialCommand: s.initial_command,
         }));
@@ -106,7 +104,7 @@ export function useUserShells(sessionId: string | null): UseUserShellsReturn {
         store.getState().setUserShells(sessionId, shells);
         lastFetchedSessionIdRef.current = sessionId;
       } catch (error) {
-        console.error('Failed to fetch user shells:', error);
+        console.error("Failed to fetch user shells:", error);
         // Set empty shells on error so we don't keep retrying
         store.getState().setUserShells(sessionId, []);
         lastFetchedSessionIdRef.current = sessionId;

@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { IconCheck, IconX, IconTerminal } from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import type { Message } from '@/lib/types/http';
-import { Badge } from '@kandev/ui/badge';
-import { ExpandableRow } from './expandable-row';
-import { useExpandState } from './use-expand-state';
+import { memo } from "react";
+import { IconCheck, IconX, IconTerminal } from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import type { Message } from "@/lib/types/http";
+import { Badge } from "@kandev/ui/badge";
+import { ExpandableRow } from "./expandable-row";
+import { useExpandState } from "./use-expand-state";
 
 interface ScriptExecutionMetadata {
-  script_type: 'setup' | 'cleanup' | 'agent_boot';
+  script_type: "setup" | "cleanup" | "agent_boot";
   agent_name?: string;
   command: string;
-  status: 'starting' | 'running' | 'exited' | 'failed';
+  status: "starting" | "running" | "exited" | "failed";
   exit_code?: number;
   is_resuming?: boolean;
   started_at?: string;
@@ -21,36 +21,60 @@ interface ScriptExecutionMetadata {
   error?: string;
 }
 
-function getAgentBootVerb(isResuming: boolean | undefined, isSuccess: boolean, isRunning: boolean): string {
+function getAgentBootVerb(
+  isResuming: boolean | undefined,
+  isSuccess: boolean,
+  isRunning: boolean,
+): string {
   if (isResuming) {
-    if (isSuccess) return 'Resumed';
-    if (isRunning) return 'Resuming';
-    return 'Failed to resume';
+    if (isSuccess) return "Resumed";
+    if (isRunning) return "Resuming";
+    return "Failed to resume";
   }
-  if (isSuccess) return 'Started';
-  if (isRunning) return 'Starting';
-  return 'Failed to start';
+  if (isSuccess) return "Started";
+  if (isRunning) return "Starting";
+  return "Failed to start";
 }
 
-function AgentBootHeader({ metadata, isSuccess, isRunning }: { metadata: ScriptExecutionMetadata; isSuccess: boolean; isRunning: boolean }) {
-  const agentName = metadata.agent_name || 'agent';
+function AgentBootHeader({
+  metadata,
+  isSuccess,
+  isRunning,
+}: {
+  metadata: ScriptExecutionMetadata;
+  isSuccess: boolean;
+  isRunning: boolean;
+}) {
+  const agentName = metadata.agent_name || "agent";
   const verb = getAgentBootVerb(metadata.is_resuming, isSuccess, isRunning);
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-        <span className="text-xs text-muted-foreground">{verb} agent {agentName}</span>
+        <span className="text-xs text-muted-foreground">
+          {verb} agent {agentName}
+        </span>
         {isRunning && <GridSpinner className="text-muted-foreground" />}
       </span>
     </div>
   );
 }
 
-function ScriptHeader({ command, isSetup, isRunning, isSuccess }: { command: string; isSetup: boolean; isRunning: boolean; isSuccess: boolean }) {
+function ScriptHeader({
+  command,
+  isSetup,
+  isRunning,
+  isSuccess,
+}: {
+  command: string;
+  isSetup: boolean;
+  isRunning: boolean;
+  isSuccess: boolean;
+}) {
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-        <Badge variant={isSetup ? 'default' : 'secondary'} className="text-xs">
-          {isSetup ? 'Setup' : 'Cleanup'}
+        <Badge variant={isSetup ? "default" : "secondary"} className="text-xs">
+          {isSetup ? "Setup" : "Cleanup"}
         </Badge>
         <span className="font-mono text-xs text-muted-foreground">{command}</span>
         {isRunning && <GridSpinner className="text-muted-foreground" />}
@@ -73,7 +97,7 @@ function calculateDuration(startedAt: string, completedAt: string): string {
     const seconds = Math.floor((durationMs % 60000) / 1000);
     return `${minutes}m ${seconds}s`;
   } catch {
-    return 'N/A';
+    return "N/A";
   }
 }
 
@@ -116,20 +140,32 @@ type ScriptBodyProps = {
   exitCode: number | undefined;
 };
 
-function ScriptExpandedContent({ isAgentBoot, command, content, error, isRunning, metadata, exitCode }: ScriptBodyProps) {
+function ScriptExpandedContent({
+  isAgentBoot,
+  command,
+  content,
+  error,
+  isRunning,
+  metadata,
+  exitCode,
+}: ScriptBodyProps) {
   return (
     <div className="pl-4 border-l-2 border-border/30 space-y-2">
       {isAgentBoot && command && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">Command</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
+            Command
+          </div>
           <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap break-words">
             {command}
           </pre>
         </div>
       )}
-      {content && content.trim() !== '' && (
+      {content && content.trim() !== "" && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">Output</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
+            Output
+          </div>
           <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
             {content}
           </pre>
@@ -137,11 +173,20 @@ function ScriptExpandedContent({ isAgentBoot, command, content, error, isRunning
       )}
       {error && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-red-600/70 dark:text-red-400/70 mb-1">Error</div>
-          <div className="text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded px-2 py-1.5">{error}</div>
+          <div className="text-[10px] uppercase tracking-wide text-red-600/70 dark:text-red-400/70 mb-1">
+            Error
+          </div>
+          <div className="text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded px-2 py-1.5">
+            {error}
+          </div>
         </div>
       )}
-      <ScriptFooter isAgentBoot={isAgentBoot} isRunning={isRunning} metadata={metadata} exitCode={exitCode} />
+      <ScriptFooter
+        isAgentBoot={isAgentBoot}
+        isRunning={isRunning}
+        metadata={metadata}
+        exitCode={exitCode}
+      />
     </div>
   );
 }
@@ -150,12 +195,17 @@ function parseScriptMetadata(comment: Message) {
   const metadata = comment.metadata as ScriptExecutionMetadata | undefined;
   const status = metadata?.status;
   const scriptType = metadata?.script_type;
-  const isRunning = status === 'starting' || status === 'running';
-  const isSuccess = status === 'exited' && (metadata?.exit_code === 0 || metadata?.exit_code === undefined);
+  const isRunning = status === "starting" || status === "running";
+  const isSuccess =
+    status === "exited" && (metadata?.exit_code === 0 || metadata?.exit_code === undefined);
   return { metadata, status, scriptType, isRunning, isSuccess };
 }
 
-export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({ comment }: { comment: Message }) {
+export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
+  comment,
+}: {
+  comment: Message;
+}) {
   const { metadata, status, scriptType, isRunning, isSuccess } = parseScriptMetadata(comment);
   const autoExpanded = isRunning;
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
@@ -189,17 +239,31 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({ com
   }
 
   const { command, exit_code, error } = metadata;
-  const isAgentBoot = scriptType === 'agent_boot';
-  const isSetup = scriptType === 'setup';
+  const isAgentBoot = scriptType === "agent_boot";
+  const isSetup = scriptType === "setup";
   const hasDuration = !!(metadata.started_at && metadata.completed_at);
-  const hasExpandableContent = !!(command || comment.content || error || exit_code !== undefined || hasDuration);
+  const hasExpandableContent = !!(
+    command ||
+    comment.content ||
+    error ||
+    exit_code !== undefined ||
+    hasDuration
+  );
 
   return (
     <ExpandableRow
       icon={<IconTerminal className="h-4 w-4 text-muted-foreground" />}
-      header={isAgentBoot
-        ? <AgentBootHeader metadata={metadata} isSuccess={isSuccess} isRunning={isRunning} />
-        : <ScriptHeader command={command} isSetup={isSetup} isRunning={isRunning} isSuccess={isSuccess} />
+      header={
+        isAgentBoot ? (
+          <AgentBootHeader metadata={metadata} isSuccess={isSuccess} isRunning={isRunning} />
+        ) : (
+          <ScriptHeader
+            command={command}
+            isSetup={isSetup}
+            isRunning={isRunning}
+            isSuccess={isSuccess}
+          />
+        )
       }
       hasExpandableContent={hasExpandableContent}
       isExpanded={isExpanded}

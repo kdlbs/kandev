@@ -14,11 +14,11 @@ func TestEscapeArg(t *testing.T) {
 		{"with tab", "hello\tworld", `"hello` + "\t" + `world"`},
 		{"with quote", `say "hi"`, `"say \"hi\""`},
 		{"backslash no quote", `a\b`, `a\b`},
-		{"backslash before quote", `a\"`, `a\\\"` },
+		{"backslash before quote", `a\"`, `a\\\"`},
 		{"trailing backslash with space", `a b\`, `"a b\\"`},
 		{"multiple trailing backslashes with space", `a b\\`, `"a b\\\\"`},
 		{"only backslashes", `\\`, `\\`},
-		{"backslash then quote", `\\"`, `\\\\\"` },
+		{"backslash then quote", `\\"`, `\\\\\"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

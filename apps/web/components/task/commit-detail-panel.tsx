@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import { memo, useState, useEffect, useCallback, useMemo } from 'react';
-import type { IDockviewPanelProps } from 'dockview-react';
-import { IconLoader2 } from '@tabler/icons-react';
-import { PanelRoot, PanelBody } from './panel-primitives';
-import { FileDiffViewer } from '@/components/diff';
-import { useAppStore } from '@/components/state-provider';
-import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useToast } from '@/components/toast-provider';
-import { usePanelActions } from '@/hooks/use-panel-actions';
-import type { FileInfo } from '@/lib/state/store';
+import { memo, useState, useEffect, useCallback, useMemo } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
+import { IconLoader2 } from "@tabler/icons-react";
+import { PanelRoot, PanelBody } from "./panel-primitives";
+import { FileDiffViewer } from "@/components/diff";
+import { useAppStore } from "@/components/state-provider";
+import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useToast } from "@/components/toast-provider";
+import { usePanelActions } from "@/hooks/use-panel-actions";
+import type { FileInfo } from "@/lib/state/store";
 
 type CommitDetailParams = {
   commitSha: string;
@@ -21,12 +21,12 @@ function formatRelativeTime(dateStr: string): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`;
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
   const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+  if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
   return date.toLocaleDateString();
 }
 
@@ -36,7 +36,7 @@ function getInitials(name: string): string {
     .map((w) => w[0])
     .filter(Boolean)
     .slice(0, 2)
-    .join('')
+    .join("")
     .toUpperCase();
 }
 
@@ -62,9 +62,10 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
   useEffect(() => {
     if (commit) {
       const shortSha = commitSha.slice(0, 7);
-      const msg = commit.commit_message.length > 30
-        ? commit.commit_message.slice(0, 30) + '...'
-        : commit.commit_message;
+      const msg =
+        commit.commit_message.length > 30
+          ? commit.commit_message.slice(0, 30) + "..."
+          : commit.commit_message;
       props.api.setTitle(`${shortSha} ${msg}`);
     }
   }, [commit, commitSha, props.api]);
@@ -77,7 +78,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
       const ws = getWebSocketClient();
       if (!ws) return;
       const response = await ws.request<{ success: boolean; files: Record<string, FileInfo> }>(
-        'session.commit_diff',
+        "session.commit_diff",
         { session_id: activeSessionId, commit_sha: commitSha },
         10000,
       );
@@ -86,9 +87,9 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
       }
     } catch (err) {
       toast({
-        title: 'Failed to load commit diff',
-        description: err instanceof Error ? err.message : 'An unexpected error occurred',
-        variant: 'error',
+        title: "Failed to load commit diff",
+        description: err instanceof Error ? err.message : "An unexpected error occurred",
+        variant: "error",
       });
     } finally {
       setLoading(false);
@@ -172,9 +173,7 @@ function CommitFileList({
 }) {
   if (fileEntries.length === 0 && !loading) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">
-        No files in this commit
-      </div>
+      <div className="text-sm text-muted-foreground text-center py-8">No files in this commit</div>
     );
   }
   return (

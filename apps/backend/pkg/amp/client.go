@@ -60,7 +60,7 @@ type Message struct {
 
 	// Result fields (when Type == "result")
 	IsError           bool              `json:"is_error,omitempty"`
-	Error             string            `json:"error,omitempty"` // Error message when is_error is true
+	Error             string            `json:"error,omitempty"`   // Error message when is_error is true
 	Subtype           string            `json:"subtype,omitempty"` // e.g., "error_during_execution"
 	CostUSD           float64           `json:"cost_usd,omitempty"`
 	DurationMS        int64             `json:"duration_ms,omitempty"`
@@ -73,11 +73,11 @@ type Message struct {
 
 // Content represents the message content.
 type Content struct {
-	Model         string          `json:"model,omitempty"`
-	Content       []ContentBlock  `json:"content,omitempty"`
-	Usage         *TokenUsage     `json:"usage,omitempty"`
-	StopReason    string          `json:"stop_reason,omitempty"`
-	StopSequence  string          `json:"stop_sequence,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	Content      []ContentBlock `json:"content,omitempty"`
+	Usage        *TokenUsage    `json:"usage,omitempty"`
+	StopReason   string         `json:"stop_reason,omitempty"`
+	StopSequence string         `json:"stop_sequence,omitempty"`
 }
 
 // ContentBlock represents a content block (text, tool_use, etc.).
@@ -117,14 +117,14 @@ type ResultData struct {
 
 // UserMessage represents a user message to send (Claude Code-compatible format).
 type UserMessage struct {
-	Type    string          `json:"type"`    // "user"
+	Type    string          `json:"type"` // "user"
 	Message UserMessageBody `json:"message"`
 }
 
 // UserMessageBody is the nested message body for user messages.
 type UserMessageBody struct {
-	Role    string               `json:"role"` // "user"
-	Content []UserContentBlock   `json:"content"`
+	Role    string             `json:"role"` // "user"
+	Content []UserContentBlock `json:"content"`
 }
 
 // UserContentBlock represents a content block in user messages.

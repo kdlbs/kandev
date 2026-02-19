@@ -1,6 +1,6 @@
-export type PreviewStage = 'closed' | 'logs' | 'preview';
-export type PreviewViewMode = 'preview' | 'output';
-export type PreviewDevicePreset = 'desktop' | 'tablet' | 'mobile';
+export type PreviewStage = "closed" | "logs" | "preview";
+export type PreviewViewMode = "preview" | "output";
+export type PreviewDevicePreset = "desktop" | "tablet" | "mobile";
 
 export type PreviewPanelState = {
   openBySessionId: Record<string, boolean>;
@@ -16,11 +16,11 @@ export type RightPanelState = {
 };
 
 export type DiffState = {
-  files: Array<{ path: string; status: 'A' | 'M' | 'D'; plus: number; minus: number }>;
+  files: Array<{ path: string; status: "A" | "M" | "D"; plus: number; minus: number }>;
 };
 
 export type ConnectionState = {
-  status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
+  status: "disconnected" | "connecting" | "connected" | "error" | "reconnecting";
   error: string | null;
 };
 
@@ -29,7 +29,7 @@ export type MobileKanbanState = {
   isMenuOpen: boolean;
 };
 
-export type MobileSessionPanel = 'chat' | 'plan' | 'changes' | 'files' | 'terminal';
+export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal";
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
@@ -41,8 +41,8 @@ export type ChatInputState = {
 };
 
 export type ActiveDocument =
-  | { type: 'plan'; taskId: string }
-  | { type: 'file'; path: string; name: string };
+  | { type: "plan"; taskId: string }
+  | { type: "file"; path: string; name: string };
 
 export type DocumentPanelState = {
   activeDocumentBySessionId: Record<string, ActiveDocument | null>;
@@ -68,7 +68,7 @@ export type UISliceActions = {
   setPreviewUrl: (sessionId: string, url: string) => void;
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
-  setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
+  setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;

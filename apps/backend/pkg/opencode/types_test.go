@@ -294,7 +294,9 @@ func TestSDKError_GetMessage(t *testing.T) {
 			name: "data.message takes precedence",
 			err: SDKError{
 				Message: "outer message",
-				Data:    &struct{ Message string `json:"message,omitempty"` }{Message: "inner message"},
+				Data: &struct {
+					Message string `json:"message,omitempty"`
+				}{Message: "inner message"},
 			},
 			wantMessage: "inner message",
 		},

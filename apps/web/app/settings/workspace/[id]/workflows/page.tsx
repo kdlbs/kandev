@@ -2,11 +2,15 @@ import {
   getWorkspaceAction,
   listWorkflowsAction,
   listWorkflowTemplatesAction,
-} from '@/app/actions/workspaces';
-import { WorkspaceWorkflowsClient } from '@/app/settings/workspace/workspace-workflows-client';
-import type { Workflow, WorkflowTemplate } from '@/lib/types/http';
+} from "@/app/actions/workspaces";
+import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
+import type { Workflow, WorkflowTemplate } from "@/lib/types/http";
 
-export default async function WorkspaceWorkflowsPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function WorkspaceWorkflowsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
   let workspace = null;
   let workflows: Workflow[] = [];

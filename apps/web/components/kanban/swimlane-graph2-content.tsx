@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import { useSwimlaneMove } from '@/hooks/domains/kanban/use-swimlane-move';
-import { Graph2TaskPipeline } from './graph2-task-pipeline';
-import type { ViewContentProps } from '@/lib/kanban/view-registry';
+import { useMemo, useState } from "react";
+import { useSwimlaneMove } from "@/hooks/domains/kanban/use-swimlane-move";
+import { Graph2TaskPipeline } from "./graph2-task-pipeline";
+import type { ViewContentProps } from "@/lib/kanban/view-registry";
 
 export function SwimlaneGraph2Content({
   workflowId,
@@ -30,10 +30,10 @@ export function SwimlaneGraph2Content({
         if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
         return (a.position ?? 0) - (b.position ?? 0);
       }),
-    [tasks, steps]
+    [tasks, steps],
   );
 
-  const handleMoveTask = async (task: typeof tasks[number], targetStepId: string) => {
+  const handleMoveTask = async (task: (typeof tasks)[number], targetStepId: string) => {
     setMovingTaskId(task.id);
     try {
       await moveTask(task, targetStepId);

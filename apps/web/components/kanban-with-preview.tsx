@@ -20,21 +20,21 @@ type KanbanWithPreviewProps = {
 
 function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string | null) {
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
     if (selectedTaskId) {
-      url.searchParams.set('taskId', selectedTaskId);
+      url.searchParams.set("taskId", selectedTaskId);
     } else {
-      url.searchParams.delete('taskId');
-      url.searchParams.delete('sessionId');
+      url.searchParams.delete("taskId");
+      url.searchParams.delete("sessionId");
     }
 
     if (selectedTaskId && selectedTaskSessionId) {
-      url.searchParams.set('sessionId', selectedTaskSessionId);
+      url.searchParams.set("sessionId", selectedTaskSessionId);
     }
 
-    window.history.replaceState({}, '', url.toString());
+    window.history.replaceState({}, "", url.toString());
   }, [selectedTaskId, selectedTaskSessionId]);
 }
 
@@ -56,28 +56,31 @@ function useResizeHandler(
   previewWidthPx: number,
   updatePreviewWidth: (width: number) => void,
 ) {
-  return useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    (isResizingRef as React.MutableRefObject<boolean>).current = true;
+  return useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      (isResizingRef as React.MutableRefObject<boolean>).current = true;
 
-    const startX = e.clientX;
-    const startWidth = previewWidthPx;
+      const startX = e.clientX;
+      const startWidth = previewWidthPx;
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!isResizingRef.current) return;
-      const deltaX = startX - moveEvent.clientX;
-      updatePreviewWidth(startWidth + deltaX);
-    };
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        if (!isResizingRef.current) return;
+        const deltaX = startX - moveEvent.clientX;
+        updatePreviewWidth(startWidth + deltaX);
+      };
 
-    const handleMouseUp = () => {
-      (isResizingRef as React.MutableRefObject<boolean>).current = false;
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
+      const handleMouseUp = () => {
+        (isResizingRef as React.MutableRefObject<boolean>).current = false;
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  }, [isResizingRef, previewWidthPx, updatePreviewWidth]);
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    },
+    [isResizingRef, previewWidthPx, updatePreviewWidth],
+  );
 }
 
 export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
@@ -86,19 +89,13 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
 
-  const {
-    selectedTaskId,
-    isOpen,
-    previewWidthPx,
-    open,
-    close,
-    updatePreviewWidth,
-  } = useKanbanPreview({
-    initialTaskId,
-    onClose: () => {
-      // Cleanup handled by close
-    },
-  });
+  const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
+    useKanbanPreview({
+      initialTaskId,
+      onClose: () => {
+        // Cleanup handled by close
+      },
+    });
 
   // Use custom hooks for layout and session management
   const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
@@ -111,7 +108,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const selectedTask = useMemo(() => {
     if (!selectedTaskId || kanbanTasks.length === 0) return null;
 
-    const task = kanbanTasks.find((t: KanbanState['tasks'][number]) => t.id === selectedTaskId);
+    const task = kanbanTasks.find((t: KanbanState["tasks"][number]) => t.id === selectedTaskId);
     if (!task) return null;
 
     return {
@@ -125,7 +122,6 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     };
   }, [selectedTaskId, kanbanTasks]);
 
-
   // Close panel if selected task no longer exists
   useEffect(() => {
     if (isOpen && selectedTaskId && !selectedTask) {
@@ -137,7 +133,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
     (task: Task, sessionId: string) => {
       router.push(linkToSession(sessionId));
     },
-    [router]
+    [router],
   );
 
   useUrlSync(selectedTaskId ?? null, selectedTaskSessionId ?? null);
@@ -150,7 +146,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
         open(task.id);
       }
     },
-    [isOpen, selectedTaskId, open, close]
+    [isOpen, selectedTaskId, open, close],
   );
 
   useEscapeKey(isOpen, close);
@@ -224,10 +220,7 @@ function FloatingPreviewLayout({
 }: PreviewLayoutProps) {
   return (
     <>
-      <div
-        className="flex-1 overflow-hidden"
-        style={{ width: `${kanbanWidth}px` }}
-      >
+      <div className="flex-1 overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
         <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
       </div>
       <div
@@ -249,9 +242,7 @@ function FloatingPreviewLayout({
             sessionId={activeSessionId}
             onClose={onClose}
             onMaximize={
-              activeSessionId
-                ? (task) => onNavigateToTask(task, activeSessionId)
-                : undefined
+              activeSessionId ? (task) => onNavigateToTask(task, activeSessionId) : undefined
             }
           />
         </div>
@@ -273,10 +264,7 @@ function InlinePreviewLayout({
 }: PreviewLayoutProps & { isOpen: boolean }) {
   return (
     <div className="flex-1 flex overflow-hidden">
-      <div
-        className="overflow-hidden"
-        style={{ width: `${kanbanWidth}px` }}
-      >
+      <div className="overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
         <KanbanBoard onPreviewTask={onPreviewTask} onOpenTask={onNavigateToTask} />
       </div>
       {isOpen && (
@@ -291,9 +279,7 @@ function InlinePreviewLayout({
               sessionId={activeSessionId}
               onClose={onClose}
               onMaximize={
-                activeSessionId
-                  ? (task) => onNavigateToTask(task, activeSessionId)
-                  : undefined
+                activeSessionId ? (task) => onNavigateToTask(task, activeSessionId) : undefined
               }
             />
           </div>

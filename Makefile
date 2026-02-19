@@ -239,7 +239,6 @@ fmt-backend:
 fmt-web:
 	@printf "$(CYAN)Formatting web code...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) run format
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint -- --fix || true
 
 .PHONY: typecheck-web
 typecheck-web:

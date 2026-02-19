@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan } from '@/lib/types/http';
+import type { Message, TaskSession, Turn, TaskPlan } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -28,7 +28,7 @@ export type TaskSessionsByTaskState = {
 };
 
 export type SessionAgentctlStatus = {
-  status: 'starting' | 'ready' | 'error';
+  status: "starting" | "ready" | "error";
   errorMessage?: string;
   agentExecutionId?: string;
   updatedAt?: string;
@@ -109,18 +109,18 @@ export type SessionSliceActions = {
   setMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
-    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }
+    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   addTurn: (turn: Turn) => void;

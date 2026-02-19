@@ -1,26 +1,26 @@
-import type { ITheme } from '@xterm/xterm';
+import type { ITheme } from "@xterm/xterm";
 
 /**
  * ANSI terminal colors — standard palette, not derived from the app theme.
  * These are used for syntax highlighting, command output, etc.
  */
 const ansiColors = {
-  black: '#1e1e1e',
-  red: '#f44747',
-  green: '#6a9955',
-  yellow: '#dcdcaa',
-  blue: '#569cd6',
-  magenta: '#c586c0',
-  cyan: '#4ec9b0',
-  white: '#d4d4d4',
-  brightBlack: '#808080',
-  brightRed: '#f44747',
-  brightGreen: '#6a9955',
-  brightYellow: '#dcdcaa',
-  brightBlue: '#569cd6',
-  brightMagenta: '#c586c0',
-  brightCyan: '#4ec9b0',
-  brightWhite: '#ffffff',
+  black: "#1e1e1e",
+  red: "#f44747",
+  green: "#6a9955",
+  yellow: "#dcdcaa",
+  blue: "#569cd6",
+  magenta: "#c586c0",
+  cyan: "#4ec9b0",
+  white: "#d4d4d4",
+  brightBlack: "#808080",
+  brightRed: "#f44747",
+  brightGreen: "#6a9955",
+  brightYellow: "#dcdcaa",
+  brightBlue: "#569cd6",
+  brightMagenta: "#c586c0",
+  brightCyan: "#4ec9b0",
+  brightWhite: "#ffffff",
 } as const;
 
 /**
@@ -37,11 +37,11 @@ export function getTerminalTheme(container: HTMLElement): ITheme {
   const v = (name: string) => s.getPropertyValue(name).trim();
 
   return {
-    background: v('--card'),
-    foreground: v('--foreground'),
-    cursor: v('--foreground'),
-    cursorAccent: v('--background'),
-    selectionBackground: v('--muted'),
+    background: v("--card"),
+    foreground: v("--foreground"),
+    cursor: v("--foreground"),
+    cursorAccent: v("--background"),
+    selectionBackground: v("--muted"),
     ...ansiColors,
   };
 }

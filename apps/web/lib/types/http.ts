@@ -1,26 +1,30 @@
 export type TaskState =
-  | 'CREATED'
-  | 'SCHEDULING'
-  | 'TODO'
-  | 'IN_PROGRESS'
-  | 'REVIEW'
-  | 'BLOCKED'
-  | 'WAITING_FOR_INPUT'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED';
+  | "CREATED"
+  | "SCHEDULING"
+  | "TODO"
+  | "IN_PROGRESS"
+  | "REVIEW"
+  | "BLOCKED"
+  | "WAITING_FOR_INPUT"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
 // On Enter action types
-export type OnEnterActionType = 'enable_plan_mode' | 'auto_start_agent';
+export type OnEnterActionType = "enable_plan_mode" | "auto_start_agent";
 
 // On Turn Start action types
-export type OnTurnStartActionType = 'move_to_next' | 'move_to_previous' | 'move_to_step';
+export type OnTurnStartActionType = "move_to_next" | "move_to_previous" | "move_to_step";
 
 // On Turn Complete action types
-export type OnTurnCompleteActionType = 'move_to_next' | 'move_to_previous' | 'move_to_step' | 'disable_plan_mode';
+export type OnTurnCompleteActionType =
+  | "move_to_next"
+  | "move_to_previous"
+  | "move_to_step"
+  | "disable_plan_mode";
 
 // On Exit action types
-export type OnExitActionType = 'disable_plan_mode';
+export type OnExitActionType = "disable_plan_mode";
 
 export type OnEnterAction = {
   type: OnEnterActionType;
@@ -50,11 +54,7 @@ export type StepEvents = {
 };
 
 // Workflow Review Status
-export type WorkflowReviewStatus =
-  | 'pending'
-  | 'approved'
-  | 'changes_requested'
-  | 'rejected';
+export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
 
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
@@ -123,13 +123,13 @@ export type ListSessionStepHistoryResponse = {
 };
 
 export type TaskSessionState =
-  | 'CREATED'
-  | 'STARTING'
-  | 'RUNNING'
-  | 'WAITING_FOR_INPUT'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED';
+  | "CREATED"
+  | "STARTING"
+  | "RUNNING"
+  | "WAITING_FOR_INPUT"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
 export type Workflow = {
   id: string;
@@ -185,7 +185,7 @@ export type RepositoryScript = {
 };
 
 export type ProcessOutputChunk = {
-  stream: 'stdout' | 'stderr';
+  stream: "stdout" | "stderr";
   data: string;
   timestamp: string;
 };
@@ -228,7 +228,7 @@ export type Task = {
   repositories?: TaskRepository[];
   primary_session_id?: string | null;
   session_count?: number | null;
-  review_status?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -307,7 +307,7 @@ export type ApproveSessionResponse = {
   workflow_step?: WorkflowStepDTO;
 };
 
-export type NotificationProviderType = 'local' | 'apprise' | 'system';
+export type NotificationProviderType = "local" | "apprise" | "system";
 
 export type NotificationProvider = {
   id: string;
@@ -351,7 +351,7 @@ export type UserSettings = {
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
-  chat_submit_key?: 'enter' | 'cmd_enter';
+  chat_submit_key?: "enter" | "cmd_enter";
   review_auto_mark_on_scroll?: boolean;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
@@ -450,7 +450,7 @@ export type RepositoryPathValidationResponse = {
 
 export type Branch = {
   name: string;
-  type: 'local' | 'remote';
+  type: "local" | "remote";
   remote?: string; // remote name (e.g., "origin") for remote branches
 };
 
@@ -505,24 +505,24 @@ export type ListMessagesResponse = {
   cursor: string;
 };
 
-export type MessageAuthorType = 'user' | 'agent';
+export type MessageAuthorType = "user" | "agent";
 export type MessageType =
-  | 'message'
-  | 'content'
-  | 'tool_call'
-  | 'tool_edit'
-  | 'tool_read'
-  | 'tool_search'
-  | 'tool_execute'
-  | 'progress'
-  | 'log'
-  | 'error'
-  | 'status'
-  | 'thinking'
-  | 'todo'
-  | 'permission_request'
-  | 'clarification_request'
-  | 'script_execution';
+  | "message"
+  | "content"
+  | "tool_call"
+  | "tool_edit"
+  | "tool_read"
+  | "tool_search"
+  | "tool_execute"
+  | "progress"
+  | "log"
+  | "error"
+  | "status"
+  | "thinking"
+  | "todo"
+  | "permission_request"
+  | "clarification_request"
+  | "script_execution";
 
 export type Message = {
   id: string;
@@ -554,7 +554,7 @@ export type ListTurnsResponse = {
   total: number;
 };
 
-export * from './http-agents';
+export * from "./http-agents";
 
 // Workflow Export/Import types
 export type WorkflowExportData = {
@@ -586,6 +586,9 @@ export type ImportWorkflowsResult = {
 };
 
 // Helper function to check if a step has a specific on_enter action
-export function stepHasOnEnterAction(step: { events?: StepEvents }, actionType: OnEnterActionType): boolean {
-  return step.events?.on_enter?.some(a => a.type === actionType) ?? false;
+export function stepHasOnEnterAction(
+  step: { events?: StepEvents },
+  actionType: OnEnterActionType,
+): boolean {
+  return step.events?.on_enter?.some((a) => a.type === actionType) ?? false;
 }

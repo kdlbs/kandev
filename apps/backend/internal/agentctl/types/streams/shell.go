@@ -61,4 +61,3 @@ type ShellBufferResponse struct {
 	// Data contains the buffered shell output.
 	Data string `json:"data"`
 }
-

@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -9,15 +9,15 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
-import { KanbanColumn } from '@/components/kanban-column';
-import { KanbanCardPreview, type Task } from '@/components/kanban-card';
-import type { WorkflowStep } from '@/components/kanban-column';
-import type { WorkflowAutomation, MoveTaskError } from '@/hooks/use-drag-and-drop';
-import { useTaskActions } from '@/hooks/use-task-actions';
-import { useAppStoreApi } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { KanbanState } from '@/lib/state/slices/kanban/types';
+} from "@dnd-kit/core";
+import { KanbanColumn } from "@/components/kanban-column";
+import { KanbanCardPreview, type Task } from "@/components/kanban-card";
+import type { WorkflowStep } from "@/components/kanban-column";
+import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import { useTaskActions } from "@/hooks/use-task-actions";
+import { useAppStoreApi } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
@@ -39,7 +39,7 @@ async function handleWorkflowAutoStart(
   onWorkflowAutomation?: (automation: WorkflowAutomation) => void,
 ) {
   const hasAutoStart = response?.workflow_step?.events?.on_enter?.some(
-    (a: { type: string }) => a.type === 'auto_start_agent'
+    (a: { type: string }) => a.type === "auto_start_agent",
   );
   if (!hasAutoStart) return;
 
@@ -49,23 +49,23 @@ async function handleWorkflowAutoStart(
     if (!client) return;
     try {
       await client.request(
-        'orchestrator.start',
+        "orchestrator.start",
         {
           task_id: task.id,
           session_id: sessionId,
           workflow_step_id: response.workflow_step.id,
         },
-        15000
+        15000,
       );
     } catch (err) {
-      console.error('Failed to auto-start session for workflow step:', err);
+      console.error("Failed to auto-start session for workflow step:", err);
     }
   } else {
     onWorkflowAutomation?.({
       taskId: task.id,
       sessionId: null,
       workflowStep: response.workflow_step,
-      taskDescription: task.description ?? '',
+      taskDescription: task.description ?? "",
     });
   }
 }
@@ -77,14 +77,17 @@ type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useSwimlaneKanbanDnd({ tasks, workflowId, onWorkflowAutomation, onMoveError }: SwimlaneKanbanDndOptions) {
+function useSwimlaneKanbanDnd({
+  tasks,
+  workflowId,
+  onWorkflowAutomation,
+  onMoveError,
+}: SwimlaneKanbanDndOptions) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveTaskId(event.active.id as string);
@@ -106,17 +109,20 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onWorkflowAutomation, onMoveE
       if (!snapshot) return;
 
       const targetTasks = snapshot.tasks
-        .filter((t: KanbanState['tasks'][number]) => t.workflowStepId === targetStepId && t.id !== taskId)
-        .sort((a: KanbanState['tasks'][number], b: KanbanState['tasks'][number]) => a.position - b.position);
+        .filter(
+          (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
+        )
+        .sort(
+          (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
+            a.position - b.position,
+        );
       const nextPosition = targetTasks.length;
       const originalTasks = snapshot.tasks;
 
       state.setWorkflowSnapshot(workflowId, {
         ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState['tasks'][number]) =>
-          t.id === taskId
-            ? { ...t, workflowStepId: targetStepId, position: nextPosition }
-            : t
+        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
         ),
       });
 
@@ -130,50 +136,72 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onWorkflowAutomation, onMoveE
       } catch (error) {
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
         if (currentSnapshot) {
-          store.getState().setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
+          store
+            .getState()
+            .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
         }
-        const message = error instanceof Error ? error.message : 'Failed to move task';
+        const message = error instanceof Error ? error.message : "Failed to move task";
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
       }
     },
-    [tasks, workflowId, store, moveTaskById, onWorkflowAutomation, onMoveError]
+    [tasks, workflowId, store, moveTaskById, onWorkflowAutomation, onMoveError],
   );
 
-  const handleDragCancel = useCallback(() => { setActiveTaskId(null); }, []);
+  const handleDragCancel = useCallback(() => {
+    setActiveTaskId(null);
+  }, []);
 
   const moveTaskToStep = useCallback(
     async (task: Task, targetStepId: string) => {
       if (task.workflowStepId === targetStepId) return;
       await handleDragEnd({ active: { id: task.id }, over: { id: targetStepId } } as DragEndEvent);
     },
-    [handleDragEnd]
+    [handleDragEnd],
   );
 
   const activeTask = useMemo(
     () => tasks.find((t) => t.id === activeTaskId) ?? null,
-    [tasks, activeTaskId]
+    [tasks, activeTaskId],
   );
 
   return { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask };
 }
 
 export function SwimlaneKanbanContent({
-  workflowId, steps, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask,
-  onMoveError, onWorkflowAutomation, deletingTaskId,
+  workflowId,
+  steps,
+  tasks,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  onMoveError,
+  onWorkflowAutomation,
+  deletingTaskId,
 }: SwimlaneKanbanContentProps) {
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onWorkflowAutomation, onMoveError });
 
   const getTasksForStep = (stepId: string) => {
-    return tasks.filter((t) => t.workflowStepId === stepId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    return tasks
+      .filter((t) => t.workflowStepId === stepId)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   };
 
   if (steps.length === 0) return null;
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
       <div className="">
-        <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+        <div
+          className="grid gap-0"
+          style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+        >
           {steps.map((step) => (
             <KanbanColumn
               key={step.id}

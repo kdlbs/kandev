@@ -46,4 +46,3 @@ func (p Protocol) IsValid() bool {
 		return false
 	}
 }
-

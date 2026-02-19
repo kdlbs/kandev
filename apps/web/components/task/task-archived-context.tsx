@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { createContext, useContext, memo } from 'react';
-import { PanelRoot, PanelBody } from './panel-primitives';
+import { createContext, useContext, memo } from "react";
+import { PanelRoot, PanelBody } from "./panel-primitives";
 
 type TaskArchivedState = {
   isArchived: boolean;
@@ -23,7 +23,11 @@ export function useArchivedTaskState() {
   return useContext(TaskArchivedContext);
 }
 
-export const ArchivedPanelPlaceholder = memo(function ArchivedPanelPlaceholder({ message = 'Workspace not available — this task is archived' }: { message?: string }) {
+export const ArchivedPanelPlaceholder = memo(function ArchivedPanelPlaceholder({
+  message = "Workspace not available — this task is archived",
+}: {
+  message?: string;
+}) {
   return (
     <PanelRoot>
       <PanelBody>

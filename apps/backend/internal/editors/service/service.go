@@ -30,9 +30,9 @@ var (
 
 // Editor kind constants for custom editor types.
 const (
-	editorKindCustomRemoteSSH  = "custom_remote_ssh"
-	editorKindCustomHostedURL  = "custom_hosted_url"
-	editorKindCustomCommand    = "custom_command"
+	editorKindCustomRemoteSSH = "custom_remote_ssh"
+	editorKindCustomHostedURL = "custom_hosted_url"
+	editorKindCustomCommand   = "custom_command"
 )
 
 type UserSettingsProvider interface {

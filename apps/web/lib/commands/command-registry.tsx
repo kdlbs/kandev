@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import {
   createContext,
@@ -8,8 +8,8 @@ import {
   useState,
   useSyncExternalStore,
   type ReactNode,
-} from 'react';
-import type { CommandItem } from './types';
+} from "react";
+import type { CommandItem } from "./types";
 
 type CommandRegistryContextValue = {
   register: (sourceId: string, commands: CommandItem[]) => void;
@@ -45,7 +45,7 @@ export function CommandRegistryProvider({ children }: { children: ReactNode }) {
       commandsRef.current.set(sourceId, commands);
       notify();
     },
-    [notify]
+    [notify],
   );
 
   const unregister = useCallback(
@@ -53,7 +53,7 @@ export function CommandRegistryProvider({ children }: { children: ReactNode }) {
       commandsRef.current.delete(sourceId);
       notify();
     },
-    [notify]
+    [notify],
   );
 
   const subscribe = useCallback((callback: () => void) => {
@@ -76,7 +76,7 @@ export function CommandRegistryProvider({ children }: { children: ReactNode }) {
 
 export function useCommandRegistry() {
   const ctx = useContext(CommandRegistryContext);
-  if (!ctx) throw new Error('useCommandRegistry must be used within CommandRegistryProvider');
+  if (!ctx) throw new Error("useCommandRegistry must be used within CommandRegistryProvider");
   return ctx;
 }
 

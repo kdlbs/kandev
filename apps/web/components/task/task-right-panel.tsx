@@ -1,22 +1,27 @@
-'use client';
+"use client";
 
-import type { ReactNode, MouseEvent } from 'react';
-import { memo, useEffect, useCallback, useState, useMemo } from 'react';
-import { Badge } from '@kandev/ui/badge';
-import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
-import { Group, Panel } from 'react-resizable-panels';
-import { TabsContent } from '@kandev/ui/tabs';
-import { getLocalStorage, setLocalStorage, getSessionStorage, setSessionStorage } from '@/lib/local-storage';
-import { ShellTerminal } from '@/components/task/shell-terminal';
-import { PassthroughTerminal } from '@/components/task/passthrough-terminal';
-import { useAppStore } from '@/components/state-provider';
-import { useLayoutStore } from '@/lib/state/layout-store';
-import { useDefaultLayout } from '@/lib/layout/use-default-layout';
-import { SessionTabs, type SessionTab } from '@/components/session-tabs';
-import { useRepositoryScripts } from '@/hooks/domains/workspace/use-repository-scripts';
-import { useTerminals } from '@/hooks/domains/session/use-terminals';
-import type { RepositoryScript } from '@/lib/types/http';
-import type { Terminal } from '@/hooks/domains/session/use-terminals';
+import type { ReactNode, MouseEvent } from "react";
+import { memo, useEffect, useCallback, useState, useMemo } from "react";
+import { Badge } from "@kandev/ui/badge";
+import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
+import { Group, Panel } from "react-resizable-panels";
+import { TabsContent } from "@kandev/ui/tabs";
+import {
+  getLocalStorage,
+  setLocalStorage,
+  getSessionStorage,
+  setSessionStorage,
+} from "@/lib/local-storage";
+import { ShellTerminal } from "@/components/task/shell-terminal";
+import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
+import { useAppStore } from "@/components/state-provider";
+import { useLayoutStore } from "@/lib/state/layout-store";
+import { useDefaultLayout } from "@/lib/layout/use-default-layout";
+import { SessionTabs, type SessionTab } from "@/components/session-tabs";
+import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
+import { useTerminals } from "@/hooks/domains/session/use-terminals";
+import type { RepositoryScript } from "@/lib/types/http";
+import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
@@ -36,9 +41,12 @@ function buildTerminalTabs(
   return terminals.map((terminal) => ({
     id: terminal.id,
     label: terminal.label,
-    className: terminal.closable ? 'group flex items-center cursor-pointer' : 'cursor-pointer',
+    className: terminal.closable ? "group flex items-center cursor-pointer" : "cursor-pointer",
     closable: terminal.closable,
-    onClose: terminal.type === 'dev-server' ? handleCloseDevTab : (e: MouseEvent) => handleCloseTab(e, terminal.id),
+    onClose:
+      terminal.type === "dev-server"
+        ? handleCloseDevTab
+        : (e: MouseEvent) => handleCloseTab(e, terminal.id),
   }));
 }
 
@@ -57,20 +65,46 @@ type CollapsedRightPanelProps = {
   onExpand: () => void;
 };
 
-function CollapsedRightPanel({ topPanel, tabs, terminalTabValue, handleTabChange, addTerminal, onExpand }: CollapsedRightPanelProps) {
+function CollapsedRightPanel({
+  topPanel,
+  tabs,
+  terminalTabValue,
+  handleTabChange,
+  addTerminal,
+  onExpand,
+}: CollapsedRightPanelProps) {
   return (
     <div className="h-full min-h-0 flex flex-col gap-1">
       <div className="flex-1 min-h-0">{topPanel}</div>
-      <SessionPanel borderSide="left" className="!h-10 !p-0 mt-[2px] justify-between items-center flex-row">
-        <SessionTabs tabs={tabs} activeTab={terminalTabValue} onTabChange={handleTabChange} showAddButton onAddTab={addTerminal} collapsible isCollapsed={true} onToggleCollapse={onExpand} className="flex-1 min-h-0" />
+      <SessionPanel
+        borderSide="left"
+        className="!h-10 !p-0 mt-[2px] justify-between items-center flex-row"
+      >
+        <SessionTabs
+          tabs={tabs}
+          activeTab={terminalTabValue}
+          onTabChange={handleTabChange}
+          showAddButton
+          onAddTab={addTerminal}
+          collapsible
+          isCollapsed={true}
+          onToggleCollapse={onExpand}
+          className="flex-1 min-h-0"
+        />
       </SessionPanel>
     </div>
   );
 }
 
-const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null, repositoryId = null, initialScripts = [], initialTerminals }: TaskRightPanelProps) {
-  const rightPanelIds = ['top', 'bottom'];
-  const rightLayoutKey = 'task-layout-right-v2';
+const TaskRightPanel = memo(function TaskRightPanel({
+  topPanel,
+  sessionId = null,
+  repositoryId = null,
+  initialScripts = [],
+  initialTerminals,
+}: TaskRightPanelProps) {
+  const rightPanelIds = ["top", "bottom"];
+  const rightLayoutKey = "task-layout-right-v2";
   const { defaultLayout: rightLayout, onLayoutChanged: onRightLayoutChange } = useDefaultLayout({
     id: rightLayoutKey,
     panelIds: rightPanelIds,
@@ -78,7 +112,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   });
 
   const [isBottomCollapsed, setIsBottomCollapsed] = useState<boolean>(() =>
-    getLocalStorage('task-right-panel-collapsed', false)
+    getLocalStorage("task-right-panel-collapsed", false),
   );
 
   const setRightPanelActiveTab = useAppStore((state) => state.setRightPanelActiveTab);
@@ -99,12 +133,15 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   } = useTerminals({ sessionId, initialTerminals });
 
   // Wrap handleCloseDevTab to also close the layout preview
-  const handleCloseDevTab = useCallback(async (event: MouseEvent) => {
-    await baseHandleCloseDevTab(event);
-    if (sessionId) {
-      closeLayoutPreview(sessionId);
-    }
-  }, [baseHandleCloseDevTab, sessionId, closeLayoutPreview]);
+  const handleCloseDevTab = useCallback(
+    async (event: MouseEvent) => {
+      await baseHandleCloseDevTab(event);
+      if (sessionId) {
+        closeLayoutPreview(sessionId);
+      }
+    },
+    [baseHandleCloseDevTab, sessionId, closeLayoutPreview],
+  );
 
   const { scripts, hasScripts } = useRightPanelScripts(repositoryId, initialScripts);
 
@@ -112,7 +149,7 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
   useEffect(() => {
     if (!sessionId || !hasScripts) return;
     const savedTab = getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null);
-    if (savedTab === 'commands') {
+    if (savedTab === "commands") {
       setRightPanelActiveTab(sessionId, savedTab);
     }
   }, [sessionId, hasScripts, setRightPanelActiveTab]);
@@ -125,22 +162,34 @@ const TaskRightPanel = memo(function TaskRightPanel({ topPanel, sessionId = null
 
   // Save collapse state to local storage
   useEffect(() => {
-    setLocalStorage('task-right-panel-collapsed', isBottomCollapsed);
+    setLocalStorage("task-right-panel-collapsed", isBottomCollapsed);
   }, [isBottomCollapsed]);
 
   const tabs: SessionTab[] = useMemo(() => {
-    const commandsTabs: SessionTab[] = hasScripts ? [{ id: 'commands', label: 'Commands' }] : [];
+    const commandsTabs: SessionTab[] = hasScripts ? [{ id: "commands", label: "Commands" }] : [];
     return [...commandsTabs, ...buildTerminalTabs(terminals, handleCloseDevTab, handleCloseTab)];
   }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab]);
 
-  const handleTabChange = useCallback((value: string) => {
-    if (sessionId) {
-      setRightPanelActiveTab(sessionId, value);
-    }
-  }, [sessionId, setRightPanelActiveTab]);
+  const handleTabChange = useCallback(
+    (value: string) => {
+      if (sessionId) {
+        setRightPanelActiveTab(sessionId, value);
+      }
+    },
+    [sessionId, setRightPanelActiveTab],
+  );
 
   if (isBottomCollapsed) {
-    return <CollapsedRightPanel topPanel={topPanel} tabs={tabs} terminalTabValue={terminalTabValue} handleTabChange={handleTabChange} addTerminal={addTerminal} onExpand={() => setIsBottomCollapsed(false)} />;
+    return (
+      <CollapsedRightPanel
+        topPanel={topPanel}
+        tabs={tabs}
+        terminalTabValue={terminalTabValue}
+        handleTabChange={handleTabChange}
+        addTerminal={addTerminal}
+        onExpand={() => setIsBottomCollapsed(false)}
+      />
+    );
   }
 
   return (
@@ -233,7 +282,7 @@ function TerminalTabContents({
       {terminals.map((terminal) => (
         <TabsContent key={terminal.id} value={terminal.id} className="flex-1 min-h-0">
           <SessionPanelContent className="p-0">
-            {terminal.type === 'dev-server' ? (
+            {terminal.type === "dev-server" ? (
               <ShellTerminal
                 key={devProcessId}
                 processOutput={devOutput}
@@ -246,7 +295,7 @@ function TerminalTabContents({
                 sessionId={sessionId ?? undefined}
                 mode="shell"
                 terminalId={terminal.id}
-                label={terminal.type === 'shell' ? terminal.label : undefined}
+                label={terminal.type === "shell" ? terminal.label : undefined}
               />
             )}
           </SessionPanelContent>

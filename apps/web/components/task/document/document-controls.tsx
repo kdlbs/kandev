@@ -1,13 +1,10 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import {
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarRightCollapse,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { useLayoutStore } from '@/lib/state/layout-store';
+import { useMemo } from "react";
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarRightCollapse } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useLayoutStore } from "@/lib/state/layout-store";
 
 type DocumentControlsProps = {
   activeSessionId: string | null;
@@ -40,7 +37,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               size="icon-sm"
               variant="ghost"
               className="cursor-pointer rounded-none border-r border-border/70"
-              onClick={() => showColumn(activeSessionId, 'left')}
+              onClick={() => showColumn(activeSessionId, "left")}
             >
               <IconLayoutSidebarLeftCollapse className="h-3 w-3" />
             </Button>
@@ -54,7 +51,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               size="icon-sm"
               variant="ghost"
               className="cursor-pointer rounded-none border-r border-border/70"
-              onClick={() => toggleColumn(activeSessionId, 'left')}
+              onClick={() => toggleColumn(activeSessionId, "left")}
             >
               <IconLayoutSidebarLeftCollapse className="h-3 w-3" />
             </Button>

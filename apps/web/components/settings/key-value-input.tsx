@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { IconPlus, IconX } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import type { KeyValue } from '@/lib/settings/types';
-import { generateUUID } from '@/lib/utils';
+import { IconPlus, IconX } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import type { KeyValue } from "@/lib/settings/types";
+import { generateUUID } from "@/lib/utils";
 
 type KeyValueInputProps = {
   items: KeyValue[];
@@ -18,25 +18,21 @@ type KeyValueInputProps = {
 export function KeyValueInput({
   items,
   onChange,
-  keyPlaceholder = 'Key',
-  valuePlaceholder = 'Value',
-  addButtonLabel = 'Add Item',
+  keyPlaceholder = "Key",
+  valuePlaceholder = "Value",
+  addButtonLabel = "Add Item",
   masked = false,
 }: KeyValueInputProps) {
   const handleAdd = () => {
-    onChange([...items, { id: generateUUID(), key: '', value: '' }]);
+    onChange([...items, { id: generateUUID(), key: "", value: "" }]);
   };
 
   const handleRemove = (id: string) => {
     onChange(items.filter((item) => item.id !== id));
   };
 
-  const handleChange = (id: string, field: 'key' | 'value', value: string) => {
-    onChange(
-      items.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item
-      )
-    );
+  const handleChange = (id: string, field: "key" | "value", value: string) => {
+    onChange(items.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
 
   return (
@@ -46,21 +42,17 @@ export function KeyValueInput({
           <Input
             placeholder={keyPlaceholder}
             value={item.key}
-            onChange={(e) => handleChange(item.id, 'key', e.target.value)}
+            onChange={(e) => handleChange(item.id, "key", e.target.value)}
             className="flex-1"
           />
           <Input
-            type={masked ? 'password' : 'text'}
+            type={masked ? "password" : "text"}
             placeholder={valuePlaceholder}
             value={item.value}
-            onChange={(e) => handleChange(item.id, 'value', e.target.value)}
+            onChange={(e) => handleChange(item.id, "value", e.target.value)}
             className="flex-1"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => handleRemove(item.id)}
-          >
+          <Button variant="ghost" size="icon" onClick={() => handleRemove(item.id)}>
             <IconX className="h-4 w-4" />
           </Button>
         </div>

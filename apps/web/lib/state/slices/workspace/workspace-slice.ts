@@ -1,16 +1,24 @@
-import type { StateCreator } from 'zustand';
-import type { WorkspaceSlice, WorkspaceSliceState } from './types';
+import type { StateCreator } from "zustand";
+import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
 
 export const defaultWorkspaceState: WorkspaceSliceState = {
   workspaces: { items: [], activeId: null },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
-  repositoryBranches: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
-  repositoryScripts: { itemsByRepositoryId: {}, loadingByRepositoryId: {}, loadedByRepositoryId: {} },
+  repositoryBranches: {
+    itemsByRepositoryId: {},
+    loadingByRepositoryId: {},
+    loadedByRepositoryId: {},
+  },
+  repositoryScripts: {
+    itemsByRepositoryId: {},
+    loadingByRepositoryId: {},
+    loadedByRepositoryId: {},
+  },
 };
 
 export const createWorkspaceSlice: StateCreator<
   WorkspaceSlice,
-  [['zustand/immer', never]],
+  [["zustand/immer", never]],
   [],
   WorkspaceSlice
 > = (set, get) => ({

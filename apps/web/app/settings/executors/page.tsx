@@ -1,28 +1,28 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { IconChevronRight, IconBrandDocker, IconCloud } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Separator } from '@kandev/ui/separator';
-import { useAppStore } from '@/components/state-provider';
-import type { Executor } from '@/lib/types/http';
-import { EXECUTOR_ICON_MAP, getExecutorLabel } from '@/lib/executor-icons';
+import Link from "next/link";
+import { IconChevronRight, IconBrandDocker, IconCloud } from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { Card, CardContent } from "@kandev/ui/card";
+import { Separator } from "@kandev/ui/separator";
+import { useAppStore } from "@/components/state-provider";
+import type { Executor } from "@/lib/types/http";
+import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 
 const CREATION_OPTIONS = [
   {
-    id: 'local_docker',
-    label: 'Local Docker',
-    description: 'Run on the local Docker daemon.',
-    href: '/settings/executor/new?type=local_docker',
+    id: "local_docker",
+    label: "Local Docker",
+    description: "Run on the local Docker daemon.",
+    href: "/settings/executor/new?type=local_docker",
     icon: IconBrandDocker,
     enabled: true,
   },
   {
-    id: 'remote_docker',
-    label: 'Remote Docker',
-    description: 'Connect to a remote Docker host.',
-    href: '/settings/executor/new?type=remote_docker',
+    id: "remote_docker",
+    label: "Remote Docker",
+    description: "Connect to a remote Docker host.",
+    href: "/settings/executor/new?type=remote_docker",
     icon: IconCloud,
     enabled: true,
   },
@@ -63,22 +63,20 @@ function CreationOptionCard({ option }: CreationOptionCardProps) {
   }
   return (
     <Link href={option.href} className="block">
-      <Card className="h-full hover:bg-accent transition-colors">
-        {cardBody}
-      </Card>
+      <Card className="h-full hover:bg-accent transition-colors">{cardBody}</Card>
     </Link>
   );
 }
 
 function ExecutorTypeDescription({ type }: { type: string }) {
-  if (type === 'local') {
+  if (type === "local") {
     return (
       <div className="text-xs text-muted-foreground mt-1">
         Runs agents directly in the repository folder. No worktree isolation.
       </div>
     );
   }
-  if (type === 'worktree') {
+  if (type === "worktree") {
     return (
       <div className="text-xs text-muted-foreground mt-1">
         Creates a git worktree for each session. Agents work in isolated branches.
@@ -101,7 +99,9 @@ function ExecutorIconBadge({ type }: { type: string }) {
 
 function ExecutorListItem({ executor }: { executor: Executor }) {
   const typeLabel = getExecutorLabel(executor.type);
-  const showDockerHost = (executor.type === 'local_docker' || executor.type === 'remote_docker') && executor.config?.docker_host;
+  const showDockerHost =
+    (executor.type === "local_docker" || executor.type === "remote_docker") &&
+    executor.config?.docker_host;
 
   return (
     <Link href={`/settings/executor/${executor.id}`}>
@@ -116,7 +116,7 @@ function ExecutorListItem({ executor }: { executor: Executor }) {
                   <Badge variant="secondary" className="text-xs">
                     {typeLabel}
                   </Badge>
-                  {executor.status === 'disabled' && (
+                  {executor.status === "disabled" && (
                     <Badge variant="outline" className="text-xs">
                       Disabled
                     </Badge>

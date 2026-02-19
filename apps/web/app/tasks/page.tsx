@@ -4,9 +4,9 @@ import {
   listTasksByWorkspaceAction,
   listRepositoriesAction,
   listWorkflowStepsAction,
-} from '@/app/actions/workspaces';
-import { TasksPageClient } from './tasks-page-client';
-import type { Workflow, Task, WorkflowStep, Repository, Workspace } from '@/lib/types/http';
+} from "@/app/actions/workspaces";
+import { TasksPageClient } from "./tasks-page-client";
+import type { Workflow, Task, WorkflowStep, Repository, Workspace } from "@/lib/types/http";
 
 export default async function TasksPage({
   searchParams,
@@ -47,12 +47,12 @@ export default async function TasksPage({
 
       // Fetch workflow steps for each workflow
       const stepsResponses = await Promise.all(
-        workflows.map((workflow) => listWorkflowStepsAction(workflow.id))
+        workflows.map((workflow) => listWorkflowStepsAction(workflow.id)),
       );
       steps = stepsResponses.flatMap((r) => r.steps);
     }
   } catch (error) {
-    console.error('Failed to load tasks page data:', error);
+    console.error("Failed to load tasks page data:", error);
   }
 
   return (

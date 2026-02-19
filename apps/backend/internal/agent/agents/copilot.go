@@ -47,8 +47,8 @@ func (a *Copilot) DisplayName() string { return "Copilot" }
 func (a *Copilot) Description() string {
 	return "GitHub Copilot CLI-powered autonomous coding agent using the Copilot SDK protocol."
 }
-func (a *Copilot) Enabled() bool      { return true }
-func (a *Copilot) DisplayOrder() int   { return 6 }
+func (a *Copilot) Enabled() bool     { return true }
+func (a *Copilot) DisplayOrder() int { return 6 }
 
 func (a *Copilot) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
@@ -91,7 +91,6 @@ func (a *Copilot) BuildCommand(opts CommandOptions) Command {
 		Settings(copilotPermSettings, opts.PermissionValues).
 		Build()
 }
-
 
 func (a *Copilot) Runtime() *RuntimeConfig {
 	canRecover := true

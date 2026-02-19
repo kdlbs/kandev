@@ -884,4 +884,3 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 func (s *Service) GetQueuedTasks() []*queue.QueuedTask {
 	return s.queue.List()
 }
-

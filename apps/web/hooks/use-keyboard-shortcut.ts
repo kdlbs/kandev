@@ -2,9 +2,9 @@
  * React hook for handling keyboard shortcuts
  */
 
-import { useEffect, useCallback, useRef } from 'react';
-import type { KeyboardShortcut } from '@/lib/keyboard/constants';
-import { matchesShortcut } from '@/lib/keyboard/utils';
+import { useEffect, useCallback, useRef } from "react";
+import type { KeyboardShortcut } from "@/lib/keyboard/constants";
+import { matchesShortcut } from "@/lib/keyboard/utils";
 
 export type KeyboardShortcutOptions = {
   /** Whether the shortcut is enabled (default: true) */
@@ -19,7 +19,7 @@ export type KeyboardShortcutOptions = {
 
 /**
  * Hook for handling global keyboard shortcuts
- * 
+ *
  * @example
  * ```tsx
  * useKeyboardShortcut(SHORTCUTS.SUBMIT, handleSubmit);
@@ -28,13 +28,13 @@ export type KeyboardShortcutOptions = {
 export function useKeyboardShortcut(
   shortcut: KeyboardShortcut,
   callback: (event: KeyboardEvent) => void,
-  options: KeyboardShortcutOptions = {}
+  options: KeyboardShortcutOptions = {},
 ) {
   const {
     enabled = true,
     preventDefault = true,
     stopPropagation = false,
-    target = typeof window !== 'undefined' ? window : null,
+    target = typeof window !== "undefined" ? window : null,
   } = options;
 
   // Use ref to avoid recreating the handler on every render
@@ -55,16 +55,16 @@ export function useKeyboardShortcut(
         callbackRef.current(event);
       }
     },
-    [enabled, preventDefault, stopPropagation, shortcut]
+    [enabled, preventDefault, stopPropagation, shortcut],
   );
 
   useEffect(() => {
     if (!enabled || !target) return;
 
-    target.addEventListener('keydown', handleKeyDown as EventListener);
+    target.addEventListener("keydown", handleKeyDown as EventListener);
 
     return () => {
-      target.removeEventListener('keydown', handleKeyDown as EventListener);
+      target.removeEventListener("keydown", handleKeyDown as EventListener);
     };
   }, [enabled, target, handleKeyDown]);
 }
@@ -83,13 +83,9 @@ export function useKeyboardShortcut(
 export function useKeyboardShortcutHandler(
   shortcut: KeyboardShortcut,
   callback: (event: React.KeyboardEvent) => void,
-  options: Omit<KeyboardShortcutOptions, 'target'> = {}
+  options: Omit<KeyboardShortcutOptions, "target"> = {},
 ) {
-  const {
-    enabled = true,
-    preventDefault = true,
-    stopPropagation = false,
-  } = options;
+  const { enabled = true, preventDefault = true, stopPropagation = false } = options;
 
   // Use ref to avoid recreating the handler on every render
   const callbackRef = useRef(callback);
@@ -113,7 +109,6 @@ export function useKeyboardShortcutHandler(
         callbackRef.current(event);
       }
     },
-    [enabled, preventDefault, stopPropagation, shortcut]
+    [enabled, preventDefault, stopPropagation, shortcut],
   );
 }
-

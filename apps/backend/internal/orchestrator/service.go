@@ -430,26 +430,27 @@ func (s *Service) Stop() error {
 // Recovery Strategy:
 //
 //  1. Query database for sessions marked as "running" (persisted executor state)
+//
 //  2. For each session, determine recovery action based on previous state:
 //
 //     Terminal States (Completed/Failed/Cancelled):
-//       - Clean up stale executor record from database
-//       - Skip resume (session is already done)
+//     - Clean up stale executor record from database
+//     - Skip resume (session is already done)
 //
 //     Never-Started State (Created):
-//       - Clean up executor record (session never actually ran)
-//       - Skip resume (nothing to recover)
+//     - Clean up executor record (session never actually ran)
+//     - Skip resume (nothing to recover)
 //
 //     Active States (Starting/Running/WaitingForInput):
-//       - Validate workspace/worktree still exists
-//       - Launch new agentctl instance
-//       - Restore session via ACP session/load (if resumable)
-//       - Transition to WaitingForInput (ready for next prompt)
+//     - Validate workspace/worktree still exists
+//     - Launch new agentctl instance
+//     - Restore session via ACP session/load (if resumable)
+//     - Transition to WaitingForInput (ready for next prompt)
 //
 //  3. Handle resume failures gracefully:
-//       - Mark session as Failed in database
-//       - Clean up executor record
-//       - Continue with next session (don't block other recoveries)
+//     - Mark session as Failed in database
+//     - Clean up executor record
+//     - Continue with next session (don't block other recoveries)
 //
 // Agent Resume Behavior:
 //

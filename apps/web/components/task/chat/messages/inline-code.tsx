@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { cn } from '@/lib/utils';
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
 type InlineCodeProps = {
   children: React.ReactNode;
@@ -11,17 +11,17 @@ type InlineCodeProps = {
 export function InlineCode({ children }: InlineCodeProps) {
   const { copy } = useCopyToClipboard();
   const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipText, setTooltipText] = useState('Copy to clipboard');
+  const [tooltipText, setTooltipText] = useState("Copy to clipboard");
 
   const handleClick = async () => {
     const text = String(children);
     await copy(text);
-    setTooltipText('Copied!');
+    setTooltipText("Copied!");
     setShowTooltip(true);
 
     setTimeout(() => {
       setShowTooltip(false);
-      setTimeout(() => setTooltipText('Copy to clipboard'), 200);
+      setTimeout(() => setTooltipText("Copy to clipboard"), 200);
     }, 1500);
   };
 
@@ -30,8 +30,8 @@ export function InlineCode({ children }: InlineCodeProps) {
       <code
         onClick={handleClick}
         className={cn(
-          'px-0.5 py-0.5 text-indigo-400 rounded font-mono',
-          'cursor-pointer hover:bg-indigo-500/30 transition-colors'
+          "px-0.5 py-0.5 text-indigo-400 rounded font-mono",
+          "cursor-pointer hover:bg-indigo-500/30 transition-colors",
         )}
       >
         {children}
@@ -40,11 +40,11 @@ export function InlineCode({ children }: InlineCodeProps) {
       {/* Tooltip */}
       <span
         className={cn(
-          'absolute bottom-full left-1/2 -translate-x-1/2 mb-1',
-          'px-2 py-1 text-xs text-white bg-gray-900 rounded whitespace-nowrap',
-          'pointer-events-none transition-opacity duration-200',
-          'opacity-0 group-hover/inline-code:opacity-100',
-          showTooltip && 'opacity-100'
+          "absolute bottom-full left-1/2 -translate-x-1/2 mb-1",
+          "px-2 py-1 text-xs text-white bg-gray-900 rounded whitespace-nowrap",
+          "pointer-events-none transition-opacity duration-200",
+          "opacity-0 group-hover/inline-code:opacity-100",
+          showTooltip && "opacity-100",
         )}
       >
         {tooltipText}

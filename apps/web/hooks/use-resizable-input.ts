@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getChatInputHeight, setChatInputHeight } from '@/lib/local-storage';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getChatInputHeight, setChatInputHeight } from "@/lib/local-storage";
 
 const MIN_HEIGHT = 100;
 const DEFAULT_HEIGHT = 134;
@@ -9,9 +9,10 @@ const MAX_ABSOLUTE = 450;
 
 export function useResizableInput(sessionId: string | undefined) {
   const [height, setHeight] = useState(() => {
-    const maxHeight = typeof window !== 'undefined'
-      ? Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE)
-      : MAX_ABSOLUTE;
+    const maxHeight =
+      typeof window !== "undefined"
+        ? Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE)
+        : MAX_ABSOLUTE;
     if (sessionId) {
       const saved = getChatInputHeight(sessionId);
       return saved ? Math.min(saved, maxHeight) : DEFAULT_HEIGHT;
@@ -39,11 +40,14 @@ export function useResizableInput(sessionId: string | undefined) {
   }, [sessionId]);
 
   // Persist height after drag ends
-  const persistHeight = useCallback((h: number) => {
-    if (sessionId) {
-      setChatInputHeight(sessionId, h);
-    }
-  }, [sessionId]);
+  const persistHeight = useCallback(
+    (h: number) => {
+      if (sessionId) {
+        setChatInputHeight(sessionId, h);
+      }
+    },
+    [sessionId],
+  );
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -51,10 +55,10 @@ export function useResizableInput(sessionId: string | undefined) {
       isDragging.current = true;
       startY.current = e.clientY;
       startHeight.current = height;
-      document.body.style.cursor = 'ns-resize';
-      document.body.style.userSelect = 'none';
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
     },
-    [height]
+    [height],
   );
 
   const resetHeight = useCallback(() => {
@@ -79,8 +83,8 @@ export function useResizableInput(sessionId: string | undefined) {
     const handleMouseUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
       // Persist the final height after drag
       setHeight((h) => {
         persistHeight(h);
@@ -88,11 +92,11 @@ export function useResizableInput(sessionId: string | undefined) {
       });
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [persistHeight]);
 

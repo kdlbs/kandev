@@ -1,5 +1,5 @@
-import { useMemo, useCallback } from 'react';
-import type { DiffComment } from './types';
+import { useMemo, useCallback } from "react";
+import type { DiffComment } from "./types";
 
 /** Build a DiffComment object from common parameters */
 export function buildDiffComment(params: {
@@ -7,22 +7,22 @@ export function buildDiffComment(params: {
   sessionId: string;
   startLine: number;
   endLine: number;
-  side: DiffComment['side'];
+  side: DiffComment["side"];
   text: string;
   codeContent?: string;
 }): DiffComment {
   return {
     id: `${params.filePath}-${Date.now()}`,
-    source: 'diff',
+    source: "diff",
     sessionId: params.sessionId,
     filePath: params.filePath,
     startLine: Math.min(params.startLine, params.endLine),
     endLine: Math.max(params.startLine, params.endLine),
     side: params.side,
-    codeContent: params.codeContent ?? '',
+    codeContent: params.codeContent ?? "",
     text: params.text,
     createdAt: new Date().toISOString(),
-    status: 'pending',
+    status: "pending",
   };
 }
 
@@ -49,7 +49,8 @@ export function useCommentActions(params: {
   onCommentUpdate?: (commentId: string, updates: Partial<DiffComment>) => void;
   externalComments?: DiffComment[];
 }) {
-  const { removeComment, updateComment, setEditingComment, onCommentDelete, externalComments } = params;
+  const { removeComment, updateComment, setEditingComment, onCommentDelete, externalComments } =
+    params;
 
   const handleCommentDelete = useCallback(
     (commentId: string) => {
@@ -59,7 +60,7 @@ export function useCommentActions(params: {
         removeComment(commentId);
       }
     },
-    [removeComment, onCommentDelete, externalComments]
+    [removeComment, onCommentDelete, externalComments],
   );
 
   const handleCommentUpdate = useCallback(
@@ -67,7 +68,7 @@ export function useCommentActions(params: {
       updateComment(commentId, { text: content });
       setEditingComment(null);
     },
-    [updateComment, setEditingComment]
+    [updateComment, setEditingComment],
   );
 
   return { handleCommentDelete, handleCommentUpdate };

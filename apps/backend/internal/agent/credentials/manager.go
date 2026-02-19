@@ -182,4 +182,3 @@ func (m *Manager) ClearCache() {
 	m.cache = make(map[string]*Credential)
 	m.logger.Debug("credential cache cleared")
 }
-

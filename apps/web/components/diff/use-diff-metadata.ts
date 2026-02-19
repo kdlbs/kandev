@@ -1,7 +1,7 @@
-import { useMemo } from 'react';
-import { parsePatchFiles, parseDiffFromFile } from '@pierre/diffs';
-import type { FileDiffMetadata } from '@pierre/diffs';
-import type { FileDiffData } from '@/lib/diff/types';
+import { useMemo } from "react";
+import { parsePatchFiles, parseDiffFromFile } from "@pierre/diffs";
+import type { FileDiffMetadata } from "@pierre/diffs";
+import type { FileDiffData } from "@/lib/diff/types";
 
 /**
  * Check if Go code contains patterns that trigger catastrophic regex backtracking
@@ -14,7 +14,7 @@ function hasProblematicGoPattern(content: string | undefined): boolean {
 }
 
 function isGoFile(filePath: string): boolean {
-  return filePath.endsWith('.go');
+  return filePath.endsWith(".go");
 }
 
 /** Parse diff data into FileDiffMetadata, with Go-specific safety checks. */
@@ -27,14 +27,14 @@ export function useDiffMetadata(data: FileDiffData): FileDiffMetadata | null {
     } else if (data.oldContent || data.newContent) {
       result = parseDiffFromFile(
         { name: data.filePath, contents: data.oldContent },
-        { name: data.filePath, contents: data.newContent }
+        { name: data.filePath, contents: data.newContent },
       );
     }
 
     if (result && isGoFile(data.filePath)) {
       const contentToCheck = data.newContent || data.oldContent || data.diff;
       if (hasProblematicGoPattern(contentToCheck)) {
-        result = { ...result, lang: 'text' };
+        result = { ...result, lang: "text" };
       }
     }
 

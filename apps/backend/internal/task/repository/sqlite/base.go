@@ -440,4 +440,3 @@ func (r *Repository) initReviewSchema() error {
 	`)
 	return err
 }
-

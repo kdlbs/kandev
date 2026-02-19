@@ -1,4 +1,4 @@
-import { getBackendConfig } from '@/lib/config';
+import { getBackendConfig } from "@/lib/config";
 
 export type ApiRequestOptions = {
   baseUrl?: string;
@@ -7,7 +7,7 @@ export type ApiRequestOptions = {
 };
 
 function resolveUrl(pathOrUrl: string, baseUrl: string) {
-  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
     return pathOrUrl;
   }
   return `${baseUrl}${pathOrUrl}`;
@@ -20,7 +20,7 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
     ...options?.init,
     cache: options?.cache,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(options?.init?.headers ?? {}),
     },
   });

@@ -1,7 +1,7 @@
-import type { Repository } from '@/lib/types/http';
-import type { KanbanState } from '@/lib/state/store';
+import type { Repository } from "@/lib/types/http";
+import type { KanbanState } from "@/lib/state/store";
 
-export type KanbanTask = KanbanState['tasks'][number];
+export type KanbanTask = KanbanState["tasks"][number];
 
 // Minimal task type for filtering - only needs id and repositoryId
 export type FilterableTask = {
@@ -11,7 +11,7 @@ export type FilterableTask = {
 
 export function mapSelectedRepositoryIds(
   repositories: Repository[],
-  selectedIds: string[]
+  selectedIds: string[],
 ): Set<string> {
   if (selectedIds.length === 0) {
     return new Set();
@@ -27,7 +27,7 @@ export function mapSelectedRepositoryIds(
 
 export function filterTasksByRepositories<T extends FilterableTask>(
   tasks: T[],
-  selectedRepositoryIds: Set<string>
+  selectedRepositoryIds: Set<string>,
 ): T[] {
   if (selectedRepositoryIds.size === 0) {
     return tasks;

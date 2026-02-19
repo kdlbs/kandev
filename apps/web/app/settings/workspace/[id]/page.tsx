@@ -1,4 +1,4 @@
-import { WorkspaceEditClient } from '@/app/settings/workspace/workspace-edit-client';
+import { WorkspaceEditClient } from "@/app/settings/workspace/workspace-edit-client";
 
 export default async function WorkspaceEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
