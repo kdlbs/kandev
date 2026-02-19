@@ -45,6 +45,39 @@ jobs:
       - name: Build
         run: go build -v ./cmd/kandev
 
+      - name: Check gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$(git rev-list --max-parents=0 HEAD)"
+          fi
+
+          CHANGED_GO_FILES="$(
+            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}"..."${{ github.sha }}" -- apps/backend \
+            | grep -E '^apps/backend/.*\.go$' \
+            || true
+          )"
+
+          if [[ -z "${CHANGED_GO_FILES}" ]]; then
+            echo "No backend Go files changed."
+            exit 0
+          fi
+
+          UNFORMATTED="$(echo "${CHANGED_GO_FILES}" | sed 's#^apps/backend/##' | xargs gofmt -l)"
+          if [[ -n "${UNFORMATTED}" ]]; then
+            echo "The following changed Go files are not formatted with gofmt:"
+            echo "${UNFORMATTED}"
+            exit 1
+          fi
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
