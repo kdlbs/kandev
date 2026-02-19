@@ -57,6 +57,47 @@ const EDITOR_OPTIONS = {
   "semanticHighlighting.enabled": true,
 };
 
+type EditorState = ReturnType<typeof useMonacoEditorComments>;
+
+function buildCommentZones(state: EditorState, addZone: (line: number, height: number, node: React.ReactNode) => void) {
+  for (const comment of state.comments) {
+    const isEditing = state.editingCommentId === comment.id;
+    const node = isEditing ? (
+      <div className="px-2 py-0.5" data-comment-zone>
+        <CommentForm
+          initialContent={comment.text}
+          onSubmit={(c) => state.handleCommentUpdateRef.current(comment.id, c)}
+          onCancel={() => state.setEditingComment(null)}
+          isEditing
+        />
+      </div>
+    ) : (
+      <div className="px-2 py-0.5" data-comment-zone>
+        <CommentDisplay
+          comment={comment}
+          onDelete={() => state.handleCommentDeleteRef.current(comment.id)}
+          onEdit={() => state.setEditingComment(comment.id)}
+          showCode={false}
+          compact
+        />
+      </div>
+    );
+    addZone(comment.endLine, isEditing ? 120 : 32, node);
+  }
+  if (state.formZoneRange) {
+    addZone(
+      state.formZoneRange.endLine,
+      120,
+      <div className="px-2 py-1" data-comment-zone>
+        <CommentForm
+          onSubmit={(c) => state.handleCommentSubmitRef.current(c)}
+          onCancel={() => { state.setFormZoneRange(null); state.clearGutterSelection(); }}
+        />
+      </div>,
+    );
+  }
+}
+
 export function MonacoCodeEditor({
   path,
   content,
@@ -78,90 +119,19 @@ export function MonacoCodeEditor({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
 
-  const state = useMonacoEditorComments({
-    path,
-    enableComments,
-    sessionId,
-    wrapperRef,
-    onChange,
-    onSave,
-    contentRef,
-  });
+  const state = useMonacoEditorComments({ path, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef });
+  const lsp = useMonacoEditorLsp({ sessionId, worktreePath, language, path, contentRef, editorRef: state.editorRef });
+  const { diffStats } = useMonacoDiffDecorations({ originalContent, isDirty, showDiffIndicators: state.showDiffIndicators, vcsDiff, editorReady: state.editorInstance, contentRef, editorRef: state.editorRef, diffDecorationsRef: state.diffDecorationsRef });
 
-  const lsp = useMonacoEditorLsp({
-    sessionId,
-    worktreePath,
-    language,
-    path,
-    contentRef,
-    editorRef: state.editorRef,
-  });
-
-  const { diffStats } = useMonacoDiffDecorations({
-    originalContent,
-    isDirty,
-    showDiffIndicators: state.showDiffIndicators,
-    vcsDiff,
-    editorReady: state.editorInstance,
-    contentRef,
-    editorRef: state.editorRef,
-    diffDecorationsRef: state.diffDecorationsRef,
-  });
-
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
+  useEffect(() => { contentRef.current = content; }, [content]);
 
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],
-    (addZone) => {
-      for (const comment of state.comments) {
-        const isEditing = state.editingCommentId === comment.id;
-        const node = isEditing ? (
-          <div className="px-2 py-0.5" data-comment-zone>
-            <CommentForm
-              initialContent={comment.text}
-              onSubmit={(c) => state.handleCommentUpdateRef.current(comment.id, c)}
-              onCancel={() => state.setEditingComment(null)}
-              isEditing
-            />
-          </div>
-        ) : (
-          <div className="px-2 py-0.5" data-comment-zone>
-            <CommentDisplay
-              comment={comment}
-              onDelete={() => state.handleCommentDeleteRef.current(comment.id)}
-              onEdit={() => state.setEditingComment(comment.id)}
-              showCode={false}
-              compact
-            />
-          </div>
-        );
-        addZone(comment.endLine, isEditing ? 120 : 32, node);
-      }
-      if (state.formZoneRange) {
-        addZone(
-          state.formZoneRange.endLine,
-          120,
-          <div className="px-2 py-1" data-comment-zone>
-            <CommentForm
-              onSubmit={(c) => state.handleCommentSubmitRef.current(c)}
-              onCancel={() => {
-                state.setFormZoneRange(null);
-                state.clearGutterSelection();
-              }}
-            />
-          </div>,
-        );
-      }
-    },
+    (addZone) => buildCommentZones(state, addZone),
   );
 
-  const options = {
-    ...EDITOR_OPTIONS,
-    wordWrap: state.wrapEnabled ? ("on" as const) : ("off" as const),
-  };
+  const options = { ...EDITOR_OPTIONS, wordWrap: state.wrapEnabled ? ("on" as const) : ("off" as const) };
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
@@ -198,11 +168,7 @@ export function MonacoCodeEditor({
           onMount={state.handleEditorDidMount}
           keepCurrentModel
           options={options}
-          loading={
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading editor...
-            </div>
-          }
+          loading={<div className="flex h-full items-center justify-center text-muted-foreground text-sm">Loading editor...</div>}
         />
         {state.floatingButtonPos && !state.formZoneRange && (
           <Button

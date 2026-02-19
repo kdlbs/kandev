@@ -40,28 +40,12 @@ function ImagePanel({ path, worktreePath }: { path: string; worktreePath: string
   );
 }
 
-export const FileEditorPanel = memo(function FileEditorPanel(
-  props: IDockviewPanelProps<{ path: string }>,
+function useFileLoader(
+  hasFile: boolean,
+  activeSessionId: string | null,
+  path: string,
+  setFileState: (path: string, state: FileEditorState) => void,
 ) {
-  const path = props.params.path;
-
-  const hasFile = useDockviewStore((s) => s.openFiles.has(path));
-  const content = useDockviewStore((s) => s.openFiles.get(path)?.content ?? "");
-  const isDirty = useDockviewStore((s) => s.openFiles.get(path)?.isDirty ?? false);
-  const hasRemoteUpdate = useDockviewStore((s) => s.openFiles.get(path)?.hasRemoteUpdate ?? false);
-  const isBinary = useDockviewStore((s) => s.openFiles.get(path)?.isBinary ?? false);
-  const originalContent = useDockviewStore((s) => s.openFiles.get(path)?.originalContent ?? "");
-  const setFileState = useDockviewStore((s) => s.setFileState);
-
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const vcsDiff = gitStatus?.files?.[path]?.diff;
-  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
-    useFileEditors();
-
   const loadingRef = useRef(false);
   useEffect(() => {
     if (hasFile || loadingRef.current || !activeSessionId) return;
@@ -93,6 +77,30 @@ export const FileEditorPanel = memo(function FileEditorPanel(
         loadingRef.current = false;
       });
   }, [hasFile, activeSessionId, path, setFileState]);
+}
+
+export const FileEditorPanel = memo(function FileEditorPanel(
+  props: IDockviewPanelProps<{ path: string }>,
+) {
+  const path = props.params.path;
+
+  const hasFile = useDockviewStore((s) => s.openFiles.has(path));
+  const content = useDockviewStore((s) => s.openFiles.get(path)?.content ?? "");
+  const isDirty = useDockviewStore((s) => s.openFiles.get(path)?.isDirty ?? false);
+  const hasRemoteUpdate = useDockviewStore((s) => s.openFiles.get(path)?.hasRemoteUpdate ?? false);
+  const isBinary = useDockviewStore((s) => s.openFiles.get(path)?.isBinary ?? false);
+  const originalContent = useDockviewStore((s) => s.openFiles.get(path)?.originalContent ?? "");
+  const setFileState = useDockviewStore((s) => s.setFileState);
+
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeSession = useAppStore((state) =>
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
+  );
+  const gitStatus = useSessionGitStatus(activeSessionId);
+  const vcsDiff = gitStatus?.files?.[path]?.diff;
+  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
+    useFileEditors();
+  useFileLoader(hasFile, activeSessionId, path, setFileState);
 
   const onChange = useCallback(
     (newContent: string) => handleFileChange(path, newContent),

@@ -352,14 +352,8 @@ function CenterRightActions() {
   );
 }
 
-function TerminalGroupRightActions() {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const repositoryId = useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return state.taskSessions.items[sessionId]?.repository_id ?? null;
-  });
-  const hasDevScript = useAppStore((state) => {
+function useHasActiveSessionDevScript() {
+  return useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return false;
     const repoId = state.taskSessions.items[sessionId]?.repository_id;
@@ -368,6 +362,16 @@ function TerminalGroupRightActions() {
     const repo = allRepos.find((r) => r.id === repoId);
     return Boolean(repo?.dev_script?.trim());
   });
+}
+
+function TerminalGroupRightActions() {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const repositoryId = useAppStore((state) => {
+    const sessionId = state.tasks.activeSessionId;
+    if (!sessionId) return null;
+    return state.taskSessions.items[sessionId]?.repository_id ?? null;
+  });
+  const hasDevScript = useHasActiveSessionDevScript();
 
   const { scripts } = useRepositoryScripts(repositoryId);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);

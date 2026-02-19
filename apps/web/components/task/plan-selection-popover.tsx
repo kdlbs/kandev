@@ -106,6 +106,36 @@ function usePopoverDismiss(
   }, [onClose]);
 }
 
+function usePopoverComposer(
+  comment: string,
+  selectedText: string,
+  onAdd: (comment: string, selectedText: string) => void,
+  onClose: () => void,
+) {
+  const handleSubmit = useCallback(() => {
+    if (!comment.trim()) return;
+    onAdd(comment.trim(), selectedText);
+    onClose();
+  }, [comment, onAdd, selectedText, onClose]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit],
+  );
+
+  return {
+    handleSubmit,
+    handleKeyDown,
+    isDisabled: !comment.trim(),
+    previewText: selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText,
+  };
+}
+
 export function PlanSelectionPopover({
   selectedText,
   position,
@@ -123,26 +153,12 @@ export function PlanSelectionPopover({
     textareaRef.current?.focus();
   }, []);
   usePopoverDismiss(onClose, popoverRef);
-
-  const handleSubmit = useCallback(() => {
-    if (!comment.trim()) return;
-    onAdd(comment.trim(), selectedText);
-    onClose();
-  }, [comment, onAdd, selectedText, onClose]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        handleSubmit();
-      }
-    },
-    [handleSubmit],
+  const { handleSubmit, handleKeyDown, isDisabled, previewText } = usePopoverComposer(
+    comment,
+    selectedText,
+    onAdd,
+    onClose,
   );
-
-  const isDisabled = !comment.trim();
-  const previewText =
-    selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText;
   const { left, top } = computePopoverPosition(position);
 
   // Portal to document.body to escape dockview's CSS transform containing block

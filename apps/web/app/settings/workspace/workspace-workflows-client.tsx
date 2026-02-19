@@ -5,19 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IconDownload, IconLayoutColumns, IconPlus, IconUpload } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
-import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
-import { Textarea } from "@kandev/ui/textarea";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
-import { cn, generateUUID } from "@/lib/utils";
+import { generateUUID } from "@/lib/utils";
 import {
   deleteWorkflowAction,
   updateWorkflowAction,
@@ -32,197 +26,11 @@ import type {
   WorkflowTemplate,
   WorkflowExportData,
 } from "@/lib/types/http";
-
-type ImportWorkflowsDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  importJson: string;
-  onImportJsonChange: (value: string) => void;
-  onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onImport: () => void;
-  importLoading: boolean;
-};
-
-function ImportWorkflowsDialog({
-  open,
-  onOpenChange,
-  importJson,
-  onImportJsonChange,
-  onFileUpload,
-  fileInputRef,
-  onImport,
-  importLoading,
-}: ImportWorkflowsDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Import Workflows</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Upload JSON file</Label>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={onFileUpload}
-              className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Or paste JSON</Label>
-            <Textarea
-              placeholder='{"version": 1, "type": "kandev_workflow", "workflows": [...]}'
-              value={importJson}
-              onChange={(e) => onImportJsonChange(e.target.value)}
-              className="font-mono text-xs max-h-96 overflow-y-auto"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
-          </Button>
-          <Button
-            onClick={onImport}
-            disabled={!importJson.trim() || importLoading}
-            className="cursor-pointer"
-          >
-            {importLoading ? "Importing..." : "Import"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function TemplateRadioItem({
-  template,
-  isSelected,
-}: {
-  template: WorkflowTemplate;
-  isSelected: boolean;
-}) {
-  return (
-    <label
-      htmlFor={template.id}
-      className={cn(
-        "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
-        isSelected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50",
-      )}
-    >
-      <RadioGroupItem value={template.id} id={template.id} className="mt-0.5" />
-      <div className="flex flex-col gap-1.5 min-w-0">
-        <span className="font-medium">{template.name}</span>
-        {template.description && (
-          <span className="text-sm text-muted-foreground">{template.description}</span>
-        )}
-        {template.default_steps && template.default_steps.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-            {template.default_steps.map((step, i) => (
-              <div key={i} className="flex items-center gap-1">
-                {i > 0 && <span className="text-muted-foreground/40 text-xs">&rarr;</span>}
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <div className={cn("w-2 h-2 rounded-full", step.color ?? "bg-slate-500")} />
-                  {step.name}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </label>
-  );
-}
-
-type CreateWorkflowDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  workflowName: string;
-  onWorkflowNameChange: (value: string) => void;
-  selectedTemplateId: string | null;
-  onSelectedTemplateChange: (value: string | null) => void;
-  workflowTemplates: WorkflowTemplate[];
-  onCreate: () => void;
-};
-
-function CreateWorkflowDialog({
-  open,
-  onOpenChange,
-  workflowName,
-  onWorkflowNameChange,
-  selectedTemplateId,
-  onSelectedTemplateChange,
-  workflowTemplates,
-  onCreate,
-}: CreateWorkflowDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:w-[900px] sm:max-w-none">
-        <DialogHeader>
-          <DialogTitle>Add Workflow</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="workflowName">Name</Label>
-            <Input
-              id="workflowName"
-              placeholder="My Project Workflow"
-              value={workflowName}
-              onChange={(e) => onWorkflowNameChange(e.target.value)}
-            />
-          </div>
-          {workflowTemplates.length > 0 && (
-            <div className="space-y-2">
-              <Label>Template</Label>
-              <RadioGroup
-                value={selectedTemplateId ?? "custom"}
-                onValueChange={(v) => onSelectedTemplateChange(v === "custom" ? null : v)}
-              >
-                <div className="grid gap-3">
-                  {workflowTemplates.map((template) => (
-                    <TemplateRadioItem
-                      key={template.id}
-                      template={template}
-                      isSelected={selectedTemplateId === template.id}
-                    />
-                  ))}
-                  <label
-                    htmlFor="custom"
-                    className={cn(
-                      "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
-                      selectedTemplateId === null
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50",
-                    )}
-                  >
-                    <RadioGroupItem value="custom" id="custom" className="mt-0.5" />
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-medium">Custom</span>
-                      <span className="text-sm text-muted-foreground">
-                        Create your own agentic workflow from scratch.
-                      </span>
-                    </div>
-                  </label>
-                </div>
-              </RadioGroup>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
-          </Button>
-          <Button onClick={onCreate} className="cursor-pointer">
-            Add Workflow
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+import {
+  CreateWorkflowDialog,
+  ImportWorkflowsDialog,
+} from "@/app/settings/workspace/workspace-workflows-dialogs";
+import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
 type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
@@ -520,13 +328,11 @@ export function WorkspaceWorkflowsClient({
   workflows,
   workflowTemplates,
 }: WorkspaceWorkflowsClientProps) {
-  const router = useRouter();
-  const { toast } = useToast();
-  const { workflowItems, setWorkflowItems, setSavedWorkflowItems, isWorkflowDirty } =
-    useWorkflowSettings(workflows);
-
-  const importExport = useWorkflowImportExport(workspace, router, toast);
+  const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
   const {
+    router,
+    workflowItems,
+    isWorkflowDirty,
     isExportDialogOpen,
     setIsExportDialogOpen,
     exportJson,
@@ -539,17 +345,6 @@ export function WorkspaceWorkflowsClient({
     handleExportAll,
     handleFileUpload,
     handleImport,
-  } = importExport;
-
-  const actions = useWorkflowActions({
-    workspace,
-    workflowItems,
-    workflowTemplates,
-    setWorkflowItems,
-    setSavedWorkflowItems,
-    router,
-  });
-  const {
     isAddWorkflowDialogOpen,
     setIsAddWorkflowDialogOpen,
     newWorkflowName,
@@ -562,27 +357,10 @@ export function WorkspaceWorkflowsClient({
     handleDeleteWorkflow,
     handleWorkflowCreated,
     handleSaveWorkflow,
-  } = actions;
+    templateStepsById,
+  } = page;
 
-  const templateStepsById = useMemo(
-    () => new Map(workflowTemplates.map((t) => [t.id, t.default_steps ?? []])),
-    [workflowTemplates],
-  );
-
-  if (!workspace) {
-    return (
-      <div>
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Workspace not found</p>
-            <Button className="mt-4" onClick={() => router.push("/settings/workspace")}>
-              Back to Workspaces
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  if (!workspace) return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
 
   return (
     <div className="space-y-8">
@@ -645,5 +423,92 @@ export function WorkspaceWorkflowsClient({
         onCreate={handleCreateWorkflow}
       />
     </div>
+  );
+}
+
+function useWorkspaceWorkflowsPage(
+  workspace: Workspace | null,
+  workflows: Workflow[],
+  workflowTemplates: WorkflowTemplate[],
+) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const { workflowItems, setWorkflowItems, setSavedWorkflowItems, isWorkflowDirty } =
+    useWorkflowSettings(workflows);
+
+  const importExport = useWorkflowImportExport(workspace, router, toast);
+  const {
+    isExportDialogOpen,
+    setIsExportDialogOpen,
+    exportJson,
+    isImportDialogOpen,
+    setIsImportDialogOpen,
+    importJson,
+    setImportJson,
+    importLoading,
+    fileInputRef,
+    handleExportAll,
+    handleFileUpload,
+    handleImport,
+  } = importExport;
+
+  const actions = useWorkflowActions({
+    workspace,
+    workflowItems,
+    workflowTemplates,
+    setWorkflowItems,
+    setSavedWorkflowItems,
+    router,
+  });
+  const {
+    isAddWorkflowDialogOpen,
+    setIsAddWorkflowDialogOpen,
+    newWorkflowName,
+    setNewWorkflowName,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    handleOpenAddWorkflowDialog,
+    handleCreateWorkflow,
+    handleUpdateWorkflow,
+    handleDeleteWorkflow,
+    handleWorkflowCreated,
+    handleSaveWorkflow,
+  } = actions;
+
+  const templateStepsById = useMemo(
+    () => new Map(workflowTemplates.map((t) => [t.id, t.default_steps ?? []])),
+    [workflowTemplates],
+  );
+  return (
+    {
+      router,
+      workflowItems,
+      isWorkflowDirty,
+      isExportDialogOpen,
+      setIsExportDialogOpen,
+      exportJson,
+      isImportDialogOpen,
+      setIsImportDialogOpen,
+      importJson,
+      setImportJson,
+      importLoading,
+      fileInputRef,
+      handleExportAll,
+      handleFileUpload,
+      handleImport,
+      isAddWorkflowDialogOpen,
+      setIsAddWorkflowDialogOpen,
+      newWorkflowName,
+      setNewWorkflowName,
+      selectedTemplateId,
+      setSelectedTemplateId,
+      handleOpenAddWorkflowDialog,
+      handleCreateWorkflow,
+      handleUpdateWorkflow,
+      handleDeleteWorkflow,
+      handleWorkflowCreated,
+      handleSaveWorkflow,
+      templateStepsById,
+    }
   );
 }

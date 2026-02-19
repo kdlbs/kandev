@@ -166,30 +166,16 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
   };
 }
 
-export const ToolCallMessage = memo(function ToolCallMessage({
-  comment,
-  permissionMessage,
-  worktreePath,
-}: ToolCallMessageProps) {
-  const {
-    toolName,
-    status,
-    output,
-    isHttpError,
-    permissionMetadata,
-    permissionStatus,
-    isPermissionPending,
-    hasOutput,
-    hasExpandableContent,
-    isSuccess,
-  } = parseToolCallMetadata(comment, permissionMessage);
-  const [isResponding, setIsResponding] = useState(false);
-  const autoExpanded = status === "running" || isPermissionPending;
-  const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
+type UsePermissionHandlersParams = {
+  permissionMetadata: PermissionRequestMetadata | undefined;
+  permissionMessage: Message | undefined;
+};
 
-  const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
-  const title = transformPathsInText(rawTitle, worktreePath);
+function usePermissionResponseHandlers({
+  permissionMetadata,
+  permissionMessage,
+}: UsePermissionHandlersParams) {
+  const [isResponding, setIsResponding] = useState(false);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false) => {
@@ -233,6 +219,37 @@ export const ToolCallMessage = memo(function ToolCallMessage({
       handleRespond("", true);
     }
   }, [permissionMetadata, handleRespond]);
+
+  return { isResponding, handleApprove, handleReject };
+}
+
+export const ToolCallMessage = memo(function ToolCallMessage({
+  comment,
+  permissionMessage,
+  worktreePath,
+}: ToolCallMessageProps) {
+  const {
+    toolName,
+    status,
+    output,
+    isHttpError,
+    permissionMetadata,
+    permissionStatus,
+    isPermissionPending,
+    hasOutput,
+    hasExpandableContent,
+    isSuccess,
+  } = parseToolCallMetadata(comment, permissionMessage);
+  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
+    permissionMetadata,
+    permissionMessage,
+  });
+  const autoExpanded = status === "running" || isPermissionPending;
+  const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
+
+  const metadata = comment.metadata as ToolCallMetadata | undefined;
+  const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
+  const title = transformPathsInText(rawTitle, worktreePath);
 
   const formattedOutput = hasOutput ? formatToolOutput(output) : null;
 

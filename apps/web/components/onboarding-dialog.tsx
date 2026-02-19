@@ -121,6 +121,59 @@ type OnboardingFooterProps = {
   onGetStarted: () => void;
 };
 
+function OnboardingStepDots({ step }: { step: number }) {
+  return (
+    <div className="flex justify-center gap-1.5 pb-2">
+      {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+        <div
+          key={i}
+          className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useOnboardingResources(open: boolean) {
+  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
+  const [agentSettings, setAgentSettings] = useState<Record<string, AgentSetting>>({});
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      setLoadingAgents(true);
+      setLoadingTemplates(true);
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([listAvailableAgents({ cache: "no-store" }), listAgentsAction()])
+      .then(([availRes, savedRes]) => {
+        setAvailableAgents(availRes.agents ?? []);
+        setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingAgents(false));
+    listWorkflowTemplates()
+      .then((res) => setTemplates(res.templates ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingTemplates(false));
+  }, [open]);
+
+  return {
+    availableAgents,
+    agentSettings,
+    setAgentSettings,
+    templates,
+    loadingAgents,
+    loadingTemplates,
+  };
+}
+
 function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: OnboardingFooterProps) {
   return (
     <DialogFooter>
@@ -155,35 +208,8 @@ function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: Onboar
 
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [step, setStep] = useState(0);
-  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
-  const [agentSettings, setAgentSettings] = useState<Record<string, AgentSetting>>({});
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(true);
-  const [loadingTemplates, setLoadingTemplates] = useState(true);
-  const [prevOpen, setPrevOpen] = useState(false);
-
-  if (open && !prevOpen) {
-    setPrevOpen(true);
-    setLoadingAgents(true);
-    setLoadingTemplates(true);
-  } else if (!open && prevOpen) {
-    setPrevOpen(false);
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    Promise.all([listAvailableAgents({ cache: "no-store" }), listAgentsAction()])
-      .then(([availRes, savedRes]) => {
-        setAvailableAgents(availRes.agents ?? []);
-        setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
-      })
-      .catch(() => {})
-      .finally(() => setLoadingAgents(false));
-    listWorkflowTemplates()
-      .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => {})
-      .finally(() => setLoadingTemplates(false));
-  }, [open]);
+  const { availableAgents, agentSettings, setAgentSettings, templates, loadingAgents, loadingTemplates } =
+    useOnboardingResources(open);
 
   const saveAgentSettings = useCallback(async () => {
     await Promise.all(
@@ -246,14 +272,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           {step === 2 && <StepWorkflows templates={templates} loading={loadingTemplates} />}
           {step === 3 && <StepCommandPanel />}
         </div>
-        <div className="flex justify-center gap-1.5 pb-2">
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`}
-            />
-          ))}
-        </div>
+        <OnboardingStepDots step={step} />
         <OnboardingFooter
           step={step}
           onSkip={handleSkip}

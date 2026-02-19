@@ -21,21 +21,27 @@ type AddTUIAgentDialogProps = {
   onSubmit: (data: TUIAgentFormData) => Promise<void>;
 };
 
-export function AddTUIAgentDialog({ open, onOpenChange, onSubmit }: AddTUIAgentDialogProps) {
-  const [displayName, setDisplayName] = useState("");
-  const [model, setModel] = useState("");
-  const [command, setCommand] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type DialogHandlersParams = {
+  displayName: string;
+  model: string;
+  command: string;
+  setError: React.Dispatch<React.SetStateAction<string | null>>;
+  setLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  onSubmit: (data: TUIAgentFormData) => Promise<void>;
+  onOpenChange: (open: boolean) => void;
+  reset: () => void;
+};
 
-  const reset = () => {
-    setDisplayName("");
-    setModel("");
-    setCommand("");
-    setError(null);
-    setLoading(false);
-  };
-
+function useDialogHandlers({
+  displayName,
+  model,
+  command,
+  setError,
+  setLoading,
+  onSubmit,
+  onOpenChange,
+  reset,
+}: DialogHandlersParams) {
   const handleSubmit = async () => {
     if (!displayName.trim()) {
       setError("Display name is required");
@@ -62,14 +68,42 @@ export function AddTUIAgentDialog({ open, onOpenChange, onSubmit }: AddTUIAgentD
     }
   };
 
+  const handleOpenChange = (next: boolean) => {
+    if (!next) reset();
+    onOpenChange(next);
+  };
+
+  return { handleSubmit, handleOpenChange };
+}
+
+export function AddTUIAgentDialog({ open, onOpenChange, onSubmit }: AddTUIAgentDialogProps) {
+  const [displayName, setDisplayName] = useState("");
+  const [model, setModel] = useState("");
+  const [command, setCommand] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => {
+    setDisplayName("");
+    setModel("");
+    setCommand("");
+    setError(null);
+    setLoading(false);
+  };
+
+  const { handleSubmit, handleOpenChange } = useDialogHandlers({
+    displayName,
+    model,
+    command,
+    setError,
+    setLoading,
+    onSubmit,
+    onOpenChange,
+    reset,
+  });
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) reset();
-        onOpenChange(next);
-      }}
-    >
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add TUI Agent</DialogTitle>

@@ -255,6 +255,13 @@ function useCommandPanelState() {
   };
 }
 
+function useCommandPanelEffectRefs() {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return { debounceRef, abortRef, fileDebounceRef };
+}
+
 function useCommandPanelEffects(
   open: boolean,
   state: ReturnType<typeof useCommandPanelState>,
@@ -273,24 +280,16 @@ function useCommandPanelEffects(
     setIsSearchingFiles,
     setSelectedValue,
   } = state;
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const { debounceRef, abortRef, fileDebounceRef } = useCommandPanelEffectRefs();
   useEffect(() => {
     if (!open) {
       const t = setTimeout(() => {
-        setMode("commands");
-        setSearch("");
-        setInputCommand(null);
-        setTaskResults([]);
-        setFileResults([]);
-        setSelectedValue("");
+        setMode("commands"); setSearch(""); setInputCommand(null);
+        setTaskResults([]); setFileResults([]); setSelectedValue("");
       }, 200);
       return () => clearTimeout(t);
     }
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
-
   useEffect(() => {
     if (mode !== MODE_SEARCH_TASKS) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -325,8 +324,7 @@ function useCommandPanelEffects(
       if (debounceRef.current) clearTimeout(debounceRef.current);
       abortRef.current?.abort();
     };
-  }, [search, mode, workspaceId, setTaskResults, setIsSearching]);
-
+  }, [abortRef, debounceRef, mode, search, setIsSearching, setTaskResults, workspaceId]);
   useEffect(() => {
     if (mode !== "commands" || !search.trim() || !activeSessionId) {
       setFileResults([]);
@@ -359,36 +357,104 @@ function useCommandPanelEffects(
       cancelled = true;
       if (fileDebounceRef.current) clearTimeout(fileDebounceRef.current);
     };
-  }, [search, mode, activeSessionId, setFileResults, setIsSearchingFiles, setSelectedValue]);
+  }, [activeSessionId, fileDebounceRef, mode, search, setFileResults, setIsSearchingFiles, setSelectedValue]);
 }
 
-export function CommandPanel() {
-  const { open, setOpen } = useCommandPanelOpen();
-  const commands = useCommands();
+function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
+  return (
+    <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
+      {mode === "commands" && (
+        <KbdGroup>
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd>
+          <span>Navigate</span>
+        </KbdGroup>
+      )}
+      <KbdGroup>
+        <Kbd>↵</Kbd>
+        <span>{getEnterLabel(mode)}</span>
+      </KbdGroup>
+      {mode !== "commands" && (
+        <KbdGroup>
+          <Kbd>⌫</Kbd>
+          <span>Back</span>
+        </KbdGroup>
+      )}
+      <KbdGroup>
+        <Kbd>esc</Kbd>
+        <span>Close</span>
+      </KbdGroup>
+    </div>
+  );
+}
+
+type CommandPanelViewProps = {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  mode: CommandPanelMode;
+  inputCommand: CommandItemType | null;
+  selectedValue: string;
+  setSelectedValue: (value: string) => void;
+  search: string;
+  setSearch: (value: string) => void;
+  handleKeyDown: (e: React.KeyboardEvent) => void;
+  goBack: () => void;
+  fileResults: string[];
+  isSearchingFiles: boolean;
+  handleFileSelect: (filePath: string) => void;
+  commands: CommandItemType[];
+  grouped: Array<[string, CommandItemType[]]>;
+  handleSelect: (cmd: CommandItemType) => void;
+  isSearching: boolean;
+  taskResults: Task[];
+  stepMap: Map<string, { name: string; color: string }>;
+  handleTaskSelect: (task: Task) => void;
+};
+
+function CommandPanelView({
+  open, setOpen, mode, inputCommand, selectedValue, setSelectedValue, search, setSearch,
+  handleKeyDown, goBack, fileResults, isSearchingFiles, handleFileSelect, commands, grouped,
+  handleSelect, isSearching, taskResults, stepMap, handleTaskSelect,
+}: CommandPanelViewProps) {
+  return (
+    <CommandDialog open={open} onOpenChange={setOpen} overlayClassName="supports-backdrop-filter:backdrop-blur-none!">
+      <Command shouldFilter={mode === "commands"} loop value={selectedValue} onValueChange={setSelectedValue}>
+        <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
+          {mode !== "commands" && (
+            <button onClick={goBack} className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <span>←</span>
+              <span>{mode === "input" ? inputCommand?.label : "Tasks"}</span>
+              <span className="text-muted-foreground/50">›</span>
+            </button>
+          )}
+          <CommandInput placeholder={getInputPlaceholder(mode, inputCommand)} value={search} onValueChange={setSearch} onKeyDown={handleKeyDown} />
+        </div>
+        <CommandList>
+          {mode === "commands" && (
+            <>
+              {search.trim() && <FileSearchResults files={fileResults} isSearching={isSearchingFiles} onSelect={handleFileSelect} />}
+              <CommandsListContent commands={commands} grouped={grouped} search={search} onSelect={handleSelect} hasFileResults={fileResults.length > 0 || isSearchingFiles} />
+            </>
+          )}
+          {mode === MODE_SEARCH_TASKS && <SearchTasksContent isSearching={isSearching} search={search} taskResults={taskResults} stepMap={stepMap} onTaskSelect={handleTaskSelect} />}
+          {mode === "input" && (!search.trim() ? <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty> : <CommandEmpty>Press Enter to confirm</CommandEmpty>)}
+        </CommandList>
+        <CommandPanelFooter mode={mode} />
+      </Command>
+    </CommandDialog>
+  );
+}
+
+function useCommandPanelHandlers(state: ReturnType<typeof useCommandPanelState>, setOpen: (open: boolean) => void, commands: CommandItemType[], kanbanSteps: { id: string; title: string; color: string }[]) {
+  const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
   const router = useRouter();
   const { toast } = useToast();
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
 
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-
-  const state = useCommandPanelState();
-  const {
-    mode,
-    setMode,
-    search,
-    setSearch,
-    inputCommand,
-    setInputCommand,
-    taskResults,
-    isSearching,
-    fileResults,
-    isSearchingFiles,
-    selectedValue,
-    setSelectedValue,
-  } = state;
-
-  useCommandPanelEffects(open, state, workspaceId, activeSessionId);
+  const grouped = useMemo(() => {
+    const map = new Map<string, CommandItemType[]>();
+    for (const cmd of commands) { const existing = map.get(cmd.group) ?? []; existing.push(cmd); map.set(cmd.group, existing); }
+    return Array.from(map.entries()).sort(([, a], [, b]) => Math.min(...a.map((c) => c.priority ?? 100)) - Math.min(...b.map((c) => c.priority ?? 100)));
+  }, [commands]);
 
   const stepMap = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
@@ -396,177 +462,79 @@ export function CommandPanel() {
     return map;
   }, [kanbanSteps]);
 
+  const handleSelect = useCallback((cmd: CommandItemType) => {
+    if (cmd.enterMode) { if (cmd.enterMode === "input") setInputCommand(cmd); setMode(cmd.enterMode); setSearch(""); return; }
+    if (cmd.action) { setOpen(false); cmd.action(); }
+  }, [setOpen, setMode, setSearch, setInputCommand]);
+
+  const handleTaskSelect = useCallback((task: Task) => {
+    setOpen(false);
+    if (task.primary_session_id) router.push(linkToSession(task.primary_session_id));
+    else toast({ title: "This task has no active session", variant: "default" });
+  }, [setOpen, router, toast]);
+
+  const handleFileSelect = useCallback((filePath: string) => {
+    setOpen(false);
+    useDockviewStore.getState().addFileEditorPanel(filePath, getFileName(filePath));
+  }, [setOpen]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (mode === "input" && e.key === "Enter" && search.trim() && inputCommand?.onInputSubmit) {
+      e.preventDefault(); setOpen(false); inputCommand.onInputSubmit(search.trim()); return;
+    }
+    if (mode !== "commands" && e.key === "Backspace" && !search) {
+      e.preventDefault(); setMode("commands"); setSearch(""); setInputCommand(null);
+    }
+  }, [mode, search, inputCommand, setOpen, setMode, setSearch, setInputCommand]);
+
+  const goBack = useCallback(() => { setMode("commands"); setSearch(""); setInputCommand(null); }, [setMode, setSearch, setInputCommand]);
+
+  return { grouped, stepMap, handleSelect, handleTaskSelect, handleFileSelect, handleKeyDown, goBack };
+}
+
+export function CommandPanel() {
+  const { open, setOpen } = useCommandPanelOpen();
+  const commands = useCommands();
+  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+
+  const state = useCommandPanelState();
+  const { mode, search, inputCommand, taskResults, isSearching, fileResults, isSearchingFiles, selectedValue, setSelectedValue, setSearch } = state;
+
+  useCommandPanelEffects(open, state, workspaceId, activeSessionId);
+
   const openRef = useRef(open);
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
+  useEffect(() => { openRef.current = open; }, [open]);
   const toggle = useCallback(() => setOpen(!openRef.current), [setOpen]);
   useKeyboardShortcut(SHORTCUTS.SEARCH, toggle);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggle);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggle);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, CommandItemType[]>();
-    for (const cmd of commands) {
-      const existing = map.get(cmd.group) ?? [];
-      existing.push(cmd);
-      map.set(cmd.group, existing);
-    }
-    return Array.from(map.entries()).sort(
-      ([, a], [, b]) =>
-        Math.min(...a.map((c) => c.priority ?? 100)) - Math.min(...b.map((c) => c.priority ?? 100)),
-    );
-  }, [commands]);
-
-  const handleSelect = useCallback(
-    (cmd: CommandItemType) => {
-      if (cmd.enterMode) {
-        if (cmd.enterMode === "input") setInputCommand(cmd);
-        setMode(cmd.enterMode);
-        setSearch("");
-        return;
-      }
-      if (cmd.action) {
-        setOpen(false);
-        cmd.action();
-      }
-    },
-    [setOpen, setMode, setSearch, setInputCommand],
-  );
-
-  const handleTaskSelect = useCallback(
-    (task: Task) => {
-      setOpen(false);
-      if (task.primary_session_id) {
-        router.push(linkToSession(task.primary_session_id));
-      } else {
-        toast({ title: "This task has no active session", variant: "default" });
-      }
-    },
-    [setOpen, router, toast],
-  );
-
-  const handleFileSelect = useCallback(
-    (filePath: string) => {
-      setOpen(false);
-      useDockviewStore.getState().addFileEditorPanel(filePath, getFileName(filePath));
-    },
-    [setOpen],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (mode === "input" && e.key === "Enter" && search.trim() && inputCommand?.onInputSubmit) {
-        e.preventDefault();
-        setOpen(false);
-        inputCommand.onInputSubmit(search.trim());
-        return;
-      }
-      if (mode !== "commands" && e.key === "Backspace" && !search) {
-        e.preventDefault();
-        setMode("commands");
-        setSearch("");
-        setInputCommand(null);
-      }
-    },
-    [mode, search, inputCommand, setOpen, setMode, setSearch, setInputCommand],
-  );
-
-  const goBack = useCallback(() => {
-    setMode("commands");
-    setSearch("");
-    setInputCommand(null);
-  }, [setMode, setSearch, setInputCommand]);
+  const { grouped, stepMap, handleSelect, handleTaskSelect, handleFileSelect, handleKeyDown, goBack } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps);
 
   return (
-    <CommandDialog
+    <CommandPanelView
       open={open}
-      onOpenChange={setOpen}
-      overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
-    >
-      <Command
-        shouldFilter={mode === "commands"}
-        loop
-        value={selectedValue}
-        onValueChange={setSelectedValue}
-      >
-        <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
-          {mode !== "commands" && (
-            <button
-              onClick={goBack}
-              className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              <span>←</span>
-              <span>{mode === "input" ? inputCommand?.label : "Tasks"}</span>
-              <span className="text-muted-foreground/50">›</span>
-            </button>
-          )}
-          <CommandInput
-            placeholder={getInputPlaceholder(mode, inputCommand)}
-            value={search}
-            onValueChange={setSearch}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
-        <CommandList>
-          {mode === "commands" && (
-            <>
-              {search.trim() && (
-                <FileSearchResults
-                  files={fileResults}
-                  isSearching={isSearchingFiles}
-                  onSelect={handleFileSelect}
-                />
-              )}
-              <CommandsListContent
-                commands={commands}
-                grouped={grouped}
-                search={search}
-                onSelect={handleSelect}
-                hasFileResults={fileResults.length > 0 || isSearchingFiles}
-              />
-            </>
-          )}
-          {mode === MODE_SEARCH_TASKS && (
-            <SearchTasksContent
-              isSearching={isSearching}
-              search={search}
-              taskResults={taskResults}
-              stepMap={stepMap}
-              onTaskSelect={handleTaskSelect}
-            />
-          )}
-          {mode === "input" &&
-            (!search.trim() ? (
-              <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty>
-            ) : (
-              <CommandEmpty>Press Enter to confirm</CommandEmpty>
-            ))}
-        </CommandList>
-        <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
-          {mode === "commands" && (
-            <KbdGroup>
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd>
-              <span>Navigate</span>
-            </KbdGroup>
-          )}
-          <KbdGroup>
-            <Kbd>↵</Kbd>
-            <span>{getEnterLabel(mode)}</span>
-          </KbdGroup>
-          {mode !== "commands" && (
-            <KbdGroup>
-              <Kbd>⌫</Kbd>
-              <span>Back</span>
-            </KbdGroup>
-          )}
-          <KbdGroup>
-            <Kbd>esc</Kbd>
-            <span>Close</span>
-          </KbdGroup>
-        </div>
-      </Command>
-    </CommandDialog>
+      setOpen={setOpen}
+      mode={mode}
+      inputCommand={inputCommand}
+      selectedValue={selectedValue}
+      setSelectedValue={setSelectedValue}
+      search={search}
+      setSearch={setSearch}
+      handleKeyDown={handleKeyDown}
+      goBack={goBack}
+      fileResults={fileResults}
+      isSearchingFiles={isSearchingFiles}
+      handleFileSelect={handleFileSelect}
+      commands={commands}
+      grouped={grouped}
+      handleSelect={handleSelect}
+      isSearching={isSearching}
+      taskResults={taskResults}
+      stepMap={stepMap}
+      handleTaskSelect={handleTaskSelect}
+    />
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, type MutableRefObject } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 
 type SelectionCompleteParams = {
@@ -64,58 +64,22 @@ export function getLineBottomPosition(
   return { x: rect.left + pos.left, y: rect.top + pos.top + pos.height };
 }
 
-/**
- * GitHub PR-style gutter interactions for Monaco:
- * - Hover "+" icon on line numbers (no glyph margin needed)
- * - Click-and-drag to select line range, shift-click to extend
- * - Calls onSelectionComplete with the selected code and position
- */
-export function useGutterComments(
+type DecRef = MutableRefObject<monacoEditor.IEditorDecorationsCollection | null>;
+
+/** Manages the hover "+" icon decoration on gutter mousemove. */
+function useGutterHoverEffect(
   editor: monacoEditor.ICodeEditor | null,
-  options: UseGutterCommentsOptions,
+  enabled: boolean,
+  hoverDecRef: DecRef,
+  commentedRef: MutableRefObject<Set<number>>,
+  hasSelectionRef: MutableRefObject<boolean>,
 ) {
-  const { enabled, commentedLines, onSelectionComplete } = options;
-
-  const [gutterSelection, setGutterSelection] = useState<{
-    startLine: number;
-    endLine: number;
-  } | null>(null);
-  const anchorLineRef = useRef<number | null>(null);
-  const isDraggingRef = useRef(false);
-  const hasSelectionRef = useRef(false);
-  const hoverDecRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
-  const selectionDecRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
-  const callbackRef = useRef(onSelectionComplete);
-  const commentedRef = useRef(commentedLines);
-
-  useEffect(() => {
-    callbackRef.current = onSelectionComplete;
-  }, [onSelectionComplete]);
-  useEffect(() => {
-    commentedRef.current = commentedLines;
-  }, [commentedLines]);
-  useEffect(() => {
-    hasSelectionRef.current = gutterSelection !== null;
-  }, [gutterSelection]);
-
-  const clearGutterSelection = useCallback(() => {
-    setGutterSelection(null);
-    anchorLineRef.current = null;
-    selectionDecRef.current?.set([]);
-  }, []);
-
-  // Hover "+" icon — shown on gutter mousemove
   useEffect(() => {
     if (!editor || !enabled) return;
     hoverDecRef.current = editor.createDecorationsCollection([]);
     const moveSub = editor.onMouseMove((e) => {
       const line = e.target.position?.lineNumber;
-      if (
-        !isGutterTarget(e.target.type) ||
-        !line ||
-        commentedRef.current.has(line) ||
-        hasSelectionRef.current
-      ) {
+      if (!isGutterTarget(e.target.type) || !line || commentedRef.current.has(line) || hasSelectionRef.current) {
         hoverDecRef.current?.set([]);
         return;
       }
@@ -127,13 +91,29 @@ export function useGutterComments(
       leaveSub.dispose();
       hoverDecRef.current?.set([]);
     };
-  }, [editor, enabled]);
+  }, [editor, enabled, hoverDecRef, commentedRef, hasSelectionRef]);
+}
 
-  // Drag-to-select: mousedown → DOM mousemove → DOM mouseup
+type DragEffectOptions = {
+  editor: monacoEditor.ICodeEditor | null;
+  enabled: boolean;
+  selectionDecRef: DecRef;
+  hoverDecRef: DecRef;
+  isDraggingRef: MutableRefObject<boolean>;
+  anchorLineRef: MutableRefObject<number | null>;
+  commentedRef: MutableRefObject<Set<number>>;
+  callbackRef: MutableRefObject<(params: SelectionCompleteParams) => void>;
+  setGutterSelection: (v: { startLine: number; endLine: number } | null) => void;
+};
+
+/** Manages drag-to-select: mousedown → DOM mousemove → DOM mouseup. */
+function useGutterDragEffect({
+  editor, enabled, selectionDecRef, hoverDecRef,
+  isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection,
+}: DragEffectOptions) {
   useEffect(() => {
     if (!editor || !enabled) return;
     selectionDecRef.current = editor.createDecorationsCollection([]);
-
     let dragStart = 0;
     let dragEnd = 0;
 
@@ -142,19 +122,12 @@ export function useGutterComments(
       isDraggingRef.current = false;
       document.removeEventListener("mousemove", onDomMouseMove);
       document.removeEventListener("mouseup", onDomMouseUp);
-
       const model = editor.getModel();
       if (!model) return;
       const s = Math.min(dragStart, dragEnd);
       const e = Math.max(dragStart, dragEnd);
-      const code = model.getValueInRange({
-        startLineNumber: s,
-        startColumn: 1,
-        endLineNumber: e,
-        endColumn: model.getLineMaxColumn(e),
-      });
+      const code = model.getValueInRange({ startLineNumber: s, startColumn: 1, endLineNumber: e, endColumn: model.getLineMaxColumn(e) });
       setGutterSelection({ startLine: s, endLine: e });
-      // Position popover right below the last selected line
       const pos = getLineBottomPosition(editor, e) ?? { x: 0, y: 0 };
       callbackRef.current({ range: { start: s, end: e }, code, position: pos });
     };
@@ -165,11 +138,8 @@ export function useGutterComments(
       const line = target?.position?.lineNumber;
       if (!line) return;
       dragEnd = line;
-      const s = Math.min(dragStart, dragEnd);
-      const e = Math.max(dragStart, dragEnd);
-      applySelectionDecos(selectionDecRef.current, s, e);
-      setGutterSelection({ startLine: s, endLine: e });
-      // Clear hover hint during drag — selection decos provide visual feedback
+      applySelectionDecos(selectionDecRef.current, Math.min(dragStart, dragEnd), Math.max(dragStart, dragEnd));
+      setGutterSelection({ startLine: Math.min(dragStart, dragEnd), endLine: Math.max(dragStart, dragEnd) });
       hoverDecRef.current?.set([]);
     };
 
@@ -177,10 +147,7 @@ export function useGutterComments(
 
     const mouseDownSub = editor.onMouseDown((e) => {
       const line = e.target.position?.lineNumber;
-      if (!isGutterTarget(e.target.type) || !line) return;
-      if (commentedRef.current.has(line)) return;
-
-      // Shift-click extends from existing anchor
+      if (!isGutterTarget(e.target.type) || !line || commentedRef.current.has(line)) return;
       if (e.event.shiftKey && anchorLineRef.current !== null) {
         dragStart = Math.min(anchorLineRef.current, line);
         dragEnd = Math.max(anchorLineRef.current, line);
@@ -188,7 +155,6 @@ export function useGutterComments(
         finishDrag();
         return;
       }
-
       isDraggingRef.current = true;
       anchorLineRef.current = line;
       dragStart = line;
@@ -205,7 +171,45 @@ export function useGutterComments(
       isDraggingRef.current = false;
       selectionDecRef.current?.set([]);
     };
-  }, [editor, enabled]);
+  }, [editor, enabled, selectionDecRef, hoverDecRef, isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection]);
+}
+
+/**
+ * GitHub PR-style gutter interactions for Monaco:
+ * - Hover "+" icon on line numbers (no glyph margin needed)
+ * - Click-and-drag to select line range, shift-click to extend
+ * - Calls onSelectionComplete with the selected code and position
+ */
+export function useGutterComments(
+  editor: monacoEditor.ICodeEditor | null,
+  options: UseGutterCommentsOptions,
+) {
+  const { enabled, commentedLines, onSelectionComplete } = options;
+
+  const [gutterSelection, setGutterSelection] = useState<{ startLine: number; endLine: number } | null>(null);
+  const anchorLineRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const hasSelectionRef = useRef(false);
+  const hoverDecRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
+  const selectionDecRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
+  const callbackRef = useRef(onSelectionComplete);
+  const commentedRef = useRef(commentedLines);
+
+  useEffect(() => { callbackRef.current = onSelectionComplete; }, [onSelectionComplete]);
+  useEffect(() => { commentedRef.current = commentedLines; }, [commentedLines]);
+  useEffect(() => { hasSelectionRef.current = gutterSelection !== null; }, [gutterSelection]);
+
+  const clearGutterSelection = useCallback(() => {
+    setGutterSelection(null);
+    anchorLineRef.current = null;
+    selectionDecRef.current?.set([]);
+  }, []);
+
+  useGutterHoverEffect(editor, enabled, hoverDecRef, commentedRef, hasSelectionRef);
+  useGutterDragEffect({
+    editor, enabled, selectionDecRef, hoverDecRef,
+    isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection,
+  });
 
   return { gutterSelection, clearGutterSelection };
 }

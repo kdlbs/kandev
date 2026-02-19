@@ -38,10 +38,7 @@ type TaskPlanPanelProps = {
   visible?: boolean;
 };
 
-export const TaskPlanPanel = memo(function TaskPlanPanel({
-  taskId,
-  visible = true,
-}: TaskPlanPanelProps) {
+function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const { plan, isLoading, isSaving, savePlan } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
@@ -87,6 +84,58 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     [commentState.comments],
   );
 
+  const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === "";
+
+  return {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    activeSessionId,
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+    commentState,
+    selectionState,
+    handleEditorReady,
+    handleCommentDeleted,
+    commentHighlights,
+    isAgentCreatingPlan,
+    editorWrapperRef,
+    editorInstanceRef,
+  };
+}
+
+export const TaskPlanPanel = memo(function TaskPlanPanel({
+  taskId,
+  visible = true,
+}: TaskPlanPanelProps) {
+  const state = useTaskPlanPanelState(taskId, visible);
+  const {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    activeSessionId,
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+    commentState,
+    selectionState,
+    handleEditorReady,
+    handleCommentDeleted,
+    commentHighlights,
+    isAgentCreatingPlan,
+    editorWrapperRef,
+    editorInstanceRef,
+  } = state;
+
   // Ctrl+S to save immediately
   useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
 
@@ -106,9 +155,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
       </div>
     );
   }
-
-  // Show loading state while agent is creating the initial plan
-  const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === "";
 
   const { textSelection, setTextSelection } = selectionState;
 

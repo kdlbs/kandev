@@ -21,11 +21,11 @@ import {
   setFilesPanelScrollPosition,
 } from "@/lib/local-storage";
 import { useToast } from "@/components/toast-provider";
+import { FileBrowserSearchHeader } from "./file-browser-search-header";
 import {
   mergeTreeNodes,
   insertNodeInTree,
   removeNodeFromTree,
-  FileBrowserSearchHeader,
   FileBrowserToolbar,
   FileBrowserContentArea,
 } from "./file-browser-parts";
@@ -183,27 +183,9 @@ function applyFileChanges(ctx: {
   })();
 }
 
-/** Hook for tree loading with retry logic, file-change subscription, and expanded state. */
-function useFileBrowserTree(sessionId: string) {
-  const [tree, setTree] = useState<FileTreeNode | null>(null);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const [visibleLoadingPaths, setVisibleLoadingPaths] = useState<Set<string>>(new Set());
-  const [isLoadingTree, setIsLoadingTree] = useState(true);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [loadError, setLoadError] = useState<string | null>(null);
+function useLoadingTimers() {
   const loadingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const hasInitializedExpandedRef = useRef<string | null>(null);
-  const retryAttemptRef = useRef(0);
-  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const loadInFlightRef = useRef(false);
-  const agentctlStatus = useSessionAgentctl(sessionId);
-
-  const clearRetryTimer = useCallback(() => {
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
-  }, []);
+  const [visibleLoadingPaths, setVisibleLoadingPaths] = useState<Set<string>>(new Set());
 
   const showLoading = useCallback((path: string) => {
     const timer = setTimeout(() => {
@@ -215,84 +197,96 @@ function useFileBrowserTree(sessionId: string) {
 
   const hideLoading = useCallback((path: string) => {
     const timer = loadingTimersRef.current.get(path);
-    if (timer) {
-      clearTimeout(timer);
-      loadingTimersRef.current.delete(path);
-    }
-    setVisibleLoadingPaths((prev) => {
-      const next = new Set(prev);
-      next.delete(path);
-      return next;
-    });
+    if (timer) { clearTimeout(timer); loadingTimersRef.current.delete(path); }
+    setVisibleLoadingPaths((prev) => { const next = new Set(prev); next.delete(path); return next; });
   }, []);
 
-  const loadTree = useCallback(
-    async (options?: { resetRetry?: boolean }) => {
-      if (loadInFlightRef.current) return;
-      loadInFlightRef.current = true;
-      setIsLoadingTree(true);
-      setLoadState("loading");
-      setLoadError(null);
-      if (options?.resetRetry) {
-        retryAttemptRef.current = 0;
-        clearRetryTimer();
-      }
-      try {
-        const client = getWebSocketClient();
-        if (!client) throw new Error("WebSocket client not available");
-        const response = await requestFileTree(client, sessionId, "", 1);
-        setTree(response.root ?? null);
-        setLoadState("loaded");
-        retryAttemptRef.current = 0;
-        clearRetryTimer();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load file tree";
-        setLoadError(message);
-        if (retryAttemptRef.current < MAX_RETRY_ATTEMPTS) {
-          const delay =
-            RETRY_DELAYS_MS[Math.min(retryAttemptRef.current, RETRY_DELAYS_MS.length - 1)];
-          retryAttemptRef.current += 1;
-          setLoadState("waiting");
-          clearRetryTimer();
-          retryTimerRef.current = setTimeout(() => {
-            void loadTree();
-          }, delay);
-        } else {
-          setLoadState("manual");
-        }
-      } finally {
-        setIsLoadingTree(false);
-        loadInFlightRef.current = false;
-      }
-    },
-    [clearRetryTimer, sessionId],
-  );
+  return { visibleLoadingPaths, showLoading, hideLoading };
+}
 
-  // Load initial tree and cleanup
-  useEffect(() => {
-    setTree(null);
+type TreeLoaderContext = {
+  sessionId: string;
+  clearRetryTimer: () => void;
+  retryAttemptRef: React.MutableRefObject<number>;
+  retryTimerRef: React.MutableRefObject<NodeJS.Timeout | null>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  setIsLoadingTree: React.Dispatch<React.SetStateAction<boolean>>;
+  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
+  setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+};
+
+function useTreeLoader(ctx: TreeLoaderContext) {
+  const { sessionId, clearRetryTimer, retryAttemptRef, retryTimerRef, setTree, setIsLoadingTree, setLoadState, setLoadError } = ctx;
+  const loadInFlightRef = useRef(false);
+  const loadTree = useCallback(async (options?: { resetRetry?: boolean }) => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     setIsLoadingTree(true);
     setLoadState("loading");
     setLoadError(null);
-    retryAttemptRef.current = 0;
-    clearRetryTimer();
-    hasInitializedExpandedRef.current = null;
+    if (options?.resetRetry) { retryAttemptRef.current = 0; clearRetryTimer(); }
+    try {
+      const client = getWebSocketClient();
+      if (!client) throw new Error("WebSocket client not available");
+      const response = await requestFileTree(client, sessionId, "", 1);
+      setTree(response.root ?? null);
+      setLoadState("loaded");
+      retryAttemptRef.current = 0;
+      clearRetryTimer();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load file tree";
+      setLoadError(message);
+      if (retryAttemptRef.current < MAX_RETRY_ATTEMPTS) {
+        const delay = RETRY_DELAYS_MS[Math.min(retryAttemptRef.current, RETRY_DELAYS_MS.length - 1)];
+        retryAttemptRef.current += 1;
+        setLoadState("waiting");
+        clearRetryTimer();
+        retryTimerRef.current = setTimeout(() => { void loadTree(); }, delay);
+      } else {
+        setLoadState("manual");
+      }
+    } finally {
+      setIsLoadingTree(false);
+      loadInFlightRef.current = false;
+    }
+  }, [clearRetryTimer, retryAttemptRef, retryTimerRef, sessionId, setIsLoadingTree, setLoadError, setLoadState, setTree]);
+  return loadTree;
+}
+
+/** Hook for tree loading with retry logic, file-change subscription, and expanded state. */
+function useFileBrowserTree(sessionId: string) {
+  const [tree, setTree] = useState<FileTreeNode | null>(null);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [isLoadingTree, setIsLoadingTree] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const hasInitializedExpandedRef = useRef<string | null>(null);
+  const retryAttemptRef = useRef(0);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const agentctlStatus = useSessionAgentctl(sessionId);
+  const { visibleLoadingPaths, showLoading, hideLoading } = useLoadingTimers();
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+  }, []);
+
+  const loadTree = useTreeLoader({ sessionId, clearRetryTimer, retryAttemptRef, retryTimerRef, setTree, setIsLoadingTree, setLoadState, setLoadError });
+
+  useEffect(() => {
+    setTree(null); setIsLoadingTree(true); setLoadState("loading"); setLoadError(null);
+    retryAttemptRef.current = 0; clearRetryTimer(); hasInitializedExpandedRef.current = null;
     const savedPaths = getFilesPanelExpandedPaths(sessionId);
     setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
     if (savedPaths.length > 0) hasInitializedExpandedRef.current = sessionId;
     void loadTree({ resetRetry: true });
-    return () => {
-      clearRetryTimer();
-    };
+    return () => { clearRetryTimer(); };
   }, [clearRetryTimer, loadTree, sessionId]);
 
-  // When agentctl becomes ready, retry loading
   useEffect(() => {
     if (!agentctlStatus.isReady || loadState === "loaded") return;
     void loadTree({ resetRetry: true });
   }, [agentctlStatus.isReady, loadState, loadTree]);
 
-  // Auto-expand first level folders
   useEffect(() => {
     if (!tree || isLoadingTree || hasInitializedExpandedRef.current === sessionId) return;
     hasInitializedExpandedRef.current = sessionId;
@@ -300,14 +294,12 @@ function useFileBrowserTree(sessionId: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tree?.children?.length, isLoadingTree, sessionId]);
 
-  // Save expanded paths when they change
   useEffect(() => {
     if (expandedPaths.size > 0 || hasInitializedExpandedRef.current === sessionId) {
       setFilesPanelExpandedPaths(sessionId, Array.from(expandedPaths));
     }
   }, [expandedPaths, sessionId]);
 
-  // Subscribe to file changes and refresh only affected folders
   useEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
@@ -318,24 +310,9 @@ function useFileBrowserTree(sessionId: string) {
     });
   }, [sessionId, expandedPaths]);
 
-  const collapseAll = useCallback(() => {
-    setExpandedPaths(new Set());
-  }, []);
+  const collapseAll = useCallback(() => { setExpandedPaths(new Set()); }, []);
 
-  return {
-    tree,
-    setTree,
-    expandedPaths,
-    setExpandedPaths,
-    visibleLoadingPaths,
-    isLoadingTree,
-    loadState,
-    loadError,
-    loadTree,
-    showLoading,
-    hideLoading,
-    collapseAll,
-  };
+  return { tree, setTree, expandedPaths, setExpandedPaths, visibleLoadingPaths, isLoadingTree, loadState, loadError, loadTree, showLoading, hideLoading, collapseAll };
 }
 
 /** Hook for scroll position persistence in the file browser.
@@ -504,34 +481,10 @@ type FileBrowserProps = {
   activeFilePath?: string | null;
 };
 
-export function FileBrowser({
-  sessionId,
-  onOpenFile,
-  onCreateFile,
-  onDeleteFile,
-  activeFilePath,
-}: FileBrowserProps) {
+function useFileBrowserHandlers(sessionId: string, onOpenFile: (file: OpenFileTab) => void, onCreateFile: FileBrowserProps["onCreateFile"], treeState: ReturnType<typeof useFileBrowserTree>) {
   const { toast } = useToast();
-  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
-  const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-
-  const search = useFileBrowserSearch(sessionId);
-  const treeState = useFileBrowserTree(sessionId);
-  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
-  useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
-  const fileStatuses = useMemo(
-    () =>
-      new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
-    [gitStatus?.files],
-  );
-  // Workspace path for header
-  const fullPath = session?.worktree_path ?? "";
-  const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
   const handleStartCreate = useCallback(() => {
     if (activeFolderPath && !treeState.expandedPaths.has(activeFolderPath)) {
@@ -540,46 +493,51 @@ export function FileBrowser({
     setCreatingInPath(activeFolderPath);
   }, [activeFolderPath, treeState]);
 
-  const handleCreateFileSubmit = useCallback(
-    (parentPath: string, name: string) => {
-      setCreatingInPath(null);
-      const newPath = parentPath ? `${parentPath}/${name}` : name;
-      const newNode: FileTreeNode = { name, path: newPath, is_dir: false, size: 0 };
-      treeState.setTree((prev) => (prev ? insertNodeInTree(prev, parentPath, newNode) : prev));
-      onCreateFile?.(newPath)
-        .then((ok) => {
-          if (!ok) treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
-        })
-        .catch(() => {
-          treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev));
-        });
-    },
-    [onCreateFile, treeState],
-  );
-
-  const toggleExpand = useCallback(
-    async (node: FileTreeNode) => {
-      if (!node.is_dir) return;
-      setActiveFolderPath(node.path);
-      const newExpanded = new Set(treeState.expandedPaths);
-      if (newExpanded.has(node.path)) {
-        newExpanded.delete(node.path);
-      } else {
-        await loadNodeChildren(node, sessionId, treeState);
-        newExpanded.add(node.path);
-      }
-      treeState.setExpandedPaths(newExpanded);
-    },
-    [treeState, sessionId],
-  );
-
-  const openFileByPath = useCallback(
-    (path: string) => fetchAndOpenFile(sessionId, path, onOpenFile, toast),
-    [sessionId, onOpenFile, toast],
-  );
-  const handleCancelCreate = useCallback(() => {
+  const handleCreateFileSubmit = useCallback((parentPath: string, name: string) => {
     setCreatingInPath(null);
-  }, []);
+    const newPath = parentPath ? `${parentPath}/${name}` : name;
+    const newNode: FileTreeNode = { name, path: newPath, is_dir: false, size: 0 };
+    treeState.setTree((prev) => (prev ? insertNodeInTree(prev, parentPath, newNode) : prev));
+    onCreateFile?.(newPath)
+      .then((ok) => { if (!ok) treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev)); })
+      .catch(() => { treeState.setTree((prev) => (prev ? removeNodeFromTree(prev, newPath) : prev)); });
+  }, [onCreateFile, treeState]);
+
+  const toggleExpand = useCallback(async (node: FileTreeNode) => {
+    if (!node.is_dir) return;
+    setActiveFolderPath(node.path);
+    const newExpanded = new Set(treeState.expandedPaths);
+    if (newExpanded.has(node.path)) { newExpanded.delete(node.path); }
+    else { await loadNodeChildren(node, sessionId, treeState); newExpanded.add(node.path); }
+    treeState.setExpandedPaths(newExpanded);
+  }, [treeState, sessionId]);
+
+  const openFileByPath = useCallback((path: string) => fetchAndOpenFile(sessionId, path, onOpenFile, toast), [sessionId, onOpenFile, toast]);
+  const handleCancelCreate = useCallback(() => { setCreatingInPath(null); }, []);
+
+  return { creatingInPath, activeFolderPath, handleStartCreate, handleCreateFileSubmit, toggleExpand, openFileByPath, handleCancelCreate };
+}
+
+export function FileBrowser({ sessionId, onOpenFile, onCreateFile, onDeleteFile, activeFilePath }: FileBrowserProps) {
+  const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const gitStatus = useSessionGitStatus(sessionId);
+  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const { copied, copy: copyPath } = useCopyToClipboard(1000);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  const search = useFileBrowserSearch(sessionId);
+  const treeState = useFileBrowserTree(sessionId);
+  const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
+  useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
+
+  const fileStatuses = useMemo(
+    () => new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
+    [gitStatus?.files],
+  );
+  const fullPath = session?.worktree_path ?? "";
+  const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
+
+  const { creatingInPath, activeFolderPath, handleStartCreate, handleCreateFileSubmit, toggleExpand, openFileByPath, handleCancelCreate } = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
 
   return (
     <div className="flex flex-col h-full">
@@ -596,7 +554,6 @@ export function FileBrowser({
         onCollapseAll={treeState.collapseAll}
         showCreateButton={Boolean(onCreateFile)}
       />
-
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         <FileBrowserContentArea
           isSearchActive={search.isSearchActive}

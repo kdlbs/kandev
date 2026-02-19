@@ -7,8 +7,6 @@ import {
   IconFolder,
   IconFolderOpen,
   IconSearch,
-  IconX,
-  IconLoader2,
   IconTrash,
   IconRefresh,
   IconListTree,
@@ -17,14 +15,14 @@ import {
   IconCheck,
   IconPlus,
 } from "@tabler/icons-react";
-import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import { InlineFileInput } from "./inline-file-input";
-import { PanelHeaderBar, PanelHeaderBarSplit } from "./panel-primitives";
+import { PanelHeaderBarSplit } from "./panel-primitives";
+import { renderSessionOrLoadState } from "./file-browser-load-state";
 
 type GitFileStatus = FileInfo["status"] | undefined;
 
@@ -240,8 +238,6 @@ export function TreeNodeItem({
   const isActive = !node.is_dir && activeFilePath === node.path;
   const isActiveFolder = node.is_dir && activeFolderPath === node.path;
   const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
-  const rowPadding = treeNodePaddingLeft(depth, node.is_dir);
-  const handleNodeClick = () => handleTreeNodeClick(node, onToggleExpand, onOpenFile);
 
   return (
     <div>
@@ -252,8 +248,8 @@ export function TreeNodeItem({
           isActive && "bg-muted",
           isActiveFolder && "bg-muted/50",
         )}
-        style={{ paddingLeft: rowPadding }}
-        onClick={handleNodeClick}
+        style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
+        onClick={() => handleTreeNodeClick(node, onToggleExpand, onOpenFile)}
       >
         {node.is_dir && (
           <span className="flex-shrink-0">
@@ -376,49 +372,6 @@ export function SearchResultsList({
         );
       })}
     </div>
-  );
-}
-
-type FileBrowserSearchHeaderProps = {
-  isSearching: boolean;
-  localSearchQuery: string;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onCloseSearch: () => void;
-};
-
-export function FileBrowserSearchHeader({
-  isSearching,
-  localSearchQuery,
-  searchInputRef,
-  onSearchChange,
-  onCloseSearch,
-}: FileBrowserSearchHeaderProps) {
-  return (
-    <PanelHeaderBar className="group/header">
-      {isSearching ? (
-        <IconLoader2 className="h-3.5 w-3.5 text-muted-foreground animate-spin shrink-0" />
-      ) : (
-        <IconSearch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      )}
-      <Input
-        ref={searchInputRef}
-        type="text"
-        value={localSearchQuery}
-        onChange={onSearchChange}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onCloseSearch();
-        }}
-        placeholder="Search files..."
-        className="flex-1 min-w-0 h-5 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 px-2"
-      />
-      <button
-        className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        onClick={onCloseSearch}
-      >
-        <IconX className="h-3.5 w-3.5" />
-      </button>
-    </PanelHeaderBar>
   );
 }
 
@@ -592,39 +545,16 @@ export function FileBrowserContentArea({
       />
     );
   }
-  if (isSessionFailed) {
-    return (
-      <div className="p-4 text-sm text-destructive/80 space-y-2">
-        <div>Session failed</div>
-        {sessionError && <div className="text-xs text-muted-foreground">{sessionError}</div>}
-      </div>
-    );
-  }
-  if ((loadState === "loading" || isLoadingTree) && !tree) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading files...</div>;
-  }
-  if (loadState === "waiting") {
-    return (
-      <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
-        <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        Preparing workspace...
-      </div>
-    );
-  }
-  if (loadState === "manual") {
-    return (
-      <div className="p-4 text-sm text-muted-foreground space-y-2">
-        <div>{loadError ?? "Workspace is still starting."}</div>
-        <button
-          type="button"
-          className="text-xs text-foreground underline cursor-pointer"
-          onClick={onRetry}
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
+  const loadStateResult = renderSessionOrLoadState({
+    isSessionFailed,
+    sessionError,
+    loadState,
+    isLoadingTree,
+    tree,
+    loadError,
+    onRetry,
+  });
+  if (loadStateResult) return loadStateResult;
   if (tree) {
     return (
       <div className="pb-2">

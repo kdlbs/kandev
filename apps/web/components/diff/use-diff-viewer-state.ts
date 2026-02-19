@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type {
   SelectedLineRange,
   FileDiffMetadata,
@@ -132,6 +132,120 @@ type UseDiffViewerStateOpts = {
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
 };
 
+function useDiffViewerAnnotations({
+  comments,
+  editingCommentId,
+  showCommentForm,
+  selectedLines,
+  enableAcceptReject,
+  fileDiffMetadata,
+  changeLineMapRef,
+  revertInfoRef,
+}: BuildAnnotationsOpts & {
+  changeLineMapRef: RefObject<Map<string, string>>;
+  revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
+}) {
+  const { annotations, lineMap, revertMap } = useMemo(
+    () =>
+      buildAnnotations({
+        comments,
+        editingCommentId,
+        showCommentForm,
+        selectedLines,
+        enableAcceptReject,
+        fileDiffMetadata,
+      }),
+    [comments, editingCommentId, showCommentForm, selectedLines, enableAcceptReject, fileDiffMetadata],
+  );
+
+  useEffect(() => {
+    changeLineMapRef.current = lineMap;
+    revertInfoRef.current = revertMap;
+  }, [lineMap, revertMap, changeLineMapRef, revertInfoRef]);
+
+  return annotations;
+}
+
+function useDiffViewerCommentHandlers({
+  selectedLines,
+  setSelectedLines,
+  setShowCommentForm,
+  enableComments,
+  onCommentAdd,
+  externalComments,
+  data,
+  sessionId,
+  addComment,
+  removeComment,
+  updateComment,
+  setEditingComment,
+  onCommentDelete,
+}: {
+  selectedLines: SelectedLineRange | null;
+  setSelectedLines: React.Dispatch<React.SetStateAction<SelectedLineRange | null>>;
+  setShowCommentForm: React.Dispatch<React.SetStateAction<boolean>>;
+  enableComments: boolean;
+  onCommentAdd?: (comment: DiffComment) => void;
+  externalComments?: DiffComment[];
+  data: FileDiffData;
+  sessionId?: string;
+  addComment: (range: SelectedLineRange, content: string) => void;
+  removeComment: (commentId: string) => void;
+  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  setEditingComment: (commentId: string | null) => void;
+  onCommentDelete?: (commentId: string) => void;
+}) {
+  const handleLineSelectionEnd = useCallback(
+    (range: SelectedLineRange | null) => {
+      setSelectedLines(range);
+      if (range && enableComments) setShowCommentForm(true);
+    },
+    [enableComments, setSelectedLines, setShowCommentForm],
+  );
+
+  const handleCommentSubmit = useCallback(
+    (content: string) => {
+      if (!selectedLines) return;
+      if (onCommentAdd && externalComments !== undefined) {
+        onCommentAdd(
+          buildDiffComment({
+            filePath: data.filePath,
+            sessionId: sessionId || "",
+            startLine: selectedLines.start,
+            endLine: selectedLines.end,
+            side: (selectedLines.side || "additions") as DiffComment["side"],
+            text: content,
+          }),
+        );
+      } else if (sessionId) {
+        addComment(selectedLines, content);
+      }
+      setShowCommentForm(false);
+      setSelectedLines(null);
+    },
+    [
+      selectedLines,
+      onCommentAdd,
+      externalComments,
+      data.filePath,
+      sessionId,
+      addComment,
+      setShowCommentForm,
+      setSelectedLines,
+    ],
+  );
+
+  const { handleCommentDelete, handleCommentUpdate } = useCommentActions({
+    removeComment,
+    updateComment,
+    setEditingComment,
+    onCommentDelete,
+    externalComments,
+  });
+
+  return { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate };
+}
+
 export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   const {
     data,
@@ -179,72 +293,32 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   // Change line map for hover detection
   const changeLineMapRef = useRef<Map<string, string>>(new Map());
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Annotations
-  const { annotations, lineMap, revertMap } = useMemo(
-    () =>
-      buildAnnotations({
-        comments,
-        editingCommentId,
-        showCommentForm,
-        selectedLines,
-        enableAcceptReject,
-        fileDiffMetadata,
-      }),
-    [
-      comments,
-      editingCommentId,
-      showCommentForm,
-      selectedLines,
-      enableAcceptReject,
-      fileDiffMetadata,
-    ],
-  );
-
-  useEffect(() => {
-    changeLineMapRef.current = lineMap;
-    revertInfoRef.current = revertMap;
-  }, [lineMap, revertMap]);
-
-  // Selection & comment callbacks
-  const handleLineSelectionEnd = useCallback(
-    (range: SelectedLineRange | null) => {
-      setSelectedLines(range);
-      if (range && enableComments) setShowCommentForm(true);
-    },
-    [enableComments],
-  );
-
-  const handleCommentSubmit = useCallback(
-    (content: string) => {
-      if (!selectedLines) return;
-      if (onCommentAdd && externalComments !== undefined) {
-        onCommentAdd(
-          buildDiffComment({
-            filePath: data.filePath,
-            sessionId: sessionId || "",
-            startLine: selectedLines.start,
-            endLine: selectedLines.end,
-            side: (selectedLines.side || "additions") as DiffComment["side"],
-            text: content,
-          }),
-        );
-      } else if (sessionId) {
-        addComment(selectedLines, content);
-      }
-      setShowCommentForm(false);
-      setSelectedLines(null);
-    },
-    [selectedLines, sessionId, data.filePath, addComment, onCommentAdd, externalComments],
-  );
-
-  const { handleCommentDelete, handleCommentUpdate } = useCommentActions({
-    removeComment,
-    updateComment,
-    setEditingComment,
-    onCommentDelete,
-    externalComments,
+  const annotations = useDiffViewerAnnotations({
+    comments,
+    editingCommentId,
+    showCommentForm,
+    selectedLines,
+    enableAcceptReject,
+    fileDiffMetadata,
+    changeLineMapRef,
+    revertInfoRef,
   });
+  const { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate } =
+    useDiffViewerCommentHandlers({
+      selectedLines,
+      setSelectedLines,
+      setShowCommentForm,
+      enableComments,
+      onCommentAdd,
+      externalComments,
+      data,
+      sessionId,
+      addComment,
+      removeComment,
+      updateComment,
+      setEditingComment,
+      onCommentDelete,
+    });
 
   return {
     comments,

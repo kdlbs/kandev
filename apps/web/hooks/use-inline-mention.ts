@@ -119,6 +119,16 @@ function makePromptItem(
   };
 }
 
+function clearMentionState(
+  setIsOpen: (open: boolean) => void,
+  setTriggerStart: (start: number) => void,
+  setQuery: (query: string) => void,
+) {
+  setIsOpen(false);
+  setTriggerStart(-1);
+  setQuery("");
+}
+
 /** Detect an @-trigger in text before cursor and return the query, or null if none. */
 function detectMentionTrigger(
   text: string,
@@ -237,6 +247,39 @@ function useMentionKeyboard({
   );
 }
 
+type MentionItemsOptions = {
+  query: string;
+  fileResults: string[];
+  prompts: Array<{ id: string; name: string; content: string }>;
+  onPlanSelect?: () => void;
+  onFileSelect?: (path: string, name: string) => void;
+  onPromptSelect?: (id: string, name: string) => void;
+};
+
+function useMentionItems({ query, fileResults, prompts, onPlanSelect, onFileSelect, onPromptSelect }: MentionItemsOptions) {
+  const planItem = useMemo((): MentionItem | null => {
+    if (!onPlanSelect) return null;
+    return makePlanItem(onPlanSelect);
+  }, [onPlanSelect]);
+
+  const promptItems = useMemo(
+    () => prompts.map((prompt) => makePromptItem(prompt, onPromptSelect)),
+    [prompts, onPromptSelect],
+  );
+
+  const fileItems = useMemo(
+    () => fileResults.map((filePath) => makeFileItem(filePath, onFileSelect)),
+    [fileResults, onFileSelect],
+  );
+
+  return useMemo(() => {
+    const allItems: MentionItem[] = [];
+    if (planItem) allItems.push(planItem);
+    allItems.push(...promptItems, ...fileItems);
+    return filterItems(allItems, query);
+  }, [planItem, promptItems, fileItems, query]);
+}
+
 export function useInlineMention({
   inputRef,
   value,
@@ -254,27 +297,14 @@ export function useInlineMention({
 
   const { prompts } = useCustomPrompts();
   const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
-
-  const planItem = useMemo((): MentionItem | null => {
-    if (!onPlanSelect) return null;
-    return makePlanItem(onPlanSelect);
-  }, [onPlanSelect]);
-
-  const promptItems = useMemo((): MentionItem[] => {
-    return prompts.map((prompt) => makePromptItem(prompt, onPromptSelect));
-  }, [prompts, onPromptSelect]);
-
-  const fileItems = useMemo((): MentionItem[] => {
-    return fileResults.map((filePath) => makeFileItem(filePath, onFileSelect));
-  }, [fileResults, onFileSelect]);
-
-  const filteredItems = useMemo(() => {
-    const allItems: MentionItem[] = [];
-    if (planItem) allItems.push(planItem);
-    allItems.push(...promptItems);
-    allItems.push(...fileItems);
-    return filterItems(allItems, query);
-  }, [planItem, promptItems, fileItems, query]);
+  const filteredItems = useMentionItems({
+    query,
+    fileResults,
+    prompts,
+    onPlanSelect,
+    onFileSelect,
+    onPromptSelect,
+  });
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -284,9 +314,7 @@ export function useInlineMention({
   useEffect(() => {
     if (!isOpen || isLoading) return;
     if (filteredItems.length === 0 && query.length >= NO_RESULTS_CLOSE_THRESHOLD) {
-      setIsOpen(false);
-      setTriggerStart(-1);
-      setQuery("");
+      clearMentionState(setIsOpen, setTriggerStart, setQuery);
     }
   }, [isOpen, isLoading, filteredItems.length, query.length]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -310,9 +338,7 @@ export function useInlineMention({
           }
         }
         if (isOpen) {
-          setIsOpen(false);
-          setTriggerStart(-1);
-          setQuery("");
+          clearMentionState(setIsOpen, setTriggerStart, setQuery);
         }
       });
     },
@@ -320,9 +346,7 @@ export function useInlineMention({
   );
 
   const closeMenu = useCallback(() => {
-    setIsOpen(false);
-    setTriggerStart(-1);
-    setQuery("");
+    clearMentionState(setIsOpen, setTriggerStart, setQuery);
   }, []);
 
   const handleSelect = useCallback(

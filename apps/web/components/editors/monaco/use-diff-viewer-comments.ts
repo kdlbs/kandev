@@ -150,9 +150,8 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
       }
       modEditor.onContextMenu(handleContextMenuEvent(editor, modEditor, "modified"));
       origEditor.onContextMenu(handleContextMenuEvent(editor, origEditor, "original"));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
-    [compact, data.filePath],
+    [compact, data.filePath, handleContextMenuEvent],
   );
 
   // Comment submission

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { Virtualizer } from "@tanstack/react-virtual";
 import { GridSpinner } from "@/components/grid-spinner";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
@@ -16,10 +17,11 @@ type ContainerResizeContext = {
   previousHeightRef: React.RefObject<number>;
   previousWidthRef: React.RefObject<number>;
   wasAtBottomRef: React.RefObject<boolean>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  virtualizerRef: React.RefObject<ReturnType<typeof useVirtualizer<any, any>>>;
+  virtualizerRef: React.RefObject<MessageVirtualizer>;
   scrollSnapshot: React.RefObject<{ wasAtBottom: boolean; firstVisibleIndex: number }>;
 };
+
+type MessageVirtualizer = Virtualizer<HTMLDivElement, Element>;
 
 function handleContainerResize(
   entry: ResizeObserverEntry,
@@ -73,10 +75,9 @@ function handleContainerResize(
   previousWidthRef.current = currentWidth;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function useVirtualListScrolling(
   sessionId: string | null,
-  virtualizer: ReturnType<typeof useVirtualizer<any, any>>,
+  virtualizer: MessageVirtualizer,
   messagesContainerRef: React.RefObject<HTMLDivElement | null>,
 ) {
   const wasAtBottomRef = useRef(true);
@@ -172,8 +173,7 @@ type MessageListBodyProps = {
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   isInitialLoading: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  virtualizer: ReturnType<typeof useVirtualizer<any, any>>;
+  virtualizer: MessageVirtualizer;
   lastTurnGroupId: string | null;
   isRunning: boolean;
   handleScrollToMessage: (messageId: string) => void;
@@ -245,6 +245,20 @@ function MessageListBody({
   );
 }
 
+function getSessionRunningState(sessionState: string | null | undefined) {
+  return (
+    sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING"
+  );
+}
+
+function getLastTurnGroupId(items: RenderItem[]) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type === "turn_group") return item.id;
+  }
+  return null;
+}
+
 export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   items,
   messages,
@@ -301,16 +315,8 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: "end" });
   }, [itemCount, lastMessageContent, virtualizer, wasAtBottomRef]);
 
-  const isRunning =
-    sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
-
-  const lastTurnGroupId = useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i];
-      if (item.type === "turn_group") return item.id;
-    }
-    return null;
-  }, [items]);
+  const isRunning = getSessionRunningState(sessionState);
+  const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
 
   useEffect(() => {
     if (!isRunning) return;

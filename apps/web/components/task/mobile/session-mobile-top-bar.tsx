@@ -45,6 +45,11 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
+import {
+  CommitSummary,
+  MobilePRBranchSummary,
+  PRSubmitButton,
+} from "./session-mobile-top-bar-dialog-parts";
 
 type SessionMobileTopBarProps = {
   taskTitle?: string;
@@ -141,21 +146,11 @@ function CommitDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="text-sm text-muted-foreground">
-            {uncommittedCount > 0 ? (
-              <span>
-                <span className="font-medium text-foreground">{uncommittedCount}</span> file
-                {uncommittedCount !== 1 ? "s" : ""} changed
-                {(uncommittedAdditions > 0 || uncommittedDeletions > 0) && (
-                  <span className="ml-2">
-                    (<span className="text-green-600">+{uncommittedAdditions}</span>
-                    {" / "}
-                    <span className="text-red-600">-{uncommittedDeletions}</span>)
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span>No changes to commit</span>
-            )}
+            <CommitSummary
+              uncommittedCount={uncommittedCount}
+              uncommittedAdditions={uncommittedAdditions}
+              uncommittedDeletions={uncommittedDeletions}
+            />
           </div>
           <Textarea
             placeholder="Enter commit message..."
@@ -246,20 +241,7 @@ function PRDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="text-sm text-muted-foreground">
-            {baseBranch ? (
-              <span>
-                Creating PR from{" "}
-                <span className="font-medium text-foreground">{displayBranch}</span> to{" "}
-                <span className="font-medium text-foreground">{baseBranch}</span>
-              </span>
-            ) : (
-              <span>
-                Creating PR from{" "}
-                <span className="font-medium text-foreground">{displayBranch}</span>
-              </span>
-            )}
-          </div>
+          <MobilePRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
           <div className="space-y-2">
             <Label htmlFor="pr-title-mobile" className="text-sm">
               Title
@@ -304,23 +286,13 @@ function PRDialog({
               Cancel
             </Button>
           </DialogClose>
-          <Button
-            onClick={() => onCreatePR(prTitle.trim(), prBody.trim(), prDraft)}
-            disabled={!prTitle.trim() || isGitLoading}
-            className="bg-cyan-600 hover:bg-cyan-700 text-white"
-          >
-            {isGitLoading ? (
-              <>
-                <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <IconGitPullRequest className="h-4 w-4 mr-2" />
-                Create PR
-              </>
-            )}
-          </Button>
+          <PRSubmitButton
+            prTitle={prTitle}
+            prBody={prBody}
+            prDraft={prDraft}
+            isGitLoading={isGitLoading}
+            onCreatePR={onCreatePR}
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

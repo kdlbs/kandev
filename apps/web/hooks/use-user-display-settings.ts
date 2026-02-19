@@ -74,6 +74,14 @@ function persistSettingsPayload(payload: Record<string, unknown>) {
   });
 }
 
+function useUserSettingsRef(userSettings: DisplaySettings) {
+  const userSettingsRef = useRef(userSettings);
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  }, [userSettings]);
+  return userSettingsRef;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapFetchedUserSettings(data: any): DisplaySettings {
   const s = data.settings;
@@ -97,6 +105,23 @@ function mapFetchedUserSettings(data: any): DisplaySettings {
   };
 }
 
+function useLoadUserSettings(
+  loaded: boolean,
+  setUserSettings: (settings: DisplaySettings) => void,
+) {
+  useEffect(() => {
+    if (loaded) return;
+    fetchUserSettings({ cache: "no-store" })
+      .then((data) => {
+        if (!data?.settings) return;
+        setUserSettings(mapFetchedUserSettings(data));
+      })
+      .catch(() => {
+        /* Ignore settings fetch errors for now. */
+      });
+  }, [loaded, setUserSettings]);
+}
+
 export function useUserDisplaySettings({
   workspaceId,
   workflowId,
@@ -106,10 +131,7 @@ export function useUserDisplaySettings({
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
-  const userSettingsRef = useRef(userSettings);
-  useEffect(() => {
-    userSettingsRef.current = userSettings;
-  });
+  const userSettingsRef = useUserSettingsRef(userSettings);
 
   const settingsLoadedOnMountRef = useRef(userSettings.loaded);
 
@@ -128,20 +150,10 @@ export function useUserDisplaySettings({
       };
       persistSettingsPayload(payload);
     },
-    [setUserSettings],
+    [setUserSettings, userSettingsRef],
   );
 
-  useEffect(() => {
-    if (userSettings.loaded) return;
-    fetchUserSettings({ cache: "no-store" })
-      .then((data) => {
-        if (!data?.settings) return;
-        setUserSettings(mapFetchedUserSettings(data));
-      })
-      .catch(() => {
-        /* Ignore settings fetch errors for now. */
-      });
-  }, [setUserSettings, userSettings.loaded]);
+  useLoadUserSettings(userSettings.loaded, setUserSettings);
 
   useEffect(() => {
     if (!userSettings.loaded) return;

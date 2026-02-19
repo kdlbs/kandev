@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode, MouseEvent } from "react";
+import type { Layout } from "react-resizable-panels";
 import { memo, useEffect, useCallback, useState, useMemo } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
@@ -56,6 +57,65 @@ function useRightPanelScripts(repositoryId: string | null, initialScripts: Repos
   return { scripts, hasScripts: scripts.length > 0 };
 }
 
+function useRightPanelPersistence({
+  sessionId,
+  hasScripts,
+  activeTab,
+  isBottomCollapsed,
+  setRightPanelActiveTab,
+}: {
+  sessionId: string | null;
+  hasScripts: boolean;
+  activeTab: string | undefined;
+  isBottomCollapsed: boolean;
+  setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
+}) {
+  useEffect(() => {
+    if (!sessionId || !hasScripts) return;
+    const savedTab = getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null);
+    if (savedTab === "commands") setRightPanelActiveTab(sessionId, savedTab);
+  }, [sessionId, hasScripts, setRightPanelActiveTab]);
+
+  useEffect(() => {
+    if (!sessionId || !activeTab) return;
+    setSessionStorage(`rightPanel-tab-${sessionId}`, activeTab);
+  }, [sessionId, activeTab]);
+
+  useEffect(() => {
+    setLocalStorage("task-right-panel-collapsed", isBottomCollapsed);
+  }, [isBottomCollapsed]);
+}
+
+function useRightPanelTabs({
+  hasScripts,
+  terminals,
+  handleCloseDevTab,
+  handleCloseTab,
+  sessionId,
+  setRightPanelActiveTab,
+}: {
+  hasScripts: boolean;
+  terminals: Terminal[];
+  handleCloseDevTab: (event: MouseEvent) => void;
+  handleCloseTab: (event: MouseEvent, terminalId: string) => void;
+  sessionId: string | null;
+  setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
+}) {
+  const tabs: SessionTab[] = useMemo(() => {
+    const commandsTabs: SessionTab[] = hasScripts ? [{ id: "commands", label: "Commands" }] : [];
+    return [...commandsTabs, ...buildTerminalTabs(terminals, handleCloseDevTab, handleCloseTab)];
+  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab]);
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      if (sessionId) setRightPanelActiveTab(sessionId, value);
+    },
+    [sessionId, setRightPanelActiveTab],
+  );
+
+  return { tabs, handleTabChange };
+}
+
 type CollapsedRightPanelProps = {
   topPanel: ReactNode;
   tabs: SessionTab[];
@@ -93,6 +153,98 @@ function CollapsedRightPanel({
         />
       </SessionPanel>
     </div>
+  );
+}
+
+type RightPanelContentProps = {
+  isBottomCollapsed: boolean;
+  topPanel: ReactNode;
+  tabs: SessionTab[];
+  terminalTabValue: string;
+  handleTabChange: (value: string) => void;
+  addTerminal: () => void;
+  setIsBottomCollapsed: (v: boolean) => void;
+  rightLayoutKey: string;
+  rightLayout: Layout | undefined;
+  onRightLayoutChange: (layout: Layout) => void;
+  scripts: RepositoryScript[];
+  handleRunCommand: (script: RepositoryScript) => void;
+  terminals: Terminal[];
+  sessionId: string | null;
+  devProcessId: string | null | undefined;
+  devOutput: string | undefined;
+  isStoppingDev: boolean;
+};
+
+function RightPanelContent({
+  isBottomCollapsed,
+  topPanel,
+  tabs,
+  terminalTabValue,
+  handleTabChange,
+  addTerminal,
+  setIsBottomCollapsed,
+  rightLayoutKey,
+  rightLayout,
+  onRightLayoutChange,
+  scripts,
+  handleRunCommand,
+  terminals,
+  sessionId,
+  devProcessId,
+  devOutput,
+  isStoppingDev,
+}: RightPanelContentProps) {
+  if (isBottomCollapsed) {
+    return (
+      <CollapsedRightPanel
+        topPanel={topPanel}
+        tabs={tabs}
+        terminalTabValue={terminalTabValue}
+        handleTabChange={handleTabChange}
+        addTerminal={addTerminal}
+        onExpand={() => setIsBottomCollapsed(false)}
+      />
+    );
+  }
+
+  return (
+    <Group
+      orientation="vertical"
+      className="h-full min-h-0"
+      id={rightLayoutKey}
+      key={rightLayoutKey}
+      defaultLayout={rightLayout}
+      onLayoutChanged={onRightLayoutChange}
+    >
+      <Panel id="top" minSize={30} className="min-h-0">
+        {topPanel}
+      </Panel>
+      <Panel id="bottom" minSize={20} className="min-h-0">
+        <SessionPanel borderSide="left" margin="top">
+          <SessionTabs
+            tabs={tabs}
+            activeTab={terminalTabValue}
+            onTabChange={handleTabChange}
+            showAddButton
+            onAddTab={addTerminal}
+            collapsible
+            isCollapsed={isBottomCollapsed}
+            onToggleCollapse={() => setIsBottomCollapsed(true)}
+            className="flex-1 min-h-0"
+          >
+            <CommandsTabContent scripts={scripts} onRunCommand={handleRunCommand} />
+            <TerminalTabContents
+              terminals={terminals}
+              sessionId={sessionId}
+              devProcessId={devProcessId}
+              devOutput={devOutput}
+              isStoppingDev={isStoppingDev}
+            />
+          </SessionTabs>
+        </SessionPanel>
+      </Panel>
+    </Group>
   );
 }
 
@@ -144,91 +296,41 @@ const TaskRightPanel = memo(function TaskRightPanel({
   );
 
   const { scripts, hasScripts } = useRightPanelScripts(repositoryId, initialScripts);
-
-  // Restore 'commands' tab from sessionStorage (needs hasScripts check)
-  useEffect(() => {
-    if (!sessionId || !hasScripts) return;
-    const savedTab = getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null);
-    if (savedTab === "commands") {
-      setRightPanelActiveTab(sessionId, savedTab);
-    }
-  }, [sessionId, hasScripts, setRightPanelActiveTab]);
-
-  // Persist active tab to sessionStorage when it changes
-  useEffect(() => {
-    if (!sessionId || !activeTab) return;
-    setSessionStorage(`rightPanel-tab-${sessionId}`, activeTab);
-  }, [sessionId, activeTab]);
-
-  // Save collapse state to local storage
-  useEffect(() => {
-    setLocalStorage("task-right-panel-collapsed", isBottomCollapsed);
-  }, [isBottomCollapsed]);
-
-  const tabs: SessionTab[] = useMemo(() => {
-    const commandsTabs: SessionTab[] = hasScripts ? [{ id: "commands", label: "Commands" }] : [];
-    return [...commandsTabs, ...buildTerminalTabs(terminals, handleCloseDevTab, handleCloseTab)];
-  }, [hasScripts, terminals, handleCloseDevTab, handleCloseTab]);
-
-  const handleTabChange = useCallback(
-    (value: string) => {
-      if (sessionId) {
-        setRightPanelActiveTab(sessionId, value);
-      }
-    },
-    [sessionId, setRightPanelActiveTab],
-  );
-
-  if (isBottomCollapsed) {
-    return (
-      <CollapsedRightPanel
-        topPanel={topPanel}
-        tabs={tabs}
-        terminalTabValue={terminalTabValue}
-        handleTabChange={handleTabChange}
-        addTerminal={addTerminal}
-        onExpand={() => setIsBottomCollapsed(false)}
-      />
-    );
-  }
-
+  useRightPanelPersistence({
+    sessionId,
+    hasScripts,
+    activeTab,
+    isBottomCollapsed,
+    setRightPanelActiveTab,
+  });
+  const { tabs, handleTabChange } = useRightPanelTabs({
+    hasScripts,
+    terminals,
+    handleCloseDevTab,
+    handleCloseTab,
+    sessionId,
+    setRightPanelActiveTab,
+  });
   return (
-    <Group
-      orientation="vertical"
-      className="h-full min-h-0"
-      id={rightLayoutKey}
-      key={rightLayoutKey}
-      defaultLayout={rightLayout}
-      onLayoutChanged={onRightLayoutChange}
-    >
-      <Panel id="top" minSize={30} className="min-h-0">
-        {topPanel}
-      </Panel>
-      <Panel id="bottom" minSize={20} className="min-h-0">
-        <SessionPanel borderSide="left" margin="top">
-          <SessionTabs
-            tabs={tabs}
-            activeTab={terminalTabValue}
-            onTabChange={handleTabChange}
-            showAddButton
-            onAddTab={addTerminal}
-            collapsible
-            isCollapsed={isBottomCollapsed}
-            onToggleCollapse={() => setIsBottomCollapsed(true)}
-            className="flex-1 min-h-0"
-          >
-            <CommandsTabContent scripts={scripts} onRunCommand={handleRunCommand} />
-            <TerminalTabContents
-              terminals={terminals}
-              sessionId={sessionId}
-              devProcessId={devProcessId}
-              devOutput={devOutput}
-              isStoppingDev={isStoppingDev}
-            />
-          </SessionTabs>
-        </SessionPanel>
-      </Panel>
-    </Group>
+    <RightPanelContent
+      isBottomCollapsed={isBottomCollapsed}
+      topPanel={topPanel}
+      tabs={tabs}
+      terminalTabValue={terminalTabValue}
+      handleTabChange={handleTabChange}
+      addTerminal={addTerminal}
+      setIsBottomCollapsed={setIsBottomCollapsed}
+      rightLayoutKey={rightLayoutKey}
+      rightLayout={rightLayout}
+      onRightLayoutChange={onRightLayoutChange}
+      scripts={scripts}
+      handleRunCommand={handleRunCommand}
+      terminals={terminals}
+      sessionId={sessionId}
+      devProcessId={devProcessId}
+      devOutput={devOutput}
+      isStoppingDev={isStoppingDev}
+    />
   );
 });
 

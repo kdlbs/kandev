@@ -318,53 +318,14 @@ type FileEditorActionsParams = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-function useFileEditorActions({
-  activeSessionIdRef,
-  setFileState,
-  updateFileState,
-  addFileEditorPanel,
-  setSavingFiles,
-  toast,
-}: FileEditorActionsParams) {
-  const openFile = useCallback(
-    async (filePath: string) => {
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      const files = getOpenFiles();
-      if (files.has(filePath)) {
-        addFileEditorPanel(filePath, filePath.split("/").pop() || filePath);
-        return;
-      }
-      try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          currentSessionId,
-          filePath,
-        );
-        const state = await buildFileEditorState(filePath, response);
-        setFileState(filePath, state);
-        addFileEditorPanel(filePath, state.name);
-      } catch (error) {
-        toast({
-          title: "Failed to open file",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionIdRef, addFileEditorPanel, setFileState, toast],
-  );
+type SaveDeleteParams = {
+  activeSessionIdRef: React.MutableRefObject<string | null>;
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  toast: ReturnType<typeof useToast>["toast"];
+};
 
-  const handleFileChange = useCallback(
-    (path: string, newContent: string) => {
-      const file = getOpenFiles().get(path);
-      if (!file) return;
-      updateFileState(path, { content: newContent, isDirty: newContent !== file.originalContent });
-    },
-    [updateFileState],
-  );
-
+function useSaveDeleteActions({ activeSessionIdRef, updateFileState, setSavingFiles, toast }: SaveDeleteParams) {
   const saveFile = useCallback(
     async (path: string) => {
       const file = getOpenFiles().get(path);
@@ -375,13 +336,7 @@ function useFileEditorActions({
       setSavingFiles((prev) => new Set(prev).add(path));
       try {
         const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-        const response = await updateFileContent(
-          client,
-          currentSessionId,
-          path,
-          diff,
-          file.originalHash,
-        );
+        const response = await updateFileContent(client, currentSessionId, path, diff, file.originalHash);
         if (response.success && response.new_hash) {
           updateFileState(path, {
             originalContent: file.content,
@@ -393,17 +348,12 @@ function useFileEditorActions({
           });
           updatePanelAfterSave(path, file.name);
         } else {
-          toast({
-            title: "Save failed",
-            description: response.error || "Failed to save file",
-            variant: "error",
-          });
+          toast({ title: "Save failed", description: response.error || "Failed to save file", variant: "error" });
         }
       } catch (error) {
         toast({
           title: "Save failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while saving the file",
+          description: error instanceof Error ? error.message : "An error occurred while saving the file",
           variant: "error",
         });
       } finally {
@@ -428,17 +378,12 @@ function useFileEditorActions({
       try {
         const response = await deleteFile(client, currentSessionId, path);
         if (!response.success) {
-          toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
-            variant: "error",
-          });
+          toast({ title: "Delete failed", description: response.error || "Failed to delete file", variant: "error" });
         }
       } catch (error) {
         toast({
           title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
+          description: error instanceof Error ? error.message : "An error occurred while deleting the file",
           variant: "error",
         });
       }
@@ -464,6 +409,59 @@ function useFileEditorActions({
     },
     [updateFileState],
   );
+
+  return { saveFile, deleteFileAction, applyRemoteUpdate };
+}
+
+function useFileEditorActions({
+  activeSessionIdRef,
+  setFileState,
+  updateFileState,
+  addFileEditorPanel,
+  setSavingFiles,
+  toast,
+}: FileEditorActionsParams) {
+  const openFile = useCallback(
+    async (filePath: string) => {
+      const client = getWebSocketClient();
+      const currentSessionId = activeSessionIdRef.current;
+      if (!client || !currentSessionId) return;
+      const files = getOpenFiles();
+      if (files.has(filePath)) {
+        addFileEditorPanel(filePath, filePath.split("/").pop() || filePath);
+        return;
+      }
+      try {
+        const response: FileContentResponse = await requestFileContent(client, currentSessionId, filePath);
+        const state = await buildFileEditorState(filePath, response);
+        setFileState(filePath, state);
+        addFileEditorPanel(filePath, state.name);
+      } catch (error) {
+        toast({
+          title: "Failed to open file",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "error",
+        });
+      }
+    },
+    [activeSessionIdRef, addFileEditorPanel, setFileState, toast],
+  );
+
+  const handleFileChange = useCallback(
+    (path: string, newContent: string) => {
+      const file = getOpenFiles().get(path);
+      if (!file) return;
+      updateFileState(path, { content: newContent, isDirty: newContent !== file.originalContent });
+    },
+    [updateFileState],
+  );
+
+  const { saveFile, deleteFileAction, applyRemoteUpdate } = useSaveDeleteActions({
+    activeSessionIdRef,
+    updateFileState,
+    setSavingFiles,
+    toast,
+  });
 
   return { openFile, handleFileChange, saveFile, deleteFileAction, applyRemoteUpdate };
 }

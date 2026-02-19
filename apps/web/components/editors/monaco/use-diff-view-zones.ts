@@ -67,6 +67,107 @@ function removeZones(
   queueMicrotask(() => roots.forEach((r) => r.unmount()));
 }
 
+type CreateZonesParams = {
+  modifiedEditor: monacoEditor.ICodeEditor;
+  originalEditor: monacoEditor.ICodeEditor;
+  comments: DiffComment[];
+  showCommentForm: boolean;
+  selectedLineRange: { start: number; end: number; side: string } | null;
+  editingCommentId: string | null;
+  setEditingComment: (id: string | null) => void;
+  handleCommentSubmitRef: React.RefObject<(content: string) => void>;
+  handleCommentDeleteRef: React.RefObject<(commentId: string) => void>;
+  handleCommentUpdateRef: React.RefObject<(commentId: string, content: string) => void>;
+  clearModifiedGutter: () => void;
+  clearOriginalGutter: () => void;
+  setShowCommentForm: (v: boolean) => void;
+  setSelectedLineRange: (v: null) => void;
+};
+
+function createZones(params: CreateZonesParams): ViewZoneEntry[] {
+  const {
+    modifiedEditor,
+    originalEditor,
+    comments,
+    showCommentForm,
+    selectedLineRange,
+    editingCommentId,
+    setEditingComment,
+    handleCommentSubmitRef,
+    handleCommentDeleteRef,
+    handleCommentUpdateRef,
+    clearModifiedGutter,
+    clearOriginalGutter,
+    setShowCommentForm,
+    setSelectedLineRange,
+  } = params;
+  const zones: ViewZoneEntry[] = [];
+
+  for (const comment of comments) {
+    const side = comment.side === "deletions" ? "original" : "modified";
+    const editor = side === "modified" ? modifiedEditor : originalEditor;
+    const isEditing = editingCommentId === comment.id;
+    const node = isEditing
+      ? createElement(
+          "div",
+          { className: "px-2 py-0.5" },
+          createElement(CommentForm, {
+            initialContent: comment.text,
+            onSubmit: (c: string) => handleCommentUpdateRef.current?.(comment.id, c),
+            onCancel: () => setEditingComment(null),
+            isEditing: true,
+          }),
+        )
+      : createElement(
+          "div",
+          { className: "px-2 py-0.5" },
+          createElement(CommentDisplay, {
+            comment,
+            onDelete: () => handleCommentDeleteRef.current?.(comment.id),
+            onEdit: () => setEditingComment(comment.id),
+            showCode: false,
+            compact: true,
+          }),
+        );
+    addZone({
+      targetEditor: editor,
+      side,
+      afterLine: comment.endLine,
+      heightPx: isEditing ? 120 : 32,
+      content: node,
+      zones,
+    });
+  }
+
+  if (showCommentForm && selectedLineRange) {
+    const side = selectedLineRange.side === "deletions" ? "original" : "modified";
+    const editor = side === "modified" ? modifiedEditor : originalEditor;
+    const node = createElement(
+      "div",
+      { className: "px-2 py-1" },
+      createElement(CommentForm, {
+        onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
+        onCancel: () => {
+          setShowCommentForm(false);
+          setSelectedLineRange(null);
+          clearModifiedGutter();
+          clearOriginalGutter();
+        },
+      }),
+    );
+    addZone({
+      targetEditor: editor,
+      side,
+      afterLine: Math.max(selectedLineRange.start, selectedLineRange.end),
+      heightPx: 120,
+      content: node,
+      zones,
+    });
+  }
+
+  return zones;
+}
+
 /** Manages inline ViewZones for comments and comment forms */
 export function useViewZones({
   modifiedEditor,
@@ -95,69 +196,22 @@ export function useViewZones({
       viewZonesRef.current = [];
     }
 
-    const newZones: ViewZoneEntry[] = [];
-
-    for (const comment of comments) {
-      const side = comment.side === "deletions" ? "original" : "modified";
-      const editor = side === "modified" ? modifiedEditor : originalEditor;
-      const isEditing = editingCommentId === comment.id;
-      const node = isEditing
-        ? createElement(
-            "div",
-            { className: "px-2 py-0.5" },
-            createElement(CommentForm, {
-              initialContent: comment.text,
-              onSubmit: (c: string) => handleCommentUpdateRef.current?.(comment.id, c),
-              onCancel: () => setEditingComment(null),
-              isEditing: true,
-            }),
-          )
-        : createElement(
-            "div",
-            { className: "px-2 py-0.5" },
-            createElement(CommentDisplay, {
-              comment,
-              onDelete: () => handleCommentDeleteRef.current?.(comment.id),
-              onEdit: () => setEditingComment(comment.id),
-              showCode: false,
-              compact: true,
-            }),
-          );
-      addZone({
-        targetEditor: editor,
-        side,
-        afterLine: comment.endLine,
-        heightPx: isEditing ? 120 : 32,
-        content: node,
-        zones: newZones,
-      });
-    }
-
-    if (showCommentForm && selectedLineRange) {
-      const side = selectedLineRange.side === "deletions" ? "original" : "modified";
-      const editor = side === "modified" ? modifiedEditor : originalEditor;
-      const node = createElement(
-        "div",
-        { className: "px-2 py-1" },
-        createElement(CommentForm, {
-          onSubmit: (c: string) => handleCommentSubmitRef.current?.(c),
-          onCancel: () => {
-            setShowCommentForm(false);
-            setSelectedLineRange(null);
-            clearModifiedGutter();
-            clearOriginalGutter();
-          },
-        }),
-      );
-      addZone({
-        targetEditor: editor,
-        side,
-        afterLine: Math.max(selectedLineRange.start, selectedLineRange.end),
-        heightPx: 120,
-        content: node,
-        zones: newZones,
-      });
-    }
+    const newZones = createZones({
+      modifiedEditor,
+      originalEditor,
+      comments,
+      showCommentForm,
+      selectedLineRange,
+      editingCommentId,
+      setEditingComment,
+      handleCommentSubmitRef,
+      handleCommentDeleteRef,
+      handleCommentUpdateRef,
+      clearModifiedGutter,
+      clearOriginalGutter,
+      setShowCommentForm,
+      setSelectedLineRange,
+    });
 
     viewZonesRef.current = newZones;
 

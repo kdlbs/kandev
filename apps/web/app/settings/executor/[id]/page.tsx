@@ -372,35 +372,32 @@ function validateMcpPolicy(value: string | undefined): string | null {
   return null;
 }
 
-function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
-  const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
-  const [draft, setDraft] = useState<Executor>({ ...executor });
-  const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+type ExecutorEditHandlersOptions = {
+  draft: Executor;
+  setDraft: (e: Executor) => void;
+  setSavedExecutor: (e: Executor) => void;
+  deleteConfirmText: string;
+  setDeleteDialogOpen: (open: boolean) => void;
+  executors: Executor[];
+  setExecutors: (items: Executor[]) => void;
+  pushRoute: (path: string) => void;
+};
+
+function useExecutorEditHandlers({
+  draft,
+  setDraft,
+  setSavedExecutor,
+  deleteConfirmText,
+  setDeleteDialogOpen,
+  executors,
+  setExecutors,
+  pushRoute,
+}: ExecutorEditHandlersOptions) {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-
   const isSystem = draft.is_system ?? false;
-  const isDockerType = draft.type === "local_docker" || draft.type === "remote_docker";
-  const mcpPolicyError = useMemo(
-    () => validateMcpPolicy(draft.config?.mcp_policy),
-    [draft.config?.mcp_policy],
-  );
-
-  const isDirty = useMemo(
-    () =>
-      draft.name !== savedExecutor.name ||
-      draft.type !== savedExecutor.type ||
-      draft.status !== savedExecutor.status ||
-      JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {}),
-    [draft, savedExecutor],
-  );
 
   const handleSaveExecutor = async () => {
-    if (!draft) return;
     setIsSaving(true);
     try {
       const payload = isSystem
@@ -413,9 +410,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
       setDraft(updated);
       setSavedExecutor(updated);
       setExecutors(
-        executors.map((item: Executor) =>
-          item.id === updated.id ? { ...item, ...updated } : item,
-        ),
+        executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item)),
       );
     } finally {
       setIsSaving(false);
@@ -433,7 +428,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         await deleteExecutorAction(draft.id);
       }
       setExecutors(executors.filter((item: Executor) => item.id !== draft.id));
-      router.push(EXECUTORS_ROUTE);
+      pushRoute(EXECUTORS_ROUTE);
     } finally {
       setIsDeleting(false);
       setDeleteDialogOpen(false);
@@ -443,6 +438,45 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
   const handleMcpPolicyChange = (value: string) => {
     setDraft({ ...draft, config: { ...(draft.config ?? {}), mcp_policy: value } });
   };
+
+  return { isSaving, isDeleting, handleSaveExecutor, handleDeleteExecutor, handleMcpPolicyChange };
+}
+
+function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
+  const router = useRouter();
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+  const [draft, setDraft] = useState<Executor>({ ...executor });
+  const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+
+  const isSystem = draft.is_system ?? false;
+  const isDockerType = draft.type === "local_docker" || draft.type === "remote_docker";
+  const mcpPolicyError = useMemo(
+    () => validateMcpPolicy(draft.config?.mcp_policy),
+    [draft.config?.mcp_policy],
+  );
+  const isDirty = useMemo(
+    () =>
+      draft.name !== savedExecutor.name ||
+      draft.type !== savedExecutor.type ||
+      draft.status !== savedExecutor.status ||
+      JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {}),
+    [draft, savedExecutor],
+  );
+
+  const { isSaving, isDeleting, handleSaveExecutor, handleDeleteExecutor, handleMcpPolicyChange } =
+    useExecutorEditHandlers({
+      draft,
+      setDraft,
+      setSavedExecutor,
+      deleteConfirmText,
+      setDeleteDialogOpen,
+      executors,
+      setExecutors,
+      pushRoute: (path) => router.push(path),
+    });
 
   return (
     <div className="space-y-8">

@@ -160,6 +160,63 @@ type SwimlaneGraphDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
+async function moveTaskAcrossSwimlaneSteps({
+  task,
+  taskId,
+  targetColumnId,
+  workflowId,
+  store,
+  moveTaskById,
+  onWorkflowAutomation,
+  onMoveError,
+}: {
+  task: Task;
+  taskId: string;
+  targetColumnId: string;
+  workflowId: string;
+  store: ReturnType<typeof useAppStoreApi>;
+  moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
+  onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
+  onMoveError?: (error: MoveTaskError) => void;
+}) {
+  const state = store.getState();
+  const snapshot = state.kanbanMulti.snapshots[workflowId];
+  if (!snapshot) return;
+
+  const targetTasks = snapshot.tasks
+    .filter(
+      (t: KanbanState["tasks"][number]) => t.workflowStepId === targetColumnId && t.id !== taskId,
+    )
+    .sort(
+      (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) => a.position - b.position,
+    );
+  const nextPosition = targetTasks.length;
+  const originalTasks = snapshot.tasks;
+
+  state.setWorkflowSnapshot(workflowId, {
+    ...snapshot,
+    tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
+      t.id === taskId ? { ...t, workflowStepId: targetColumnId, position: nextPosition } : t,
+    ),
+  });
+
+  try {
+    const response = await moveTaskById(taskId, {
+      workflow_id: workflowId,
+      workflow_step_id: targetColumnId,
+      position: nextPosition,
+    });
+    await handleWorkflowAutoStart(task, response, onWorkflowAutomation);
+  } catch (error) {
+    const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
+    if (currentSnapshot) {
+      store.getState().setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
+    }
+    const message = error instanceof Error ? error.message : "Failed to move task";
+    onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
+  }
+}
+
 function useSwimlaneGraphDnd({
   tasks,
   steps,
@@ -216,47 +273,16 @@ function useSwimlaneGraphDnd({
 
       const allowed = adjacentSteps[task.workflowStepId];
       if (!allowed || !allowed.has(targetColumnId)) return;
-
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
-
-      const targetTasks = snapshot.tasks
-        .filter(
-          (t: KanbanState["tasks"][number]) =>
-            t.workflowStepId === targetColumnId && t.id !== taskId,
-        )
-        .sort(
-          (a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
-            a.position - b.position,
-        );
-      const nextPosition = targetTasks.length;
-      const originalTasks = snapshot.tasks;
-
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetColumnId, position: nextPosition } : t,
-        ),
+      await moveTaskAcrossSwimlaneSteps({
+        task,
+        taskId,
+        targetColumnId,
+        workflowId,
+        store,
+        moveTaskById,
+        onWorkflowAutomation,
+        onMoveError,
       });
-
-      try {
-        const response = await moveTaskById(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: targetColumnId,
-          position: nextPosition,
-        });
-        await handleWorkflowAutoStart(task, response, onWorkflowAutomation);
-      } catch (error) {
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          store
-            .getState()
-            .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
-        }
-        const message = error instanceof Error ? error.message : "Failed to move task";
-        onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
-      }
     },
     [tasks, workflowId, store, moveTaskById, adjacentSteps, onWorkflowAutomation, onMoveError],
   );

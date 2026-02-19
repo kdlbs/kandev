@@ -1,25 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState, useCallback, useEffect } from "react";
-import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
-import {
-  IconCloudDownload,
-  IconEye,
-  IconChevronDown,
-  IconGitBranch,
-  IconGitCherryPick,
-  IconGitMerge,
-  IconArrowRight,
-} from "@tabler/icons-react";
-
-import { Button } from "@kandev/ui/button";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
@@ -31,6 +13,7 @@ import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { DiscardDialog, CommitDialog, PRDialog } from "./changes-panel-dialogs";
+import { ChangesPanelHeader } from "./changes-panel-header";
 import {
   FileListSection,
   CommitsSection,
@@ -215,24 +198,18 @@ function useChangesStageHandlers(
   return { pendingStageFiles, handleStageAll, handleStage, handleUnstage };
 }
 
-function useChangesDialogHandlers(
+function useChangesDiscardCommitHandlers(
   gitOps: ReturnType<typeof useGitOperations>,
   toast: ReturnType<typeof useToast>["toast"],
   handleGitOperation: (
     op: () => Promise<{ success: boolean; output: string; error?: string }>,
     name: string,
   ) => Promise<void>,
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
 ) {
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prTitle, setPrTitle] = useState("");
-  const [prBody, setPrBody] = useState("");
-  const [prDraft, setPrDraft] = useState(true);
 
   const handleDiscardClick = useCallback((filePath: string) => {
     setFileToDiscard(filePath);
@@ -271,6 +248,32 @@ function useChangesDialogHandlers(
     setCommitMessage("");
   }, [commitMessage, handleGitOperation, gitOps]);
 
+  return {
+    showDiscardDialog,
+    setShowDiscardDialog,
+    fileToDiscard,
+    commitDialogOpen,
+    setCommitDialogOpen,
+    commitMessage,
+    setCommitMessage,
+    handleDiscardClick,
+    handleDiscardConfirm,
+    handleOpenCommitDialog,
+    handleCommit,
+  };
+}
+
+function useChangesPRHandlers(
+  gitOps: ReturnType<typeof useGitOperations>,
+  toast: ReturnType<typeof useToast>["toast"],
+  taskTitle: string | undefined,
+  baseBranch: string | undefined,
+) {
+  const [prDialogOpen, setPrDialogOpen] = useState(false);
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prDraft, setPrDraft] = useState(true);
+
   const handleOpenPRDialog = useCallback(() => {
     setPrTitle(taskTitle || "");
     setPrBody("");
@@ -289,46 +292,31 @@ function useChangesDialogHandlers(
         });
         if (result.pr_url) window.open(result.pr_url, "_blank");
       } else {
-        toast({
-          title: "Create PR failed",
-          description: result.error || "An error occurred",
-          variant: "error",
-        });
+        toast({ title: "Create PR failed", description: result.error || "An error occurred", variant: "error" });
       }
     } catch (e) {
-      toast({
-        title: "Create PR failed",
-        description: e instanceof Error ? e.message : "An error occurred",
-        variant: "error",
-      });
+      toast({ title: "Create PR failed", description: e instanceof Error ? e.message : "An error occurred", variant: "error" });
     }
     setPrTitle("");
     setPrBody("");
   }, [prTitle, prBody, baseBranch, prDraft, gitOps, toast]);
 
-  return {
-    showDiscardDialog,
-    setShowDiscardDialog,
-    fileToDiscard,
-    commitDialogOpen,
-    setCommitDialogOpen,
-    commitMessage,
-    setCommitMessage,
-    prDialogOpen,
-    setPrDialogOpen,
-    prTitle,
-    setPrTitle,
-    prBody,
-    setPrBody,
-    prDraft,
-    setPrDraft,
-    handleDiscardClick,
-    handleDiscardConfirm,
-    handleOpenCommitDialog,
-    handleCommit,
-    handleOpenPRDialog,
-    handleCreatePR,
-  };
+  return { prDialogOpen, setPrDialogOpen, prTitle, setPrTitle, prBody, setPrBody, prDraft, setPrDraft, handleOpenPRDialog, handleCreatePR };
+}
+
+function useChangesDialogHandlers(
+  gitOps: ReturnType<typeof useGitOperations>,
+  toast: ReturnType<typeof useToast>["toast"],
+  handleGitOperation: (
+    op: () => Promise<{ success: boolean; output: string; error?: string }>,
+    name: string,
+  ) => Promise<void>,
+  taskTitle: string | undefined,
+  baseBranch: string | undefined,
+) {
+  const discardCommit = useChangesDiscardCommitHandlers(gitOps, toast, handleGitOperation);
+  const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch);
+  return { ...discardCommit, ...pr };
 }
 
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
@@ -380,6 +368,102 @@ function useChangesPanelStoreData() {
   return { activeSessionId, taskTitle, baseBranch, displayBranch };
 }
 
+type ChangesPanelBodyProps = {
+  hasAnything: boolean;
+  hasUnstaged: boolean;
+  hasStaged: boolean;
+  hasCommits: boolean;
+  unstagedFiles: ReturnType<typeof mapChangedFiles>;
+  stagedFiles: ReturnType<typeof mapChangedFiles>;
+  commits: ReturnType<typeof useSessionCommits>["commits"];
+  pendingStageFiles: Set<string>;
+  lastTimelineSection: string;
+  reviewedCount: number;
+  totalFileCount: number;
+  aheadCount: number;
+  isLoading: boolean;
+  dialogs: ReturnType<typeof useChangesDialogHandlers>;
+  onOpenDiffFile: (path: string) => void;
+  onEditFile: (path: string) => void;
+  onOpenCommitDetail?: (sha: string) => void;
+  onOpenReview?: () => void;
+  onStageAll: () => void;
+  onStage: (path: string) => Promise<void>;
+  onUnstage: (path: string) => Promise<void>;
+  onPush: () => void;
+  stagedFileCount: number;
+  stagedAdditions: number;
+  stagedDeletions: number;
+  displayBranch: string | null;
+  baseBranch: string | undefined;
+};
+
+function ChangesPanelBody({
+  hasAnything, hasUnstaged, hasStaged, hasCommits, unstagedFiles, stagedFiles, commits,
+  pendingStageFiles, lastTimelineSection, reviewedCount, totalFileCount, aheadCount,
+  isLoading, dialogs, onOpenDiffFile, onEditFile, onOpenCommitDetail, onOpenReview,
+  onStageAll, onStage, onUnstage, onPush, stagedFileCount, stagedAdditions, stagedDeletions,
+  displayBranch, baseBranch,
+}: ChangesPanelBodyProps) {
+  return (
+    <PanelBody className="flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        {!hasAnything && (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+            Your changed files will appear here
+          </div>
+        )}
+        {hasAnything && (
+          <div className="flex flex-col">
+            {hasUnstaged && (
+              <FileListSection
+                variant="unstaged" files={unstagedFiles} pendingStageFiles={pendingStageFiles}
+                isLast={lastTimelineSection === "unstaged"} actionLabel="Stage all"
+                onAction={onStageAll} onOpenDiff={onOpenDiffFile} onEditFile={onEditFile}
+                onStage={onStage} onUnstage={onUnstage} onDiscard={dialogs.handleDiscardClick}
+              />
+            )}
+            {hasStaged && (
+              <FileListSection
+                variant="staged" files={stagedFiles} pendingStageFiles={pendingStageFiles}
+                isLast={lastTimelineSection === "staged"} actionLabel="Commit"
+                onAction={dialogs.handleOpenCommitDialog} onOpenDiff={onOpenDiffFile}
+                onEditFile={onEditFile} onStage={onStage} onUnstage={onUnstage}
+                onDiscard={dialogs.handleDiscardClick}
+              />
+            )}
+            {hasCommits && (
+              <CommitsSection commits={commits} isLast={!hasCommits} onOpenCommitDetail={onOpenCommitDetail} />
+            )}
+            {hasCommits && (
+              <ActionButtonsSection onOpenPRDialog={dialogs.handleOpenPRDialog} onPush={onPush} isLoading={isLoading} aheadCount={aheadCount} />
+            )}
+          </div>
+        )}
+      </div>
+      <ReviewProgressBar reviewedCount={reviewedCount} totalFileCount={totalFileCount} onOpenReview={onOpenReview} />
+      <DiscardDialog
+        open={dialogs.showDiscardDialog} onOpenChange={dialogs.setShowDiscardDialog}
+        fileToDiscard={dialogs.fileToDiscard} onConfirm={dialogs.handleDiscardConfirm}
+      />
+      <CommitDialog
+        open={dialogs.commitDialogOpen} onOpenChange={dialogs.setCommitDialogOpen}
+        commitMessage={dialogs.commitMessage} onCommitMessageChange={dialogs.setCommitMessage}
+        onCommit={dialogs.handleCommit} isLoading={isLoading}
+        stagedFileCount={stagedFileCount} stagedAdditions={stagedAdditions} stagedDeletions={stagedDeletions}
+      />
+      <PRDialog
+        open={dialogs.prDialogOpen} onOpenChange={dialogs.setPrDialogOpen}
+        prTitle={dialogs.prTitle} onPrTitleChange={dialogs.setPrTitle}
+        prBody={dialogs.prBody} onPrBodyChange={dialogs.setPrBody}
+        prDraft={dialogs.prDraft} onPrDraftChange={dialogs.setPrDraft}
+        onCreatePR={dialogs.handleCreatePR} isLoading={isLoading}
+        displayBranch={displayBranch} baseBranch={baseBranch}
+      />
+    </PanelBody>
+  );
+}
+
 const ChangesPanel = memo(function ChangesPanel({
   onOpenDiffFile,
   onEditFile,
@@ -401,30 +485,20 @@ const ChangesPanel = memo(function ChangesPanel({
   const behindCount = gitStatus?.behind ?? 0;
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const changedFiles = useMemo(() => mapChangedFiles(gitStatus), [gitStatus]);
-
   const unstagedFiles = useMemo(() => changedFiles.filter((f) => !f.staged), [changedFiles]);
   const stagedFiles = useMemo(() => changedFiles.filter((f) => f.staged), [changedFiles]);
   const { reviewedCount, totalFileCount } = useMemo(
     () => computeReviewProgress(gitStatus, cumulativeDiff, reviews),
     [gitStatus, cumulativeDiff, reviews],
   );
+  const { stagedFileCount, stagedAdditions, stagedDeletions } = useMemo(
+    () => computeStagedStats(gitStatus, stagedFiles),
+    [gitStatus, stagedFiles],
+  );
 
-  const { handleGitOperation, handlePull, handleRebase, handlePush } = useChangesGitHandlers(
-    gitOps,
-    toast,
-    baseBranch,
-  );
-  const { pendingStageFiles, handleStageAll, handleStage, handleUnstage } = useChangesStageHandlers(
-    gitOps,
-    changedFiles,
-  );
-  const dialogs = useChangesDialogHandlers(
-    gitOps,
-    toast,
-    handleGitOperation,
-    taskTitle,
-    baseBranch,
-  );
+  const { handleGitOperation, handlePull, handleRebase, handlePush } = useChangesGitHandlers(gitOps, toast, baseBranch);
+  const { pendingStageFiles, handleStageAll, handleStage, handleUnstage } = useChangesStageHandlers(gitOps, changedFiles);
+  const dialogs = useChangesDialogHandlers(gitOps, toast, handleGitOperation, taskTitle, baseBranch);
 
   const hasUnstaged = unstagedFiles.length > 0;
   const hasStaged = stagedFiles.length > 0;
@@ -432,275 +506,32 @@ const ChangesPanel = memo(function ChangesPanel({
   const hasChanges = changedFiles.length > 0;
   const hasAnything = computeHasAnything(hasUnstaged, hasStaged, hasCommits);
   const lastTimelineSection = getLastTimelineSection(hasCommits, hasStaged);
-  const { stagedFileCount, stagedAdditions, stagedDeletions } = useMemo(
-    () => computeStagedStats(gitStatus, stagedFiles),
-    [gitStatus, stagedFiles],
-  );
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
     <PanelRoot>
       <ChangesPanelHeader
-        hasChanges={hasChanges}
-        hasCommits={hasCommits}
-        displayBranch={displayBranch}
-        baseBranchDisplay={baseBranchDisplay}
-        behindCount={behindCount}
-        isLoading={gitOps.isLoading}
-        onOpenDiffAll={onOpenDiffAll}
-        onOpenReview={onOpenReview}
-        onPull={handlePull}
-        onRebase={handleRebase}
+        hasChanges={hasChanges} hasCommits={hasCommits} displayBranch={displayBranch}
+        baseBranchDisplay={baseBranchDisplay} behindCount={behindCount}
+        isLoading={gitOps.isLoading} onOpenDiffAll={onOpenDiffAll} onOpenReview={onOpenReview}
+        onPull={handlePull} onRebase={handleRebase}
       />
-      <PanelBody className="flex flex-col">
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {!hasAnything && (
-            <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-              Your changed files will appear here
-            </div>
-          )}
-          {hasAnything && (
-            <div className="flex flex-col">
-              {hasUnstaged && (
-                <FileListSection
-                  variant="unstaged"
-                  files={unstagedFiles}
-                  pendingStageFiles={pendingStageFiles}
-                  isLast={lastTimelineSection === "unstaged"}
-                  actionLabel="Stage all"
-                  onAction={handleStageAll}
-                  onOpenDiff={onOpenDiffFile}
-                  onEditFile={onEditFile}
-                  onStage={handleStage}
-                  onUnstage={handleUnstage}
-                  onDiscard={dialogs.handleDiscardClick}
-                />
-              )}
-              {hasStaged && (
-                <FileListSection
-                  variant="staged"
-                  files={stagedFiles}
-                  pendingStageFiles={pendingStageFiles}
-                  isLast={lastTimelineSection === "staged"}
-                  actionLabel="Commit"
-                  onAction={dialogs.handleOpenCommitDialog}
-                  onOpenDiff={onOpenDiffFile}
-                  onEditFile={onEditFile}
-                  onStage={handleStage}
-                  onUnstage={handleUnstage}
-                  onDiscard={dialogs.handleDiscardClick}
-                />
-              )}
-              {hasCommits && (
-                <CommitsSection
-                  commits={commits}
-                  isLast={!hasCommits}
-                  onOpenCommitDetail={onOpenCommitDetail}
-                />
-              )}
-              {hasCommits && (
-                <ActionButtonsSection
-                  onOpenPRDialog={dialogs.handleOpenPRDialog}
-                  onPush={handlePush}
-                  isLoading={gitOps.isLoading}
-                  aheadCount={aheadCount}
-                />
-              )}
-            </div>
-          )}
-        </div>
-        <ReviewProgressBar
-          reviewedCount={reviewedCount}
-          totalFileCount={totalFileCount}
-          onOpenReview={onOpenReview}
-        />
-      </PanelBody>
-      <DiscardDialog
-        open={dialogs.showDiscardDialog}
-        onOpenChange={dialogs.setShowDiscardDialog}
-        fileToDiscard={dialogs.fileToDiscard}
-        onConfirm={dialogs.handleDiscardConfirm}
-      />
-      <CommitDialog
-        open={dialogs.commitDialogOpen}
-        onOpenChange={dialogs.setCommitDialogOpen}
-        commitMessage={dialogs.commitMessage}
-        onCommitMessageChange={dialogs.setCommitMessage}
-        onCommit={dialogs.handleCommit}
-        isLoading={gitOps.isLoading}
-        stagedFileCount={stagedFileCount}
-        stagedAdditions={stagedAdditions}
-        stagedDeletions={stagedDeletions}
-      />
-      <PRDialog
-        open={dialogs.prDialogOpen}
-        onOpenChange={dialogs.setPrDialogOpen}
-        prTitle={dialogs.prTitle}
-        onPrTitleChange={dialogs.setPrTitle}
-        prBody={dialogs.prBody}
-        onPrBodyChange={dialogs.setPrBody}
-        prDraft={dialogs.prDraft}
-        onPrDraftChange={dialogs.setPrDraft}
-        onCreatePR={dialogs.handleCreatePR}
-        isLoading={gitOps.isLoading}
-        displayBranch={displayBranch}
-        baseBranch={baseBranch}
+      <ChangesPanelBody
+        hasAnything={hasAnything} hasUnstaged={hasUnstaged} hasStaged={hasStaged}
+        hasCommits={hasCommits} unstagedFiles={unstagedFiles} stagedFiles={stagedFiles}
+        commits={commits} pendingStageFiles={pendingStageFiles}
+        lastTimelineSection={lastTimelineSection} reviewedCount={reviewedCount}
+        totalFileCount={totalFileCount} aheadCount={aheadCount} isLoading={gitOps.isLoading}
+        dialogs={dialogs} onOpenDiffFile={onOpenDiffFile} onEditFile={onEditFile}
+        onOpenCommitDetail={onOpenCommitDetail} onOpenReview={onOpenReview}
+        onStageAll={handleStageAll} onStage={handleStage} onUnstage={handleUnstage}
+        onPush={handlePush} stagedFileCount={stagedFileCount}
+        stagedAdditions={stagedAdditions} stagedDeletions={stagedDeletions}
+        displayBranch={displayBranch} baseBranch={baseBranch}
       />
     </PanelRoot>
   );
 });
-
-// --- Header sub-component ---
-
-function ChangesPanelHeader({
-  hasChanges,
-  hasCommits,
-  displayBranch,
-  baseBranchDisplay,
-  behindCount,
-  isLoading,
-  onOpenDiffAll,
-  onOpenReview,
-  onPull,
-  onRebase,
-}: {
-  hasChanges: boolean;
-  hasCommits: boolean;
-  displayBranch: string | null;
-  baseBranchDisplay: string;
-  behindCount: number;
-  isLoading: boolean;
-  onOpenDiffAll?: () => void;
-  onOpenReview?: () => void;
-  onPull: () => void;
-  onRebase: () => void;
-}) {
-  return (
-    <PanelHeaderBarSplit
-      left={
-        hasChanges || hasCommits ? (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-              onClick={onOpenDiffAll}
-            >
-              <IconGitMerge className="h-3 w-3" />
-              Diff
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-              onClick={onOpenReview}
-            >
-              <IconEye className="h-3 w-3" />
-              Review
-            </Button>
-          </>
-        ) : undefined
-      }
-      right={
-        <>
-          {displayBranch && (
-            <BranchHoverCard displayBranch={displayBranch} baseBranchDisplay={baseBranchDisplay} />
-          )}
-          <PullDropdown
-            behindCount={behindCount}
-            isLoading={isLoading}
-            onPull={onPull}
-            onRebase={onRebase}
-          />
-        </>
-      }
-    />
-  );
-}
-
-function BranchHoverCard({
-  displayBranch,
-  baseBranchDisplay,
-}: {
-  displayBranch: string;
-  baseBranchDisplay: string;
-}) {
-  return (
-    <HoverCard openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-default"
-        >
-          <IconGitBranch className="h-3.5 w-3.5" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent side="bottom" align="end" className="w-auto p-3">
-        <div className="flex flex-col gap-2.5 text-xs">
-          <div className="flex items-center justify-between gap-6">
-            <span className="text-muted-foreground/60">Your code lives in:</span>
-            <span className="text-muted-foreground/60">and will be merged into:</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 text-foreground font-medium">
-              <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-              {displayBranch}
-            </span>
-            <div className="flex-1 border-t border-muted-foreground/20 min-w-8" />
-            <IconArrowRight className="h-3 w-3 text-muted-foreground/40" />
-            <span className="text-foreground font-medium">{baseBranchDisplay}</span>
-          </div>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
-
-function PullDropdown({
-  behindCount,
-  isLoading,
-  onPull,
-  onRebase,
-}: {
-  behindCount: number;
-  isLoading: boolean;
-  onPull: () => void;
-  onRebase: () => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-          disabled={isLoading}
-        >
-          <IconCloudDownload className="h-3 w-3" />
-          Pull
-          {behindCount > 0 && <span className="text-yellow-500 text-[10px]">{behindCount}</span>}
-          <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onClick={onPull} className="cursor-pointer text-xs gap-2">
-          <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
-          Pull
-          {behindCount > 0 && (
-            <span className="ml-auto text-muted-foreground text-[10px]">{behindCount} behind</span>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onRebase} className="cursor-pointer text-xs gap-2">
-          <IconGitCherryPick className="h-3.5 w-3.5 text-muted-foreground" />
-          Rebase
-          {behindCount > 0 && (
-            <span className="ml-auto text-muted-foreground text-[10px]">{behindCount} behind</span>
-          )}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 export { ChangesPanel };

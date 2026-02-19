@@ -164,6 +164,31 @@ type PRDialogProps = {
   onCreatePR: () => void;
 };
 
+function PRBranchSummary({
+  displayBranch,
+  baseBranch,
+}: {
+  displayBranch?: string | null;
+  baseBranch?: string;
+}) {
+  if (!displayBranch) return null;
+  return (
+    <div className="text-sm text-muted-foreground">
+      {baseBranch ? (
+        <span>
+          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+          {" → "}
+          <span className="font-medium text-foreground">{baseBranch}</span>
+        </span>
+      ) : (
+        <span>
+          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function PRDialog({
   open,
   onOpenChange,
@@ -188,23 +213,7 @@ function PRDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          {displayBranch && (
-            <div className="text-sm text-muted-foreground">
-              {baseBranch ? (
-                <span>
-                  Creating PR from{" "}
-                  <span className="font-medium text-foreground">{displayBranch}</span>
-                  {" → "}
-                  <span className="font-medium text-foreground">{baseBranch}</span>
-                </span>
-              ) : (
-                <span>
-                  Creating PR from{" "}
-                  <span className="font-medium text-foreground">{displayBranch}</span>
-                </span>
-              )}
-            </div>
-          )}
+          <PRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
           <div className="space-y-2">
             <Label htmlFor="vcs-pr-title" className="text-sm">
               Title

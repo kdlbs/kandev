@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
@@ -27,6 +27,8 @@ export type DragAndDropOptions = {
   onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   onMoveError?: (error: MoveTaskError) => void;
 };
+
+type UseDragAndDropRefsInput = Pick<DragAndDropOptions, "onWorkflowAutomation" | "onMoveError">;
 
 /** Compute optimistic task list after a move. */
 function applyOptimisticMove(
@@ -72,6 +74,37 @@ async function triggerAutoStart(task: Task, response: any): Promise<void> {
   }
 }
 
+function useDragAndDropRefs({ onWorkflowAutomation, onMoveError }: UseDragAndDropRefsInput) {
+  const onWorkflowAutomationRef = useRef(onWorkflowAutomation);
+  const onMoveErrorRef = useRef(onMoveError);
+  useEffect(() => {
+    onWorkflowAutomationRef.current = onWorkflowAutomation;
+    onMoveErrorRef.current = onMoveError;
+  }, [onMoveError, onWorkflowAutomation]);
+  return { onWorkflowAutomationRef, onMoveErrorRef };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function maybeHandleWorkflowAutomation(task: Task, response: any, onWorkflowAutomationRef: {
+  current: DragAndDropOptions["onWorkflowAutomation"];
+}) {
+  const hasAutoStart = response.workflow_step?.events?.on_enter?.some(
+    (a: { type: string }) => a.type === "auto_start_agent",
+  );
+  if (!hasAutoStart) return;
+  const sessionId = task.primarySessionId ?? null;
+  if (sessionId) {
+    await triggerAutoStart(task, response);
+    return;
+  }
+  onWorkflowAutomationRef.current?.({
+    taskId: task.id,
+    sessionId: null,
+    workflowStep: response.workflow_step,
+    taskDescription: task.description ?? "",
+  });
+}
+
 export function useDragAndDrop({
   visibleTasks,
   onWorkflowAutomation,
@@ -82,46 +115,22 @@ export function useDragAndDrop({
   const { moveTaskById } = useTaskActions();
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
-
-  const onWorkflowAutomationRef = useRef(onWorkflowAutomation);
-  const onMoveErrorRef = useRef(onMoveError);
-  onWorkflowAutomationRef.current = onWorkflowAutomation;
-  onMoveErrorRef.current = onMoveError;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleWorkflowAutomation = useCallback(async (task: Task, response: any) => {
-    const hasAutoStart = response.workflow_step?.events?.on_enter?.some(
-      (a: { type: string }) => a.type === "auto_start_agent",
-    );
-    if (!hasAutoStart) return;
-    const sessionId = task.primarySessionId ?? null;
-    if (sessionId) {
-      await triggerAutoStart(task, response);
-    } else {
-      onWorkflowAutomationRef.current?.({
-        taskId: task.id,
-        sessionId: null,
-        workflowStep: response.workflow_step,
-        taskDescription: task.description ?? "",
-      });
-    }
-  }, []);
-
+  const { onWorkflowAutomationRef, onMoveErrorRef } = useDragAndDropRefs({
+    onWorkflowAutomation,
+    onMoveError,
+  });
   const performTaskMove = useCallback(
     async (task: Task, targetStepId: string) => {
       const currentKanban = store.getState().kanban;
       if (!currentKanban.workflowId) return;
-
       const nextPosition = calcNextPosition(currentKanban.tasks, task.id, targetStepId);
       const originalTasks = currentKanban.tasks;
-
       store.getState().hydrate({
         kanban: {
           ...currentKanban,
           tasks: applyOptimisticMove(currentKanban.tasks, task.id, targetStepId, nextPosition),
         },
       });
-
       try {
         setIsMovingTask(true);
         const response = await moveTaskById(task.id, {
@@ -129,7 +138,7 @@ export function useDragAndDrop({
           workflow_step_id: targetStepId,
           position: nextPosition,
         });
-        await handleWorkflowAutomation(task, response);
+        await maybeHandleWorkflowAutomation(task, response, onWorkflowAutomationRef);
       } catch (error) {
         store.getState().hydrate({ kanban: { ...store.getState().kanban, tasks: originalTasks } });
         const message = error instanceof Error ? error.message : "Failed to move task";
@@ -142,13 +151,11 @@ export function useDragAndDrop({
         setIsMovingTask(false);
       }
     },
-    [moveTaskById, store, handleWorkflowAutomation],
+    [moveTaskById, onMoveErrorRef, onWorkflowAutomationRef, store],
   );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
+  const handleDragStart = (event: DragStartEvent) => {
     setActiveTaskId(event.active.id as string);
-  }, []);
-
+  };
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
@@ -163,11 +170,9 @@ export function useDragAndDrop({
     },
     [kanban.workflowId, isMovingTask, visibleTasks, performTaskMove],
   );
-
-  const handleDragCancel = useCallback(() => {
+  const handleDragCancel = () => {
     setActiveTaskId(null);
-  }, []);
-
+  };
   const moveTaskToStep = useCallback(
     async (task: Task, targetStepId: string) => {
       if (!kanban.workflowId || isMovingTask) return;
@@ -176,11 +181,7 @@ export function useDragAndDrop({
     },
     [kanban.workflowId, isMovingTask, performTaskMove],
   );
-
-  const activeTask = useMemo(
-    () => visibleTasks.find((task) => task.id === activeTaskId) ?? null,
-    [visibleTasks, activeTaskId],
-  );
+  const activeTask = visibleTasks.find((task) => task.id === activeTaskId) ?? null;
 
   return {
     activeTaskId,

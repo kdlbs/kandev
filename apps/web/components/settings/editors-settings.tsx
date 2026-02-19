@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   IconEdit,
   IconTrash,
@@ -17,25 +17,29 @@ import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
-import { useAppStore } from "@/components/state-provider";
 import { EditableCard } from "@/components/settings/editable-card";
-import { useEditors } from "@/hooks/domains/settings/use-editors";
-import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
-import { useRequest, type RequestStatus } from "@/lib/http/use-request";
-import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
-import type { EditorOption } from "@/lib/types/http";
 import {
   EditorForm,
   type EditorFormState,
-  buildConfig,
   defaultFormState,
   formStateFromEditor,
   getCustomEditorSummary,
-  getCustomKindLabel,
-  isCustomEditor,
-  resolveAvailableEditors,
-  resolveDefaultEditorId,
 } from "@/components/settings/editor-form";
+import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
+import type { EditorOption } from "@/lib/types/http";
+import type { RequestStatus } from "@/lib/http/use-request";
+import {
+  useEditorsSettingsState,
+  useLspConfigActions,
+  useApplyEditors,
+  useEditorRequests,
+  useSaveRequest,
+  buildDefaultEditorOptions,
+  sortCustomEditors,
+  resolveAvailableEditors,
+  isCustomEditor,
+  type EditorsSettingsState,
+} from "@/components/settings/editors-settings-state";
 
 const LSP_LANGUAGE_OPTIONS = [
   {
@@ -231,7 +235,6 @@ function LspServerConfigSection({
 }
 
 type EditorRequestProps = { isLoading: boolean; status: RequestStatus };
-
 type CreateReq = EditorRequestProps & { run: (state: EditorFormState) => Promise<void> };
 type UpdateReq = EditorRequestProps & {
   run: (id: string, state: EditorFormState) => Promise<void>;
@@ -466,389 +469,48 @@ function ExternalEditorsSection({
   );
 }
 
-function useEditorsSettingsState() {
-  const setEditors = useAppStore((state) => state.setEditors);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const currentUserSettings = useAppStore((state) => state.userSettings);
-  const { editors: storeEditors } = useEditors();
-  const [editors, setEditorItems] = useState<EditorOption[]>(() => storeEditors ?? []);
-  const initialDefaultId = resolveDefaultEditorId(
-    editors ?? [],
-    currentUserSettings.defaultEditorId ?? "",
-  );
-  const [defaultEditorId, setDefaultEditorId] = useState(initialDefaultId);
-  const [baselineDefaultId, setBaselineDefaultId] = useState(initialDefaultId);
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [lspAutoStartLanguages, setLspAutoStartLanguages] = useState<string[]>(
-    () => currentUserSettings.lspAutoStartLanguages ?? [],
-  );
-  const [lspAutoInstallLanguages, setLspAutoInstallLanguages] = useState<string[]>(
-    () => currentUserSettings.lspAutoInstallLanguages ?? [],
-  );
-  const [baselineLspAutoStart, setBaselineLspAutoStart] = useState<string[]>(
-    () => currentUserSettings.lspAutoStartLanguages ?? [],
-  );
-  const [baselineLspAutoInstall, setBaselineLspAutoInstall] = useState<string[]>(
-    () => currentUserSettings.lspAutoInstallLanguages ?? [],
-  );
-
-  const initConfigStrings = useCallback((): Record<string, string> => {
-    const configs = currentUserSettings.lspServerConfigs ?? {};
-    const result: Record<string, string> = {};
-    for (const [lang, config] of Object.entries(configs)) {
-      if (config && Object.keys(config).length > 0) result[lang] = JSON.stringify(config, null, 2);
-    }
-    return result;
-  }, [currentUserSettings.lspServerConfigs]);
-  const [lspConfigStrings, setLspConfigStrings] =
-    useState<Record<string, string>>(initConfigStrings);
-  const [baselineLspConfigStrings, setBaselineLspConfigStrings] =
-    useState<Record<string, string>>(initConfigStrings);
-  const [expandedConfigLang, setExpandedConfigLang] = useState<string | null>(null);
-  const [lspConfigErrors, setLspConfigErrors] = useState<Record<string, string>>({});
-
-  return {
-    setEditors,
-    setUserSettings,
-    currentUserSettings,
-    editors,
-    setEditorItems,
+function useEditorsIsDirty(state: EditorsSettingsState) {
+  const {
     defaultEditorId,
-    setDefaultEditorId,
     baselineDefaultId,
-    setBaselineDefaultId,
-    isAdding,
-    setIsAdding,
-    editingId,
-    setEditingId,
     lspAutoStartLanguages,
-    setLspAutoStartLanguages,
-    lspAutoInstallLanguages,
-    setLspAutoInstallLanguages,
     baselineLspAutoStart,
-    setBaselineLspAutoStart,
-    baselineLspAutoInstall,
-    setBaselineLspAutoInstall,
-    lspConfigStrings,
-    setLspConfigStrings,
-    baselineLspConfigStrings,
-    setBaselineLspConfigStrings,
-    expandedConfigLang,
-    setExpandedConfigLang,
-    lspConfigErrors,
-    setLspConfigErrors,
-  };
-}
-
-function useLspConfigActions(
-  setLspConfigStrings: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
-  setLspConfigErrors: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
-) {
-  const clearLspConfigError = useCallback(
-    (langId: string) => {
-      setLspConfigErrors((prev) => {
-        const next = { ...prev };
-        delete next[langId];
-        return next;
-      });
-    },
-    [setLspConfigErrors],
-  );
-
-  const updateLspConfigString = useCallback(
-    (langId: string, value: string) => {
-      setLspConfigStrings((prev) => {
-        if (!value.trim()) {
-          const next = { ...prev };
-          delete next[langId];
-          return next;
-        }
-        return { ...prev, [langId]: value };
-      });
-      if (!value.trim()) {
-        clearLspConfigError(langId);
-        return;
-      }
-      try {
-        const parsed = JSON.parse(value);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          setLspConfigErrors((prev) => ({ ...prev, [langId]: "Must be a JSON object" }));
-        } else {
-          clearLspConfigError(langId);
-        }
-      } catch {
-        setLspConfigErrors((prev) => ({ ...prev, [langId]: "Invalid JSON" }));
-      }
-    },
-    [setLspConfigStrings, setLspConfigErrors, clearLspConfigError],
-  );
-
-  return { updateLspConfigString };
-}
-
-function parseLspConfigStrings(
-  lspConfigStrings: Record<string, string>,
-): Record<string, Record<string, unknown>> | null {
-  const result: Record<string, Record<string, unknown>> = {};
-  for (const [lang, str] of Object.entries(lspConfigStrings)) {
-    if (!str.trim()) continue;
-    try {
-      const parsed = JSON.parse(str);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-      result[lang] = parsed as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-  return result;
-}
-
-function buildDefaultEditorOptions(
-  availableEditors: EditorOption[],
-  defaultEditorId: string,
-): ComboboxOption[] {
-  if (availableEditors.length === 0) return [];
-  const selected = defaultEditorId ? availableEditors.filter((e) => e.id === defaultEditorId) : [];
-  const rest = availableEditors.filter((e) => e.id !== defaultEditorId);
-  const ordered = [...selected, ...rest];
-  return ordered.map((editor) => ({
-    value: editor.id,
-    label: editor.name,
-    renderLabel: () => (
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="truncate">{editor.name}</span>
-        {editor.kind === "built_in" ? (
-          <Badge variant={editor.installed ? "secondary" : "outline"} className="ml-auto">
-            {editor.installed ? "Installed" : "Not installed"}
-          </Badge>
-        ) : (
-          <Badge variant="secondary" className="ml-auto">
-            {getCustomKindLabel(editor.kind)}
-          </Badge>
-        )}
-      </div>
-    ),
-  }));
-}
-
-function sortCustomEditors(items: EditorOption[]): EditorOption[] {
-  return items.slice().sort((a, b) => {
-    const createdA = a.created_at ? Date.parse(a.created_at) : 0;
-    const createdB = b.created_at ? Date.parse(b.created_at) : 0;
-    if (createdA !== createdB) return createdB - createdA;
-    const nameA = (a.name || "").toLowerCase();
-    const nameB = (b.name || "").toLowerCase();
-    if (nameA < nameB) return -1;
-    if (nameA > nameB) return 1;
-    return a.id.localeCompare(b.id);
-  });
-}
-
-type UserSettingsState = ReturnType<typeof useEditorsSettingsState>["currentUserSettings"];
-type UpdateUserSettingsResponse = Awaited<ReturnType<typeof updateUserSettings>>;
-type SetUserSettingsFn = ReturnType<typeof useEditorsSettingsState>["setUserSettings"];
-
-function buildSettingsPayload(
-  s: UserSettingsState,
-  defaultEditorId: string,
-  lspAutoStartLanguages: string[],
-  lspAutoInstallLanguages: string[],
-  parsedConfigs: Record<string, Record<string, unknown>>,
-): Parameters<typeof updateUserSettings>[0] {
-  return {
-    workspace_id: s.workspaceId ?? "",
-    repository_ids: s.repositoryIds ?? [],
-    default_editor_id: defaultEditorId || undefined,
-    lsp_auto_start_languages: lspAutoStartLanguages,
-    lsp_auto_install_languages: lspAutoInstallLanguages,
-    lsp_server_configs: parsedConfigs,
-  };
-}
-
-function mapEditorSettingsFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
-    reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s.lsp_server_configs ?? {},
-    savedLayouts: s.saved_layouts ?? [],
-    loaded: true as const,
-  };
-}
-
-function buildUserSettingsFromResponse(
-  s: NonNullable<UpdateUserSettingsResponse>["settings"],
-  shellOptions: Array<{ value: string; label: string }> | null | undefined,
-) {
-  if (!s) return null;
-  return {
-    workspaceId: s.workspace_id || null,
-    workflowId: s.workflow_filter_id || null,
-    kanbanViewMode: s.kanban_view_mode || null,
-    repositoryIds: s.repository_ids ?? [],
-    preferredShell: s.preferred_shell || null,
-    shellOptions: shellOptions ?? [],
-    defaultEditorId: s.default_editor_id || null,
-    enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    ...mapEditorSettingsFields(s),
-  };
-}
-
-function applySettingsResponseToStore(
-  response: UpdateUserSettingsResponse,
-  shellOptions: Array<{ value: string; label: string }> | null | undefined,
-  setUserSettings: SetUserSettingsFn,
-) {
-  if (!response?.settings) return;
-  const settings = buildUserSettingsFromResponse(response.settings, shellOptions);
-  if (settings) setUserSettings(settings);
-}
-
-type EditorsSettingsState = ReturnType<typeof useEditorsSettingsState>;
-
-function useApplyEditors(state: EditorsSettingsState) {
-  const { defaultEditorId, setEditorItems, setDefaultEditorId, setBaselineDefaultId } = state;
-  return useCallback(
-    (updater: EditorOption[] | ((prev: EditorOption[]) => EditorOption[])) => {
-      setEditorItems((prev) => {
-        const next = typeof updater === "function" ? updater(prev) : updater;
-        const resolvedDefault = resolveDefaultEditorId(next, defaultEditorId);
-        if (resolvedDefault !== defaultEditorId) {
-          setDefaultEditorId(resolvedDefault);
-          setBaselineDefaultId(resolvedDefault);
-        }
-        return next;
-      });
-    },
-    [defaultEditorId, setEditorItems, setDefaultEditorId, setBaselineDefaultId],
-  );
-}
-
-function useEditorRequests(
-  state: EditorsSettingsState,
-  applyEditors: (updater: EditorOption[] | ((prev: EditorOption[]) => EditorOption[])) => void,
-) {
-  const {
-    setIsAdding,
-    defaultEditorId,
-    setDefaultEditorId,
-    setBaselineDefaultId,
-    setUserSettings,
-    currentUserSettings,
-  } = state;
-
-  const createRequest = useRequest(async (editorState: EditorFormState) => {
-    const created = await createEditor(
-      {
-        name: editorState.name,
-        kind: editorState.kind,
-        config: buildConfig(editorState),
-        enabled: editorState.enabled,
-      },
-      { cache: "no-store" },
-    );
-    applyEditors((prev: EditorOption[]) => [...prev, created]);
-    setIsAdding(false);
-  });
-
-  const updateRequest = useRequest(async (editorId: string, editorState: EditorFormState) => {
-    const updated = await updateEditor(
-      editorId,
-      {
-        name: editorState.name,
-        kind: editorState.kind,
-        config: buildConfig(editorState),
-        enabled: editorState.enabled,
-      },
-      { cache: "no-store" },
-    );
-    applyEditors((prev: EditorOption[]) =>
-      prev.map((editor: EditorOption) => (editor.id === editorId ? updated : editor)),
-    );
-  });
-
-  const deleteRequest = useRequest(async (editorId: string) => {
-    await deleteEditor(editorId, { cache: "no-store" });
-    applyEditors((prev: EditorOption[]) =>
-      prev.filter((editor: EditorOption) => editor.id !== editorId),
-    );
-    if (defaultEditorId === editorId) {
-      setDefaultEditorId("");
-      setBaselineDefaultId("");
-      setUserSettings({ ...currentUserSettings, defaultEditorId: null, loaded: true });
-    }
-  });
-
-  return { createRequest, updateRequest, deleteRequest };
-}
-
-function useSaveRequest(state: EditorsSettingsState) {
-  const {
-    setUserSettings,
-    currentUserSettings,
-    defaultEditorId,
-    setBaselineDefaultId,
-    lspAutoStartLanguages,
-    setBaselineLspAutoStart,
     lspAutoInstallLanguages,
-    setBaselineLspAutoInstall,
+    baselineLspAutoInstall,
     lspConfigStrings,
-    setBaselineLspConfigStrings,
+    baselineLspConfigStrings,
   } = state;
-  return useRequest(async () => {
-    const parsedConfigs = parseLspConfigStrings(lspConfigStrings);
-    if (parsedConfigs === null) return;
-    const payload = buildSettingsPayload(
-      currentUserSettings,
-      defaultEditorId,
-      lspAutoStartLanguages,
-      lspAutoInstallLanguages,
-      parsedConfigs,
-    );
-    const response = await updateUserSettings(payload, { cache: "no-store" });
-    setBaselineDefaultId(defaultEditorId);
-    setBaselineLspAutoStart([...lspAutoStartLanguages]);
-    setBaselineLspAutoInstall([...lspAutoInstallLanguages]);
-    setBaselineLspConfigStrings({ ...lspConfigStrings });
-    applySettingsResponseToStore(response, currentUserSettings.shellOptions, setUserSettings);
-  });
+  const lspAutoStartDirty =
+    lspAutoStartLanguages.length !== baselineLspAutoStart.length ||
+    lspAutoStartLanguages.some((id) => !baselineLspAutoStart.includes(id));
+  const lspAutoInstallDirty =
+    lspAutoInstallLanguages.length !== baselineLspAutoInstall.length ||
+    lspAutoInstallLanguages.some((id) => !baselineLspAutoInstall.includes(id));
+  const lspConfigsDirty =
+    JSON.stringify(lspConfigStrings) !== JSON.stringify(baselineLspConfigStrings);
+  return (
+    defaultEditorId !== baselineDefaultId ||
+    lspAutoStartDirty ||
+    lspAutoInstallDirty ||
+    lspConfigsDirty
+  );
 }
 
 export function EditorsSettings() {
   const state = useEditorsSettingsState();
   const {
-    setEditors,
-    editors,
+    setLspAutoStartLanguages,
+    setLspAutoInstallLanguages,
     setLspConfigStrings,
     setLspConfigErrors,
-    defaultEditorId,
-    setDefaultEditorId,
-    baselineDefaultId,
-    isAdding,
-    setIsAdding,
-    editingId,
-    setEditingId,
-    lspAutoStartLanguages,
-    setLspAutoStartLanguages,
-    lspAutoInstallLanguages,
-    setLspAutoInstallLanguages,
-    baselineLspAutoStart,
-    baselineLspAutoInstall,
-    lspConfigStrings,
-    baselineLspConfigStrings,
-    expandedConfigLang,
-    setExpandedConfigLang,
-    lspConfigErrors,
+    setEditors,
+    editors,
   } = state;
-
-  const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
   const applyEditors = useApplyEditors(state);
   const saveDefaultRequest = useSaveRequest(state);
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
+  const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
+  const isDirty = useEditorsIsDirty(state);
 
   const toggleAutoStart = useCallback(
     (langId: string, checked: boolean) => {
@@ -858,7 +520,6 @@ export function EditorsSettings() {
     },
     [setLspAutoStartLanguages],
   );
-
   const toggleAutoInstall = useCallback(
     (langId: string, checked: boolean) => {
       setLspAutoInstallLanguages((prev) =>
@@ -869,33 +530,16 @@ export function EditorsSettings() {
   );
 
   const customEditors = useMemo(() => sortCustomEditors(editors.filter(isCustomEditor)), [editors]);
-  const builtInEditors = useMemo(
-    () => editors.filter((editor) => !isCustomEditor(editor)),
-    [editors],
-  );
+  const builtInEditors = useMemo(() => editors.filter((editor) => !isCustomEditor(editor)), [editors]);
   const availableEditors = useMemo(() => resolveAvailableEditors(editors), [editors]);
   const defaultOptions = useMemo<ComboboxOption[]>(
-    () => buildDefaultEditorOptions(availableEditors, defaultEditorId),
-    [availableEditors, defaultEditorId],
+    () => buildDefaultEditorOptions(availableEditors, state.defaultEditorId),
+    [availableEditors, state.defaultEditorId],
   );
 
   useEffect(() => {
     setEditors(editors);
   }, [editors, setEditors]);
-
-  const lspAutoStartDirty =
-    lspAutoStartLanguages.length !== baselineLspAutoStart.length ||
-    lspAutoStartLanguages.some((id) => !baselineLspAutoStart.includes(id));
-  const lspAutoInstallDirty =
-    lspAutoInstallLanguages.length !== baselineLspAutoInstall.length ||
-    lspAutoInstallLanguages.some((id) => !baselineLspAutoInstall.includes(id));
-  const lspConfigsDirty =
-    JSON.stringify(lspConfigStrings) !== JSON.stringify(baselineLspConfigStrings);
-  const isDirty =
-    defaultEditorId !== baselineDefaultId ||
-    lspAutoStartDirty ||
-    lspAutoInstallDirty ||
-    lspConfigsDirty;
 
   return (
     <SettingsPageTemplate
@@ -903,9 +547,7 @@ export function EditorsSettings() {
       description="Configure the included code editor and external editors"
       isDirty={isDirty}
       saveStatus={saveDefaultRequest.status}
-      onSave={() => {
-        void saveDefaultRequest.run();
-      }}
+      onSave={() => void saveDefaultRequest.run()}
     >
       <div className="space-y-6">
         <div className="space-y-4">
@@ -913,31 +555,31 @@ export function EditorsSettings() {
             File Editor
           </div>
           <LspLanguageCards
-            lspAutoStartLanguages={lspAutoStartLanguages}
-            lspAutoInstallLanguages={lspAutoInstallLanguages}
+            lspAutoStartLanguages={state.lspAutoStartLanguages}
+            lspAutoInstallLanguages={state.lspAutoInstallLanguages}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
           />
           <LspServerConfigSection
-            lspConfigStrings={lspConfigStrings}
-            lspConfigErrors={lspConfigErrors}
-            expandedConfigLang={expandedConfigLang}
-            setExpandedConfigLang={setExpandedConfigLang}
+            lspConfigStrings={state.lspConfigStrings}
+            lspConfigErrors={state.lspConfigErrors}
+            expandedConfigLang={state.expandedConfigLang}
+            setExpandedConfigLang={state.setExpandedConfigLang}
             updateLspConfigString={updateLspConfigString}
           />
         </div>
         <Separator />
         <ExternalEditorsSection
           defaultOptions={defaultOptions}
-          defaultEditorId={defaultEditorId}
+          defaultEditorId={state.defaultEditorId}
           availableEditors={availableEditors}
           builtInEditors={builtInEditors}
-          onDefaultEditorChange={setDefaultEditorId}
+          onDefaultEditorChange={state.setDefaultEditorId}
           customEditors={customEditors}
-          editingId={editingId}
-          setEditingId={setEditingId}
-          isAdding={isAdding}
-          setIsAdding={setIsAdding}
+          editingId={state.editingId}
+          setEditingId={state.setEditingId}
+          isAdding={state.isAdding}
+          setIsAdding={state.setIsAdding}
           createRequest={createRequest}
           updateRequest={updateRequest}
           deleteRequest={deleteRequest}

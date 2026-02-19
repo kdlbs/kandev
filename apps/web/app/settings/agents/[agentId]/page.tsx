@@ -3,40 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { IconPlus, IconTrash } from "@tabler/icons-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
-import { ProfileFormFields } from "@/components/settings/profile-form-fields";
-import type {
-  Agent,
-  AgentDiscovery,
-  AvailableAgent,
-  PermissionSetting,
-  ModelConfig,
-  PassthroughConfig,
-} from "@/lib/types/http";
+import type { Agent, AgentDiscovery, AvailableAgent, PermissionSetting, ModelConfig } from "@/lib/types/http";
 import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { generateUUID } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
-import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
+import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -91,70 +70,6 @@ const ensureProfiles = (
     profiles: [createDraftProfile(agent.id, agentDisplayName, defaultModel, permissionSettings)],
   };
 };
-
-type ProfileCardItemProps = {
-  profile: DraftProfile;
-  isNew: boolean;
-  draftAgent: DraftAgent;
-  currentAgentModelConfig: ModelConfig;
-  permissionSettings: Record<string, PermissionSetting>;
-  passthroughConfig: PassthroughConfig | null;
-  onProfileChange: (profileId: string, patch: Partial<DraftProfile>) => void;
-  onProfileMcpChange: (
-    profileId: string,
-    patch: Partial<NonNullable<DraftProfile["mcp_config"]>>,
-  ) => void;
-  onRemoveProfile: (profileId: string) => void;
-  onToastError: (error: unknown) => void;
-};
-
-function ProfileCardItem({
-  profile,
-  isNew,
-  draftAgent,
-  currentAgentModelConfig,
-  permissionSettings,
-  passthroughConfig,
-  onProfileChange,
-  onProfileMcpChange,
-  onRemoveProfile,
-  onToastError,
-}: ProfileCardItemProps) {
-  return (
-    <Card
-      id={`profile-card-${profile.id}`}
-      className={isNew ? "border-amber-400/70 shadow-sm" : "border-muted"}
-    >
-      <CardContent className="pt-6 space-y-4">
-        <ProfileFormFields
-          profile={{
-            name: profile.name,
-            model: profile.model,
-            auto_approve: profile.auto_approve,
-            dangerously_skip_permissions: profile.dangerously_skip_permissions,
-            allow_indexing: profile.allow_indexing ?? false,
-            cli_passthrough: profile.cli_passthrough,
-          }}
-          onChange={(patch) => onProfileChange(profile.id, patch)}
-          modelConfig={currentAgentModelConfig}
-          permissionSettings={permissionSettings}
-          passthroughConfig={passthroughConfig}
-          agentName={draftAgent.name}
-          onRemove={() => onRemoveProfile(profile.id)}
-          canRemove={draftAgent.profiles.length > 1}
-          lockPassthrough={Boolean(draftAgent.tui_config)}
-        />
-        <ProfileMcpConfigCard
-          profileId={profile.id}
-          supportsMcp={draftAgent.supports_mcp}
-          draftState={profile.id.startsWith("draft-") ? profile.mcp_config : undefined}
-          onDraftStateChange={(patch) => onProfileMcpChange(profile.id, patch)}
-          onToastError={onToastError}
-        />
-      </CardContent>
-    </Card>
-  );
-}
 
 function useAgentFormState(
   initialAgent: DraftAgent,
@@ -221,65 +136,6 @@ function useAgentFormState(
   };
 }
 
-type AgentHeaderProps = {
-  displayName: string;
-  matchedPath: string | null | undefined;
-  isCreateMode: boolean;
-  savedAgent: Agent | null;
-  onDelete?: () => void;
-};
-
-function AgentHeader({
-  displayName,
-  matchedPath,
-  isCreateMode,
-  savedAgent,
-  onDelete,
-}: AgentHeaderProps) {
-  return (
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-2xl font-bold">{displayName}</h2>
-          <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
-            {matchedPath ?? "Installation not detected"}
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isCreateMode
-            ? "Create a new profile for this agent."
-            : "Configure profiles and defaults for this agent."}
-        </p>
-      </div>
-      {savedAgent?.tui_config && onDelete && (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive" size="sm" className="cursor-pointer">
-              <IconTrash className="h-4 w-4 mr-2" />
-              Delete Agent
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {displayName}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove the agent and all its profiles. This action cannot be
-                undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={onDelete} className="cursor-pointer">
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
-    </div>
-  );
-}
-
 function useAgentStoreSync() {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -310,6 +166,86 @@ function useAgentStoreSync() {
   };
 
   return { upsertAgent };
+}
+
+type AgentSaveHandlersProps = {
+  draftAgent: DraftAgent;
+  savedAgent: Agent | null;
+  isCreateMode: boolean;
+  hasInvalidMcpConfig: boolean;
+  currentAgentModelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  resolveDisplayName: (name: string) => string;
+  setDraftAgent: (agent: DraftAgent) => void;
+  setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
+  upsertAgent: (agent: Agent) => void;
+  onToastError: (error: unknown) => void;
+  replaceRoute: (path: string) => void;
+};
+
+function useAgentSaveHandlers({
+  draftAgent,
+  savedAgent,
+  isCreateMode,
+  hasInvalidMcpConfig,
+  currentAgentModelConfig,
+  permissionSettings,
+  resolveDisplayName,
+  setDraftAgent,
+  setSaveStatus,
+  upsertAgent,
+  onToastError,
+  replaceRoute,
+}: AgentSaveHandlersProps) {
+  const handleSave = async () => {
+    if (draftAgent.profiles.some((p) => !p.name.trim())) {
+      onToastError(new Error("Profile name is required."));
+      return;
+    }
+    if (draftAgent.profiles.some((p) => !p.model.trim())) {
+      onToastError(new Error("Model is required for all profiles."));
+      return;
+    }
+    if (hasInvalidMcpConfig) {
+      onToastError(new Error("Fix invalid MCP JSON before saving."));
+      return;
+    }
+    setSaveStatus("loading");
+    const callbacks = {
+      onToastError,
+      currentAgentModelConfig,
+      permissionSettings,
+      resolveDisplayName,
+      upsertAgent,
+      setDraftAgent,
+      ensureProfiles,
+      cloneAgent,
+      replaceRoute,
+    };
+    try {
+      if (!savedAgent) {
+        await saveNewAgent(draftAgent, callbacks);
+      } else {
+        await saveExistingAgent(draftAgent, savedAgent, isCreateMode, callbacks);
+      }
+      setSaveStatus("success");
+    } catch (error) {
+      setSaveStatus("error");
+      onToastError(error);
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!savedAgent) return;
+    try {
+      await deleteAgentAction(savedAgent.id);
+      replaceRoute("/settings/agents");
+    } catch (err) {
+      onToastError(err);
+    }
+  };
+
+  return { handleSave, handleDeleteAgent };
 }
 
 function useProfileHandlers(
@@ -437,53 +373,20 @@ function AgentSetupForm({
     permissionSettings,
   );
 
-  const handleSave = async () => {
-    if (draftAgent.profiles.some((p) => !p.name.trim())) {
-      onToastError(new Error("Profile name is required."));
-      return;
-    }
-    if (draftAgent.profiles.some((p) => !p.model.trim())) {
-      onToastError(new Error("Model is required for all profiles."));
-      return;
-    }
-    if (hasInvalidMcpConfig) {
-      onToastError(new Error("Fix invalid MCP JSON before saving."));
-      return;
-    }
-    setSaveStatus("loading");
-    const callbacks = {
-      onToastError,
-      currentAgentModelConfig,
-      permissionSettings,
-      resolveDisplayName,
-      upsertAgent,
-      setDraftAgent,
-      ensureProfiles,
-      cloneAgent,
-      replaceRoute: (path: string) => router.replace(path),
-    };
-    try {
-      if (!savedAgent) {
-        await saveNewAgent(draftAgent, callbacks);
-      } else {
-        await saveExistingAgent(draftAgent, savedAgent, isCreateMode, callbacks);
-      }
-      setSaveStatus("success");
-    } catch (error) {
-      setSaveStatus("error");
-      onToastError(error);
-    }
-  };
-
-  const handleDeleteAgent = async () => {
-    if (!savedAgent) return;
-    try {
-      await deleteAgentAction(savedAgent.id);
-      router.replace("/settings/agents");
-    } catch (err) {
-      onToastError(err);
-    }
-  };
+  const { handleSave, handleDeleteAgent } = useAgentSaveHandlers({
+    draftAgent,
+    savedAgent,
+    isCreateMode,
+    hasInvalidMcpConfig,
+    currentAgentModelConfig,
+    permissionSettings,
+    resolveDisplayName,
+    setDraftAgent,
+    setSaveStatus,
+    upsertAgent,
+    onToastError,
+    replaceRoute: (path: string) => router.replace(path),
+  });
 
   const displayName = draftAgent.profiles[0]?.agent_display_name ?? draftAgent.name;
 
@@ -497,46 +400,24 @@ function AgentSetupForm({
         onDelete={handleDeleteAgent}
       />
       <Separator />
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle>
-              {isCreateMode ? `Create ${displayName} Profile` : `${displayName} Profiles`}
-            </CardTitle>
-            {isAgentDirty && <UnsavedChangesBadge />}
-          </div>
-          <Button size="sm" variant="outline" onClick={handleAddProfile} className="cursor-pointer">
-            <IconPlus className="h-4 w-4 mr-2" />
-            Add profile
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {draftAgent.profiles.map((profile) => (
-            <ProfileCardItem
-              key={profile.id}
-              profile={profile}
-              isNew={profile.id === newProfileId}
-              draftAgent={draftAgent}
-              currentAgentModelConfig={currentAgentModelConfig}
-              permissionSettings={permissionSettings}
-              passthroughConfig={passthroughConfig}
-              onProfileChange={handleProfileChange}
-              onProfileMcpChange={handleProfileMcpChange}
-              onRemoveProfile={handleRemoveProfile}
-              onToastError={onToastError}
-            />
-          ))}
-        </CardContent>
-        <div className="flex justify-end px-6 pb-6">
-          <UnsavedSaveButton
-            isDirty={isAgentDirty}
-            isLoading={saveStatus === "loading"}
-            status={saveStatus}
-            onClick={handleSave}
-            disabled={hasInvalidMcpConfig}
-          />
-        </div>
-      </Card>
+      <ProfilesCard
+        displayName={displayName}
+        isCreateMode={isCreateMode}
+        isAgentDirty={isAgentDirty}
+        draftAgent={draftAgent}
+        newProfileId={newProfileId}
+        currentAgentModelConfig={currentAgentModelConfig}
+        permissionSettings={permissionSettings}
+        passthroughConfig={passthroughConfig}
+        saveStatus={saveStatus}
+        hasInvalidMcpConfig={hasInvalidMcpConfig}
+        onAddProfile={handleAddProfile}
+        onProfileChange={handleProfileChange}
+        onProfileMcpChange={handleProfileMcpChange}
+        onRemoveProfile={handleRemoveProfile}
+        onToastError={onToastError}
+        onSave={handleSave}
+      />
     </div>
   );
 }

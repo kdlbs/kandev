@@ -99,47 +99,10 @@ function handleMenuKeyDown<T>(
   return false;
 }
 
-// ── Suggestion configs hook ──────────────────────────────────────────
+// ── Mention items fetcher hook ───────────────────────────────────────
 
-type SuggestionConfigsInput = {
-  sessionId: string | null;
-  onAgentCommand?: (commandName: string) => void;
-  onMentionKeyDown: (event: KeyboardEvent) => boolean;
-  onSlashKeyDown: (event: KeyboardEvent) => boolean;
-  setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
-  setSlashMenu: React.Dispatch<React.SetStateAction<MenuState<SlashCommand>>>;
-};
-
-function useSuggestionConfigs({
-  sessionId,
-  onAgentCommand,
-  onMentionKeyDown,
-  onSlashKeyDown,
-  setMentionMenu,
-  setSlashMenu,
-}: SuggestionConfigsInput) {
+function useMentionItems(sessionId: string | null) {
   const { prompts } = useCustomPrompts();
-
-  const agentCommands = useAppStore((state) =>
-    sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
-  );
-
-  const slashCommands = useMemo((): SlashCommand[] => {
-    if (!agentCommands || agentCommands.length === 0) return [];
-    return agentCommands
-      .filter((cmd) => {
-        const desc = cmd.description || "";
-        return !desc.includes("(bundled)");
-      })
-      .map((cmd) => ({
-        id: `agent-${cmd.name}`,
-        label: `/${cmd.name}`,
-        description: cmd.description || `Run /${cmd.name} command`,
-        action: "agent" as const,
-        agentCommandName: cmd.name,
-      }));
-  }, [agentCommands]);
-
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
   const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
@@ -151,7 +114,7 @@ function useSuggestionConfigs({
     sessionIdRef.current = sessionId;
   });
 
-  const getMentionItems = useCallback(async (query: string): Promise<MentionItem[]> => {
+  return useCallback(async (query: string): Promise<MentionItem[]> => {
     const allItems: MentionItem[] = [];
     allItems.push({
       id: "__plan__",
@@ -184,13 +147,7 @@ function useSuggestionConfigs({
             lastFileSearchRef.current = { query: cacheKey, results: files };
           }
           for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: "File",
-              onSelect: () => {},
-            });
+            allItems.push({ id: filePath, kind: "file", label: filePath, description: "File", onSelect: () => {} });
           }
         }
       } catch {
@@ -199,11 +156,46 @@ function useSuggestionConfigs({
     }
     return filterItems(allItems, query);
   }, []);
+}
 
+// ── Suggestion configs hook ──────────────────────────────────────────
+
+type SuggestionConfigsInput = {
+  sessionId: string | null;
+  onAgentCommand?: (commandName: string) => void;
+  onMentionKeyDown: (event: KeyboardEvent) => boolean;
+  onSlashKeyDown: (event: KeyboardEvent) => boolean;
+  setMentionMenu: React.Dispatch<React.SetStateAction<MenuState<MentionItem>>>;
+  setSlashMenu: React.Dispatch<React.SetStateAction<MenuState<SlashCommand>>>;
+};
+
+function useSuggestionConfigs({
+  sessionId,
+  onAgentCommand,
+  onMentionKeyDown,
+  onSlashKeyDown,
+  setMentionMenu,
+  setSlashMenu,
+}: SuggestionConfigsInput) {
+  const agentCommands = useAppStore((state) =>
+    sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
+  );
+  const slashCommands = useMemo((): SlashCommand[] => {
+    if (!agentCommands || agentCommands.length === 0) return [];
+    return agentCommands
+      .filter((cmd) => !(cmd.description || "").includes("(bundled)"))
+      .map((cmd) => ({
+        id: `agent-${cmd.name}`,
+        label: `/${cmd.name}`,
+        description: cmd.description || `Run /${cmd.name} command`,
+        action: "agent" as const,
+        agentCommandName: cmd.name,
+      }));
+  }, [agentCommands]);
+
+  const getMentionItems = useMentionItems(sessionId);
   const mentionCallbacks = useMemo(
-    (): MentionSuggestionCallbacks => ({
-      getItems: getMentionItems,
-    }),
+    (): MentionSuggestionCallbacks => ({ getItems: getMentionItems }),
     [getMentionItems],
   );
 
@@ -213,7 +205,6 @@ function useSuggestionConfigs({
     onAgentCommandRef.current = onAgentCommand;
     slashCommandsRef.current = slashCommands;
   });
-
   const slashCallbacks = useMemo(
     (): SlashSuggestionCallbacks => ({
       getCommands: () => slashCommandsRef.current,
@@ -227,7 +218,6 @@ function useSuggestionConfigs({
     () => createMentionSuggestion(mentionCallbacks, setMentionMenu, onMentionKeyDown),
     [mentionCallbacks, setMentionMenu, onMentionKeyDown],
   );
-
   const slashSuggestion = useMemo(
     () => createSlashSuggestion(slashCallbacks, setSlashMenu, onSlashKeyDown),
     [slashCallbacks, setSlashMenu, onSlashKeyDown],
@@ -235,6 +225,79 @@ function useSuggestionConfigs({
   /* eslint-enable react-hooks/refs */
 
   return { mentionSuggestion, slashSuggestion };
+}
+
+// ── Menu state hook ──────────────────────────────────────────────────
+
+function useMenuHandlers() {
+  const [mentionMenu, setMentionMenu] = useState<MenuState<MentionItem>>({
+    isOpen: false, items: [], query: "", clientRect: null, command: null,
+  });
+  const [slashMenu, setSlashMenu] = useState<MenuState<SlashCommand>>({
+    isOpen: false, items: [], query: "", clientRect: null, command: null,
+  });
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+
+  useEffect(() => { void Promise.resolve().then(() => setMentionSelectedIndex(0)); }, [mentionMenu.items]);
+  useEffect(() => { void Promise.resolve().then(() => setSlashSelectedIndex(0)); }, [slashMenu.items]);
+
+  const mentionSelectedIndexRef = useRef(mentionSelectedIndex);
+  const slashSelectedIndexRef = useRef(slashSelectedIndex);
+  const mentionKeyDownRef = useRef<((event: KeyboardEvent) => boolean) | null>(null);
+  const slashKeyDownRef = useRef<((event: KeyboardEvent) => boolean) | null>(null);
+
+  const mentionKeyDown = useCallback(
+    (event: KeyboardEvent) =>
+      handleMenuKeyDown(event, mentionMenu, setMentionSelectedIndex, mentionSelectedIndexRef),
+    [mentionMenu],
+  );
+  const slashKeyDown = useCallback(
+    (event: KeyboardEvent) =>
+      handleMenuKeyDown(event, slashMenu, setSlashSelectedIndex, slashSelectedIndexRef),
+    [slashMenu],
+  );
+  const onMentionKeyDown = useCallback(
+    (event: KeyboardEvent) => mentionKeyDownRef.current?.(event) ?? false,
+    [],
+  );
+  const onSlashKeyDown = useCallback(
+    (event: KeyboardEvent) => slashKeyDownRef.current?.(event) ?? false,
+    [],
+  );
+
+  useLayoutEffect(() => {
+    mentionSelectedIndexRef.current = mentionSelectedIndex;
+    slashSelectedIndexRef.current = slashSelectedIndex;
+    mentionKeyDownRef.current = mentionKeyDown;
+    slashKeyDownRef.current = slashKeyDown;
+  });
+
+  const handleMentionSelect = useCallback(
+    (item: MentionItem) => { mentionMenu.command?.(item); },
+    [mentionMenu],
+  );
+  const handleMentionClose = useCallback(
+    () => setMentionMenu({ isOpen: false, items: [], query: "", clientRect: null, command: null }),
+    [],
+  );
+  const handleSlashSelect = useCallback(
+    (cmd: SlashCommand) => { slashMenu.command?.(cmd); },
+    [slashMenu],
+  );
+  const handleSlashClose = useCallback(
+    () => setSlashMenu({ isOpen: false, items: [], query: "", clientRect: null, command: null }),
+    [],
+  );
+
+  return {
+    mentionMenu, setMentionMenu, slashMenu, setSlashMenu,
+    mentionSelectedIndex, setMentionSelectedIndex,
+    slashSelectedIndex, setSlashSelectedIndex,
+    onMentionKeyDown, onSlashKeyDown,
+    handleMentionSelect, handleMentionClose,
+    handleSlashSelect, handleSlashClose,
+  };
 }
 
 // ── Component ───────────────────────────────────────────────────────
@@ -258,77 +321,15 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   },
   ref,
 ) {
-  // ── Menu state ────────────────────────────────────────────────
+  const {
+    mentionMenu, setMentionMenu, slashMenu, setSlashMenu,
+    mentionSelectedIndex, setMentionSelectedIndex,
+    slashSelectedIndex, setSlashSelectedIndex,
+    onMentionKeyDown, onSlashKeyDown,
+    handleMentionSelect, handleMentionClose,
+    handleSlashSelect, handleSlashClose,
+  } = useMenuHandlers();
 
-  const [mentionMenu, setMentionMenu] = useState<MenuState<MentionItem>>({
-    isOpen: false,
-    items: [],
-    query: "",
-    clientRect: null,
-    command: null,
-  });
-  const [slashMenu, setSlashMenu] = useState<MenuState<SlashCommand>>({
-    isOpen: false,
-    items: [],
-    query: "",
-    clientRect: null,
-    command: null,
-  });
-  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
-
-  // Reset selected index when items change (deferred to avoid synchronous setState in effect)
-  useEffect(() => {
-    void Promise.resolve().then(() => setMentionSelectedIndex(0));
-  }, [mentionMenu.items]);
-  useEffect(() => {
-    void Promise.resolve().then(() => setSlashSelectedIndex(0));
-  }, [slashMenu.items]);
-
-  // ── Keyboard handler refs (set by suggestion lifecycle) ───────
-
-  const mentionSelectedIndexRef = useRef(mentionSelectedIndex);
-  const slashSelectedIndexRef = useRef(slashSelectedIndex);
-  const mentionKeyDownRef = useRef<((event: KeyboardEvent) => boolean) | null>(null);
-  const slashKeyDownRef = useRef<((event: KeyboardEvent) => boolean) | null>(null);
-
-  // Wire up keyboard navigation for menus (memoized per menu state)
-  const mentionKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      return handleMenuKeyDown(
-        event,
-        mentionMenu,
-        setMentionSelectedIndex,
-        mentionSelectedIndexRef,
-      );
-    },
-    [mentionMenu],
-  );
-
-  const slashKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      return handleMenuKeyDown(event, slashMenu, setSlashSelectedIndex, slashSelectedIndexRef);
-    },
-    [slashMenu],
-  );
-
-  // Stable callbacks that forward to current handlers via refs
-  const onMentionKeyDown = useCallback((event: KeyboardEvent) => {
-    return mentionKeyDownRef.current?.(event) ?? false;
-  }, []);
-
-  const onSlashKeyDown = useCallback((event: KeyboardEvent) => {
-    return slashKeyDownRef.current?.(event) ?? false;
-  }, []);
-
-  useLayoutEffect(() => {
-    mentionSelectedIndexRef.current = mentionSelectedIndex;
-    slashSelectedIndexRef.current = slashSelectedIndex;
-    mentionKeyDownRef.current = mentionKeyDown;
-    slashKeyDownRef.current = slashKeyDown;
-  });
-
-  // ── Data sources & suggestion configs ──────────────────────────
   const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
     sessionId,
     onAgentCommand,
@@ -338,50 +339,11 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     setSlashMenu,
   });
 
-  // ── Editor (hook handles refs, extensions, sync, imperative handle) ──
   const editor = useTipTapEditor({
-    value,
-    onChange,
-    onSubmit,
-    placeholder,
-    disabled,
-    className,
-    planModeEnabled,
-    submitKey,
-    onFocus,
-    onBlur,
-    sessionId,
-    onImagePaste,
-    mentionSuggestion,
-    slashSuggestion,
-    ref,
+    value, onChange, onSubmit, placeholder, disabled, className,
+    planModeEnabled, submitKey, onFocus, onBlur, sessionId, onImagePaste,
+    mentionSuggestion, slashSuggestion, ref,
   });
-
-  // ── Menu handlers ─────────────────────────────────────────────
-
-  const handleMentionSelect = useCallback(
-    (item: MentionItem) => {
-      mentionMenu.command?.(item);
-    },
-    [mentionMenu],
-  );
-
-  const handleMentionClose = useCallback(() => {
-    setMentionMenu({ isOpen: false, items: [], query: "", clientRect: null, command: null });
-  }, []);
-
-  const handleSlashSelect = useCallback(
-    (cmd: SlashCommand) => {
-      slashMenu.command?.(cmd);
-    },
-    [slashMenu],
-  );
-
-  const handleSlashClose = useCallback(() => {
-    setSlashMenu({ isOpen: false, items: [], query: "", clientRect: null, command: null });
-  }, []);
-
-  // ── Render ────────────────────────────────────────────────────
 
   return (
     <>

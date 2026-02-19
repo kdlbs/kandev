@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { IconDownload, IconTrash } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -21,21 +21,14 @@ import { useToast } from "@/components/toast-provider";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
-import { generateUUID } from "@/lib/utils";
+import { listWorkflowStepsAction } from "@/app/actions/workspaces";
 import {
-  createWorkflowAction,
-  listWorkflowStepsAction,
-  createWorkflowStepAction,
-  updateWorkflowStepAction,
-  deleteWorkflowStepAction,
-  reorderWorkflowStepsAction,
-  getWorkflowTaskCount,
-  getStepTaskCount,
-  bulkMoveTasks,
-  exportWorkflowAction,
-} from "@/app/actions/workspaces";
-
-const FALLBACK_ERROR_MESSAGE = "Request failed";
+  useWorkflowStepActions,
+  useWorkflowDeleteHandlers,
+  useStepDeleteHandlers,
+  useWorkflowSaveActions,
+  handleExportWorkflow,
+} from "./workflow-card-actions";
 
 type WorkflowCardProps = {
   workflow: Workflow;
@@ -91,139 +84,6 @@ function useWorkflowSteps(
   };
 
   return { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps };
-}
-
-type WorkflowStepActionsParams = {
-  workflow: Workflow;
-  isNewWorkflow: boolean;
-  workflowSteps: WorkflowStep[];
-  setWorkflowSteps: (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => void;
-  refreshWorkflowSteps: () => Promise<void>;
-  setStepToDelete: (id: string | null) => void;
-  setStepTaskCount: (count: number | null) => void;
-  setTargetStepForMigration: (id: string) => void;
-  setStepDeleteOpen: (open: boolean) => void;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
-function useWorkflowStepActions({
-  workflow,
-  isNewWorkflow,
-  workflowSteps,
-  setWorkflowSteps,
-  refreshWorkflowSteps,
-  setStepToDelete,
-  setStepTaskCount,
-  setTargetStepForMigration,
-  setStepDeleteOpen,
-  toast,
-}: WorkflowStepActionsParams) {
-  const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
-    if (isNewWorkflow) {
-      setWorkflowSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, ...updates } : s)));
-      return;
-    }
-    try {
-      await updateWorkflowStepAction(stepId, updates);
-      await refreshWorkflowSteps();
-    } catch (error) {
-      toast({
-        title: "Failed to update workflow step",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
-  const handleAddWorkflowStep = async () => {
-    if (isNewWorkflow) {
-      setWorkflowSteps((prev) => [
-        ...prev,
-        {
-          id: `temp-step-${generateUUID()}`,
-          workflow_id: workflow.id,
-          name: "New Step",
-          position: prev.length,
-          color: "bg-slate-500",
-          allow_manual_move: true,
-          created_at: "",
-          updated_at: "",
-        },
-      ]);
-      return;
-    }
-    try {
-      await createWorkflowStepAction({
-        workflow_id: workflow.id,
-        name: "New Step",
-        position: workflowSteps.length,
-        color: "bg-slate-500",
-      });
-      await refreshWorkflowSteps();
-    } catch (error) {
-      toast({
-        title: "Failed to add workflow step",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
-  const handleRemoveWorkflowStep = async (stepId: string) => {
-    if (isNewWorkflow) {
-      setWorkflowSteps((prev) =>
-        prev.filter((s) => s.id !== stepId).map((s, i) => ({ ...s, position: i })),
-      );
-      return;
-    }
-    try {
-      const { task_count } = await getStepTaskCount(stepId);
-      if (task_count === 0) {
-        await deleteWorkflowStepAction(stepId);
-        await refreshWorkflowSteps();
-        return;
-      }
-      setStepToDelete(stepId);
-      setStepTaskCount(task_count);
-      const otherSteps = workflowSteps.filter((s) => s.id !== stepId);
-      setTargetStepForMigration(otherSteps.length > 0 ? otherSteps[0].id : "");
-      setStepDeleteOpen(true);
-    } catch (error) {
-      toast({
-        title: "Failed to check step tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
-  const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
-    if (isNewWorkflow) {
-      setWorkflowSteps(reorderedSteps);
-      return;
-    }
-    setWorkflowSteps(reorderedSteps);
-    try {
-      await reorderWorkflowStepsAction(
-        workflow.id,
-        reorderedSteps.map((s) => s.id),
-      );
-    } catch (error) {
-      toast({
-        title: "Failed to reorder workflow steps",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-      await refreshWorkflowSteps();
-    }
-  };
-
-  return {
-    handleUpdateWorkflowStep,
-    handleAddWorkflowStep,
-    handleRemoveWorkflowStep,
-    handleReorderWorkflowSteps,
-  };
 }
 
 type WorkflowDeleteDialogProps = {
@@ -516,204 +376,24 @@ export function WorkflowCard({
   const [exportJson, setExportJson] = useState("");
   const wfDel = useWorkflowDeleteState();
   const stepDel = useStepDeleteState();
-
   const isNewWorkflow = workflow.id.startsWith("temp-");
-  const saveWorkflowRequest = useRequest(onSaveWorkflow);
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
   const { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps } =
     useWorkflowSteps(workflow.id, initialWorkflowSteps, isNewWorkflow, toast);
-  const {
-    handleUpdateWorkflowStep,
-    handleAddWorkflowStep,
-    handleRemoveWorkflowStep,
-    handleReorderWorkflowSteps,
-  } = useWorkflowStepActions({
-    workflow,
-    isNewWorkflow,
-    workflowSteps,
-    setWorkflowSteps,
-    refreshWorkflowSteps,
-    setStepToDelete: stepDel.setStepToDelete,
-    setStepTaskCount: stepDel.setStepTaskCount,
+  const stepActions = useWorkflowStepActions({
+    workflow, isNewWorkflow, workflowSteps, setWorkflowSteps, refreshWorkflowSteps,
+    setStepToDelete: stepDel.setStepToDelete, setStepTaskCount: stepDel.setStepTaskCount,
     setTargetStepForMigration: stepDel.setTargetStepForMigration,
-    setStepDeleteOpen: stepDel.setStepDeleteOpen,
-    toast,
+    setStepDeleteOpen: stepDel.setStepDeleteOpen, toast,
   });
-
-  useEffect(() => {
-    if (!wfDel.targetWorkflowId) {
-      wfDel.setTargetWorkflowSteps([]);
-      wfDel.setTargetStepId("");
-      return;
-    }
-    let cancelled = false;
-    listWorkflowStepsAction(wfDel.targetWorkflowId)
-      .then((res) => {
-        if (!cancelled) {
-          const steps = res.steps ?? [];
-          wfDel.setTargetWorkflowSteps(steps);
-          wfDel.setTargetStepId(steps.length > 0 ? steps[0].id : "");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) wfDel.setTargetWorkflowSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [wfDel.targetWorkflowId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const saveNewWorkflowRequest = useRequest(async () => {
-    const created = await createWorkflowAction({
-      workspace_id: workflow.workspace_id,
-      name: workflow.name.trim() || "New Workflow",
-    });
-    for (const step of workflowSteps) {
-      await createWorkflowStepAction({
-        workflow_id: created.id,
-        name: step.name,
-        position: step.position,
-        color: step.color,
-        prompt: step.prompt,
-        events: step.events,
-        is_start_step: step.is_start_step,
-        allow_manual_move: step.allow_manual_move,
-      });
-    }
-    onWorkflowCreated?.(created);
+  const { activeSaveRequest, handleSaveWorkflow } = useWorkflowSaveActions({
+    workflow, isNewWorkflow, workflowSteps, onSaveWorkflow, onWorkflowCreated, toast,
   });
-  const activeSaveRequest = isNewWorkflow ? saveNewWorkflowRequest : saveWorkflowRequest;
-
-  const handleSaveWorkflow = async () => {
-    try {
-      if (isNewWorkflow) await saveNewWorkflowRequest.run();
-      else await saveWorkflowRequest.run();
-    } catch (error) {
-      toast({
-        title: "Failed to save workflow changes",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
-  const handleDeleteWorkflowClick = async () => {
-    if (isNewWorkflow) {
-      wfDel.setWorkflowTaskCount(0);
-      wfDel.setDeleteOpen(true);
-      return;
-    }
-    wfDel.setWorkflowDeleteLoading(true);
-    try {
-      const { task_count } = await getWorkflowTaskCount(workflow.id);
-      wfDel.setWorkflowTaskCount(task_count);
-      if (task_count > 0 && otherWorkflows.length > 0)
-        wfDel.setTargetWorkflowId(otherWorkflows[0].id);
-      wfDel.setDeleteOpen(true);
-    } catch (error) {
-      toast({
-        title: "Failed to check workflow tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    } finally {
-      wfDel.setWorkflowDeleteLoading(false);
-    }
-  };
-
-  const handleDeleteWorkflow = async () => {
-    try {
-      await deleteWorkflowRequest.run();
-      wfDel.setDeleteOpen(false);
-    } catch (error) {
-      toast({
-        title: "Failed to delete workflow",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
-  const handleMigrateAndDeleteWorkflow = async () => {
-    if (!wfDel.targetWorkflowId || !wfDel.targetStepId) return;
-    wfDel.setMigrateLoading(true);
-    try {
-      await bulkMoveTasks({
-        source_workflow_id: workflow.id,
-        target_workflow_id: wfDel.targetWorkflowId,
-        target_step_id: wfDel.targetStepId,
-      });
-      await deleteWorkflowRequest.run();
-      wfDel.setDeleteOpen(false);
-    } catch (error) {
-      toast({
-        title: "Failed to migrate tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    } finally {
-      wfDel.setMigrateLoading(false);
-    }
-  };
-
-  const handleMigrateAndDeleteStep = async () => {
-    if (!stepDel.stepToDelete || !stepDel.targetStepForMigration) return;
-    stepDel.setStepMigrateLoading(true);
-    try {
-      await bulkMoveTasks({
-        source_workflow_id: workflow.id,
-        source_step_id: stepDel.stepToDelete,
-        target_workflow_id: workflow.id,
-        target_step_id: stepDel.targetStepForMigration,
-      });
-      await deleteWorkflowStepAction(stepDel.stepToDelete);
-      await refreshWorkflowSteps();
-      stepDel.setStepDeleteOpen(false);
-      stepDel.setStepToDelete(null);
-    } catch (error) {
-      toast({
-        title: "Failed to migrate tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    } finally {
-      stepDel.setStepMigrateLoading(false);
-    }
-  };
-
-  const handleDeleteStepAndTasks = async () => {
-    if (!stepDel.stepToDelete) return;
-    stepDel.setStepMigrateLoading(true);
-    try {
-      await deleteWorkflowStepAction(stepDel.stepToDelete);
-      await refreshWorkflowSteps();
-      stepDel.setStepDeleteOpen(false);
-      stepDel.setStepToDelete(null);
-    } catch (error) {
-      toast({
-        title: "Failed to delete step",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    } finally {
-      stepDel.setStepMigrateLoading(false);
-    }
-  };
-
-  const handleExportWorkflow = async () => {
-    try {
-      const data = await exportWorkflowAction(workflow.id);
-      setExportJson(JSON.stringify(data, null, 2));
-      setExportOpen(true);
-    } catch (error) {
-      toast({
-        title: "Failed to export workflow",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
-  };
-
+  const wfDeleteHandlers = useWorkflowDeleteHandlers({
+    workflow, isNewWorkflow, otherWorkflows, wfDel,
+    deleteWorkflowRun: deleteWorkflowRequest.run, toast,
+  });
+  const stepDeleteHandlers = useStepDeleteHandlers({ workflow, stepDel, refreshWorkflowSteps, toast });
   const stepsForStepMigration = stepDel.stepToDelete
     ? workflowSteps.filter((s) => s.id !== stepDel.stepToDelete)
     : [];
@@ -729,16 +409,8 @@ export function WorkflowCard({
                 {isWorkflowDirty && <UnsavedChangesBadge />}
               </Label>
               <div className="flex items-center gap-2">
-                <Input
-                  value={workflow.name}
-                  onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-                />
-                <UnsavedSaveButton
-                  isDirty={isWorkflowDirty}
-                  isLoading={activeSaveRequest.isLoading}
-                  status={activeSaveRequest.status}
-                  onClick={handleSaveWorkflow}
-                />
+                <Input value={workflow.name} onChange={(e) => onUpdateWorkflow({ name: e.target.value })} />
+                <UnsavedSaveButton isDirty={isWorkflowDirty} isLoading={activeSaveRequest.isLoading} status={activeSaveRequest.status} onClick={handleSaveWorkflow} />
               </div>
             </div>
           </div>
@@ -747,72 +419,24 @@ export function WorkflowCard({
             {workflowLoading ? (
               <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
             ) : (
-              <WorkflowPipelineEditor
-                steps={workflowSteps}
-                onUpdateStep={handleUpdateWorkflowStep}
-                onAddStep={handleAddWorkflowStep}
-                onRemoveStep={handleRemoveWorkflowStep}
-                onReorderSteps={handleReorderWorkflowSteps}
-              />
+              <WorkflowPipelineEditor steps={workflowSteps} onUpdateStep={stepActions.handleUpdateWorkflowStep} onAddStep={stepActions.handleAddWorkflowStep} onRemoveStep={stepActions.handleRemoveWorkflowStep} onReorderSteps={stepActions.handleReorderWorkflowSteps} />
             )}
           </div>
           <div className="flex justify-end gap-2">
             {!isNewWorkflow && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleExportWorkflow}
-                className="cursor-pointer"
-              >
-                <IconDownload className="h-4 w-4 mr-2" />
-                Export
+              <Button type="button" variant="outline" onClick={() => handleExportWorkflow({ workflowId: workflow.id, setExportJson, setExportOpen, toast })} className="cursor-pointer">
+                <IconDownload className="h-4 w-4 mr-2" />Export
               </Button>
             )}
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleDeleteWorkflowClick}
-              disabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading}
-              className="cursor-pointer"
-            >
-              <IconTrash className="h-4 w-4 mr-2" />
-              Delete Workflow
+            <Button type="button" variant="destructive" onClick={wfDeleteHandlers.handleDeleteWorkflowClick} disabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading} className="cursor-pointer">
+              <IconTrash className="h-4 w-4 mr-2" />Delete Workflow
             </Button>
           </div>
         </div>
       </CardContent>
-      <WorkflowDeleteDialog
-        open={wfDel.deleteOpen}
-        onOpenChange={wfDel.setDeleteOpen}
-        workflowTaskCount={wfDel.workflowTaskCount}
-        otherWorkflows={otherWorkflows}
-        targetWorkflowId={wfDel.targetWorkflowId}
-        setTargetWorkflowId={wfDel.setTargetWorkflowId}
-        targetWorkflowSteps={wfDel.targetWorkflowSteps}
-        targetStepId={wfDel.targetStepId}
-        setTargetStepId={wfDel.setTargetStepId}
-        migrateLoading={wfDel.migrateLoading}
-        deleteLoading={deleteWorkflowRequest.isLoading}
-        onDelete={handleDeleteWorkflow}
-        onMigrateAndDelete={handleMigrateAndDeleteWorkflow}
-      />
-      <WorkflowExportDialog
-        open={exportOpen}
-        onOpenChange={setExportOpen}
-        title="Export Workflow"
-        json={exportJson}
-      />
-      <StepDeleteDialog
-        open={stepDel.stepDeleteOpen}
-        onOpenChange={stepDel.setStepDeleteOpen}
-        stepTaskCount={stepDel.stepTaskCount}
-        stepsForMigration={stepsForStepMigration}
-        targetStep={stepDel.targetStepForMigration}
-        setTargetStep={stepDel.setTargetStepForMigration}
-        loading={stepDel.stepMigrateLoading}
-        onMigrateAndDelete={handleMigrateAndDeleteStep}
-        onDeleteAndTasks={handleDeleteStepAndTasks}
-      />
+      <WorkflowDeleteDialog open={wfDel.deleteOpen} onOpenChange={wfDel.setDeleteOpen} workflowTaskCount={wfDel.workflowTaskCount} otherWorkflows={otherWorkflows} targetWorkflowId={wfDel.targetWorkflowId} setTargetWorkflowId={wfDel.setTargetWorkflowId} targetWorkflowSteps={wfDel.targetWorkflowSteps} targetStepId={wfDel.targetStepId} setTargetStepId={wfDel.setTargetStepId} migrateLoading={wfDel.migrateLoading} deleteLoading={deleteWorkflowRequest.isLoading} onDelete={wfDeleteHandlers.handleDeleteWorkflow} onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow} />
+      <WorkflowExportDialog open={exportOpen} onOpenChange={setExportOpen} title="Export Workflow" json={exportJson} />
+      <StepDeleteDialog open={stepDel.stepDeleteOpen} onOpenChange={stepDel.setStepDeleteOpen} stepTaskCount={stepDel.stepTaskCount} stepsForMigration={stepsForStepMigration} targetStep={stepDel.targetStepForMigration} setTargetStep={stepDel.setTargetStepForMigration} loading={stepDel.stepMigrateLoading} onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep} onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks} />
     </Card>
   );
 }

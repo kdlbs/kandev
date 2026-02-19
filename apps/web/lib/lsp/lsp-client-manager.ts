@@ -1,301 +1,32 @@
-import type {
-  editor as monacoEditor,
-  IDisposable,
-  MarkerSeverity as MarkerSeverityType,
-} from "monaco-editor";
-import { getBackendConfig } from "@/lib/config";
+import type { editor as monacoEditor, IDisposable } from "monaco-editor";
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 import { setBuiltinTsSuppressed } from "@/components/editors/monaco/builtin-providers";
 import { registerLspProviders } from "./lsp-providers";
+import {
+  JsonRpcConnection,
+  toMonacoRange,
+  toMonacoSeverity,
+  getWsBaseUrl,
+  CLOSE_CODE_STATUS,
+  LSP_CLIENT_CAPABILITIES,
+} from "./lsp-json-rpc";
+import type { LspRange, LSPConnection, LspStatus } from "./lsp-json-rpc";
+
+export type { LspStatus } from "./lsp-json-rpc";
+export { toLspLanguage } from "./lsp-json-rpc";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type LspStatus =
-  | { state: "disabled" }
-  | { state: "connecting" }
-  | { state: "installing" }
-  | { state: "starting" }
-  | { state: "ready" }
-  | { state: "stopping" }
-  | { state: "unavailable"; reason: string }
-  | { state: "error"; reason: string };
-
-const DISABLED_STATUS: LspStatus = { state: "disabled" };
-const LSP_IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes
-
-// Default per-language LSP server configurations.
-// These are sent to the language server via workspace/configuration requests.
-// Users can override these via lspServerConfigs in user settings.
 export const LSP_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   go: { "ui.semanticTokens": true },
 };
 
+const DISABLED_STATUS = { state: "disabled" } as const;
+const LSP_IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes
+
 type StatusListener = (key: string, status: LspStatus) => void;
-
-// ---------------------------------------------------------------------------
-// Minimal JSON-RPC 2.0 client over WebSocket
-// ---------------------------------------------------------------------------
-
-type PendingRequest = { resolve: (value: unknown) => void; reject: (reason: unknown) => void };
-
-class JsonRpcConnection {
-  private nextId = 1;
-  private pending = new Map<number, PendingRequest>();
-  private notificationHandlers = new Map<string, (params: unknown) => void>();
-  private requestHandlers = new Map<string, (params: unknown) => unknown>();
-  private messageHandler: ((event: MessageEvent) => void) | null = null;
-
-  constructor(private ws: WebSocket) {}
-
-  listen() {
-    this.messageHandler = (event: MessageEvent) => {
-      let msg: {
-        jsonrpc?: string;
-        id?: number;
-        method?: string;
-        params?: unknown;
-        result?: unknown;
-        error?: unknown;
-      };
-      try {
-        msg = JSON.parse(event.data as string);
-      } catch {
-        return;
-      }
-
-      if (msg.id !== undefined && msg.method !== undefined) {
-        // Server → client request
-        const handler = this.requestHandlers.get(msg.method);
-        if (handler) {
-          try {
-            const result = handler(msg.params);
-            this.ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: result ?? null }));
-          } catch (err) {
-            this.ws.send(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: msg.id,
-                error: { code: -32603, message: String(err) },
-              }),
-            );
-          }
-        } else {
-          // Respond with empty result for unhandled server requests (e.g. workspace/configuration)
-          this.ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: null }));
-        }
-      } else if (msg.id !== undefined) {
-        // Response to our request
-        const p = this.pending.get(msg.id);
-        if (p) {
-          this.pending.delete(msg.id);
-          if (msg.error) p.reject(msg.error);
-          else p.resolve(msg.result);
-        }
-      } else if (msg.method !== undefined) {
-        // Notification from server
-        this.notificationHandlers.get(msg.method)?.(msg.params);
-      }
-    };
-    this.ws.addEventListener("message", this.messageHandler);
-  }
-
-  sendRequest(method: string, params: unknown): Promise<unknown> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-    });
-  }
-
-  sendNotification(method: string, params: unknown): void {
-    this.ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
-  }
-
-  onNotification(method: string, handler: (params: unknown) => void): void {
-    this.notificationHandlers.set(method, handler);
-  }
-
-  onRequest(method: string, handler: (params: unknown) => unknown): void {
-    this.requestHandlers.set(method, handler);
-  }
-
-  dispose() {
-    if (this.messageHandler) {
-      this.ws.removeEventListener("message", this.messageHandler);
-      this.messageHandler = null;
-    }
-    for (const p of this.pending.values()) {
-      p.reject(new Error("Connection disposed"));
-    }
-    this.pending.clear();
-    this.notificationHandlers.clear();
-    this.requestHandlers.clear();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// LSP ↔ Monaco type conversions
-// ---------------------------------------------------------------------------
-
-type LspPosition = { line: number; character: number };
-type LspRange = { start: LspPosition; end: LspPosition };
-
-function toMonacoRange(r: LspRange): {
-  startLineNumber: number;
-  startColumn: number;
-  endLineNumber: number;
-  endColumn: number;
-} {
-  return {
-    startLineNumber: r.start.line + 1,
-    startColumn: r.start.character + 1,
-    endLineNumber: r.end.line + 1,
-    endColumn: r.end.character + 1,
-  };
-}
-
-// LSP DiagnosticSeverity → Monaco MarkerSeverity
-function toMonacoSeverity(lspSeverity: number | undefined): MarkerSeverityType {
-  const monaco = getMonacoInstance();
-  if (!monaco) return 8 as MarkerSeverityType; // Error fallback
-  switch (lspSeverity) {
-    case 1:
-      return monaco.MarkerSeverity.Error;
-    case 2:
-      return monaco.MarkerSeverity.Warning;
-    case 3:
-      return monaco.MarkerSeverity.Info;
-    case 4:
-      return monaco.MarkerSeverity.Hint;
-    default:
-      return monaco.MarkerSeverity.Info;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// LSP Connection
-// ---------------------------------------------------------------------------
-
-type OpenDocument = { version: number; languageId: string };
-
-type LSPConnection = {
-  ws: WebSocket;
-  rpc: JsonRpcConnection | null;
-  initialized: boolean;
-  refCount: number;
-  idleTimer: ReturnType<typeof setTimeout> | null;
-  openDocuments: Map<string, OpenDocument>;
-  providerDisposables: IDisposable[];
-  serverCapabilities: Record<string, unknown> | null;
-  workspacePath: string | null;
-};
-
-// ---------------------------------------------------------------------------
-// Manager
-// ---------------------------------------------------------------------------
-
-function getWsBaseUrl(): string {
-  try {
-    const backendUrl = getBackendConfig().apiBaseUrl;
-    const url = new URL(backendUrl);
-    const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${url.host}`;
-  } catch {
-    return "ws://localhost:8080";
-  }
-}
-
-/** LSP client capabilities sent during initialization. */
-const LSP_CLIENT_CAPABILITIES = {
-  textDocument: {
-    synchronization: {
-      dynamicRegistration: false,
-      willSave: false,
-      didSave: true,
-      willSaveWaitUntil: false,
-    },
-    completion: {
-      dynamicRegistration: false,
-      completionItem: {
-        snippetSupport: true,
-        commitCharactersSupport: true,
-        documentationFormat: ["markdown", "plaintext"],
-        deprecatedSupport: true,
-        preselectSupport: true,
-      },
-      contextSupport: true,
-    },
-    hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
-    definition: { dynamicRegistration: false },
-    references: { dynamicRegistration: false },
-    signatureHelp: {
-      dynamicRegistration: false,
-      signatureInformation: {
-        documentationFormat: ["markdown", "plaintext"],
-        parameterInformation: { labelOffsetSupport: true },
-      },
-    },
-    publishDiagnostics: { relatedInformation: true },
-    semanticTokens: {
-      dynamicRegistration: false,
-      requests: { full: true },
-      tokenTypes: [
-        "namespace",
-        "type",
-        "class",
-        "enum",
-        "interface",
-        "struct",
-        "typeParameter",
-        "parameter",
-        "variable",
-        "property",
-        "enumMember",
-        "event",
-        "function",
-        "method",
-        "macro",
-        "keyword",
-        "modifier",
-        "comment",
-        "string",
-        "number",
-        "regexp",
-        "operator",
-        "decorator",
-      ],
-      tokenModifiers: [
-        "declaration",
-        "definition",
-        "readonly",
-        "static",
-        "deprecated",
-        "abstract",
-        "async",
-        "modification",
-        "documentation",
-        "defaultLibrary",
-      ],
-      formats: ["relative"],
-      overlappingTokenSupport: false,
-      multilineTokenSupport: false,
-    },
-  },
-  workspace: {
-    configuration: true,
-    didChangeConfiguration: { dynamicRegistration: false },
-    semanticTokens: { refreshSupport: true },
-  },
-} as const;
-
-/** Map WebSocket close codes to LSP status for pre-bridge failures. */
-const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
-  4001: (reason) => ({ state: "unavailable", reason: reason || "Language server not found" }),
-  4002: () => ({ state: "unavailable", reason: "No active workspace" }),
-  4003: (reason) => ({ state: "error", reason: reason || "Install failed" }),
-};
 
 class LSPClientManager {
   private connections = new Map<string, LSPConnection>();
@@ -527,19 +258,12 @@ class LSPClientManager {
         );
       });
 
-      // Suppress Monaco's built-in TS/JS providers BEFORE registering our LSP
-      // providers. The suppression flag is checked at registration time in
-      // monaco-loader.ts — when it's true, newly registered providers are NOT
-      // wrapped with the suppression logic, so our LSP providers always work.
-      // The built-in providers (registered earlier while the flag was false)
-      // will return empty results while the flag is true.
+      // Suppress Monaco's built-in TS/JS providers BEFORE registering our LSP providers.
       if (lspLanguage === "typescript") {
         setBuiltinTsSuppressed(true);
       }
 
-      // Collect callbacks for semantic token refresh — the server sends
-      // workspace/semanticTokens/refresh when analysis is complete and
-      // semantic tokens are ready (e.g. gopls after loading a Go workspace).
+      // Collect callbacks for semantic token refresh
       const semanticRefreshCallbacks: (() => void)[] = [];
       rpc.onRequest("workspace/semanticTokens/refresh", () => {
         for (const cb of semanticRefreshCallbacks) cb();
@@ -585,12 +309,6 @@ class LSPClientManager {
 
   // ------- Placeholder models for Go-to-Definition / References -------
 
-  /**
-   * Ensure Monaco models exist for the given file:// URIs so that the peek
-   * widget and Go-to-Definition don't throw "Model not found". Models are
-   * created with empty content initially, then filled asynchronously from
-   * the backend.
-   */
   private ensureModelsExist(uris: string[], connectionKey: string): void {
     const monaco = getMonacoInstance();
     if (!monaco) return;
@@ -601,19 +319,13 @@ class LSPClientManager {
       if (!fileUri.startsWith("file://")) continue;
       const parsed = monaco.Uri.parse(fileUri);
 
-      // Skip if a model already exists for this URI
       if (monaco.editor.getModel(parsed)) continue;
 
-      // Create a placeholder model with empty content
       monaco.editor.createModel("", undefined, parsed);
       this.placeholderModels.add(fileUri);
 
-      // Fetch real content asynchronously and update the model.
-      // Only for files inside the workspace — external files (e.g. Go module
-      // cache, node_modules in global paths) can't be resolved by the backend's
-      // workspace file handler, so we leave placeholder models empty.
       if (conn?.workspacePath) {
-        const absolutePath = parsed.path; // e.g. /workspace/src/foo.ts
+        const absolutePath = parsed.path;
         if (!absolutePath.startsWith(conn.workspacePath)) continue;
         const relativePath = absolutePath.slice(conn.workspacePath.length + 1);
 
@@ -702,11 +414,7 @@ class LSPClientManager {
   /** Build a file:// URI from a Monaco model, or null if it can't be determined. */
   private getDocumentUri(model: monacoEditor.ITextModel): string | null {
     const uri = model.uri.toString();
-    // If it's already a file:// URI, use it directly
     if (uri.startsWith("file://")) return uri;
-    // Otherwise, try to match against open documents by path
-    // Monaco @monaco-editor/react creates URIs like "inmemory://model/<path>"
-    // or the model's URI path might match the file path we used
     const path = model.uri.path;
     if (path && path.startsWith("/")) return `file://${path}`;
     return null;
@@ -725,12 +433,10 @@ class LSPClientManager {
     const monaco = getMonacoInstance();
     if (!monaco) return;
 
-    // Find the matching model
     const models = monaco.editor.getModels();
     const targetModel = models.find((m: monacoEditor.ITextModel) => {
       const modelUri = m.uri.toString();
       if (modelUri === params.uri) return true;
-      // Match file:// URI to model path
       if (params.uri.startsWith("file://")) {
         const filePath = params.uri.replace("file://", "");
         if (m.uri.path === filePath) return true;
@@ -826,7 +532,6 @@ class LSPClientManager {
   }
 
   private cleanupConnection(key: string, conn: LSPConnection) {
-    // Re-enable Monaco's built-in TS/JS providers if this was a TypeScript LSP connection
     const lspLanguage = key.split(":")[1];
     if (lspLanguage === "typescript") {
       setBuiltinTsSuppressed(false);
@@ -863,23 +568,6 @@ class LSPClientManager {
       }
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Language mapping helpers
-// ---------------------------------------------------------------------------
-
-export function toLspLanguage(monacoLanguage: string): string | null {
-  const map: Record<string, string> = {
-    typescript: "typescript",
-    javascript: "typescript",
-    typescriptreact: "typescript",
-    javascriptreact: "typescript",
-    go: "go",
-    rust: "rust",
-    python: "python",
-  };
-  return map[monacoLanguage] ?? null;
 }
 
 export const lspClientManager = new LSPClientManager();

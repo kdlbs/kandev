@@ -159,6 +159,15 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
 
 type StatsContentProps = { resolvedStats: StatsResponse; rangeLabel: string };
 
+function SectionDivider({ id, label }: { id: string; label: string }) {
+  return (
+    <div id={id} className="flex items-center gap-3 pt-2 scroll-mt-24">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="h-px flex-1 bg-border/60" />
+    </div>
+  );
+}
+
 function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
   const {
     global,
@@ -174,12 +183,7 @@ function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
       <div className="max-w-7xl mx-auto p-6">
         <div className="space-y-5">
           <OverviewCards global={global} git_stats={git_stats} />
-          <div id="telemetry" className="flex items-center gap-3 pt-2 scroll-mt-24">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Telemetry
-            </div>
-            <div className="h-px flex-1 bg-border/60" />
-          </div>
+          <SectionDivider id="telemetry" label="Telemetry" />
           <div id="completed" className="scroll-mt-24">
             <div className="grid gap-4 lg:grid-cols-3">
               <Card className="rounded-sm lg:col-span-2">
@@ -256,12 +260,7 @@ function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
               <RepoLeaders repositoryStats={repository_stats} />
             </CardContent>
           </Card>
-          <div id="workload" className="flex items-center gap-3 pt-2 scroll-mt-24">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Workload
-            </div>
-            <div className="h-px flex-1 bg-border/60" />
-          </div>
+          <SectionDivider id="workload" label="Workload" />
           <WorkloadSection task_stats={task_stats} />
         </div>
       </div>

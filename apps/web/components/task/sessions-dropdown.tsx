@@ -92,6 +92,42 @@ type SessionsDropdownProps = {
   onSetPrimary?: (sessionId: string) => void;
 };
 
+function useRunningSessionsClock(sessions: TaskSession[]) {
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const hasRunningSessions = sessions.some(
+      (session: TaskSession) => session.state === "RUNNING" || session.state === "STARTING",
+    );
+    if (!hasRunningSessions) return;
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sessions]);
+  return currentTime;
+}
+
+function useSessionSelectionHandlers(taskId: string | null) {
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const appStore = useAppStoreApi();
+  const updateUrl = useCallback((sessionId: string) => {
+    if (typeof window === "undefined") return;
+    window.history.replaceState({}, "", linkToSession(sessionId));
+  }, []);
+  const handleSelectSession = useCallback(
+    (sessionId: string, close: () => void) => {
+      if (!taskId) return;
+      const oldSessionId = appStore.getState().tasks.activeSessionId;
+      setActiveSession(taskId, sessionId);
+      performLayoutSwitch(oldSessionId, sessionId);
+      updateUrl(sessionId);
+      close();
+    },
+    [appStore, setActiveSession, taskId, updateUrl],
+  );
+  return { handleSelectSession };
+}
+
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
@@ -100,13 +136,12 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   primarySessionId = null,
   onSetPrimary,
 }: SessionsDropdownProps) {
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
-  const appStore = useAppStoreApi();
   const { sessions, loadSessions } = useTaskSessions(taskId);
+  const { handleSelectSession } = useSessionSelectionHandlers(taskId);
+  const currentTime = useRunningSessionsClock(sessions);
 
   const agentLabelsById = useMemo(() => {
     return Object.fromEntries(
@@ -122,34 +157,6 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     },
     [loadSessions, taskId],
   );
-
-  // Update timer every second for running sessions
-  useEffect(() => {
-    const hasRunningSessions = sessions.some(
-      (session: TaskSession) => session.state === "RUNNING" || session.state === "STARTING",
-    );
-    if (!hasRunningSessions) return;
-
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [sessions]);
-
-  const updateUrl = useCallback((sessionId: string) => {
-    if (typeof window === "undefined") return;
-    window.history.replaceState({}, "", linkToSession(sessionId));
-  }, []);
-
-  const handleSelectSession = (sessionId: string) => {
-    if (!taskId) return;
-    const oldSessionId = appStore.getState().tasks.activeSessionId;
-    setActiveSession(taskId, sessionId);
-    performLayoutSwitch(oldSessionId, sessionId);
-    updateUrl(sessionId);
-    setOpen(false);
-  };
 
   const sortedSessions = useMemo(() => {
     const visibleSessions = taskId ? sessions : [];
@@ -190,11 +197,11 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           activeSessionId={activeSessionId}
           primarySessionId={primarySessionId}
           currentTime={currentTime}
-          resolveAgentLabel={resolveAgentLabel}
-          onSelectSession={handleSelectSession}
-          onSetPrimary={onSetPrimary}
-          onNewSession={() => setShowNewSessionDialog(true)}
-        />
+        resolveAgentLabel={resolveAgentLabel}
+        onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
+        onSetPrimary={onSetPrimary}
+        onNewSession={() => setShowNewSessionDialog(true)}
+      />
       </DropdownMenu>
       <NewSessionDialog
         open={showNewSessionDialog}

@@ -315,6 +315,17 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+type SimplePanelOpts = {
+  id: string;
+  component: string;
+  title: string;
+  params?: Record<string, unknown>;
+};
+
+function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
+  focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
+}
+
 function buildPanelActions(set: StoreSet, get: StoreGet) {
   const getFileName = (path: string) => path.split("/").pop() || path;
 
@@ -333,57 +344,33 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
     addChangesPanel: (groupId?: string) => {
       const { api, rightTopGroupId } = get();
       if (!api) return;
-      focusOrAddPanel(api, {
-        id: "changes",
-        component: "changes",
-        title: "Changes",
-        position: { referenceGroup: groupId ?? rightTopGroupId },
-      });
+      addSimplePanel(api, groupId ?? rightTopGroupId, { id: "changes", component: "changes", title: "Changes" });
     },
     addFilesPanel: (groupId?: string) => {
       const { api, rightTopGroupId } = get();
       if (!api) return;
-      focusOrAddPanel(api, {
-        id: "files",
-        component: "files",
-        title: "Files",
-        position: { referenceGroup: groupId ?? rightTopGroupId },
-      });
+      addSimplePanel(api, groupId ?? rightTopGroupId, { id: "files", component: "files", title: "Files" });
     },
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       if (path) set({ selectedDiff: { path, content } });
-      focusOrAddPanel(api, {
-        id: "diff-viewer",
-        component: "diff-viewer",
-        title: "Diff Viewer",
-        params: { kind: "all" },
-        position: { referenceGroup: groupId ?? centerGroupId },
-      });
+      addSimplePanel(api, groupId ?? centerGroupId, { id: "diff-viewer", component: "diff-viewer", title: "Diff Viewer", params: { kind: "all" } });
     },
     addFileDiffPanel: (path: string, content?: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      const id = `diff:file:${path}`;
-      focusOrAddPanel(api, {
-        id,
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: `diff:file:${path}`,
         component: "diff-viewer",
         title: `Diff [${getFileName(path)}]`,
         params: { kind: "file", path, content },
-        position: { referenceGroup: groupId ?? centerGroupId },
       });
     },
     addCommitDetailPanel: (sha: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      focusOrAddPanel(api, {
-        id: `commit:${sha}`,
-        component: "commit-detail",
-        title: sha.slice(0, 7),
-        params: { commitSha: sha },
-        position: { referenceGroup: groupId ?? centerGroupId },
-      });
+      addSimplePanel(api, groupId ?? centerGroupId, { id: `commit:${sha}`, component: "commit-detail", title: sha.slice(0, 7), params: { commitSha: sha } });
     },
     addFileEditorPanel: (path: string, name: string, quiet?: boolean) => {
       const { api, centerGroupId } = get();
@@ -404,13 +391,7 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
       const { api, centerGroupId } = get();
       if (!api) return;
       const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
-      focusOrAddPanel(api, {
-        id: browserId,
-        component: "browser",
-        title: "Browser",
-        params: { url: url ?? "" },
-        position: { referenceGroup: groupId ?? centerGroupId },
-      });
+      addSimplePanel(api, groupId ?? centerGroupId, { id: browserId, component: "browser", title: "Browser", params: { url: url ?? "" } });
     },
     addPlanPanel: (groupId?: string) => {
       const { api } = get();
@@ -424,13 +405,7 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
       const { api, rightBottomGroupId } = get();
       if (!api) return;
       const id = terminalId ?? `terminal-${Date.now()}`;
-      focusOrAddPanel(api, {
-        id,
-        component: "terminal",
-        title: "Terminal",
-        params: { terminalId: id },
-        position: { referenceGroup: groupId ?? rightBottomGroupId },
-      });
+      addSimplePanel(api, groupId ?? rightBottomGroupId, { id, component: "terminal", title: "Terminal", params: { terminalId: id } });
     },
   };
 }

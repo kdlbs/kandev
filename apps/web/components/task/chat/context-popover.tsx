@@ -132,24 +132,16 @@ function PromptsSection({ query, prompts, contextFiles, onToggleFile }: PromptsS
   );
 }
 
-export function ContextPopover({
-  open,
-  onOpenChange,
-  trigger,
-  sessionId,
-  planContextEnabled,
-  contextFiles,
-  onToggleFile,
-}: ContextPopoverProps) {
+function useContextPopoverState(
+  open: boolean,
+  sessionId: string | null,
+) {
   const [query, setQuery] = useState("");
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { prompts } = useCustomPrompts();
-
-  // Focus input when popover opens
   /* eslint-disable react-hooks/set-state-in-effect -- resetting state on open/close is intentional */
   useEffect(() => {
     if (open) {
@@ -161,7 +153,6 @@ export function ContextPopover({
   }, [open]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Debounced file search
   /* eslint-disable react-hooks/set-state-in-effect -- loading state sync is intentional for UX */
   useEffect(() => {
     if (!open || !sessionId) return;
@@ -173,10 +164,7 @@ export function ContextPopover({
       try {
         const client = getWebSocketClient();
         if (!client) {
-          if (!cancelled) {
-            setFileResults([]);
-            setIsLoading(false);
-          }
+          if (!cancelled) { setFileResults([]); setIsLoading(false); }
           return;
         }
         const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
@@ -192,6 +180,91 @@ export function ContextPopover({
     };
   }, [open, sessionId, query]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  return { query, setQuery, fileResults, isLoading, inputRef };
+}
+
+function ContextPopoverList({
+  query,
+  fileResults,
+  isLoading,
+  planContextEnabled,
+  filteredPrompts,
+  contextFiles,
+  onToggleFile,
+  isFileSelected,
+  handleToggleFile,
+}: {
+  query: string;
+  fileResults: string[];
+  isLoading: boolean;
+  planContextEnabled: boolean;
+  filteredPrompts: { id: string; name: string; content?: string }[];
+  contextFiles: ContextFile[];
+  onToggleFile: (file: ContextFile) => void;
+  isFileSelected: (path: string) => boolean;
+  handleToggleFile: (filePath: string) => void;
+}) {
+  return (
+    <div className="max-h-60 overflow-y-auto border-t border-border">
+      {!query && (
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer"
+          onClick={() => onToggleFile(PLAN_CONTEXT_FILE)}
+        >
+          <Checkbox
+            checked={planContextEnabled}
+            onCheckedChange={() => onToggleFile(PLAN_CONTEXT_FILE)}
+            className="h-3.5 w-3.5"
+          />
+          <IconListCheck className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-xs flex-1 truncate">Plan</span>
+          {planContextEnabled && (
+            <span className="text-[9px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+              ACTIVE
+            </span>
+          )}
+        </div>
+      )}
+      <PromptsSection
+        query={query}
+        prompts={filteredPrompts}
+        contextFiles={contextFiles}
+        onToggleFile={onToggleFile}
+      />
+      {!query && fileResults.length > 0 && (
+        <div className="px-3 pt-2 pb-1">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Files
+          </p>
+        </div>
+      )}
+      <FileResultsList
+        isLoading={isLoading}
+        fileResults={fileResults}
+        query={query}
+        filteredPromptsEmpty={filteredPrompts.length === 0}
+        isFileSelected={isFileSelected}
+        onToggle={handleToggleFile}
+      />
+    </div>
+  );
+}
+
+export function ContextPopover({
+  open,
+  onOpenChange,
+  trigger,
+  sessionId,
+  planContextEnabled,
+  contextFiles,
+  onToggleFile,
+}: ContextPopoverProps) {
+  const { query, setQuery, fileResults, isLoading, inputRef } = useContextPopoverState(
+    open,
+    sessionId,
+  );
+  const { prompts } = useCustomPrompts();
 
   const handleToggleFile = useCallback(
     (filePath: string) => {
@@ -235,48 +308,17 @@ export function ContextPopover({
             />
           </div>
         </div>
-        <div className="max-h-60 overflow-y-auto border-t border-border">
-          {!query && (
-            <div
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer"
-              onClick={() => onToggleFile(PLAN_CONTEXT_FILE)}
-            >
-              <Checkbox
-                checked={planContextEnabled}
-                onCheckedChange={() => onToggleFile(PLAN_CONTEXT_FILE)}
-                className="h-3.5 w-3.5"
-              />
-              <IconListCheck className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="text-xs flex-1 truncate">Plan</span>
-              {planContextEnabled && (
-                <span className="text-[9px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                  ACTIVE
-                </span>
-              )}
-            </div>
-          )}
-          <PromptsSection
-            query={query}
-            prompts={filteredPrompts}
-            contextFiles={contextFiles}
-            onToggleFile={onToggleFile}
-          />
-          {!query && fileResults.length > 0 && (
-            <div className="px-3 pt-2 pb-1">
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                Files
-              </p>
-            </div>
-          )}
-          <FileResultsList
-            isLoading={isLoading}
-            fileResults={fileResults}
-            query={query}
-            filteredPromptsEmpty={filteredPrompts.length === 0}
-            isFileSelected={isFileSelected}
-            onToggle={handleToggleFile}
-          />
-        </div>
+        <ContextPopoverList
+          query={query}
+          fileResults={fileResults}
+          isLoading={isLoading}
+          planContextEnabled={planContextEnabled}
+          filteredPrompts={filteredPrompts}
+          contextFiles={contextFiles}
+          onToggleFile={onToggleFile}
+          isFileSelected={isFileSelected}
+          handleToggleFile={handleToggleFile}
+        />
       </PopoverContent>
     </Popover>
   );

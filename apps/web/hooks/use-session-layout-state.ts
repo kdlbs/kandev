@@ -19,6 +19,30 @@ type UseSessionLayoutStateOptions = {
   sessionId?: string | null;
 };
 
+function useSelectedDiffState() {
+  const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
+  const handleSelectDiff = useCallback((path: string, content?: string) => {
+    setSelectedDiff({ path, content });
+  }, []);
+  const handleClearSelectedDiff = useCallback(() => {
+    setSelectedDiff(null);
+  }, []);
+
+  return { selectedDiff, handleSelectDiff, handleClearSelectedDiff };
+}
+
+function useOpenFileRequestState() {
+  const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
+  const handleOpenFile = useCallback((file: OpenFileTab) => {
+    setOpenFileRequest(file);
+  }, []);
+  const handleFileOpenHandled = useCallback(() => {
+    setOpenFileRequest(null);
+  }, []);
+
+  return { openFileRequest, handleOpenFile, handleFileOpenHandled };
+}
+
 /** Handle approve action: call server action and trigger auto-start if configured. */
 async function executeApprove(
   sessionId: string,
@@ -78,25 +102,8 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
     return snapshot?.cli_passthrough === true;
   }, [activeSession?.agent_profile_snapshot]);
 
-  // --- Diff selection state ---
-  const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-
-  const handleSelectDiff = useCallback((path: string, content?: string) => {
-    setSelectedDiff({ path, content });
-  }, []);
-  const handleClearSelectedDiff = useCallback(() => {
-    setSelectedDiff(null);
-  }, []);
-
-  // --- Open file request state ---
-  const [openFileRequest, setOpenFileRequest] = useState<OpenFileTab | null>(null);
-
-  const handleOpenFile = useCallback((file: OpenFileTab) => {
-    setOpenFileRequest(file);
-  }, []);
-  const handleFileOpenHandled = useCallback(() => {
-    setOpenFileRequest(null);
-  }, []);
+  const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
+  const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();
 
   // --- Git status for badges ---
   const gitStatus = useSessionGitStatus(effectiveSessionId);

@@ -70,7 +70,6 @@ export function useTipTapEditor({
   slashSuggestion,
   ref,
 }: UseTipTapEditorOptions) {
-  // ── Refs for stable callbacks ─────────────────────────────────
   const onSubmitRef = useRef(onSubmit);
   const submitKeyRef = useRef(submitKey);
   const disabledRef = useRef(disabled);
@@ -85,15 +84,9 @@ export function useTipTapEditor({
     onImagePasteRef.current = onImagePaste;
     sessionIdRef.current = sessionId;
   });
-
-  // ── Submit keymap extension ───────────────────────────────────
   const SubmitKeymap = useSubmitKeymap(disabledRef, submitKeyRef, onSubmitRef);
-
-  // ── Guard refs ────────────────────────────────────────────────
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
-
-  // ── Editor ────────────────────────────────────────────────────
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -150,20 +143,7 @@ export function useTipTapEditor({
     },
     editable: !disabled,
   });
-
-  // ── Sync effects ──────────────────────────────────────────────
-  useSyncEditor({
-    editor,
-    disabled,
-    placeholder,
-    sessionId,
-    value,
-    isSyncingRef,
-    initialSyncDoneRef,
-    onChangeRef,
-  });
-
-  // ── Imperative handle ─────────────────────────────────────────
+  useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef });
   useEditorImperativeHandle(ref, editor, onChange, isSyncingRef);
 
   return editor;

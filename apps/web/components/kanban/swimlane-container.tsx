@@ -40,6 +40,16 @@ function getEmptyMessage(
   return null;
 }
 
+function renderEmptyState(emptyMessage: string) {
+  return (
+    <div className="flex-1 min-h-0 px-4 pb-4">
+      <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground">
+        {emptyMessage}
+      </div>
+    </div>
+  );
+}
+
 export function SwimlaneContainer({
   viewMode,
   workflowFilter,
@@ -109,13 +119,7 @@ export function SwimlaneContainer({
     getFilteredTasks,
   );
   if (emptyMessage) {
-    return (
-      <div className="flex-1 min-h-0 px-4 pb-4">
-        <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground">
-          {emptyMessage}
-        </div>
-      </div>
-    );
+    return renderEmptyState(emptyMessage);
   }
 
   const visibleWorkflows = workflowFilter

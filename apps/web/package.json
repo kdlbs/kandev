@@ -6,7 +6,8 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "cross-env NODE_ENV=production next build",
     "start": "cross-env NODE_ENV=production next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 0",
+    "lint0": "eslint --max-warnings 0",
     "test": "vitest run"
   },
   "dependencies": {

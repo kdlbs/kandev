@@ -116,14 +116,21 @@ function ClarificationCustomInput({
   );
 }
 
-/**
- * Inline clarification UI - simple numbered text options like Conductor.
- */
-export function ClarificationInputOverlay({ message, onResolved }: ClarificationInputOverlayProps) {
-  const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-  const [customText, setCustomText] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+type UseClarificationHandlersParams = {
+  metadata: ClarificationRequestMetadata | undefined;
+  isSubmitting: boolean;
+  setIsSubmitting: React.Dispatch<React.SetStateAction<boolean>>;
+  customText: string;
+  onResolved: () => void;
+};
 
+function useClarificationHandlers({
+  metadata,
+  isSubmitting,
+  setIsSubmitting,
+  customText,
+  onResolved,
+}: UseClarificationHandlersParams) {
   const handleSubmitOption = useCallback(
     async (optionId: string) => {
       if (!metadata?.pending_id || isSubmitting) return;
@@ -144,7 +151,7 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
         setIsSubmitting(false);
       }
     },
-    [metadata, isSubmitting, onResolved],
+    [metadata, isSubmitting, onResolved, setIsSubmitting],
   );
 
   const handleSubmitCustom = useCallback(async () => {
@@ -166,7 +173,7 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     } finally {
       setIsSubmitting(false);
     }
-  }, [metadata, isSubmitting, customText, onResolved]);
+  }, [metadata, isSubmitting, customText, onResolved, setIsSubmitting]);
 
   const handleSkip = useCallback(async () => {
     if (!metadata?.pending_id || isSubmitting) return;
@@ -177,12 +184,9 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
         rejected: true,
         reject_reason: "User skipped",
       });
-      if (result === "ok") {
-        onResolved();
-      } else if (result === RESULT_EXPIRED) {
-        alert(
-          "This question has timed out. The agent has already moved on. Please refresh the page.",
-        );
+      if (result === "ok") onResolved();
+      else if (result === RESULT_EXPIRED) {
+        alert("This question has timed out. The agent has already moved on. Please refresh the page.");
         onResolved();
       }
     } catch (error) {
@@ -190,7 +194,25 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
     } finally {
       setIsSubmitting(false);
     }
-  }, [metadata, isSubmitting, onResolved]);
+  }, [metadata, isSubmitting, onResolved, setIsSubmitting]);
+
+  return { handleSubmitOption, handleSubmitCustom, handleSkip };
+}
+
+/**
+ * Inline clarification UI - simple numbered text options like Conductor.
+ */
+export function ClarificationInputOverlay({ message, onResolved }: ClarificationInputOverlayProps) {
+  const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+  const [customText, setCustomText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { handleSubmitOption, handleSubmitCustom, handleSkip } = useClarificationHandlers({
+    metadata,
+    isSubmitting,
+    setIsSubmitting,
+    customText,
+    onResolved,
+  });
 
   if (!metadata?.question) return null;
 

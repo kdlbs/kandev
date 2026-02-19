@@ -1,28 +1,16 @@
 "use client";
 
-import { useCallback, useState, useEffect, forwardRef, useImperativeHandle } from "react";
+import { forwardRef } from "react";
 import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { TipTapInput } from "./tiptap-input";
-import { ClarificationInputOverlay } from "./clarification-input-overlay";
-import { ChatInputFocusHint } from "./chat-input-focus-hint";
-import { ResizeHandle } from "./resize-handle";
-import { TodoSummary } from "./todo-summary";
-import {
-  QueuedMessageIndicator,
-  type QueuedMessageIndicatorHandle,
-} from "./queued-message-indicator";
-import { ChatInputToolbar } from "./chat-input-toolbar";
-import { ContextZone } from "./context-items/context-zone";
-import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import { useResizableInput } from "@/hooks/use-resizable-input";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
-import { useChatInputState } from "./use-chat-input-state";
+import type { QueuedMessageIndicatorHandle } from "./queued-message-indicator";
+import { useChatInputContainer } from "./use-chat-input-container";
+import { ChatInputBody, type ChatInputContextAreaProps, type ChatInputEditorAreaProps } from "./chat-input-body";
+import type { ContextItem } from "@/lib/types/context";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -30,8 +18,8 @@ export type { ImageAttachment } from "./image-attachment-preview";
 // Type for message attachments sent to backend
 export type MessageAttachment = {
   type: "image";
-  data: string; // Base64 data
-  mime_type: string; // MIME type
+  data: string;
+  mime_type: string;
 };
 
 export type ChatInputContainerHandle = {
@@ -42,10 +30,7 @@ export type ChatInputContainerHandle = {
   insertText: (text: string, from: number, to: number) => void;
 };
 
-type TodoItem = {
-  text: string;
-  done?: boolean;
-};
+type TodoItem = { text: string; done?: boolean };
 
 type ChatInputContainerProps = {
   onSubmit: (
@@ -135,394 +120,105 @@ function FailedSessionBanner({
   );
 }
 
-function getInputPlaceholder(
-  placeholder: string | undefined,
-  isAgentBusy: boolean,
-  hasAgentCommands: boolean,
-): string {
-  if (placeholder) return placeholder;
-  if (isAgentBusy) return "Queue more instructions...";
-  if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
-  return "Ask to make changes, @mention files";
-}
+type ContainerState = ReturnType<typeof useChatInputContainer>;
 
-function hasPendingCommentFiles(
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined,
-): boolean {
-  return !!(pendingCommentsByFile && Object.keys(pendingCommentsByFile).length > 0);
-}
-
-type DerivedInputState = {
-  isDisabled: boolean;
-  hasClarification: boolean;
-  hasPendingComments: boolean;
-  hasQueuedMessage: boolean;
-  hasTodos: boolean;
-  hasContextZone: boolean;
-  showFocusHint: boolean;
-  inputPlaceholder: string;
-};
-
-type DerivedInputParams = {
-  isStarting: boolean;
-  isSending: boolean;
-  isFailed: boolean;
-  pendingClarification: Message | null | undefined;
-  onClarificationResolved: (() => void) | undefined;
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
-  isQueued: boolean;
-  queuedMessage: string | null | undefined;
-  onCancelQueue: (() => void) | undefined;
-  updateQueueContent: ((content: string) => Promise<void>) | undefined;
-  todoItems: { text: string }[];
-  allItemsLength: number;
-  isInputFocused: boolean;
-  placeholder: string | undefined;
-  isAgentBusy: boolean;
-  hasAgentCommands: boolean;
-};
-
-function computeDerivedInputState(p: DerivedInputParams): DerivedInputState {
-  const isDisabled = p.isStarting || p.isSending || p.isFailed;
-  const hasClarification = !!(p.pendingClarification && p.onClarificationResolved);
-  const hasPendingComments = hasPendingCommentFiles(p.pendingCommentsByFile);
-  const hasQueuedMessage = !!(
-    p.isQueued &&
-    p.queuedMessage &&
-    p.onCancelQueue &&
-    p.updateQueueContent
-  );
-  const hasTodos = p.todoItems.length > 0;
-  const hasContextZone = hasQueuedMessage || hasTodos || p.allItemsLength > 0 || hasClarification;
-  const showFocusHint = !p.isInputFocused && !hasClarification && !hasPendingComments;
-  const inputPlaceholder = getInputPlaceholder(p.placeholder, p.isAgentBusy, p.hasAgentCommands);
+function buildContextAreaProps(
+  s: ContainerState,
+  p: ChatInputContainerProps,
+): ChatInputContextAreaProps {
   return {
-    isDisabled,
-    hasClarification,
-    hasPendingComments,
-    hasQueuedMessage,
-    hasTodos,
-    hasContextZone,
-    showFocusHint,
-    inputPlaceholder,
+    hasContextZone: s.hasContextZone,
+    allItems: s.allItems,
+    sessionId: p.sessionId,
+    hasQueuedMessage: s.hasQueuedMessage,
+    queuedMessage: p.queuedMessage,
+    onCancelQueue: p.onCancelQueue,
+    updateQueueContent: p.updateQueueContent,
+    queuedMessageRef: p.queuedMessageRef,
+    onQueueEditComplete: p.onQueueEditComplete,
+    hasTodos: s.hasTodos,
+    todoItems: p.todoItems ?? [],
+    hasClarification: s.hasClarification,
+    pendingClarification: p.pendingClarification,
+    onClarificationResolved: p.onClarificationResolved,
   };
 }
 
-type ChatInputBodyProps = {
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  height: React.CSSProperties["height"];
-  resizeHandleProps: { onMouseDown: (e: React.MouseEvent) => void; onDoubleClick: () => void };
-  isPanelFocused: boolean | undefined;
-  isInputFocused: boolean;
-  isAgentBusy: boolean;
-  hasClarification: boolean;
-  showRequestChangesTooltip: boolean;
-  hasPendingComments: boolean;
-  showFocusHint: boolean;
-  hasContextZone: boolean;
-  allItems: ContextItem[];
-  sessionId: string | null;
-  hasQueuedMessage: boolean;
-  queuedMessage?: string | null;
-  onCancelQueue?: () => void;
-  updateQueueContent?: (content: string) => Promise<void>;
-  queuedMessageRef?: React.RefObject<QueuedMessageIndicatorHandle | null>;
-  onQueueEditComplete?: () => void;
-  hasTodos: boolean;
-  todoItems: { text: string; done?: boolean }[];
-  pendingClarification?: Message | null;
-  onClarificationResolved?: () => void;
-  value: string;
-  inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
-  handleChange: (val: string) => void;
-  handleSubmitWithReset: () => void;
-  inputPlaceholder: string;
-  isDisabled: boolean;
-  planModeEnabled: boolean;
-  submitKey: "enter" | "cmd_enter";
-  setIsInputFocused: (focused: boolean) => void;
-  taskId: string | null;
-  onAddContextFile?: (file: ContextFile) => void;
-  onToggleContextFile?: (file: ContextFile) => void;
-  planContextEnabled: boolean;
-  handleAgentCommand: (command: string) => void;
-  handleImagePaste: (files: File[]) => Promise<void>;
-  onPlanModeChange: (enabled: boolean) => void;
-  taskTitle?: string;
-  taskDescription: string;
-  isSending: boolean;
-  onCancel: () => void;
-  contextCount: number;
-  contextPopoverOpen: boolean;
-  setContextPopoverOpen: (open: boolean) => void;
-  contextFiles: ContextFile[];
-};
-
-function ChatInputBody({
-  containerRef,
-  height,
-  resizeHandleProps,
-  isPanelFocused,
-  isInputFocused,
-  isAgentBusy,
-  hasClarification,
-  showRequestChangesTooltip,
-  hasPendingComments,
-  showFocusHint,
-  hasContextZone,
-  allItems,
-  sessionId,
-  hasQueuedMessage,
-  queuedMessage,
-  onCancelQueue,
-  updateQueueContent,
-  queuedMessageRef,
-  onQueueEditComplete,
-  hasTodos,
-  todoItems,
-  pendingClarification,
-  onClarificationResolved,
-  value,
-  inputRef,
-  handleChange,
-  handleSubmitWithReset,
-  inputPlaceholder,
-  isDisabled,
-  planModeEnabled,
-  submitKey,
-  setIsInputFocused,
-  taskId,
-  onAddContextFile,
-  onToggleContextFile,
-  planContextEnabled,
-  handleAgentCommand,
-  handleImagePaste,
-  onPlanModeChange,
-  taskTitle,
-  taskDescription,
-  isSending,
-  onCancel,
-  contextCount,
-  contextPopoverOpen,
-  setContextPopoverOpen,
-  contextFiles,
-}: ChatInputBodyProps) {
-  return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "relative flex flex-col border rounded ",
-        isPanelFocused ? "bg-background border-border" : "bg-background/40 border-border",
-        isAgentBusy && "chat-input-running",
-        hasClarification && "border-blue-500/50",
-        showRequestChangesTooltip && "animate-pulse border-orange-500",
-        hasPendingComments && "border-amber-500/50",
-      )}
-      style={{ height }}
-    >
-      <ResizeHandle visible={isPanelFocused || isInputFocused} {...resizeHandleProps} />
-      <ChatInputFocusHint visible={showFocusHint} />
-      {hasContextZone && (
-        <ContextZone
-          items={allItems}
-          sessionId={sessionId}
-          queueSlot={
-            hasQueuedMessage ? (
-              <QueuedMessageIndicator
-                ref={queuedMessageRef}
-                content={queuedMessage!}
-                onCancel={onCancelQueue!}
-                onUpdate={updateQueueContent!}
-                isVisible={true}
-                onEditComplete={onQueueEditComplete}
-              />
-            ) : undefined
-          }
-          todoSlot={hasTodos ? <TodoSummary todos={todoItems} /> : undefined}
-          clarificationSlot={
-            hasClarification ? (
-              <div className="overflow-auto">
-                <ClarificationInputOverlay
-                  message={pendingClarification!}
-                  onResolved={onClarificationResolved!}
-                />
-              </div>
-            ) : undefined
-          }
-        />
-      )}
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        <Tooltip open={showRequestChangesTooltip}>
-          <TooltipTrigger asChild>
-            <div className="flex-1 min-h-0">
-              <TipTapInput
-                ref={inputRef}
-                value={value}
-                onChange={handleChange}
-                onSubmit={handleSubmitWithReset}
-                placeholder={inputPlaceholder}
-                disabled={isDisabled || hasClarification}
-                planModeEnabled={planModeEnabled}
-                submitKey={submitKey}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
-                sessionId={sessionId}
-                taskId={taskId}
-                onAddContextFile={onAddContextFile}
-                onToggleContextFile={onToggleContextFile}
-                planContextEnabled={planContextEnabled}
-                onAgentCommand={handleAgentCommand}
-                onImagePaste={handleImagePaste}
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
-            <p className="font-medium">Write your changes here</p>
-          </TooltipContent>
-        </Tooltip>
-        <ChatInputToolbar
-          planModeEnabled={planModeEnabled}
-          onPlanModeChange={onPlanModeChange}
-          sessionId={sessionId}
-          taskId={taskId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-          isAgentBusy={isAgentBusy}
-          isDisabled={isDisabled}
-          isSending={isSending}
-          onCancel={onCancel}
-          onSubmit={handleSubmitWithReset}
-          submitKey={submitKey}
-          contextCount={contextCount}
-          contextPopoverOpen={contextPopoverOpen}
-          onContextPopoverOpenChange={setContextPopoverOpen}
-          planContextEnabled={planContextEnabled}
-          contextFiles={contextFiles}
-          onToggleFile={onToggleContextFile}
-        />
-      </div>
-    </div>
-  );
+function buildEditorAreaProps(
+  s: ContainerState,
+  p: ChatInputContainerProps,
+): ChatInputEditorAreaProps {
+  return {
+    inputRef: s.inputRef,
+    value: s.value,
+    handleChange: s.handleChange,
+    handleSubmitWithReset: s.handleSubmitWithReset,
+    inputPlaceholder: s.inputPlaceholder,
+    isDisabled: s.isDisabled,
+    hasClarification: s.hasClarification,
+    planModeEnabled: p.planModeEnabled,
+    submitKey: p.submitKey ?? "cmd_enter",
+    setIsInputFocused: s.setIsInputFocused,
+    sessionId: p.sessionId,
+    taskId: p.taskId,
+    onAddContextFile: p.onAddContextFile,
+    onToggleContextFile: p.onToggleContextFile,
+    planContextEnabled: p.planContextEnabled ?? false,
+    handleAgentCommand: s.handleAgentCommand,
+    handleImagePaste: s.handleImagePaste,
+    showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
+    isAgentBusy: p.isAgentBusy,
+    onPlanModeChange: p.onPlanModeChange,
+    taskTitle: p.taskTitle,
+    taskDescription: p.taskDescription,
+    isSending: p.isSending,
+    onCancel: p.onCancel,
+    contextCount: s.allItems.length,
+    contextPopoverOpen: s.contextPopoverOpen,
+    setContextPopoverOpen: s.setContextPopoverOpen,
+    contextFiles: p.contextFiles ?? [],
+  };
 }
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
-  function ChatInputContainer(
-    {
-      onSubmit,
-      sessionId,
-      taskId,
-      taskTitle,
-      taskDescription,
-      planModeEnabled,
-      onPlanModeChange,
-      isAgentBusy,
-      isStarting,
-      isSending,
-      onCancel,
-      placeholder,
-      pendingClarification,
-      onClarificationResolved,
-      showRequestChangesTooltip = false,
-      onRequestChangesTooltipDismiss,
-      pendingCommentsByFile,
-      submitKey = "cmd_enter",
-      hasAgentCommands = false,
-      isFailed = false,
-      isQueued = false,
-      contextItems = [],
-      planContextEnabled = false,
-      contextFiles = [],
-      onToggleContextFile,
-      onAddContextFile,
-      todoItems = [],
-      queuedMessage,
-      onCancelQueue,
-      updateQueueContent,
-      queuedMessageRef,
-      onQueueEditComplete,
-      isPanelFocused,
-    },
-    ref,
-  ) {
-    const [isInputFocused, setIsInputFocused] = useState(false);
-    const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
-    const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
-    const { height, resetHeight, containerRef, resizeHandleProps } = useResizableInput(
-      sessionId ?? undefined,
-    );
-    const { value, inputRef, handleImagePaste, handleChange, handleSubmit, allItems } =
-      useChatInputState({
-        sessionId,
-        isSending,
-        contextItems,
-        pendingCommentsByFile,
-        showRequestChangesTooltip,
-        onRequestChangesTooltipDismiss,
-        onSubmit,
-      });
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        focusInput: () => inputRef.current?.focus(),
-        getTextareaElement: () => inputRef.current?.getTextareaElement() ?? null,
-        getValue: () => inputRef.current?.getValue() ?? "",
-        getSelectionStart: () => inputRef.current?.getSelectionStart() ?? 0,
-        insertText: (text: string, from: number, to: number) => {
-          inputRef.current?.insertText(text, from, to);
-        },
-      }),
-      [inputRef],
-    );
-
-    useEffect(() => {
-      if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
-    }, [showRequestChangesTooltip, inputRef]);
-
-    const handleAgentCommand = useCallback(
-      (commandName: string) => {
-        onSubmit(`/${commandName}`);
-      },
-      [onSubmit],
-    );
-    const handleSubmitWithReset = useCallback(
-      () => handleSubmit(resetHeight),
-      [handleSubmit, resetHeight],
-    );
-
+  function ChatInputContainer(props, ref) {
     const {
-      isDisabled,
-      hasClarification,
-      hasPendingComments,
-      hasQueuedMessage,
-      hasTodos,
-      hasContextZone,
-      showFocusHint,
-      inputPlaceholder,
-    } = computeDerivedInputState({
-      isStarting,
-      isSending,
-      isFailed,
-      pendingClarification,
-      onClarificationResolved,
-      pendingCommentsByFile,
-      isQueued,
-      queuedMessage,
-      onCancelQueue,
-      updateQueueContent,
-      todoItems,
-      allItemsLength: allItems.length,
-      isInputFocused,
-      placeholder,
-      isAgentBusy,
-      hasAgentCommands,
+      sessionId, taskId, taskTitle, taskDescription, isAgentBusy,
+      isStarting, isSending, isFailed = false, isPanelFocused,
+      showRequestChangesTooltip = false,
+    } = props;
+
+    const p = {
+      ...props,
+      isFailed: isFailed ?? false,
+      isQueued: props.isQueued ?? false,
+      hasAgentCommands: props.hasAgentCommands ?? false,
+      submitKey: props.submitKey ?? "cmd_enter",
+      planContextEnabled: props.planContextEnabled ?? false,
+      contextFiles: props.contextFiles ?? [],
+      contextItems: props.contextItems ?? [],
+      todoItems: props.todoItems ?? [],
+      showRequestChangesTooltip,
+    } as const;
+
+    const s = useChatInputContainer({
+      ref, sessionId, isSending, isStarting, isFailed: p.isFailed, isAgentBusy,
+      hasAgentCommands: p.hasAgentCommands, isQueued: p.isQueued,
+      placeholder: props.placeholder, contextItems: p.contextItems,
+      pendingClarification: props.pendingClarification,
+      onClarificationResolved: props.onClarificationResolved,
+      pendingCommentsByFile: props.pendingCommentsByFile,
+      queuedMessage: props.queuedMessage, onCancelQueue: props.onCancelQueue,
+      updateQueueContent: props.updateQueueContent, todoItems: p.todoItems,
+      showRequestChangesTooltip, onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
+      onSubmit: props.onSubmit, queuedMessageRef: props.queuedMessageRef,
     });
 
-    if (isFailed) {
+    if (p.isFailed) {
       return (
         <FailedSessionBanner
-          showDialog={showNewSessionDialog}
-          onShowDialog={setShowNewSessionDialog}
+          showDialog={s.showNewSessionDialog}
+          onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}
           taskTitle={taskTitle}
           taskDescription={taskDescription}
@@ -532,53 +228,18 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
 
     return (
       <ChatInputBody
-        containerRef={containerRef}
-        height={height}
-        resizeHandleProps={resizeHandleProps}
+        containerRef={s.containerRef}
+        height={s.height}
+        resizeHandleProps={s.resizeHandleProps}
         isPanelFocused={isPanelFocused}
-        isInputFocused={isInputFocused}
+        isInputFocused={s.isInputFocused}
         isAgentBusy={isAgentBusy}
-        hasClarification={hasClarification}
+        hasClarification={s.hasClarification}
         showRequestChangesTooltip={showRequestChangesTooltip}
-        hasPendingComments={hasPendingComments}
-        showFocusHint={showFocusHint}
-        hasContextZone={hasContextZone}
-        allItems={allItems}
-        sessionId={sessionId}
-        hasQueuedMessage={hasQueuedMessage}
-        queuedMessage={queuedMessage}
-        onCancelQueue={onCancelQueue}
-        updateQueueContent={updateQueueContent}
-        queuedMessageRef={queuedMessageRef}
-        onQueueEditComplete={onQueueEditComplete}
-        hasTodos={hasTodos}
-        todoItems={todoItems}
-        pendingClarification={pendingClarification}
-        onClarificationResolved={onClarificationResolved}
-        value={value}
-        inputRef={inputRef}
-        handleChange={handleChange}
-        handleSubmitWithReset={handleSubmitWithReset}
-        inputPlaceholder={inputPlaceholder}
-        isDisabled={isDisabled}
-        planModeEnabled={planModeEnabled}
-        submitKey={submitKey}
-        setIsInputFocused={setIsInputFocused}
-        taskId={taskId}
-        onAddContextFile={onAddContextFile}
-        onToggleContextFile={onToggleContextFile}
-        planContextEnabled={planContextEnabled}
-        handleAgentCommand={handleAgentCommand}
-        handleImagePaste={handleImagePaste}
-        onPlanModeChange={onPlanModeChange}
-        taskTitle={taskTitle}
-        taskDescription={taskDescription}
-        isSending={isSending}
-        onCancel={onCancel}
-        contextCount={allItems.length}
-        contextPopoverOpen={contextPopoverOpen}
-        setContextPopoverOpen={setContextPopoverOpen}
-        contextFiles={contextFiles}
+        hasPendingComments={s.hasPendingComments}
+        showFocusHint={s.showFocusHint}
+        contextAreaProps={buildContextAreaProps(s, p)}
+        editorAreaProps={buildEditorAreaProps(s, p)}
       />
     );
   },

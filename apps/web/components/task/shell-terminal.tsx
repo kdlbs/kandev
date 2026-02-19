@@ -173,6 +173,65 @@ function useShellSubscription({
   }, [taskId, sessionId, storeApi, canSubscribe, send, xtermRef, lastOutputLengthRef]);
 }
 
+type ReadOnlySyncParams = {
+  xtermRef: React.RefObject<Terminal | null>;
+  isReadOnlyMode: boolean;
+  processOutput: string | undefined;
+  outputRef: React.RefObject<string>;
+  processId: string | null | undefined;
+  processIdRef: React.RefObject<string | null>;
+  lastOutputLengthRef: React.RefObject<number>;
+};
+
+function useReadOnlyOutputSync({
+  xtermRef,
+  isReadOnlyMode,
+  processOutput,
+  outputRef,
+  processId,
+  processIdRef,
+  lastOutputLengthRef,
+}: ReadOnlySyncParams) {
+  useEffect(() => {
+    if (isReadOnlyMode) outputRef.current = processOutput ?? "";
+  }, [processOutput, isReadOnlyMode, outputRef]);
+
+  useEffect(() => {
+    if (!xtermRef.current || !isReadOnlyMode) return;
+    if (processIdRef.current === null) {
+      processIdRef.current = processId ?? null;
+      return;
+    }
+    if (processIdRef.current !== processId) {
+      processIdRef.current = processId ?? null;
+      lastOutputLengthRef.current = 0;
+      xtermRef.current.clear();
+      if (outputRef.current) {
+        xtermRef.current.write(outputRef.current);
+        lastOutputLengthRef.current = outputRef.current.length;
+      }
+    }
+  }, [processId, isReadOnlyMode, xtermRef, processIdRef, outputRef, lastOutputLengthRef]);
+}
+
+function useTerminalOutputWrite(
+  xtermRef: React.RefObject<Terminal | null>,
+  isReadOnlyMode: boolean,
+  processOutput: string | undefined,
+  shellOutput: string,
+  lastOutputLengthRef: React.RefObject<number>,
+) {
+  useEffect(() => {
+    if (!xtermRef.current) return;
+    const output = isReadOnlyMode ? (processOutput ?? "") : shellOutput;
+    const newData = output.slice(lastOutputLengthRef.current);
+    if (newData) {
+      xtermRef.current.write(newData);
+      lastOutputLengthRef.current = output.length;
+    }
+  }, [xtermRef, shellOutput, processOutput, isReadOnlyMode, lastOutputLengthRef]);
+}
+
 export function ShellTerminal({
   sessionId: propSessionId,
   processOutput,
@@ -201,10 +260,15 @@ export function ShellTerminal({
     sessionId && !isReadOnlyMode ? state.shell.outputs[sessionId] || "" : "",
   );
   const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode);
-
-  useEffect(() => {
-    if (isReadOnlyMode) outputRef.current = processOutput ?? "";
-  }, [processOutput, isReadOnlyMode]);
+  useReadOnlyOutputSync({
+    xtermRef,
+    isReadOnlyMode,
+    processOutput,
+    outputRef,
+    processId,
+    processIdRef,
+    lastOutputLengthRef,
+  });
 
   const send = useCallback((action: string, payload: Record<string, unknown>) => {
     const client = getWebSocketClient();
@@ -229,35 +293,7 @@ export function ShellTerminal({
       onDataDisposableRef.current = null;
     };
   }, [taskId, sessionId, send, isReadOnlyMode]);
-
-  // Handle processId changes in read-only mode
-  useEffect(() => {
-    if (!xtermRef.current || !isReadOnlyMode) return;
-    if (processIdRef.current === null) {
-      processIdRef.current = processId ?? null;
-      return;
-    }
-    if (processIdRef.current !== processId) {
-      processIdRef.current = processId ?? null;
-      lastOutputLengthRef.current = 0;
-      xtermRef.current.clear();
-      if (outputRef.current) {
-        xtermRef.current.write(outputRef.current);
-        lastOutputLengthRef.current = outputRef.current.length;
-      }
-    }
-  }, [processId, isReadOnlyMode]);
-
-  // Write new output to terminal
-  useEffect(() => {
-    if (!xtermRef.current) return;
-    const output = isReadOnlyMode ? (processOutput ?? "") : shellOutput;
-    const newData = output.slice(lastOutputLengthRef.current);
-    if (newData) {
-      xtermRef.current.write(newData);
-      lastOutputLengthRef.current = output.length;
-    }
-  }, [shellOutput, processOutput, isReadOnlyMode]);
+  useTerminalOutputWrite(xtermRef, isReadOnlyMode, processOutput, shellOutput, lastOutputLengthRef);
 
   useShellSubscription({
     refs: { xtermRef, lastOutputLengthRef },

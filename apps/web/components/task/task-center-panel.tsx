@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { TabsContent } from "@kandev/ui/tabs";
 import { Button } from "@kandev/ui/button";
@@ -23,18 +23,18 @@ import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { approveSessionAction } from "@/app/actions/workspaces";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
+import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
-  getOpenFileTabs,
   setOpenFileTabs as saveOpenFileTabs,
   getActiveTabForSession,
   setActiveTabForSession,
 } from "@/lib/local-storage";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
+import { calculateHash } from "@/lib/utils/file-diff";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { useToast } from "@/components/toast-provider";
+import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -141,121 +141,6 @@ function useLeftTabState(
   };
 }
 
-type FileTabRestorationOptions = {
-  activeSessionId: string | null;
-  leftTab: string;
-  setLeftTab: (tab: string) => void;
-  setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
-};
-
-function useFileTabRestoration({
-  activeSessionId,
-  leftTab,
-  setLeftTab,
-  setOpenFileTabs,
-}: FileTabRestorationOptions) {
-  const restoredTabsRef = useRef<string | null>(null);
-  const restorationInProgressRef = useRef<boolean>(false);
-  const prevSessionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (prevSessionRef.current && leftTab)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-    };
-  }, [leftTab]);
-  useEffect(() => {
-    if (!activeSessionId) return;
-    if (restoredTabsRef.current !== activeSessionId) {
-      if (prevSessionRef.current && prevSessionRef.current !== activeSessionId)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-      restoredTabsRef.current = activeSessionId;
-      prevSessionRef.current = activeSessionId;
-      restorationInProgressRef.current = false;
-      setOpenFileTabs([]);
-    } else if (restorationInProgressRef.current || restoredTabsRef.current === activeSessionId) {
-      return;
-    }
-    const savedTabs = getOpenFileTabs(activeSessionId);
-    const savedActiveTab = getActiveTabForSession(activeSessionId, "chat");
-    if (savedTabs.length === 0) {
-      setLeftTab(
-        savedActiveTab === "chat" || savedActiveTab === "changes" ? savedActiveTab : "chat",
-      );
-      return;
-    }
-    restorationInProgressRef.current = true;
-    const loadTabs = async (retryCount = 0): Promise<void> => {
-      const client = getWebSocketClient();
-      if (!client) {
-        if (retryCount < 5) {
-          setTimeout(() => loadTabs(retryCount + 1), 200);
-          return;
-        }
-        restorationInProgressRef.current = false;
-        return;
-      }
-      if (restoredTabsRef.current !== activeSessionId) {
-        restorationInProgressRef.current = false;
-        return;
-      }
-      const loadedTabs: OpenFileTab[] = [];
-      for (const savedTab of savedTabs) {
-        try {
-          const response = await requestFileContent(client, activeSessionId, savedTab.path);
-          const hash = await calculateHash(response.content);
-          loadedTabs.push({
-            path: savedTab.path,
-            name: savedTab.name,
-            content: response.content,
-            originalContent: response.content,
-            originalHash: hash,
-            isDirty: false,
-            isBinary: response.is_binary,
-          });
-        } catch {
-          /* skip failed tabs */
-        }
-      }
-      if (restoredTabsRef.current !== activeSessionId) {
-        restorationInProgressRef.current = false;
-        return;
-      }
-      if (loadedTabs.length > 0) {
-        setOpenFileTabs(loadedTabs);
-        if (savedActiveTab.startsWith("file:")) {
-          const filePath = savedActiveTab.replace("file:", "");
-          if (loadedTabs.some((t) => t.path === filePath)) {
-            setTimeout(() => {
-              setLeftTab(savedActiveTab);
-              restorationInProgressRef.current = false;
-            }, 0);
-          } else {
-            setLeftTab("chat");
-            restorationInProgressRef.current = false;
-          }
-        } else {
-          setLeftTab(savedActiveTab);
-          restorationInProgressRef.current = false;
-        }
-      } else {
-        setLeftTab(
-          savedActiveTab === "chat" || savedActiveTab === "changes" ? savedActiveTab : "chat",
-        );
-        restorationInProgressRef.current = false;
-      }
-    };
-    void loadTabs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- leftTab is intentionally excluded to prevent re-running on tab changes
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    if (!activeSessionId || restorationInProgressRef.current) return;
-    setActiveTabForSession(activeSessionId, leftTab);
-  }, [activeSessionId, leftTab]);
-  return { restorationInProgressRef };
-}
-
 type FileTabOperationsOptions = {
   activeSessionId: string | null;
   openFileTabs: OpenFileTab[];
@@ -294,11 +179,7 @@ function useFileTabOperations({
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
       try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          activeSessionId,
-          filePath,
-        );
+        const response: FileContentResponse = await requestFileContent(client, activeSessionId, filePath);
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
         addFileTab({
@@ -342,88 +223,13 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
-  const handleFileSave = useCallback(
-    async (path: string) => {
-      const tab = openFileTabs.find((t) => t.path === path);
-      if (!tab || !tab.isDirty) return;
-      const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      setSavingFiles((prev) => new Set(prev).add(path));
-      try {
-        const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
-        const response = await updateFileContent(
-          client,
-          activeSessionId,
-          path,
-          diff,
-          tab.originalHash,
-        );
-        if (response.success && response.new_hash) {
-          setOpenFileTabs((prev) =>
-            prev.map((t) =>
-              t.path === path
-                ? {
-                    ...t,
-                    originalContent: t.content,
-                    originalHash: response.new_hash!,
-                    isDirty: false,
-                  }
-                : t,
-            ),
-          );
-        } else {
-          toast({
-            title: "Save failed",
-            description: response.error || "Failed to save file",
-            variant: "error",
-          });
-        }
-      } catch (error) {
-        console.error("Failed to save file:", error);
-        toast({
-          title: "Save failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while saving the file",
-          variant: "error",
-        });
-      } finally {
-        setSavingFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
-    },
-    [openFileTabs, activeSessionId, toast, setOpenFileTabs, setSavingFiles],
-  );
-
-  const handleFileDelete = useCallback(
-    async (path: string) => {
-      const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      try {
-        const response = await deleteFile(client, activeSessionId, path);
-        if (response.success) {
-          handleCloseFileTab(path);
-        } else {
-          toast({
-            title: "Delete failed",
-            description: response.error || "Failed to delete file",
-            variant: "error",
-          });
-        }
-      } catch (error) {
-        console.error("Failed to delete file:", error);
-        toast({
-          title: "Delete failed",
-          description:
-            error instanceof Error ? error.message : "An error occurred while deleting the file",
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionId, handleCloseFileTab, toast],
-  );
+  const { handleFileSave, handleFileDelete } = useFileSaveDelete({
+    activeSessionId,
+    openFileTabs,
+    setOpenFileTabs,
+    setSavingFiles,
+    handleCloseFileTab,
+  });
 
   return {
     handleOpenFileFromChat,
@@ -465,14 +271,8 @@ function useCenterPanelTabs(
   return { tabs, separatorAfterIndex };
 }
 
-export const TaskCenterPanel = memo(function TaskCenterPanel({
-  selectedDiff: externalSelectedDiff,
-  openFileRequest,
-  onDiffHandled,
-  onFileOpenHandled,
-  onActiveFileChange,
-  sessionId = null,
-}: TaskCenterPanelProps) {
+function useCenterPanelState(props: TaskCenterPanelProps) {
+  const { selectedDiff: externalSelectedDiff, openFileRequest, onDiffHandled, onFileOpenHandled, onActiveFileChange } = props;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
@@ -481,50 +281,21 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     const hasUncommittedChanges = gitStatus?.files && Object.keys(gitStatus.files).length > 0;
     return (hasUncommittedChanges || (commits && commits.length > 0)) as boolean;
   }, [gitStatus, commits]);
-  const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(
-    activeSessionId,
-    activeTaskId,
-  );
+  const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(activeSessionId, activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const {
-    leftTab,
-    setLeftTab,
-    showRequestChangesTooltip,
-    setShowRequestChangesTooltip,
-    handleTabChange,
-    handleRequestChanges,
-  } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
+  const { leftTab, setLeftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges } =
+    useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
   useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs });
   useEffect(() => {
     if (!activeSessionId) return;
-    saveOpenFileTabs(
-      activeSessionId,
-      openFileTabs.map(({ path, name }) => ({ path, name })),
-    );
+    saveOpenFileTabs(activeSessionId, openFileTabs.map(({ path, name }) => ({ path, name })));
   }, [activeSessionId, openFileTabs]);
-  const {
-    handleOpenFileFromChat,
-    handleCloseFileTab,
-    handleFileChange,
-    handleFileSave,
-    handleFileDelete,
-    addFileTab,
-  } = useFileTabOperations({
-    activeSessionId,
-    openFileTabs,
-    setOpenFileTabs,
-    setSavingFiles,
-    setLeftTab,
-    handleTabChange,
-    leftTab,
+  const fileTabOps = useFileTabOperations({
+    activeSessionId, openFileTabs, setOpenFileTabs, setSavingFiles, setLeftTab, handleTabChange, leftTab,
   });
-  const { tabs, separatorAfterIndex } = useCenterPanelTabs(
-    openFileTabs,
-    handleCloseFileTab,
-    hasChanges,
-  );
+  const { tabs, separatorAfterIndex } = useCenterPanelTabs(openFileTabs, fileTabOps.handleCloseFileTab, hasChanges);
 
   useEffect(() => {
     if (externalSelectedDiff) {
@@ -540,7 +311,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
     if (!openFileRequest) return;
     queueMicrotask(async () => {
       const hash = openFileRequest.originalHash || (await calculateHash(openFileRequest.content));
-      addFileTab({
+      fileTabOps.addFileTab({
         ...openFileRequest,
         originalContent: openFileRequest.originalContent || openFileRequest.content,
         originalHash: hash,
@@ -548,7 +319,26 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
       });
       onFileOpenHandled();
     });
-  }, [openFileRequest, onFileOpenHandled, addFileTab]);
+  }, [openFileRequest, onFileOpenHandled, fileTabOps.addFileTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return {
+    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
+    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
+    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
+    fileTabOps, tabs, separatorAfterIndex,
+  };
+}
+
+export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPanelProps) {
+  const { sessionId = null } = props;
+  const state = useCenterPanelState(props);
+  const {
+    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
+    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
+    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
+    fileTabOps, tabs, separatorAfterIndex,
+  } = state;
+  const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
 
   const approveContent = showApproveButton ? (
     <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} />

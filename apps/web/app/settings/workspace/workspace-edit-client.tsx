@@ -328,7 +328,86 @@ function buildWorkspaceUpdates(
   return updates;
 }
 
-function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
+type WorkspaceDraftState = {
+  workspaceNameDraft: string;
+  defaultExecutorId: string;
+  defaultEnvironmentId: string;
+  defaultAgentProfileId: string;
+};
+
+type SaveRequestLike = {
+  run: (id: string, updates: Record<string, string | undefined>) => Promise<Workspace>;
+};
+
+type WorkspaceSaveHandlerOptions = {
+  currentWorkspace: Workspace;
+  draft: WorkspaceDraftState;
+  savedState: SavedState;
+  isDirty: boolean;
+  setSavedState: (s: SavedState) => void;
+  setCurrentWorkspace: (fn: (prev: Workspace) => Workspace) => void;
+  workspaces: Workspace[];
+  setWorkspaces: (items: Workspace[]) => void;
+  saveWorkspaceRequest: SaveRequestLike;
+  toast: ReturnType<typeof useToast>["toast"];
+};
+
+function buildSaveHandler({
+  currentWorkspace,
+  draft,
+  savedState,
+  isDirty,
+  setSavedState,
+  setCurrentWorkspace,
+  workspaces,
+  setWorkspaces,
+  saveWorkspaceRequest,
+  toast,
+}: WorkspaceSaveHandlerOptions) {
+  return async () => {
+    if (!isDirty) return;
+    try {
+      const updates = buildWorkspaceUpdates(
+        {
+          name: draft.workspaceNameDraft,
+          executorId: draft.defaultExecutorId,
+          environmentId: draft.defaultEnvironmentId,
+          agentProfileId: draft.defaultAgentProfileId,
+        },
+        savedState,
+      );
+      const updated = await saveWorkspaceRequest.run(currentWorkspace.id, updates);
+      setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
+      setSavedState({
+        name: updated.name ?? draft.workspaceNameDraft.trim(),
+        executorId: updated.default_executor_id ?? "",
+        environmentId: updated.default_environment_id ?? "",
+        agentProfileId: updated.default_agent_profile_id ?? "",
+      });
+      setWorkspaces(
+        workspaces.map((ws: Workspace) =>
+          ws.id === updated.id
+            ? {
+                ...ws,
+                name: updated.name,
+                default_executor_id: updated.default_executor_id ?? null,
+                default_environment_id: updated.default_environment_id ?? null,
+                default_agent_profile_id: updated.default_agent_profile_id ?? null,
+              }
+            : ws,
+        ),
+      );
+    } catch (error) {
+      toast({
+        title: "Failed to save workspace",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
+      });
+    }
+  };
+}
+
+function useWorkspaceEditForm(workspace: Workspace) {
   const router = useRouter();
   const { toast } = useToast();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(workspace);
@@ -365,47 +444,18 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     defaultEnvironmentId !== savedState.environmentId ||
     defaultAgentProfileId !== savedState.agentProfileId;
 
-  const handleSave = async () => {
-    if (!isDirty) return;
-    try {
-      const updates = buildWorkspaceUpdates(
-        {
-          name: workspaceNameDraft,
-          executorId: defaultExecutorId,
-          environmentId: defaultEnvironmentId,
-          agentProfileId: defaultAgentProfileId,
-        },
-        savedState,
-      );
-      const updated = await saveWorkspaceRequest.run(currentWorkspace.id, updates);
-      setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
-      setSavedState({
-        name: updated.name ?? workspaceNameDraft.trim(),
-        executorId: updated.default_executor_id ?? "",
-        environmentId: updated.default_environment_id ?? "",
-        agentProfileId: updated.default_agent_profile_id ?? "",
-      });
-      setWorkspaces(
-        workspaces.map((ws: Workspace) =>
-          ws.id === updated.id
-            ? {
-                ...ws,
-                name: updated.name,
-                default_executor_id: updated.default_executor_id ?? null,
-                default_environment_id: updated.default_environment_id ?? null,
-                default_agent_profile_id: updated.default_agent_profile_id ?? null,
-              }
-            : ws,
-        ),
-      );
-    } catch (error) {
-      toast({
-        title: "Failed to save workspace",
-        description: error instanceof Error ? error.message : "Request failed",
-        variant: "error",
-      });
-    }
-  };
+  const handleSave = buildSaveHandler({
+    currentWorkspace,
+    draft: { workspaceNameDraft, defaultExecutorId, defaultEnvironmentId, defaultAgentProfileId },
+    savedState,
+    isDirty,
+    setSavedState,
+    setCurrentWorkspace,
+    workspaces,
+    setWorkspaces,
+    saveWorkspaceRequest,
+    toast,
+  });
 
   const handleDeleteWorkspace = async () => {
     if (deleteConfirmText !== "delete") return;
@@ -422,6 +472,56 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     }
   };
 
+  return {
+    currentWorkspace,
+    workspaceNameDraft,
+    setWorkspaceNameDraft,
+    defaultExecutorId,
+    setDefaultExecutorId,
+    defaultEnvironmentId,
+    setDefaultEnvironmentId,
+    defaultAgentProfileId,
+    setDefaultAgentProfileId,
+    deleteDialogOpen,
+    setDeleteDialogOpen,
+    deleteConfirmText,
+    setDeleteConfirmText,
+    activeExecutors,
+    executors,
+    environments,
+    agentProfiles,
+    isDirty,
+    saveWorkspaceRequest,
+    handleSave,
+    handleDeleteWorkspace,
+  };
+}
+
+function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
+  const {
+    currentWorkspace,
+    workspaceNameDraft,
+    setWorkspaceNameDraft,
+    defaultExecutorId,
+    setDefaultExecutorId,
+    defaultEnvironmentId,
+    setDefaultEnvironmentId,
+    defaultAgentProfileId,
+    setDefaultAgentProfileId,
+    deleteDialogOpen,
+    setDeleteDialogOpen,
+    deleteConfirmText,
+    setDeleteConfirmText,
+    activeExecutors,
+    executors,
+    environments,
+    agentProfiles,
+    isDirty,
+    saveWorkspaceRequest,
+    handleSave,
+    handleDeleteWorkspace,
+  } = useWorkspaceEditForm(workspace);
+
   return (
     <div className="space-y-8">
       <div>
@@ -430,9 +530,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
           Manage workspace details and jump into workflows or repositories.
         </p>
       </div>
-
       <Separator />
-
       <WorkspaceSettingsCard
         isDirty={isDirty}
         workspaceNameDraft={workspaceNameDraft}
@@ -451,11 +549,8 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         saveStatus={saveWorkspaceRequest.status}
         onSave={handleSave}
       />
-
       <WorkspaceLinksCard workspaceId={currentWorkspace.id} />
-
       <Separator />
-
       <DeleteWorkspaceCard
         deleteDialogOpen={deleteDialogOpen}
         setDeleteDialogOpen={setDeleteDialogOpen}

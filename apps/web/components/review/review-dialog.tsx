@@ -103,16 +103,8 @@ function computeCommentCounts(
   return counts;
 }
 
-export const ReviewDialog = memo(function ReviewDialog({
-  open,
-  onOpenChange,
-  sessionId,
-  baseBranch,
-  onSendComments,
-  onOpenFile,
-  gitStatusFiles,
-  cumulativeDiff,
-}: ReviewDialogProps) {
+function useReviewDialogState(props: ReviewDialogProps) {
+  const { open, onOpenChange, sessionId, onSendComments, gitStatusFiles, cumulativeDiff } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [splitView, setSplitView] = useState(() =>
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
@@ -134,18 +126,9 @@ export const ReviewDialog = memo(function ReviewDialog({
     () => buildAllFiles(gitStatusFiles, cumulativeDiff),
     [gitStatusFiles, cumulativeDiff],
   );
-  const { reviewedFiles, staleFiles } = useMemo(
-    () => computeReviewSets(allFiles, reviews),
-    [allFiles, reviews],
-  );
-  const commentCountByFile = useMemo(
-    () => computeCommentCounts(byId, sessionCommentIds),
-    [byId, sessionCommentIds],
-  );
-  const totalCommentCount = useMemo(
-    () => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0),
-    [commentCountByFile],
-  );
+  const { reviewedFiles, staleFiles } = useMemo(() => computeReviewSets(allFiles, reviews), [allFiles, reviews]);
+  const commentCountByFile = useMemo(() => computeCommentCounts(byId, sessionCommentIds), [byId, sessionCommentIds]);
+  const totalCommentCount = useMemo(() => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0), [commentCountByFile]);
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
     for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>());
@@ -155,9 +138,7 @@ export const ReviewDialog = memo(function ReviewDialog({
 
   useEffect(() => {
     const prevCount = prevCountRef.current;
-    if (open && prevCount !== null && prevCount > 0 && allFiles.length === 0) {
-      onOpenChange(false);
-    }
+    if (open && prevCount !== null && prevCount > 0 && allFiles.length === 0) onOpenChange(false);
     prevCountRef.current = allFiles.length;
   }, [open, allFiles.length, onOpenChange]);
 
@@ -168,55 +149,40 @@ export const ReviewDialog = memo(function ReviewDialog({
     window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
   }, []);
 
-  const handleSelectFile = useCallback(
-    (path: string) => {
-      setSelectedFile(path);
-      const ref = fileRefs.get(path);
-      if (ref?.current) ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    },
-    [fileRefs],
-  );
+  const handleSelectFile = useCallback((path: string) => {
+    setSelectedFile(path);
+    const ref = fileRefs.get(path);
+    if (ref?.current) ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [fileRefs]);
 
-  const handleToggleReviewed = useCallback(
-    (path: string, reviewed: boolean) => {
-      if (reviewed) {
-        const file = allFiles.find((f) => f.path === path);
-        markReviewed(path, file ? hashDiff(file.diff) : "");
-      } else markUnreviewed(path);
-    },
-    [allFiles, markReviewed, markUnreviewed],
-  );
+  const handleToggleReviewed = useCallback((path: string, reviewed: boolean) => {
+    if (reviewed) {
+      const file = allFiles.find((f) => f.path === path);
+      markReviewed(path, file ? hashDiff(file.diff) : "");
+    } else markUnreviewed(path);
+  }, [allFiles, markReviewed, markUnreviewed]);
 
-  const handleSendComments = useCallback(
-    (comments: DiffComment[]) => {
-      onSendComments(comments);
-      onOpenChange(false);
-    },
-    [onSendComments, onOpenChange],
-  );
+  const handleSendComments = useCallback((comments: DiffComment[]) => {
+    onSendComments(comments);
+    onOpenChange(false);
+  }, [onSendComments, onOpenChange]);
 
-  const handleDiscard = useCallback(
-    async (path: string) => {
-      try {
-        const result = await discard([path]);
-        if (result.success)
-          toast({ title: "Changes discarded", description: path, variant: "success" });
-        else
-          toast({
-            title: "Discard failed",
-            description: result.error || "An error occurred",
-            variant: "error",
-          });
-      } catch (e) {
-        toast({
-          title: "Discard failed",
-          description: e instanceof Error ? e.message : "An error occurred",
-          variant: "error",
-        });
-      }
-    },
-    [discard, toast],
-  );
+  const handleDiscard = useCallback(async (path: string) => {
+    try {
+      const result = await discard([path]);
+      if (result.success) toast({ title: "Changes discarded", description: path, variant: "success" });
+      else toast({ title: "Discard failed", description: result.error || "An error occurred", variant: "error" });
+    } catch (e) {
+      toast({ title: "Discard failed", description: e instanceof Error ? e.message : "An error occurred", variant: "error" });
+    }
+  }, [discard, toast]);
+
+  return { selectedFile, splitView, wordWrap, setWordWrap, autoMarkOnScroll, allFiles, reviewedFiles, staleFiles, commentCountByFile, totalCommentCount, fileRefs, getPendingComments, markCommentsSent, handleToggleSplitView, handleSelectFile, handleToggleReviewed, handleSendComments, handleDiscard };
+}
+
+export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
+  const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
+  const s = useReviewDialogState(props);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -228,44 +194,44 @@ export const ReviewDialog = memo(function ReviewDialog({
         <DialogTitle className="sr-only">Review Changes</DialogTitle>
         <ReviewTopBar
           sessionId={sessionId}
-          reviewedCount={reviewedFiles.size}
-          totalCount={allFiles.length}
-          commentCount={totalCommentCount}
+          reviewedCount={s.reviewedFiles.size}
+          totalCount={s.allFiles.length}
+          commentCount={s.totalCommentCount}
           baseBranch={baseBranch}
-          splitView={splitView}
-          onToggleSplitView={handleToggleSplitView}
-          wordWrap={wordWrap}
-          onToggleWordWrap={setWordWrap}
-          onSendComments={handleSendComments}
+          splitView={s.splitView}
+          onToggleSplitView={s.handleToggleSplitView}
+          wordWrap={s.wordWrap}
+          onToggleWordWrap={s.setWordWrap}
+          onSendComments={s.handleSendComments}
           onClose={() => onOpenChange(false)}
-          getPendingComments={getPendingComments}
-          markCommentsSent={markCommentsSent}
+          getPendingComments={s.getPendingComments}
+          markCommentsSent={s.markCommentsSent}
         />
         <div className="flex flex-1 min-h-0">
           <div className="w-[280px] min-w-[220px] border-r border-border flex-shrink-0 overflow-hidden">
             <ReviewFileTree
-              files={allFiles}
-              reviewedFiles={reviewedFiles}
-              staleFiles={staleFiles}
-              commentCountByFile={commentCountByFile}
-              selectedFile={selectedFile}
-              onSelectFile={handleSelectFile}
-              onToggleReviewed={handleToggleReviewed}
+              files={s.allFiles}
+              reviewedFiles={s.reviewedFiles}
+              staleFiles={s.staleFiles}
+              commentCountByFile={s.commentCountByFile}
+              selectedFile={s.selectedFile}
+              onSelectFile={s.handleSelectFile}
+              onToggleReviewed={s.handleToggleReviewed}
             />
           </div>
           <div className="flex-1 min-w-0 overflow-hidden">
-            {allFiles.length > 0 ? (
+            {s.allFiles.length > 0 ? (
               <ReviewDiffList
-                files={allFiles}
-                reviewedFiles={reviewedFiles}
-                staleFiles={staleFiles}
+                files={s.allFiles}
+                reviewedFiles={s.reviewedFiles}
+                staleFiles={s.staleFiles}
                 sessionId={sessionId}
-                autoMarkOnScroll={autoMarkOnScroll}
-                wordWrap={wordWrap}
-                onToggleReviewed={handleToggleReviewed}
-                onDiscard={handleDiscard}
+                autoMarkOnScroll={s.autoMarkOnScroll}
+                wordWrap={s.wordWrap}
+                onToggleReviewed={s.handleToggleReviewed}
+                onDiscard={s.handleDiscard}
                 onOpenFile={onOpenFile}
-                fileRefs={fileRefs}
+                fileRefs={s.fileRefs}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
