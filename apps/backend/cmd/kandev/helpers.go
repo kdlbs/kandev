@@ -31,7 +31,6 @@ import (
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
-	taskcontroller "github.com/kandev/kandev/internal/task/controller"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
@@ -266,23 +265,13 @@ type routeParams struct {
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
 func registerRoutes(p routeParams) {
-	workspaceController := taskcontroller.NewWorkspaceController(p.taskSvc)
-	taskWorkflowController := taskcontroller.NewWorkflowController(p.taskSvc)
-	taskWorkflowController.SetWorkflowStepLister(p.services.Workflow)
-	taskController := taskcontroller.NewTaskController(p.taskSvc)
-	messageController := taskcontroller.NewMessageController(p.taskSvc)
-	repositoryController := taskcontroller.NewRepositoryController(p.taskSvc)
-	executorController := taskcontroller.NewExecutorController(p.taskSvc)
-	environmentController := taskcontroller.NewEnvironmentController(p.taskSvc)
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
 	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
 	clarificationStore := clarification.NewStore(10 * time.Minute)
 
 	p.gateway.SetupRoutes(p.router)
-	registerTaskRoutes(p, workspaceController, taskWorkflowController, taskController,
-		messageController, repositoryController, executorController, environmentController, planService)
-	registerSecondaryRoutes(p, workflowCtrl, workspaceController, taskWorkflowController,
-		taskController, workflowCtrl, clarificationStore, planService)
+	registerTaskRoutes(p, planService)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, planService)
 
 	p.router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
@@ -290,25 +279,15 @@ func registerRoutes(p routeParams) {
 }
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
-func registerTaskRoutes(
-	p routeParams,
-	workspaceController *taskcontroller.WorkspaceController,
-	taskWorkflowController *taskcontroller.WorkflowController,
-	taskController *taskcontroller.TaskController,
-	messageController *taskcontroller.MessageController,
-	repositoryController *taskcontroller.RepositoryController,
-	executorController *taskcontroller.ExecutorController,
-	environmentController *taskcontroller.EnvironmentController,
-	planService *taskservice.PlanService,
-) {
-	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, workspaceController, p.log)
-	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, taskWorkflowController, p.log)
-	taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, taskController, p.orchestratorSvc, p.taskRepo, planService, p.log)
-	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, repositoryController, p.log)
-	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, executorController, p.log)
-	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, environmentController, p.log)
+func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
+	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
+	taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterMessageRoutes(
-		p.router, p.gateway.Dispatcher, messageController, taskController,
+		p.router, p.gateway.Dispatcher, p.taskSvc,
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log,
 	)
 	taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
@@ -322,10 +301,6 @@ func registerTaskRoutes(
 func registerSecondaryRoutes(
 	p routeParams,
 	workflowCtrl *workflowcontroller.Controller,
-	workspaceController *taskcontroller.WorkspaceController,
-	taskWorkflowController *taskcontroller.WorkflowController,
-	taskController *taskcontroller.TaskController,
-	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	planService *taskservice.PlanService,
 ) {
@@ -350,21 +325,18 @@ func registerSecondaryRoutes(
 	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
-	registerMCPAndDebugRoutes(p, workspaceController, taskWorkflowController, taskController, wfCtrl, clarificationStore, planService)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 }
 
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.
 func registerMCPAndDebugRoutes(
 	p routeParams,
-	workspaceController *taskcontroller.WorkspaceController,
-	taskWorkflowController *taskcontroller.WorkflowController,
-	taskController *taskcontroller.TaskController,
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	planService *taskservice.PlanService,
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
-		workspaceController, taskWorkflowController, taskController, wfCtrl,
+		p.taskSvc, wfCtrl,
 		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.log,
 	)
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)

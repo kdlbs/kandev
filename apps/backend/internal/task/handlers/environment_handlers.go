@@ -9,23 +9,23 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 type EnvironmentHandlers struct {
-	controller *controller.EnvironmentController
-	logger     *logger.Logger
+	service *service.Service
+	logger  *logger.Logger
 }
 
-func NewEnvironmentHandlers(ctrl *controller.EnvironmentController, log *logger.Logger) *EnvironmentHandlers {
-	return &EnvironmentHandlers{controller: ctrl, logger: log}
+func NewEnvironmentHandlers(svc *service.Service, log *logger.Logger) *EnvironmentHandlers {
+	return &EnvironmentHandlers{service: svc, logger: log}
 }
 
-func RegisterEnvironmentRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, ctrl *controller.EnvironmentController, log *logger.Logger) {
-	handlers := NewEnvironmentHandlers(ctrl, log)
+func RegisterEnvironmentRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, log *logger.Logger) {
+	handlers := NewEnvironmentHandlers(svc, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -47,8 +47,23 @@ func (h *EnvironmentHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionEnvironmentDelete, h.wsDeleteEnvironment)
 }
 
+func (h *EnvironmentHandlers) listEnvironments(ctx context.Context) (dto.ListEnvironmentsResponse, error) {
+	environments, err := h.service.ListEnvironments(ctx)
+	if err != nil {
+		return dto.ListEnvironmentsResponse{}, err
+	}
+	resp := dto.ListEnvironmentsResponse{
+		Environments: make([]dto.EnvironmentDTO, 0, len(environments)),
+		Total:        len(environments),
+	}
+	for _, environment := range environments {
+		resp.Environments = append(resp.Environments, dto.FromEnvironment(environment))
+	}
+	return resp, nil
+}
+
 func (h *EnvironmentHandlers) httpListEnvironments(c *gin.Context) {
-	resp, err := h.controller.ListEnvironments(c.Request.Context(), dto.ListEnvironmentsRequest{})
+	resp, err := h.listEnvironments(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list environments", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list environments"})
@@ -76,7 +91,7 @@ func (h *EnvironmentHandlers) httpCreateEnvironment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name and kind are required"})
 		return
 	}
-	resp, err := h.controller.CreateEnvironment(c.Request.Context(), dto.CreateEnvironmentRequest{
+	environment, err := h.service.CreateEnvironment(c.Request.Context(), &service.CreateEnvironmentRequest{
 		Name:         body.Name,
 		Kind:         models.EnvironmentKind(body.Kind),
 		WorktreeRoot: body.WorktreeRoot,
@@ -89,17 +104,17 @@ func (h *EnvironmentHandlers) httpCreateEnvironment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "environment not created"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromEnvironment(environment))
 }
 
 func (h *EnvironmentHandlers) httpGetEnvironment(c *gin.Context) {
-	resp, err := h.controller.GetEnvironment(c.Request.Context(), dto.GetEnvironmentRequest{ID: c.Param("id")})
+	environment, err := h.service.GetEnvironment(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to get environment", zap.Error(err))
 		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromEnvironment(environment))
 }
 
 type httpUpdateEnvironmentRequest struct {
@@ -122,8 +137,7 @@ func (h *EnvironmentHandlers) httpUpdateEnvironment(c *gin.Context) {
 		value := models.EnvironmentKind(*body.Kind)
 		kind = &value
 	}
-	resp, err := h.controller.UpdateEnvironment(c.Request.Context(), dto.UpdateEnvironmentRequest{
-		ID:           c.Param("id"),
+	environment, err := h.service.UpdateEnvironment(c.Request.Context(), c.Param("id"), &service.UpdateEnvironmentRequest{
 		Name:         body.Name,
 		Kind:         kind,
 		WorktreeRoot: body.WorktreeRoot,
@@ -136,13 +150,12 @@ func (h *EnvironmentHandlers) httpUpdateEnvironment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "environment not updated"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.FromEnvironment(environment))
 }
 
 func (h *EnvironmentHandlers) httpDeleteEnvironment(c *gin.Context) {
-	resp, err := h.controller.DeleteEnvironment(c.Request.Context(), dto.DeleteEnvironmentRequest{ID: c.Param("id")})
-	if err != nil {
-		if errors.Is(err, controller.ErrActiveTaskSessions) {
+	if err := h.service.DeleteEnvironment(c.Request.Context(), c.Param("id")); err != nil {
+		if errors.Is(err, service.ErrActiveTaskSessions) {
 			c.JSON(http.StatusConflict, gin.H{"error": "environment is used by an active agent session"})
 			return
 		}
@@ -150,11 +163,11 @@ func (h *EnvironmentHandlers) httpDeleteEnvironment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "environment not deleted"})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
 func (h *EnvironmentHandlers) wsListEnvironments(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.controller.ListEnvironments(ctx, dto.ListEnvironmentsRequest{})
+	resp, err := h.listEnvironments(ctx)
 	if err != nil {
 		h.logger.Error("failed to list environments", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list environments", nil)
@@ -179,7 +192,7 @@ func (h *EnvironmentHandlers) wsCreateEnvironment(ctx context.Context, msg *ws.M
 	if req.Name == "" || req.Kind == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name and kind are required", nil)
 	}
-	resp, err := h.controller.CreateEnvironment(ctx, dto.CreateEnvironmentRequest{
+	environment, err := h.service.CreateEnvironment(ctx, &service.CreateEnvironmentRequest{
 		Name:         req.Name,
 		Kind:         models.EnvironmentKind(req.Kind),
 		WorktreeRoot: req.WorktreeRoot,
@@ -191,7 +204,7 @@ func (h *EnvironmentHandlers) wsCreateEnvironment(ctx context.Context, msg *ws.M
 		h.logger.Error("failed to create environment", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create environment", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromEnvironment(environment))
 }
 
 type wsGetEnvironmentRequest struct {
@@ -206,11 +219,11 @@ func (h *EnvironmentHandlers) wsGetEnvironment(ctx context.Context, msg *ws.Mess
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	resp, err := h.controller.GetEnvironment(ctx, dto.GetEnvironmentRequest{ID: req.ID})
+	environment, err := h.service.GetEnvironment(ctx, req.ID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Environment not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromEnvironment(environment))
 }
 
 type wsUpdateEnvironmentRequest struct {
@@ -236,8 +249,7 @@ func (h *EnvironmentHandlers) wsUpdateEnvironment(ctx context.Context, msg *ws.M
 		value := models.EnvironmentKind(*req.Kind)
 		kind = &value
 	}
-	resp, err := h.controller.UpdateEnvironment(ctx, dto.UpdateEnvironmentRequest{
-		ID:           req.ID,
+	environment, err := h.service.UpdateEnvironment(ctx, req.ID, &service.UpdateEnvironmentRequest{
 		Name:         req.Name,
 		Kind:         kind,
 		WorktreeRoot: req.WorktreeRoot,
@@ -249,13 +261,23 @@ func (h *EnvironmentHandlers) wsUpdateEnvironment(ctx context.Context, msg *ws.M
 		h.logger.Error("failed to update environment", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update environment", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromEnvironment(environment))
 }
 
 func (h *EnvironmentHandlers) wsDeleteEnvironment(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsHandleIDRequestActiveCheck(ctx, msg, h.logger,
-		"failed to delete environment", "environment is used by an active agent session",
-		func(ctx context.Context, id string) (any, error) {
-			return h.controller.DeleteEnvironment(ctx, dto.DeleteEnvironmentRequest{ID: id})
-		})
+	var req wsIDOnlyRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if err := h.service.DeleteEnvironment(ctx, req.ID); err != nil {
+		h.logger.Error("failed to delete environment", zap.Error(err))
+		if errors.Is(err, service.ErrActiveTaskSessions) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "environment is used by an active agent session", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete environment", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

@@ -25,7 +25,7 @@ func (h *TaskHandlers) wsGetGitSnapshots(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	snapshots, err := h.controller.GetGitSnapshots(ctx, req.SessionID, req.Limit)
+	snapshots, err := h.service.GetGitSnapshots(ctx, req.SessionID, req.Limit)
 	if err != nil {
 		h.logger.Error("failed to get git snapshots", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get git snapshots", nil)
@@ -66,7 +66,7 @@ func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message)
 	return h.wsGetSessionData(ctx, msg,
 		"failed to get session commits", "Failed to get session commits", "commits",
 		func(ctx context.Context, sessionID string) (any, error) {
-			return h.controller.GetSessionCommits(ctx, sessionID)
+			return h.service.GetSessionCommits(ctx, sessionID)
 		})
 }
 
@@ -83,7 +83,7 @@ func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	diff, err := h.controller.GetCumulativeDiff(ctx, req.SessionID)
+	diff, err := h.service.GetCumulativeDiff(ctx, req.SessionID)
 	if err != nil {
 		h.logger.Error("failed to get cumulative diff", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get cumulative diff", nil)

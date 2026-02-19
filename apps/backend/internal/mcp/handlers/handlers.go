@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/task/controller"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -50,9 +49,7 @@ type EventBus interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	workspaceCtrl    *controller.WorkspaceController
-	taskWorkflowCtrl *controller.WorkflowController
-	taskCtrl         *controller.TaskController
+	taskSvc          *service.Service
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
 	messageCreator   MessageCreator
@@ -65,9 +62,7 @@ type Handlers struct {
 
 // NewHandlers creates new MCP handlers.
 func NewHandlers(
-	workspaceCtrl *controller.WorkspaceController,
-	taskWorkflowCtrl *controller.WorkflowController,
-	taskCtrl *controller.TaskController,
+	taskSvc *service.Service,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
 	messageCreator MessageCreator,
@@ -78,9 +73,7 @@ func NewHandlers(
 	log *logger.Logger,
 ) *Handlers {
 	return &Handlers{
-		workspaceCtrl:    workspaceCtrl,
-		taskWorkflowCtrl: taskWorkflowCtrl,
-		taskCtrl:         taskCtrl,
+		taskSvc:          taskSvc,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
 		messageCreator:   messageCreator,
@@ -111,13 +104,16 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 
 // handleListWorkspaces lists all workspaces.
 func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	resp, err := h.workspaceCtrl.ListWorkspaces(ctx, dto.ListWorkspacesRequest{})
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
 	if err != nil {
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
 	}
-
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	dtos := make([]dto.WorkspaceDTO, 0, len(workspaces))
+	for _, w := range workspaces {
+		dtos = append(dtos, dto.FromWorkspace(w))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.ListWorkspacesResponse{Workspaces: dtos, Total: len(dtos)})
 }
 
 // unmarshalStringField unmarshals a JSON payload and returns the value of a single string field.
@@ -154,7 +150,15 @@ func (h *Handlers) handleListByField(
 func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list workflows", "Failed to list workflows",
 		func(ctx context.Context, workspaceID string) (any, error) {
-			return h.taskWorkflowCtrl.ListWorkflows(ctx, dto.ListWorkflowsRequest{WorkspaceID: workspaceID})
+			workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID)
+			if err != nil {
+				return nil, err
+			}
+			dtos := make([]dto.WorkflowDTO, 0, len(workflows))
+			for _, w := range workflows {
+				dtos = append(dtos, dto.FromWorkflow(w))
+			}
+			return dto.ListWorkflowsResponse{Workflows: dtos, Total: len(dtos)}, nil
 		})
 }
 
@@ -170,7 +174,15 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
-			return h.taskCtrl.ListTasks(ctx, dto.ListTasksRequest{WorkflowID: workflowID})
+			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)
+			if err != nil {
+				return nil, err
+			}
+			dtos := make([]dto.TaskDTO, 0, len(tasks))
+			for _, t := range tasks {
+				dtos = append(dtos, dto.FromTask(t))
+			}
+			return dto.ListTasksResponse{Tasks: dtos, Total: len(dtos)}, nil
 		})
 }
 
@@ -193,13 +205,35 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	resp, err := h.taskCtrl.CreateTask(ctx, req)
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:    req.WorkspaceID,
+		WorkflowID:     req.WorkflowID,
+		WorkflowStepID: req.WorkflowStepID,
+		Title:          req.Title,
+		Description:    req.Description,
+		Priority:       req.Priority,
+		State:          req.State,
+		Repositories:   repos,
+		Position:       req.Position,
+		Metadata:       req.Metadata,
+	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // handleUpdateTask updates an existing task.
@@ -212,22 +246,41 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 
-	resp, err := h.taskCtrl.UpdateTask(ctx, req)
+	var repos []service.TaskRepositoryInput
+	for _, r := range req.Repositories {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:  r.RepositoryID,
+			BaseBranch:    r.BaseBranch,
+			LocalPath:     r.LocalPath,
+			Name:          r.Name,
+			DefaultBranch: r.DefaultBranch,
+		})
+	}
+
+	task, err := h.taskSvc.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
+		Title:        req.Title,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		State:        req.State,
+		Repositories: repos,
+		Position:     req.Position,
+		Metadata:     req.Metadata,
+	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task", nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
 // handleAskUserQuestion creates a clarification request and waits for response.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                  `json:"session_id"`
-		TaskID    string                  `json:"task_id"`
-		Question  clarification.Question  `json:"question"`
-		Context   string                  `json:"context"`
+		SessionID string                 `json:"session_id"`
+		TaskID    string                 `json:"task_id"`
+		Question  clarification.Question `json:"question"`
+		Context   string                 `json:"context"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
