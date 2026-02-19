@@ -746,6 +746,10 @@ func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, 
 		"SSH_ASKPASS=/bin/false",
 		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
 	)
+	// After the context cancels and the process is killed, child processes
+	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
+	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.
+	cmd.WaitDelay = 500 * time.Millisecond
 	return cmd
 }
 
