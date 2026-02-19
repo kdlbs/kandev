@@ -22,8 +22,8 @@ const (
 
 // Tool names matching Claude Code conventions
 const (
-	ToolBash = "Bash"
-	ToolEdit = "Edit"
+	ToolBash      = "Bash"
+	ToolEdit      = "Edit"
 	ToolRead      = "Read"
 	ToolGlob      = "Glob"
 	ToolGrep      = "Grep"
@@ -69,8 +69,8 @@ type SystemMsg struct {
 
 // AssistantMsg is an assistant message with content blocks.
 type AssistantMsg struct {
-	Type            string       `json:"type"`
-	ParentToolUseID string       `json:"parent_tool_use_id,omitempty"`
+	Type            string        `json:"type"`
+	ParentToolUseID string        `json:"parent_tool_use_id,omitempty"`
 	Message         AssistantBody `json:"message"`
 }
 
@@ -114,9 +114,9 @@ type Usage struct {
 
 // UserMsg is a user message (used for tool results).
 type UserMsg struct {
-	Type            string       `json:"type"`
-	ParentToolUseID string       `json:"parent_tool_use_id,omitempty"`
-	Message         UserMsgBody  `json:"message"`
+	Type            string      `json:"type"`
+	ParentToolUseID string      `json:"parent_tool_use_id,omitempty"`
+	Message         UserMsgBody `json:"message"`
 }
 
 // UserMsgBody is the body of a user message with tool results.
@@ -127,15 +127,15 @@ type UserMsgBody struct {
 
 // ResultMsg is the final result message for a turn.
 type ResultMsg struct {
-	Type              string                    `json:"type"`
-	Result            json.RawMessage           `json:"result"`
-	CostUSD           float64                   `json:"cost_usd"`
-	DurationMS        int64                     `json:"duration_ms"`
-	DurationAPIMS     int64                     `json:"duration_api_ms"`
-	IsError           bool                      `json:"is_error"`
-	NumTurns          int                       `json:"num_turns"`
-	TotalInputTokens  int64                     `json:"total_input_tokens"`
-	TotalOutputTokens int64                     `json:"total_output_tokens"`
+	Type              string                     `json:"type"`
+	Result            json.RawMessage            `json:"result"`
+	CostUSD           float64                    `json:"cost_usd"`
+	DurationMS        int64                      `json:"duration_ms"`
+	DurationAPIMS     int64                      `json:"duration_api_ms"`
+	IsError           bool                       `json:"is_error"`
+	NumTurns          int                        `json:"num_turns"`
+	TotalInputTokens  int64                      `json:"total_input_tokens"`
+	TotalOutputTokens int64                      `json:"total_output_tokens"`
 	ModelUsage        map[string]ModelUsageStats `json:"model_usage,omitempty"`
 }
 
@@ -152,9 +152,9 @@ type ResultData struct {
 
 // ControlRequestMsg is a control request emitted to stdout (permission requests).
 type ControlRequestMsg struct {
-	Type      string              `json:"type"`
-	RequestID string              `json:"request_id"`
-	Request   ControlRequestBody  `json:"request"`
+	Type      string             `json:"type"`
+	RequestID string             `json:"request_id"`
+	Request   ControlRequestBody `json:"request"`
 }
 
 // ControlRequestBody is the body of a control request.
@@ -167,15 +167,15 @@ type ControlRequestBody struct {
 
 // ControlResponseMsg is a control response emitted to stdout (for initialize).
 type ControlResponseMsg struct {
-	Type     string               `json:"type"`
-	Response ControlResponseBody  `json:"response"`
+	Type     string              `json:"type"`
+	Response ControlResponseBody `json:"response"`
 }
 
 // ControlResponseBody is the body of a control response.
 type ControlResponseBody struct {
-	Subtype   string               `json:"subtype"`
-	RequestID string               `json:"request_id"`
-	Response  *InitializeResponse  `json:"response,omitempty"`
+	Subtype   string              `json:"subtype"`
+	RequestID string              `json:"request_id"`
+	Response  *InitializeResponse `json:"response,omitempty"`
 }
 
 // InitializeResponse is the response to an initialize control request.

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
-export type RequestStatus = 'idle' | 'loading' | 'success' | 'error';
+export type RequestStatus = "idle" | "loading" | "success" | "error";
 
 export type RequestState<T> = {
   status: RequestStatus;
@@ -16,11 +16,11 @@ type UseRequestOptions = {
 
 export function useRequest<TArgs extends unknown[], TData>(
   fn: (...args: TArgs) => Promise<TData>,
-  options: UseRequestOptions = {}
+  options: UseRequestOptions = {},
 ) {
   const { successDuration = 1500 } = options;
   const [state, setState] = useState<RequestState<TData>>({
-    status: 'idle',
+    status: "idle",
     data: null,
     error: null,
   });
@@ -39,29 +39,29 @@ export function useRequest<TArgs extends unknown[], TData>(
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
-      setState({ status: 'loading', data: null, error: null });
+      setState({ status: "loading", data: null, error: null });
       try {
         const data = await fn(...args);
-        setState({ status: 'success', data, error: null });
+        setState({ status: "success", data, error: null });
         if (successDuration > 0) {
           timeoutRef.current = setTimeout(() => {
-            setState((prev) => ({ ...prev, status: 'idle' }));
+            setState((prev) => ({ ...prev, status: "idle" }));
           }, successDuration);
         }
         return data;
       } catch (error) {
-        const normalized = error instanceof Error ? error : new Error('Request failed');
-        setState({ status: 'error', data: null, error: normalized });
+        const normalized = error instanceof Error ? error : new Error("Request failed");
+        setState({ status: "error", data: null, error: normalized });
         throw normalized;
       }
     },
-    [fn, successDuration]
+    [fn, successDuration],
   );
 
   return {
     ...state,
-    isLoading: state.status === 'loading',
+    isLoading: state.status === "loading",
     run,
-    reset: () => setState({ status: 'idle', data: null, error: null }),
+    reset: () => setState({ status: "idle", data: null, error: null }),
   };
 }

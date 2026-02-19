@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { cn } from '@/lib/utils';
-import { useSessionContextWindow } from '@/hooks/domains/session/use-session-context-window';
+import { memo } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
@@ -21,13 +21,16 @@ function formatNumber(num: number): string {
 }
 
 function getCircleColor(efficiency: number): string {
-  if (efficiency >= 90) return 'text-yellow-500';
-  if (efficiency >= 75) return 'text-yellow-300';
-  if (efficiency >= 50) return 'text-blue-500';
-  return 'text-blue-300';
+  if (efficiency >= 90) return "text-yellow-500";
+  if (efficiency >= 75) return "text-yellow-300";
+  if (efficiency >= 50) return "text-blue-500";
+  return "text-blue-300";
 }
 
-export const TokenUsageDisplay = memo(function TokenUsageDisplay({ sessionId, className }: TokenUsageDisplayProps) {
+export const TokenUsageDisplay = memo(function TokenUsageDisplay({
+  sessionId,
+  className,
+}: TokenUsageDisplayProps) {
   const contextWindow = useSessionContextWindow(sessionId);
 
   if (!contextWindow || contextWindow.size === 0) return null;
@@ -46,13 +49,9 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({ sessionId, cl
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={cn('flex items-center gap-2 cursor-help', className)}>
+        <div className={cn("flex items-center gap-2 cursor-help", className)}>
           <div className="relative flex items-center justify-center">
-            <svg
-              viewBox="0 0 24 24"
-              className="w-5 h-5 -rotate-90"
-              aria-hidden="true"
-            >
+            <svg viewBox="0 0 24 24" className="w-5 h-5 -rotate-90" aria-hidden="true">
               {/* Background circle */}
               <circle
                 cx="12"
@@ -74,10 +73,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({ sessionId, cl
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={strokeDashoffset}
-                className={cn(
-                  getCircleColor(efficiency),
-                  'transition-all duration-300 ease-out'
-                )}
+                className={cn(getCircleColor(efficiency), "transition-all duration-300 ease-out")}
               />
             </svg>
           </div>
@@ -85,10 +81,11 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({ sessionId, cl
       </TooltipTrigger>
       <TooltipContent side="top">
         <div className="text-xs space-y-1">
-          <div className="font-medium">{efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})</div>
+          <div className="font-medium">
+            {efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
+          </div>
         </div>
       </TooltipContent>
     </Tooltip>
   );
 });
-

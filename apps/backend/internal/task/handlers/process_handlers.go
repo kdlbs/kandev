@@ -22,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-
 // queryValueTrue is the string "true" used in query parameter comparisons.
 const queryValueTrue = "true"
 

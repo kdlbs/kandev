@@ -37,11 +37,11 @@ func (s *mockSubscription) IsValid() bool {
 
 // mockEventBus implements bus.EventBus for testing
 type mockEventBus struct {
-	subscriptions    map[string][]bus.EventHandler
-	queuedSubs       map[string]map[string][]bus.EventHandler
-	mu               sync.RWMutex
-	connected        bool
-	subscribeErr     error
+	subscriptions     map[string][]bus.EventHandler
+	queuedSubs        map[string]map[string][]bus.EventHandler
+	mu                sync.RWMutex
+	connected         bool
+	subscribeErr      error
 	queueSubscribeErr error
 }
 

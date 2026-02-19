@@ -248,4 +248,3 @@ func BuildAvailableCommandsSubject(sessionID string) string {
 func BuildAvailableCommandsWildcardSubject() string {
 	return AvailableCommandsUpdated + ".*"
 }
-

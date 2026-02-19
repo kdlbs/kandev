@@ -1,7 +1,7 @@
-import { StateHydrator } from '@/components/state-hydrator';
-import { listAvailableAgents, getAgentProfileMcpConfig } from '@/lib/api';
-import type { AgentProfileMcpConfig } from '@/lib/types/http';
-import { AgentProfilePage } from '@/components/settings/agent-profile-page';
+import { StateHydrator } from "@/components/state-hydrator";
+import { listAvailableAgents, getAgentProfileMcpConfig } from "@/lib/api";
+import type { AgentProfileMcpConfig } from "@/lib/types/http";
+import { AgentProfilePage } from "@/components/settings/agent-profile-page";
 
 export default async function AgentProfileRoute({
   params,
@@ -15,22 +15,19 @@ export default async function AgentProfileRoute({
   try {
     const [availableAgentsResult, mcpConfigResult] = await Promise.allSettled([
       listAvailableAgents({
-        cache: 'no-store',
+        cache: "no-store",
       }),
       getAgentProfileMcpConfig(profileId, {
-        cache: 'no-store',
+        cache: "no-store",
       }),
     ]);
     const availableAgents =
-      availableAgentsResult.status === 'fulfilled'
-        ? availableAgentsResult.value
-        : { agents: [] };
-    const mcpConfig =
-      mcpConfigResult.status === 'fulfilled' ? mcpConfigResult.value : null;
+      availableAgentsResult.status === "fulfilled" ? availableAgentsResult.value : { agents: [] };
+    const mcpConfig = mcpConfigResult.status === "fulfilled" ? mcpConfigResult.value : null;
     initialState = {
       availableAgents: {
         items: availableAgents.agents ?? [],
-        loaded: availableAgentsResult.status === 'fulfilled',
+        loaded: availableAgentsResult.status === "fulfilled",
         loading: false,
       },
     };

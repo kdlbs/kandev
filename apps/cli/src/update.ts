@@ -4,24 +4,20 @@ import readline from "node:readline";
 
 function requestJson<T>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const req = https.get(
-      url,
-      { headers: { "User-Agent": "kandev-npx" } },
-      (res) => {
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+    const req = https.get(url, { headers: { "User-Agent": "kandev-npx" } }, (res) => {
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+      }
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body) as T);
+        } catch {
+          reject(new Error(`Failed to parse JSON from ${url}`));
         }
-        let body = "";
-        res.on("data", (chunk) => (body += chunk));
-        res.on("end", () => {
-          try {
-            resolve(JSON.parse(body) as T);
-          } catch {
-            reject(new Error(`Failed to parse JSON from ${url}`));
-          }
-        });
-      },
-    );
+      });
+    });
     req.setTimeout(5000, () => {
       req.destroy(new Error(`Request timed out fetching ${url}`));
     });
@@ -61,7 +57,9 @@ function promptYesNo(question: string, defaultYes = false): Promise<boolean> {
     const suffix = defaultYes ? "[Y/n]" : "[y/N]";
     rl.question(`${question} ${suffix} `, (answer: string) => {
       rl.close();
-      const normalized = String(answer || "").trim().toLowerCase();
+      const normalized = String(answer || "")
+        .trim()
+        .toLowerCase();
       if (!normalized) {
         resolve(Boolean(defaultYes));
         return;

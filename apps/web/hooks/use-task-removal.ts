@@ -1,10 +1,10 @@
-import { useCallback } from 'react';
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { KanbanState } from '@/lib/state/slices';
-import { linkToSession } from '@/lib/links';
-import { listTaskSessions } from '@/lib/api';
-import { performLayoutSwitch } from '@/lib/state/dockview-store';
+import { useCallback } from "react";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { KanbanState } from "@/lib/state/slices";
+import { linkToSession } from "@/lib/links";
+import { listTaskSessions } from "@/lib/api";
+import { performLayoutSwitch } from "@/lib/state/dockview-store";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
@@ -30,18 +30,18 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       }
       store.getState().setTaskSessionsLoading(taskId, true);
       try {
-        const response = await listTaskSessions(taskId, { cache: 'no-store' });
+        const response = await listTaskSessions(taskId, { cache: "no-store" });
         store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
         return response.sessions ?? [];
       } catch (error) {
-        console.error('Failed to load task sessions:', error);
+        console.error("Failed to load task sessions:", error);
         store.getState().setTaskSessionsForTask(taskId, []);
         return [];
       } finally {
         store.getState().setTaskSessionsLoading(taskId, false);
       }
     },
-    [store]
+    [store],
   );
 
   /** Remove a task from both multi and single kanban snapshots. */
@@ -49,38 +49,38 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
     (taskId: string) => {
       const currentSnapshots = store.getState().kanbanMulti.snapshots;
       for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-        const hadTask = snapshot.tasks.some((t: KanbanState['tasks'][number]) => t.id === taskId);
+        const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
         if (hadTask) {
           store.getState().setWorkflowSnapshot(wfId, {
             ...snapshot,
-            tasks: snapshot.tasks.filter((t: KanbanState['tasks'][number]) => t.id !== taskId),
+            tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
           });
         }
       }
 
       const currentKanbanTasks = store.getState().kanban.tasks;
-      if (currentKanbanTasks.some((t: KanbanState['tasks'][number]) => t.id === taskId)) {
+      if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
         store.setState((state) => ({
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: state.kanban.tasks.filter((t: KanbanState['tasks'][number]) => t.id !== taskId),
+            tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
           },
         }));
       }
     },
-    [store]
+    [store],
   );
 
   /** Switch to the next available task after removal. */
   const switchToNextTask = useCallback(
-    async (nextTask: KanbanState['tasks'][number], oldSessionId: string | null) => {
+    async (nextTask: KanbanState["tasks"][number], oldSessionId: string | null) => {
       const { setActiveSession, setActiveTask } = store.getState();
 
       if (nextTask.primarySessionId) {
         setActiveSession(nextTask.id, nextTask.primarySessionId);
         if (useLayoutSwitch) performLayoutSwitch(oldSessionId, nextTask.primarySessionId);
-        window.history.replaceState({}, '', linkToSession(nextTask.primarySessionId));
+        window.history.replaceState({}, "", linkToSession(nextTask.primarySessionId));
         return;
       }
 
@@ -89,12 +89,12 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       if (sessionId) {
         setActiveSession(nextTask.id, sessionId);
         if (useLayoutSwitch) performLayoutSwitch(oldSessionId, sessionId);
-        window.history.replaceState({}, '', linkToSession(sessionId));
+        window.history.replaceState({}, "", linkToSession(sessionId));
       } else {
         setActiveTask(nextTask.id);
       }
     },
-    [store, useLayoutSwitch, loadTaskSessionsForTask]
+    [store, useLayoutSwitch, loadTaskSessionsForTask],
   );
 
   /**
@@ -106,7 +106,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       removeTaskFromSnapshots(taskId);
 
       // Collect remaining tasks across snapshots
-      const allRemainingTasks: KanbanState['tasks'] = [];
+      const allRemainingTasks: KanbanState["tasks"] = [];
       for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
         allRemainingTasks.push(...snapshot.tasks);
       }
@@ -122,10 +122,10 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       if (allRemainingTasks.length > 0) {
         await switchToNextTask(allRemainingTasks[0], oldSessionId);
       } else {
-        window.location.href = '/';
+        window.location.href = "/";
       }
     },
-    [store, removeTaskFromSnapshots, switchToNextTask]
+    [store, removeTaskFromSnapshots, switchToNextTask],
   );
 
   return { removeTaskFromBoard, loadTaskSessionsForTask };

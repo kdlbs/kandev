@@ -1,28 +1,28 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { IconCode } from '@tabler/icons-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Button } from '@kandev/ui/button';
-import { Input } from '@kandev/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
-import { SettingsSection } from '@/components/settings/settings-section';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
-import { useShellSettings } from '@/hooks/domains/settings/use-shell-settings';
-import { updateUserSettings } from '@/lib/api';
-import { useRequest } from '@/lib/http/use-request';
+import { useState } from "react";
+import { IconCode } from "@tabler/icons-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
+import { updateUserSettings } from "@/lib/api";
+import { useRequest } from "@/lib/http/use-request";
 
-const AUTO_SHELL = 'auto';
-const CUSTOM_SHELL = 'custom';
+const AUTO_SHELL = "auto";
+const CUSTOM_SHELL = "custom";
 
 type ShellOption = { value: string; label: string };
 
 function resolveShellSelection(preferredShell: string, shellOptions: ShellOption[]) {
   if (!preferredShell) {
-    return { selection: AUTO_SHELL, customShell: '' };
+    return { selection: AUTO_SHELL, customShell: "" };
   }
   if (shellOptions.some((option) => option.value === preferredShell)) {
-    return { selection: preferredShell, customShell: '' };
+    return { selection: preferredShell, customShell: "" };
   }
   return { selection: CUSTOM_SHELL, customShell: preferredShell };
 }
@@ -55,7 +55,7 @@ function ShellSelect({
           <SelectTrigger>
             <SelectValue
               placeholder={
-                shellOptions.length === 0 ? 'Shell options unavailable' : 'Select a shell'
+                shellOptions.length === 0 ? "Shell options unavailable" : "Select a shell"
               }
             />
           </SelectTrigger>
@@ -65,13 +65,13 @@ function ShellSelect({
                 (option) =>
                   option.value !== AUTO_SHELL &&
                   option.value !== CUSTOM_SHELL &&
-                  option.value !== ''
+                  option.value !== "",
               )
               .map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             <SelectItem value={CUSTOM_SHELL}>Custom</SelectItem>
             <SelectItem value={AUTO_SHELL}>System default</SelectItem>
           </SelectContent>
@@ -97,7 +97,7 @@ export function ShellSettingsCard() {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
   const shellSettings = useShellSettings();
-  const initialShellValue = shellSettings.preferredShell ?? '';
+  const initialShellValue = shellSettings.preferredShell ?? "";
   const initialShellOptions = shellSettings.shellOptions ?? [];
   const initialSelection = resolveShellSelection(initialShellValue, initialShellOptions);
   const [preferredShell, setPreferredShell] = useState(initialShellValue);
@@ -111,7 +111,7 @@ export function ShellSettingsCard() {
     const trimmed = preferredShell.trim();
     const currentSettings = storeApi.getState().userSettings;
     await updateUserSettings({
-      workspace_id: currentSettings.workspaceId ?? '',
+      workspace_id: currentSettings.workspaceId ?? "",
       repository_ids: currentSettings.repositoryIds,
       preferred_shell: trimmed,
     });
@@ -141,7 +141,7 @@ export function ShellSettingsCard() {
             onClick={() => saveShellRequest.run()}
             disabled={!shellLoaded || !shellDirty || saveShellRequest.isLoading}
           >
-            {saveShellRequest.isLoading ? 'Saving...' : 'Save'}
+            {saveShellRequest.isLoading ? "Saving..." : "Save"}
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -150,8 +150,8 @@ export function ShellSettingsCard() {
             onSelectionChange={(value) => {
               setShellSelection(value);
               if (value === AUTO_SHELL) {
-                setPreferredShell('');
-                setCustomShell('');
+                setPreferredShell("");
+                setCustomShell("");
                 return;
               }
               if (value === CUSTOM_SHELL) {
@@ -159,7 +159,7 @@ export function ShellSettingsCard() {
                 return;
               }
               setPreferredShell(value);
-              setCustomShell('');
+              setCustomShell("");
             }}
             customShell={customShell}
             onCustomShellChange={(value) => {

@@ -2,55 +2,58 @@
  * Keyboard shortcut utility functions
  */
 
-import type { KeyboardShortcut, Platform } from './constants';
+import type { KeyboardShortcut, Platform } from "./constants";
 
 /**
  * Detect the current platform
  */
 export function detectPlatform(): Platform {
-  if (typeof navigator === 'undefined') {
-    return 'unknown';
+  if (typeof navigator === "undefined") {
+    return "unknown";
   }
 
   const platform = navigator.platform.toLowerCase();
   const userAgent = navigator.userAgent.toLowerCase();
 
-  if (platform.includes('mac') || userAgent.includes('mac')) {
-    return 'mac';
+  if (platform.includes("mac") || userAgent.includes("mac")) {
+    return "mac";
   }
 
-  if (platform.includes('win') || userAgent.includes('win')) {
-    return 'windows';
+  if (platform.includes("win") || userAgent.includes("win")) {
+    return "windows";
   }
 
-  if (platform.includes('linux') || userAgent.includes('linux')) {
-    return 'linux';
+  if (platform.includes("linux") || userAgent.includes("linux")) {
+    return "linux";
   }
 
-  return 'unknown';
+  return "unknown";
 }
 
 /**
  * Check if the current platform is Mac
  */
 export function isMac(): boolean {
-  return detectPlatform() === 'mac';
+  return detectPlatform() === "mac";
 }
 
 /** Collect modifier display names based on platform. */
-function collectModifierNames(modifiers: KeyboardShortcut['modifiers'], currentPlatform: Platform): string[] {
+function collectModifierNames(
+  modifiers: KeyboardShortcut["modifiers"],
+  currentPlatform: Platform,
+): string[] {
   if (!modifiers) return [];
   const parts: string[] = [];
 
   if (modifiers.ctrlOrCmd) {
-    parts.push(currentPlatform === 'mac' ? 'Cmd' : 'Ctrl');
+    parts.push(currentPlatform === "mac" ? "Cmd" : "Ctrl");
     return parts;
   }
 
-  if (modifiers.ctrl) parts.push('Ctrl');
-  if (modifiers.cmd && currentPlatform === 'mac') parts.push('Cmd');
-  if (modifiers.alt) parts.push(currentPlatform === 'mac' ? 'Option' : 'Alt');
-  if (modifiers.shift) parts.push('Shift');
+  if (modifiers.ctrl) parts.push("Ctrl");
+  if (modifiers.cmd && currentPlatform === "mac") parts.push("Cmd");
+  if (modifiers.alt) parts.push(currentPlatform === "mac" ? "Option" : "Alt");
+  if (modifiers.shift) parts.push("Shift");
   return parts;
 }
 
@@ -64,7 +67,7 @@ export function formatShortcut(shortcut: KeyboardShortcut, platform?: Platform):
   const currentPlatform = platform ?? detectPlatform();
   const parts = collectModifierNames(shortcut.modifiers, currentPlatform);
   parts.push(formatKey(shortcut.key));
-  return parts.join('+');
+  return parts.join("+");
 }
 
 /**
@@ -73,16 +76,16 @@ export function formatShortcut(shortcut: KeyboardShortcut, platform?: Platform):
 function formatKey(key: string): string {
   // Special keys
   const specialKeys: Record<string, string> = {
-    Enter: 'Enter',
-    Escape: 'Esc',
-    ' ': 'Space',
-    Tab: 'Tab',
-    Backspace: 'Backspace',
-    Delete: 'Del',
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-    ArrowLeft: '←',
-    ArrowRight: '→',
+    Enter: "Enter",
+    Escape: "Esc",
+    " ": "Space",
+    Tab: "Tab",
+    Backspace: "Backspace",
+    Delete: "Del",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
   };
 
   if (key in specialKeys) {
@@ -110,7 +113,7 @@ function modifierMatches(expected: boolean | undefined, actual: boolean): boolea
  */
 export function matchesShortcut(
   event: KeyboardEvent | React.KeyboardEvent,
-  shortcut: KeyboardShortcut
+  shortcut: KeyboardShortcut,
 ): boolean {
   if (event.key !== shortcut.key) return false;
 
@@ -141,15 +144,15 @@ export function shortcutToCodeMirrorKeybinding(shortcut: KeyboardShortcut): stri
 
   if (shortcut.modifiers) {
     if (shortcut.modifiers.ctrlOrCmd) {
-      parts.push('Mod');
+      parts.push("Mod");
     } else {
-      if (shortcut.modifiers.ctrl) parts.push('Ctrl');
-      if (shortcut.modifiers.cmd) parts.push('Mod');
-      if (shortcut.modifiers.alt) parts.push('Alt');
-      if (shortcut.modifiers.shift) parts.push('Shift');
+      if (shortcut.modifiers.ctrl) parts.push("Ctrl");
+      if (shortcut.modifiers.cmd) parts.push("Mod");
+      if (shortcut.modifiers.alt) parts.push("Alt");
+      if (shortcut.modifiers.shift) parts.push("Shift");
     }
   }
 
   parts.push(shortcut.key);
-  return parts.join('-');
+  return parts.join("-");
 }

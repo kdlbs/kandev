@@ -13,9 +13,9 @@ import (
 // Store manages pending clarification requests.
 // It provides thread-safe storage and notification when responses arrive.
 type Store struct {
-	mu       sync.RWMutex
-	pending  map[string]*PendingClarification
-	timeout  time.Duration
+	mu      sync.RWMutex
+	pending map[string]*PendingClarification
+	timeout time.Duration
 }
 
 // NewStore creates a new clarification store.
@@ -131,10 +131,10 @@ func (s *Store) Cancel(pendingID string) error {
 	// Send a cancelled response
 	select {
 	case pending.ResponseCh <- &Response{
-		PendingID:   pendingID,
-		Rejected:    true,
+		PendingID:    pendingID,
+		Rejected:     true,
 		RejectReason: "cancelled",
-		RespondedAt: time.Now(),
+		RespondedAt:  time.Now(),
 	}:
 	default:
 	}
@@ -181,4 +181,3 @@ func (s *Store) ListPending() []*Request {
 	}
 	return requests
 }
-

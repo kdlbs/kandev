@@ -299,10 +299,10 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 			payload.Data.ToolStatus,
 			"", // result - no longer used, tool results in NormalizedPayload
 			payload.SessionID,
-			payload.Data.ToolTitle,                // Include title from update event
+			payload.Data.ToolTitle,               // Include title from update event
 			s.getActiveTurnID(payload.SessionID), // Turn ID for fallback creation
-			msgType,                               // Message type for fallback creation
-			payload.Data.Normalized,               // Pass normalized tool data for message metadata
+			msgType,                              // Message type for fallback creation
+			payload.Data.Normalized,              // Pass normalized tool data for message metadata
 		); err != nil {
 			s.logger.Warn("failed to update tool call message",
 				zap.String("task_id", payload.TaskID),

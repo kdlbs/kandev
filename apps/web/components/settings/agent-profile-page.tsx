@@ -1,24 +1,30 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { IconTrash } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { Button } from '@kandev/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Separator } from '@kandev/ui/separator';
-import { useToast } from '@/components/toast-provider';
-import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
-import { ProfileFormFields } from '@/components/settings/profile-form-fields';
-import { deleteAgentProfileAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { Agent, AgentProfile, ModelConfig, PermissionSetting, PassthroughConfig } from '@/lib/types/http';
-import { useAppStore } from '@/components/state-provider';
-import { AgentLogo } from '@/components/agent-logo';
-import { ProfileMcpConfigCard } from '@/app/settings/agents/[agentId]/profile-mcp-config-card';
-import { CommandPreviewCard } from '@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card';
-import type { AgentProfileMcpConfig } from '@/lib/types/http';
-import { useAgentProfileSettings } from '@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings';
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { IconTrash } from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Separator } from "@kandev/ui/separator";
+import { useToast } from "@/components/toast-provider";
+import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { ProfileFormFields } from "@/components/settings/profile-form-fields";
+import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
+import type {
+  Agent,
+  AgentProfile,
+  ModelConfig,
+  PermissionSetting,
+  PassthroughConfig,
+} from "@/lib/types/http";
+import { useAppStore } from "@/components/state-provider";
+import { AgentLogo } from "@/components/agent-logo";
+import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
+import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
+import type { AgentProfileMcpConfig } from "@/lib/types/http";
+import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -29,7 +35,7 @@ type ProfileEditorProps = {
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
-type SaveStatus = 'idle' | 'loading' | 'success' | 'error';
+type SaveStatus = "idle" | "loading" | "success" | "error";
 
 type ProfileEditorHeaderProps = {
   agentName: string;
@@ -57,9 +63,7 @@ function ProfileEditorHeader({
           <AgentLogo agentName={agentName} size={28} className="shrink-0" />
           {agentDisplayName} • {savedProfileName}
         </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {agentDisplayName} profile settings
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">{agentDisplayName} profile settings</p>
       </div>
       <div className="flex items-center gap-3">
         {isDirty && <UnsavedChangesBadge />}
@@ -158,8 +162,8 @@ function useSyncAgentsToStore() {
           agent_id: agentItem.id,
           agent_name: agentItem.name,
           cli_passthrough: agentProfile.cli_passthrough,
-        }))
-      )
+        })),
+      ),
     );
   };
 }
@@ -167,16 +171,18 @@ function useSyncAgentsToStore() {
 function useProfileEditorState(profile: AgentProfile) {
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
-  const isDirty = useMemo(() => (
-    draft.name !== savedProfile.name ||
-    draft.model !== savedProfile.model ||
-    draft.auto_approve !== savedProfile.auto_approve ||
-    draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
-    draft.allow_indexing !== savedProfile.allow_indexing ||
-    draft.cli_passthrough !== savedProfile.cli_passthrough
-  ), [draft, savedProfile]);
+  const isDirty = useMemo(
+    () =>
+      draft.name !== savedProfile.name ||
+      draft.model !== savedProfile.model ||
+      draft.auto_approve !== savedProfile.auto_approve ||
+      draft.dangerously_skip_permissions !== savedProfile.dangerously_skip_permissions ||
+      draft.allow_indexing !== savedProfile.allow_indexing ||
+      draft.cli_passthrough !== savedProfile.cli_passthrough,
+    [draft, savedProfile],
+  );
 
   return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
 }
@@ -189,40 +195,67 @@ type ProfileEditorActionsOptions = {
   setSaveStatus: (s: SaveStatus) => void;
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
-  toast: ReturnType<typeof useToast>['toast'];
+  toast: ReturnType<typeof useToast>["toast"];
 };
 
 function useProfileEditorActions({
-  agent, draft, setSavedProfile, setDraft, setSaveStatus, settingsAgents, syncAgentsToStore, toast,
+  agent,
+  draft,
+  setSavedProfile,
+  setDraft,
+  setSaveStatus,
+  settingsAgents,
+  syncAgentsToStore,
+  toast,
 }: ProfileEditorActionsOptions) {
   const handleSave = async () => {
     if (!draft.name.trim()) {
-      toast({ title: 'Profile name is required', description: 'Please enter a profile name before saving.', variant: 'error' });
+      toast({
+        title: "Profile name is required",
+        description: "Please enter a profile name before saving.",
+        variant: "error",
+      });
       return;
     }
     if (!draft.model.trim()) {
-      toast({ title: 'Model is required', description: 'Please select a model before saving.', variant: 'error' });
+      toast({
+        title: "Model is required",
+        description: "Please select a model before saving.",
+        variant: "error",
+      });
       return;
     }
-    setSaveStatus('loading');
+    setSaveStatus("loading");
     try {
       const updated = await updateAgentProfileAction(draft.id, {
-        name: draft.name, model: draft.model, auto_approve: draft.auto_approve,
+        name: draft.name,
+        model: draft.model,
+        auto_approve: draft.auto_approve,
         dangerously_skip_permissions: draft.dangerously_skip_permissions,
-        allow_indexing: draft.allow_indexing, cli_passthrough: draft.cli_passthrough,
+        allow_indexing: draft.allow_indexing,
+        cli_passthrough: draft.cli_passthrough,
       });
       setSavedProfile(updated);
       setDraft(updated);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
-          ? { ...agentItem, profiles: agentItem.profiles.map((p: AgentProfile) => p.id === updated.id ? updated : p) }
-          : agentItem
+          ? {
+              ...agentItem,
+              profiles: agentItem.profiles.map((p: AgentProfile) =>
+                p.id === updated.id ? updated : p,
+              ),
+            }
+          : agentItem,
       );
       syncAgentsToStore(nextAgents);
-      setSaveStatus('success');
+      setSaveStatus("success");
     } catch (error) {
-      setSaveStatus('error');
-      toast({ title: 'Failed to save profile', description: error instanceof Error ? error.message : 'Request failed', variant: 'error' });
+      setSaveStatus("error");
+      toast({
+        title: "Failed to save profile",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
+      });
     }
   };
 
@@ -231,26 +264,48 @@ function useProfileEditorActions({
       await deleteAgentProfileAction(draft.id);
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
-          ? { ...agentItem, profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id) }
-          : agentItem
+          ? {
+              ...agentItem,
+              profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id),
+            }
+          : agentItem,
       );
       syncAgentsToStore(nextAgents);
-      window.location.assign('/settings/agents');
+      window.location.assign("/settings/agents");
     } catch (error) {
-      toast({ title: 'Failed to delete profile', description: error instanceof Error ? error.message : 'Request failed', variant: 'error' });
+      toast({
+        title: "Failed to delete profile",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
+      });
     }
   };
 
   return { handleSave, handleDeleteProfile };
 }
 
-function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passthroughConfig, initialMcpConfig }: ProfileEditorProps) {
+function ProfileEditor({
+  agent,
+  profile,
+  modelConfig,
+  permissionSettings,
+  passthroughConfig,
+  initialMcpConfig,
+}: ProfileEditorProps) {
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
-  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } = useProfileEditorState(profile);
+  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
+    useProfileEditorState(profile);
   const { handleSave, handleDeleteProfile } = useProfileEditorActions({
-    agent, draft, setSavedProfile, setDraft, setSaveStatus, settingsAgents, syncAgentsToStore, toast,
+    agent,
+    draft,
+    setSavedProfile,
+    setDraft,
+    setSaveStatus,
+    settingsAgents,
+    syncAgentsToStore,
+    toast,
   });
 
   return (
@@ -260,7 +315,7 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
         agentDisplayName={profile.agent_display_name}
         savedProfileName={savedProfile.name}
         isDirty={isDirty}
-        isLoading={saveStatus === 'loading'}
+        isLoading={saveStatus === "loading"}
         saveStatus={saveStatus}
         onSave={handleSave}
       />
@@ -293,9 +348,9 @@ function ProfileEditor({ agent, profile, modelConfig, permissionSettings, passth
         initialConfig={initialMcpConfig}
         onToastError={(error) =>
           toast({
-            title: 'Failed to save MCP config',
-            description: error instanceof Error ? error.message : 'Request failed',
-            variant: 'error',
+            title: "Failed to save MCP config",
+            description: error instanceof Error ? error.message : "Request failed",
+            variant: "error",
           })
         }
       />
@@ -313,9 +368,10 @@ export function AgentProfilePage({ initialMcpConfig }: AgentProfilePageClientPro
   const params = useParams();
   const agentParam = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const profileParam = Array.isArray(params.profileId) ? params.profileId[0] : params.profileId;
-  const agentKey = decodeURIComponent(agentParam ?? '');
-  const profileId = profileParam ?? '';
-  const { agent, profile, modelConfig, permissionSettings, passthroughConfig } = useAgentProfileSettings(agentKey, profileId);
+  const agentKey = decodeURIComponent(agentParam ?? "");
+  const profileId = profileParam ?? "";
+  const { agent, profile, modelConfig, permissionSettings, passthroughConfig } =
+    useAgentProfileSettings(agentKey, profileId);
 
   if (!agent || !profile) {
     return (

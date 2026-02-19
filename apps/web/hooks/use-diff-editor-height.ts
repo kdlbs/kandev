@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import type { editor as monacoEditor } from 'monaco-editor';
+import { useState, useEffect, useMemo } from "react";
+import type { editor as monacoEditor } from "monaco-editor";
 
 interface UseDiffEditorHeightOptions {
   modifiedEditor: monacoEditor.ICodeEditor | null;
@@ -29,10 +29,7 @@ export function useDiffEditorHeight({
 }: UseDiffEditorHeightOptions): number {
   // Estimate before editors mount
   const estimatedHeight = useMemo(() => {
-    const lines = Math.max(
-      originalContent.split('\n').length,
-      modifiedContent.split('\n').length,
-    );
+    const lines = Math.max(originalContent.split("\n").length, modifiedContent.split("\n").length);
     return clampHeight(lines * lineHeight + 10, compact);
   }, [originalContent, modifiedContent, lineHeight, compact]);
 

@@ -1,6 +1,6 @@
-import type { Draft } from 'immer';
-import type { AppState } from '../store';
-import { deepMerge, mergeSessionMap, mergeLoadingState } from './merge-strategies';
+import type { Draft } from "immer";
+import type { AppState } from "../store";
+import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
  * Hydration options for controlling merge behavior
@@ -52,44 +52,98 @@ function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void
 
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
-  draft: Draft<AppState>, state: Partial<AppState>,
-  activeSessionId: string | null, forceMergeSessionId: string | null
+  draft: Draft<AppState>,
+  state: Partial<AppState>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
 ): void {
   if (state.messages) {
-    if (state.messages.bySession) mergeSessionMap(draft.messages.bySession, state.messages.bySession, activeSessionId, forceMergeSessionId);
-    if (state.messages.metaBySession) mergeSessionMap(draft.messages.metaBySession, state.messages.metaBySession, activeSessionId, forceMergeSessionId);
+    if (state.messages.bySession)
+      mergeSessionMap(
+        draft.messages.bySession,
+        state.messages.bySession,
+        activeSessionId,
+        forceMergeSessionId,
+      );
+    if (state.messages.metaBySession)
+      mergeSessionMap(
+        draft.messages.metaBySession,
+        state.messages.metaBySession,
+        activeSessionId,
+        forceMergeSessionId,
+      );
   }
   if (state.turns) {
-    if (state.turns.bySession) mergeSessionMap(draft.turns.bySession, state.turns.bySession, activeSessionId, forceMergeSessionId);
-    if (state.turns.activeBySession) mergeSessionMap(draft.turns.activeBySession, state.turns.activeBySession, activeSessionId, forceMergeSessionId);
+    if (state.turns.bySession)
+      mergeSessionMap(
+        draft.turns.bySession,
+        state.turns.bySession,
+        activeSessionId,
+        forceMergeSessionId,
+      );
+    if (state.turns.activeBySession)
+      mergeSessionMap(
+        draft.turns.activeBySession,
+        state.turns.activeBySession,
+        activeSessionId,
+        forceMergeSessionId,
+      );
   }
   if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
   if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
   if (state.sessionAgentctl) {
-    mergeSessionMap(draft.sessionAgentctl.itemsBySessionId, state.sessionAgentctl?.itemsBySessionId, activeSessionId, forceMergeSessionId);
+    mergeSessionMap(
+      draft.sessionAgentctl.itemsBySessionId,
+      state.sessionAgentctl?.itemsBySessionId,
+      activeSessionId,
+      forceMergeSessionId,
+    );
   }
   if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
-  if (state.sessionWorktreesBySessionId) deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
+  if (state.sessionWorktreesBySessionId)
+    deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
   if (state.pendingModel) deepMerge(draft.pendingModel, state.pendingModel);
   if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
 }
 
 /** Hydrate session runtime slices (volatile state). */
 function hydrateSessionRuntime(
-  draft: Draft<AppState>, state: Partial<AppState>,
-  activeSessionId: string | null, forceMergeSessionId: string | null
+  draft: Draft<AppState>,
+  state: Partial<AppState>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
 ): void {
   if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
-    mergeSessionMap(draft.shell.outputs, state.shell?.outputs, activeSessionId, forceMergeSessionId);
-    mergeSessionMap(draft.shell.statuses, state.shell?.statuses, activeSessionId, forceMergeSessionId);
+    mergeSessionMap(
+      draft.shell.outputs,
+      state.shell?.outputs,
+      activeSessionId,
+      forceMergeSessionId,
+    );
+    mergeSessionMap(
+      draft.shell.statuses,
+      state.shell?.statuses,
+      activeSessionId,
+      forceMergeSessionId,
+    );
   }
   if (state.processes) deepMerge(draft.processes, state.processes);
   if (state.gitStatus) {
-    mergeSessionMap(draft.gitStatus.bySessionId, state.gitStatus?.bySessionId, activeSessionId, forceMergeSessionId);
+    mergeSessionMap(
+      draft.gitStatus.bySessionId,
+      state.gitStatus?.bySessionId,
+      activeSessionId,
+      forceMergeSessionId,
+    );
   }
   if (state.contextWindow) {
-    mergeSessionMap(draft.contextWindow.bySessionId, state.contextWindow?.bySessionId, activeSessionId, forceMergeSessionId);
+    mergeSessionMap(
+      draft.contextWindow.bySessionId,
+      state.contextWindow?.bySessionId,
+      activeSessionId,
+      forceMergeSessionId,
+    );
   }
   if (state.agents) deepMerge(draft.agents, state.agents);
 }
@@ -120,9 +174,13 @@ function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
 export function hydrateState(
   draft: Draft<AppState>,
   state: Partial<AppState>,
-  options: HydrationOptions = {}
+  options: HydrationOptions = {},
 ): void {
-  const { activeSessionId = null, skipSessionRuntime = false, forceMergeSessionId = null } = options;
+  const {
+    activeSessionId = null,
+    skipSessionRuntime = false,
+    forceMergeSessionId = null,
+  } = options;
 
   hydrateKanbanAndWorkspace(draft, state);
   hydrateSettings(draft, state);

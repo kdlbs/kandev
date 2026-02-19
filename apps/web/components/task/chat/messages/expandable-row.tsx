@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { ReactNode, memo, useCallback } from 'react';
-import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { ReactNode, memo, useCallback } from "react";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 
 type ExpandableRowProps = {
   /** The icon to display (will transition to chevron on hover when expandable) */
@@ -36,8 +36,8 @@ export const ExpandableRow = memo(function ExpandableRow({
       {/* Clickable header row */}
       <div
         className={cn(
-          'flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors',
-          hasExpandableContent && 'hover:bg-muted/50 cursor-pointer'
+          "flex items-start gap-3 w-full rounded px-2 py-1 -mx-2 transition-colors",
+          hasExpandableContent && "hover:bg-muted/50 cursor-pointer",
         )}
         onClick={handleClick}
       >
@@ -45,8 +45,8 @@ export const ExpandableRow = memo(function ExpandableRow({
         <div className="flex-shrink-0 mt-0.5 relative w-4 h-4">
           <div
             className={cn(
-              'absolute inset-0 transition-opacity',
-              hasExpandableContent && 'group-hover/expandable:opacity-0'
+              "absolute inset-0 transition-opacity",
+              hasExpandableContent && "group-hover/expandable:opacity-0",
             )}
           >
             {icon}

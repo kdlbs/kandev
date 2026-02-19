@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { PREVIEW_PANEL } from '@/lib/settings/constants';
+import { useEffect, useRef, useState } from "react";
+import { PREVIEW_PANEL } from "@/lib/settings/constants";
 
 /**
  * Custom hook that extracts complex layout calculations for the Kanban board.

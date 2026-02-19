@@ -144,8 +144,6 @@ func (s *ExecutionStore) UpdateError(executionID string, errorMsg string) {
 	}
 }
 
-
-
 // WithLock executes a function with the store lock held, providing access to the execution.
 // Returns ErrExecutionNotFound if the execution doesn't exist.
 // The function should be fast to avoid blocking other operations.

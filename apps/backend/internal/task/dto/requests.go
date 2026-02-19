@@ -261,8 +261,8 @@ type CreateTaskRequest struct {
 	Priority       int
 	State          *v1.TaskState
 	Repositories   []TaskRepositoryInput
-	Position     int
-	Metadata     map[string]interface{}
+	Position       int
+	Metadata       map[string]interface{}
 }
 
 type UpdateTaskRequest struct {

@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { memo, useMemo } from 'react';
-import { DiffViewerResolved as DiffViewer } from './diff-viewer-resolver';
-import { transformGitDiff } from '@/lib/diff';
-import type { DiffComment } from '@/lib/diff/types';
-import type { RevertBlockInfo } from './diff-viewer-resolver';
+import { memo, useMemo } from "react";
+import { DiffViewerResolved as DiffViewer } from "./diff-viewer-resolver";
+import { transformGitDiff } from "@/lib/diff";
+import type { DiffComment } from "@/lib/diff/types";
+import type { RevertBlockInfo } from "./diff-viewer-resolver";
 
 interface FileDiffViewerProps {
   filePath: string;
@@ -37,7 +37,7 @@ interface FileDiffViewerProps {
 export const FileDiffViewer = memo(function FileDiffViewer({
   filePath,
   diff,
-  status = 'M',
+  status = "M",
   enableComments,
   sessionId,
   onCommentAdd,
@@ -52,10 +52,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   onRevertBlock,
   wordWrap,
 }: FileDiffViewerProps) {
-  const data = useMemo(
-    () => transformGitDiff(filePath, diff, status),
-    [filePath, diff, status]
-  );
+  const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
   return (
     <DiffViewer

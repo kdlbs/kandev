@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useRef, memo } from 'react';
-import { FileDiff } from '@pierre/diffs/react';
-import { cn } from '@kandev/ui/lib/utils';
-import type { FileDiffData, DiffComment } from '@/lib/diff/types';
-import { useHunkHover } from './use-hunk-hover';
-import { useAnnotationRenderer } from './use-diff-annotation-renderer';
-import { useDiffOptions } from './use-diff-options';
-import { useDiffViewerState } from './use-diff-viewer-state';
+import { useState, useRef, memo } from "react";
+import { FileDiff } from "@pierre/diffs/react";
+import { cn } from "@kandev/ui/lib/utils";
+import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import { useHunkHover } from "./use-hunk-hover";
+import { useAnnotationRenderer } from "./use-diff-annotation-renderer";
+import { useDiffOptions } from "./use-diff-options";
+import { useDiffViewerState } from "./use-diff-viewer-state";
 
 export type RevertBlockInfo = {
   /** 1-based line number in the new file where additions start */
@@ -36,13 +36,24 @@ interface DiffViewerProps {
 }
 
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
-  'enableComments', 'sessionId', 'compact', 'hideHeader', 'className',
-  'onOpenFile', 'onRevert', 'enableAcceptReject', 'onRevertBlock', 'wordWrap',
+  "enableComments",
+  "sessionId",
+  "compact",
+  "hideHeader",
+  "className",
+  "onOpenFile",
+  "onRevert",
+  "enableAcceptReject",
+  "onRevertBlock",
+  "wordWrap",
 ];
 
-const DATA_KEYS: (keyof FileDiffData)[] = ['filePath', 'diff', 'oldContent', 'newContent'];
+const DATA_KEYS: (keyof FileDiffData)[] = ["filePath", "diff", "oldContent", "newContent"];
 
-function areCommentsEqual(prev: DiffComment[] | undefined, next: DiffComment[] | undefined): boolean {
+function areCommentsEqual(
+  prev: DiffComment[] | undefined,
+  next: DiffComment[] | undefined,
+): boolean {
   if (prev === next) return true;
   if (!prev || !next || prev.length !== next.length) return false;
   return prev.every((c, i) => c.id === next[i].id && c.text === next[i].text);
@@ -79,8 +90,14 @@ export const DiffViewer = memo(function DiffViewer({
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const state = useDiffViewerState({
-    data, enableComments, enableAcceptReject, sessionId,
-    onCommentAdd, onCommentDelete, externalComments, onRevertBlock,
+    data,
+    enableComments,
+    enableAcceptReject,
+    sessionId,
+    onCommentAdd,
+    onCommentDelete,
+    externalComments,
+    onRevertBlock,
   });
 
   const { onLineEnter, onLineLeave, onButtonEnter, onButtonLeave } = useHunkHover({
@@ -91,7 +108,8 @@ export const DiffViewer = memo(function DiffViewer({
 
   const renderAnnotation = useAnnotationRenderer({
     handleRevertBlock: state.handleRevertBlock,
-    onButtonEnter, onButtonLeave,
+    onButtonEnter,
+    onButtonLeave,
     handleCommentSubmit: state.handleCommentSubmit,
     handleCommentUpdate: state.handleCommentUpdate,
     handleCommentDelete: state.handleCommentDelete,
@@ -103,27 +121,37 @@ export const DiffViewer = memo(function DiffViewer({
   const showHeader = !hideHeader && !compact;
 
   const { options, renderHeaderMetadata, renderHoverUtility } = useDiffOptions({
-    filePath: data.filePath, diff: data.diff, enableComments, showHeader, wordWrap,
-    setWordWrap, handleLineSelectionEnd: state.handleLineSelectionEnd,
-    onLineEnter, onLineLeave, onOpenFile, onRevert,
+    filePath: data.filePath,
+    diff: data.diff,
+    enableComments,
+    showHeader,
+    wordWrap,
+    setWordWrap,
+    handleLineSelectionEnd: state.handleLineSelectionEnd,
+    onLineEnter,
+    onLineLeave,
+    onOpenFile,
+    onRevert,
   });
 
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;
 
   if (!state.fileDiffMetadata) {
     return (
-      <div className={cn(
-        'rounded-md border border-border/50 bg-muted/20 p-4 text-muted-foreground',
-        'text-xs',
-        className
-      )}>
+      <div
+        className={cn(
+          "rounded-md border border-border/50 bg-muted/20 p-4 text-muted-foreground",
+          "text-xs",
+          className,
+        )}
+      >
         No diff available
       </div>
     );
   }
 
   return (
-    <div ref={wrapperRef} className={cn('diff-viewer', className)}>
+    <div ref={wrapperRef} className={cn("diff-viewer", className)}>
       <FileDiff
         fileDiff={state.fileDiffMetadata}
         options={options}
@@ -132,29 +160,13 @@ export const DiffViewer = memo(function DiffViewer({
         renderAnnotation={renderAnnotation}
         renderHeaderMetadata={renderHeaderMetadata}
         renderHoverUtility={renderHoverUtility}
-        className={cn(
-          'rounded-md border border-border/50',
-          'text-xs'
-        )}
+        className={cn("rounded-md border border-border/50", "text-xs")}
       />
     </div>
   );
 }, arePropsEqual);
 
 /** Compact inline diff viewer for chat messages (Pierre implementation). */
-export function DiffViewInline({
-  data,
-  className,
-}: {
-  data: FileDiffData;
-  className?: string;
-}) {
-  return (
-    <DiffViewer
-      data={data}
-      compact
-      hideHeader
-      className={className}
-    />
-  );
+export function DiffViewInline({ data, className }: { data: FileDiffData; className?: string }) {
+  return <DiffViewer data={data} compact hideHeader className={className} />;
 }

@@ -49,8 +49,8 @@ func (a *OpenCode) DisplayName() string { return "OpenCode" }
 func (a *OpenCode) Description() string {
 	return "OpenCode CLI-powered autonomous coding agent using REST/SSE protocol."
 }
-func (a *OpenCode) Enabled() bool      { return true }
-func (a *OpenCode) DisplayOrder() int   { return 4 }
+func (a *OpenCode) Enabled() bool     { return true }
+func (a *OpenCode) DisplayOrder() int { return 4 }
 
 func (a *OpenCode) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

@@ -1,7 +1,7 @@
-import { useEffect, useCallback } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { GitSnapshot } from '@/lib/state/slices/session-runtime/types';
+import { useEffect, useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { GitSnapshot } from "@/lib/state/slices/session-runtime/types";
 
 /**
  * Hook to fetch and manage git snapshots for a session.
@@ -9,13 +9,13 @@ import type { GitSnapshot } from '@/lib/state/slices/session-runtime/types';
  */
 export function useSessionGitSnapshots(sessionId: string | null, options?: { limit?: number }) {
   const snapshots = useAppStore((state) =>
-    sessionId ? state.gitSnapshots.bySessionId[sessionId] : undefined
+    sessionId ? state.gitSnapshots.bySessionId[sessionId] : undefined,
   );
   const latestSnapshot = useAppStore((state) =>
-    sessionId ? state.gitSnapshots.latestBySessionId[sessionId] : undefined
+    sessionId ? state.gitSnapshots.latestBySessionId[sessionId] : undefined,
   );
   const loading = useAppStore((state) =>
-    sessionId ? state.gitSnapshots.loading[sessionId] : false
+    sessionId ? state.gitSnapshots.loading[sessionId] : false,
   );
   const setGitSnapshots = useAppStore((state) => state.setGitSnapshots);
   const setGitSnapshotsLoading = useAppStore((state) => state.setGitSnapshotsLoading);
@@ -30,18 +30,18 @@ export function useSessionGitSnapshots(sessionId: string | null, options?: { lim
     setGitSnapshotsLoading(sessionId, true);
     try {
       const response = await client.request<{ snapshots?: GitSnapshot[] }>(
-        'session.git.snapshots',
+        "session.git.snapshots",
         {
           session_id: sessionId,
           limit: options?.limit ?? 0,
-        }
+        },
       );
 
       if (response?.snapshots) {
         setGitSnapshots(sessionId, response.snapshots);
       }
     } catch (error) {
-      console.error('Failed to fetch git snapshots:', error);
+      console.error("Failed to fetch git snapshots:", error);
     } finally {
       setGitSnapshotsLoading(sessionId, false);
     }
@@ -49,7 +49,7 @@ export function useSessionGitSnapshots(sessionId: string | null, options?: { lim
 
   // Fetch snapshots on mount
   useEffect(() => {
-    if (connectionStatus !== 'connected') return;
+    if (connectionStatus !== "connected") return;
     if (sessionId && !snapshots) {
       fetchSnapshots();
     }
@@ -62,4 +62,3 @@ export function useSessionGitSnapshots(sessionId: string | null, options?: { lim
     refetch: fetchSnapshots,
   };
 }
-

@@ -1,13 +1,10 @@
-import type { ComponentType } from 'react';
-import {
-  IconLayoutColumns,
-  IconTimeline,
-} from '@tabler/icons-react';
-import { SwimlaneKanbanContent } from '@/components/kanban/swimlane-kanban-content';
-import { SwimlaneGraph2Content } from '@/components/kanban/swimlane-graph2-content';
-import type { Task } from '@/components/kanban-card';
-import type { WorkflowStep } from '@/components/kanban-column';
-import type { WorkflowAutomation, MoveTaskError } from '@/hooks/use-drag-and-drop';
+import type { ComponentType } from "react";
+import { IconLayoutColumns, IconTimeline } from "@tabler/icons-react";
+import { SwimlaneKanbanContent } from "@/components/kanban/swimlane-kanban-content";
+import { SwimlaneGraph2Content } from "@/components/kanban/swimlane-graph2-content";
+import type { Task } from "@/components/kanban-card";
+import type { WorkflowStep } from "@/components/kanban-column";
+import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
   workflowId: string;
@@ -33,17 +30,17 @@ export type ViewRegistryEntry = {
 
 export const VIEW_REGISTRY: ViewRegistryEntry[] = [
   {
-    id: 'kanban',
-    storedValue: '',
-    label: 'Kanban',
+    id: "kanban",
+    storedValue: "",
+    label: "Kanban",
     icon: IconLayoutColumns,
     component: SwimlaneKanbanContent as ComponentType<ViewContentProps>,
     enabled: true,
   },
   {
-    id: 'graph2',
-    storedValue: 'graph2',
-    label: 'Pipeline',
+    id: "graph2",
+    storedValue: "graph2",
+    label: "Pipeline",
     icon: IconTimeline,
     component: SwimlaneGraph2Content as ComponentType<ViewContentProps>,
     enabled: true,

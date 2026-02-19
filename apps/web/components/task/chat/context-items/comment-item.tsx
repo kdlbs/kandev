@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import type { CommentContextItem } from '@/lib/types/context';
-import { getFileName } from '@/lib/utils/file-path';
-import { ContextChip } from './context-chip';
-import { CommentDisplay } from '@/components/diff/comment-display';
+import { memo } from "react";
+import type { CommentContextItem } from "@/lib/types/context";
+import { getFileName } from "@/lib/utils/file-path";
+import { ContextChip } from "./context-chip";
+import { CommentDisplay } from "@/components/diff/comment-display";
 
 export const CommentItem = memo(function CommentItem({ item }: { item: CommentContextItem }) {
   const fileName = getFileName(item.filePath);

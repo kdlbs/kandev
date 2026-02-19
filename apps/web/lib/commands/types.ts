@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
-import type { KeyboardShortcut } from '@/lib/keyboard/constants';
+import type { ReactNode } from "react";
+import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 
-export type CommandPanelMode = 'commands' | 'search-tasks' | 'input';
+export type CommandPanelMode = "commands" | "search-tasks" | "input";
 
 export type CommandItem = {
   id: string;

@@ -7,9 +7,7 @@ let _isWSL: boolean | undefined;
 function isWSL(): boolean {
   if (_isWSL === undefined) {
     try {
-      _isWSL = readFileSync("/proc/version", "utf8")
-        .toLowerCase()
-        .includes("microsoft");
+      _isWSL = readFileSync("/proc/version", "utf8").toLowerCase().includes("microsoft");
     } catch {
       _isWSL = false;
     }
@@ -34,12 +32,7 @@ export function openBrowser(url: string) {
     return;
   }
   const useCmd = process.platform === "win32" || isWSL();
-  const opener =
-    process.platform === "darwin"
-      ? "open"
-      : useCmd
-        ? "cmd.exe"
-        : "xdg-open";
+  const opener = process.platform === "darwin" ? "open" : useCmd ? "cmd.exe" : "xdg-open";
   const args = useCmd ? ["/c", "start", "", url] : [url];
   try {
     const child = spawn(opener, args, { stdio: "ignore", detached: true });
@@ -71,7 +64,7 @@ export function launchWebApp({
 
   proc.on("exit", (code, signal) => {
     console.error(`[kandev] ${label} exited (code=${code}, signal=${signal})`);
-    const exitCode = signal ? 0 : code ?? 1;
+    const exitCode = signal ? 0 : (code ?? 1);
     void supervisor.shutdown(`${label} exit`).then(() => process.exit(exitCode));
   });
 

@@ -1,11 +1,11 @@
-import { PromptsSettings } from '@/components/settings/prompts-settings';
-import { StateProvider } from '@/components/state-provider';
-import { listPrompts } from '@/lib/api';
+import { PromptsSettings } from "@/components/settings/prompts-settings";
+import { StateProvider } from "@/components/state-provider";
+import { listPrompts } from "@/lib/api";
 
 export default async function PromptsSettingsPage() {
   let initialState = {};
   try {
-    const response = await listPrompts({ cache: 'no-store' });
+    const response = await listPrompts({ cache: "no-store" });
     initialState = {
       prompts: {
         items: response.prompts ?? [],

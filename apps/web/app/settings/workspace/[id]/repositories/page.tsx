@@ -2,8 +2,8 @@ import {
   getWorkspaceAction,
   listRepositoriesAction,
   listRepositoryScriptsAction,
-} from '@/app/actions/workspaces';
-import { WorkspaceRepositoriesClient } from '@/app/settings/workspace/workspace-repositories-client';
+} from "@/app/actions/workspaces";
+import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
 
 export default async function WorkspaceRepositoriesPage({
   params,
@@ -13,8 +13,8 @@ export default async function WorkspaceRepositoriesPage({
   const { id } = await params;
   let workspace = null;
   let repositoriesWithScripts: Array<
-    Awaited<ReturnType<typeof listRepositoriesAction>>['repositories'][number] & {
-      scripts: Awaited<ReturnType<typeof listRepositoryScriptsAction>>['scripts'];
+    Awaited<ReturnType<typeof listRepositoriesAction>>["repositories"][number] & {
+      scripts: Awaited<ReturnType<typeof listRepositoryScriptsAction>>["scripts"];
     }
   > = [];
 
@@ -25,7 +25,7 @@ export default async function WorkspaceRepositoriesPage({
       repositories.repositories.map(async (repository) => {
         const scripts = await listRepositoryScriptsAction(repository.id);
         return { ...repository, scripts: scripts.scripts };
-      })
+      }),
     );
   } catch {
     workspace = null;

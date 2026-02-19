@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
-import { fetchWorkflowSnapshot } from '@/lib/api';
-import { snapshotToState } from '@/lib/ssr/mapper';
-import { useAppStore, useAppStoreApi } from '@/components/state-provider';
+import { useEffect } from "react";
+import { fetchWorkflowSnapshot } from "@/lib/api";
+import { snapshotToState } from "@/lib/ssr/mapper";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 export function useWorkflowSnapshot(workflowId: string | null) {
   const store = useAppStoreApi();
@@ -9,7 +9,7 @@ export function useWorkflowSnapshot(workflowId: string | null) {
 
   useEffect(() => {
     if (!workflowId) return;
-    fetchWorkflowSnapshot(workflowId, { cache: 'no-store' })
+    fetchWorkflowSnapshot(workflowId, { cache: "no-store" })
       .then((snapshot) => {
         store.getState().hydrate(snapshotToState(snapshot));
       })

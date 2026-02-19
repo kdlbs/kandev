@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -10,15 +10,15 @@ import {
   TouchSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
-import { KanbanColumn, WorkflowStep } from './kanban-column';
-import { KanbanCardPreview, Task } from './kanban-card';
-import { MobileColumnTabs } from './kanban/mobile-column-tabs';
-import { SwipeableColumns } from './kanban/swipeable-columns';
-import { MobileDropTargets } from './kanban/mobile-drop-targets';
-import { MobileFab } from './kanban/mobile-fab';
-import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
-import { useAppStore } from '@/components/state-provider';
+} from "@dnd-kit/core";
+import { KanbanColumn, WorkflowStep } from "./kanban-column";
+import { KanbanCardPreview, Task } from "./kanban-card";
+import { MobileColumnTabs } from "./kanban/mobile-column-tabs";
+import { SwipeableColumns } from "./kanban/swipeable-columns";
+import { MobileDropTargets } from "./kanban/mobile-drop-targets";
+import { MobileFab } from "./kanban/mobile-fab";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useAppStore } from "@/components/state-provider";
 
 export type KanbanBoardGridProps = {
   steps: WorkflowStep[];
@@ -40,7 +40,15 @@ export type KanbanBoardGridProps = {
 
 type ColumnGridProps = Pick<
   KanbanBoardGridProps,
-  'steps' | 'tasks' | 'onPreviewTask' | 'onOpenTask' | 'onEditTask' | 'onDeleteTask' | 'onMoveTask' | 'showMaximizeButton' | 'deletingTaskId'
+  | "steps"
+  | "tasks"
+  | "onPreviewTask"
+  | "onOpenTask"
+  | "onEditTask"
+  | "onDeleteTask"
+  | "onMoveTask"
+  | "showMaximizeButton"
+  | "deletingTaskId"
 >;
 
 function getTasksForStep(tasks: Task[], stepId: string) {
@@ -53,7 +61,7 @@ function getTasksForStep(tasks: Task[], stepId: string) {
 function EmptyState({ showLoading }: { showLoading: boolean }) {
   return (
     <div className="h-full rounded-lg border border-dashed border-border/60 flex items-center justify-center text-sm text-muted-foreground mx-4">
-      {showLoading ? 'Loading...' : 'No workflows available yet.'}
+      {showLoading ? "Loading..." : "No workflows available yet."}
     </div>
   );
 }
@@ -120,9 +128,7 @@ function MobileLayout({
         {/* Safe area spacer for iOS bottom bar */}
         <div className="flex-shrink-0 h-safe" />
       </div>
-      {onCreateTask && (
-        <MobileFab onClick={onCreateTask} isDragging={!!activeTask} />
-      )}
+      {onCreateTask && <MobileFab onClick={onCreateTask} isDragging={!!activeTask} />}
       <DragOverlay dropAnimation={null}>
         {activeTask ? <KanbanCardPreview task={activeTask} /> : null}
       </DragOverlay>
@@ -151,10 +157,7 @@ function TabletLayout({
         ) : (
           <div className="flex overflow-x-auto snap-x snap-mandatory gap-2 h-full scrollbar-hide">
             {steps.map((step) => (
-              <div
-                key={step.id}
-                className="flex-shrink-0 w-[calc(50%-4px)] snap-start h-full"
-              >
+              <div key={step.id} className="flex-shrink-0 w-[calc(50%-4px)] snap-start h-full">
                 <KanbanColumn
                   step={step}
                   tasks={getTasksForStep(tasks, step.id)}
@@ -271,7 +274,7 @@ export function KanbanBoardGrid({
         delay: 250,
         tolerance: 5,
       },
-    })
+    }),
   );
 
   // Calculate task counts per step for tabs
@@ -288,9 +291,7 @@ export function KanbanBoardGrid({
   useEffect(() => {
     if (!isMobile || hasInitializedRef.current || steps.length === 0) return;
 
-    const firstStepWithTasks = steps.findIndex(
-      (step) => taskCounts[step.id] > 0
-    );
+    const firstStepWithTasks = steps.findIndex((step) => taskCounts[step.id] > 0);
 
     if (firstStepWithTasks !== -1 && firstStepWithTasks !== activeColumnIndex) {
       setActiveColumnIndex(firstStepWithTasks);
@@ -304,7 +305,15 @@ export function KanbanBoardGrid({
   const showLoading = useShowLoading(isLoading, steps.length);
 
   const columnProps: ColumnGridProps = {
-    steps, tasks, onPreviewTask, onOpenTask, onEditTask, onDeleteTask, onMoveTask, showMaximizeButton, deletingTaskId,
+    steps,
+    tasks,
+    onPreviewTask,
+    onOpenTask,
+    onEditTask,
+    onDeleteTask,
+    onMoveTask,
+    showMaximizeButton,
+    deletingTaskId,
   };
 
   let layoutContent: React.ReactNode;
@@ -322,9 +331,13 @@ export function KanbanBoardGrid({
       />
     );
   } else if (isTablet) {
-    layoutContent = <TabletLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />;
+    layoutContent = (
+      <TabletLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />
+    );
   } else {
-    layoutContent = <DesktopLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />;
+    layoutContent = (
+      <DesktopLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />
+    );
   }
 
   return (

@@ -160,13 +160,13 @@ func createTestExecutor(t *testing.T, agentMgr *mockAgentManager, log *logger.Lo
 
 func createTestTask(id string, priority int) *v1.Task {
 	return &v1.Task{
-		ID:        id,
+		ID:         id,
 		WorkflowID: "test-wf",
-		Title:     "Test Task " + id,
-		Priority:  priority,
-		State:     v1.TaskStateTODO,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Title:      "Test Task " + id,
+		Priority:   priority,
+		State:      v1.TaskStateTODO,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 }
 

@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Input } from '@kandev/ui/input';
-import { IconSearch, IconX, IconLoader2 } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Input } from "@kandev/ui/input";
+import { IconSearch, IconX, IconLoader2 } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 
 interface TaskSearchInputProps {
   value: string;
@@ -17,7 +17,7 @@ interface TaskSearchInputProps {
 export function TaskSearchInput({
   value,
   onChange,
-  placeholder = 'Search tasks...',
+  placeholder = "Search tasks...",
   debounceMs = 300,
   isLoading = false,
   className,
@@ -45,12 +45,12 @@ export function TaskSearchInput({
         onChange(newValue);
       }, debounceMs);
     },
-    [onChange, debounceMs]
+    [onChange, debounceMs],
   );
 
   const handleClear = useCallback(() => {
-    setLocalValue('');
-    onChange('');
+    setLocalValue("");
+    onChange("");
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
@@ -66,7 +66,7 @@ export function TaskSearchInput({
   }, []);
 
   return (
-    <div className={cn('relative', className)}>
+    <div className={cn("relative", className)}>
       {isLoading ? (
         <IconLoader2 className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none animate-spin" />
       ) : (

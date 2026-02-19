@@ -392,7 +392,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
 	executorID := body.ExecutorID // Capture for goroutine
-	stepID := resolvedStepID     // Capture for goroutine
+	stepID := resolvedStepID      // Capture for goroutine
 	go func() {
 		// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
 		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)

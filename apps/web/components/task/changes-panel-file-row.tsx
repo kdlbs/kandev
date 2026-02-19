@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import {
   IconArrowBackUp,
@@ -7,16 +7,16 @@ import {
   IconCheck,
   IconLoader2,
   IconPencil,
-} from '@tabler/icons-react';
+} from "@tabler/icons-react";
 
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { LineStat } from '@/components/diff-stat';
-import type { FileInfo } from '@/lib/state/store';
-import { FileStatusIcon } from './file-status-icon';
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { LineStat } from "@/components/diff-stat";
+import type { FileInfo } from "@/lib/state/store";
+import { FileStatusIcon } from "./file-status-icon";
 
 const splitPath = (path: string) => {
-  const lastSlash = path.lastIndexOf('/');
-  if (lastSlash === -1) return { folder: '', file: path };
+  const lastSlash = path.lastIndexOf("/");
+  if (lastSlash === -1) return { folder: "", file: path };
   return {
     folder: path.slice(0, lastSlash),
     file: path.slice(lastSlash + 1),
@@ -25,7 +25,7 @@ const splitPath = (path: string) => {
 
 type ChangedFile = {
   path: string;
-  status: FileInfo['status'];
+  status: FileInfo["status"];
   staged: boolean;
   plus: number | undefined;
   minus: number | undefined;
@@ -74,11 +74,7 @@ export function FileRow({
         </button>
       </div>
       <div className="flex items-center gap-2">
-        <FileRowActions
-          path={file.path}
-          onDiscard={onDiscard}
-          onEditFile={onEditFile}
-        />
+        <FileRowActions path={file.path} onDiscard={onDiscard} onEditFile={onEditFile} />
         <LineStat added={file.plus} removed={file.minus} />
         <FileStatusIcon status={file.status} />
       </div>

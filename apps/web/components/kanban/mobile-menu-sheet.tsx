@@ -1,45 +1,34 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@kandev/ui/sheet';
-import { Button } from '@kandev/ui/button';
-import { Checkbox } from '@kandev/ui/checkbox';
-import { Badge } from '@kandev/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
-import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
-import { IconSettings, IconList, IconLayoutKanban, IconChartBar } from '@tabler/icons-react';
-import { TaskSearchInput } from './task-search-input';
-import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
-import { linkToTasks } from '@/lib/links';
-import type { Workspace, Repository } from '@/lib/types/http';
-import type { WorkflowsState } from '@/lib/state/slices';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
+import { Button } from "@kandev/ui/button";
+import { Checkbox } from "@kandev/ui/checkbox";
+import { Badge } from "@kandev/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
+import { IconSettings, IconList, IconLayoutKanban, IconChartBar } from "@tabler/icons-react";
+import { TaskSearchInput } from "./task-search-input";
+import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { linkToTasks } from "@/lib/links";
+import type { Workspace, Repository } from "@/lib/types/http";
+import type { WorkflowsState } from "@/lib/state/slices";
 
 type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId?: string;
-  currentPage?: 'kanban' | 'tasks';
+  currentPage?: "kanban" | "tasks";
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
 };
 
 function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
-  if (loading) return 'Loading repositories...';
-  if (empty) return 'No repositories';
-  return 'Select repository';
+  if (loading) return "Loading repositories...";
+  if (empty) return "No repositories";
+  return "Select repository";
 }
 
 type MobileDisplayOptionsProps = {
@@ -47,26 +36,44 @@ type MobileDisplayOptionsProps = {
   workspaces: Workspace[];
   onWorkspaceChange: (id: string | null) => void;
   activeWorkflowId: string | null;
-  workflows: WorkflowsState['items'];
+  workflows: WorkflowsState["items"];
   onWorkflowChange: (id: string | null) => void;
   repositoryValue: string;
   repositories: Repository[];
   repositoriesLoading: boolean;
-  onRepositoryChange: (value: string | 'all') => void;
+  onRepositoryChange: (value: string | "all") => void;
   enablePreviewOnClick: boolean | undefined;
   onTogglePreviewOnClick: ((checked: boolean) => void) | undefined;
 };
 
-function MobileDisplaySelects({ activeWorkspaceId, workspaces, onWorkspaceChange, activeWorkflowId, workflows, onWorkflowChange, repositoryValue, repositories, repositoriesLoading, onRepositoryChange }: Omit<MobileDisplayOptionsProps, 'enablePreviewOnClick' | 'onTogglePreviewOnClick'>) {
+function MobileDisplaySelects({
+  activeWorkspaceId,
+  workspaces,
+  onWorkspaceChange,
+  activeWorkflowId,
+  workflows,
+  onWorkflowChange,
+  repositoryValue,
+  repositories,
+  repositoriesLoading,
+  onRepositoryChange,
+}: Omit<MobileDisplayOptionsProps, "enablePreviewOnClick" | "onTogglePreviewOnClick">) {
   return (
     <>
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground">Workspace</label>
-        <Select value={activeWorkspaceId ?? ''} onValueChange={(value) => onWorkspaceChange(value || null)}>
-          <SelectTrigger className="w-full"><SelectValue placeholder="Select workspace" /></SelectTrigger>
+        <Select
+          value={activeWorkspaceId ?? ""}
+          onValueChange={(value) => onWorkspaceChange(value || null)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select workspace" />
+          </SelectTrigger>
           <SelectContent>
             {workspaces.map((workspace: Workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>
+              <SelectItem key={workspace.id} value={workspace.id}>
+                {workspace.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -74,11 +81,18 @@ function MobileDisplaySelects({ activeWorkspaceId, workspaces, onWorkspaceChange
 
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground">Workflow</label>
-        <Select value={activeWorkflowId ?? ''} onValueChange={(value) => onWorkflowChange(value || null)}>
-          <SelectTrigger className="w-full"><SelectValue placeholder="Select workflow" /></SelectTrigger>
+        <Select
+          value={activeWorkflowId ?? ""}
+          onValueChange={(value) => onWorkflowChange(value || null)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select workflow" />
+          </SelectTrigger>
           <SelectContent>
-            {workflows.map((workflow: WorkflowsState['items'][number]) => (
-              <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>
+            {workflows.map((workflow: WorkflowsState["items"][number]) => (
+              <SelectItem key={workflow.id} value={workflow.id}>
+                {workflow.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -86,14 +100,22 @@ function MobileDisplaySelects({ activeWorkspaceId, workspaces, onWorkspaceChange
 
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground">Repository</label>
-        <Select value={repositoryValue} onValueChange={(value) => onRepositoryChange(value as string | 'all')} disabled={repositories.length === 0}>
+        <Select
+          value={repositoryValue}
+          onValueChange={(value) => onRepositoryChange(value as string | "all")}
+          disabled={repositories.length === 0}
+        >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)} />
+            <SelectValue
+              placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
+            />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All repositories</SelectItem>
             {repositories.map((repo: Repository) => (
-              <SelectItem key={repo.id} value={repo.id}>{repo.name}</SelectItem>
+              <SelectItem key={repo.id} value={repo.id}>
+                {repo.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -113,11 +135,15 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
         <label className="flex items-center gap-2 cursor-pointer">
           <Checkbox
             checked={enablePreviewOnClick ?? false}
-            onCheckedChange={(checked) => { onTogglePreviewOnClick?.(!!checked); }}
+            onCheckedChange={(checked) => {
+              onTogglePreviewOnClick?.(!!checked);
+            }}
           />
           <span className="text-sm">
-            Open preview on click{' '}
-            <Badge variant="secondary" className="ml-1">beta</Badge>
+            Open preview on click{" "}
+            <Badge variant="secondary" className="ml-1">
+              beta
+            </Badge>
           </span>
         </label>
       </div>
@@ -148,8 +174,8 @@ export function MobileMenuSheet({
   open,
   onOpenChange,
   workspaceId,
-  currentPage = 'kanban',
-  searchQuery = '',
+  currentPage = "kanban",
+  searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
 }: MobileMenuSheetProps) {
@@ -170,14 +196,14 @@ export function MobileMenuSheet({
     onTogglePreviewOnClick,
   } = useKanbanDisplaySettings();
 
-  const repositoryValue = allRepositoriesSelected ? 'all' : selectedRepositoryId ?? 'all';
+  const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
 
   const handleViewChange = (value: string) => {
-    if (value === 'list' && currentPage !== 'tasks') {
+    if (value === "list" && currentPage !== "tasks") {
       router.push(linkToTasks(workspaceId));
       onOpenChange(false);
-    } else if (value === 'kanban' && currentPage !== 'kanban') {
-      router.push('/');
+    } else if (value === "kanban" && currentPage !== "kanban") {
+      router.push("/");
       onOpenChange(false);
     }
   };
@@ -206,7 +232,7 @@ export function MobileMenuSheet({
             <label className="text-sm font-medium">View</label>
             <ToggleGroup
               type="single"
-              value={currentPage === 'tasks' ? 'list' : 'kanban'}
+              value={currentPage === "tasks" ? "list" : "kanban"}
               onValueChange={handleViewChange}
               variant="outline"
               className="w-full justify-start"

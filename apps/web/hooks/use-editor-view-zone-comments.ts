@@ -1,7 +1,7 @@
-import { useEffect, useRef, type DependencyList } from 'react';
-import type { editor as monacoEditor } from 'monaco-editor';
-import { createRoot, type Root } from 'react-dom/client';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type DependencyList } from "react";
+import type { editor as monacoEditor } from "monaco-editor";
+import { createRoot, type Root } from "react-dom/client";
+import type { ReactNode } from "react";
 
 type ViewZoneEntry = { id: string; root: Root };
 
@@ -40,11 +40,11 @@ export function useEditorViewZoneComments(
     const newZones: ViewZoneEntry[] = [];
 
     const addZone: AddZoneFn = (afterLine, heightPx, content) => {
-      const domNode = document.createElement('div');
-      domNode.style.zIndex = '10';
+      const domNode = document.createElement("div");
+      domNode.style.zIndex = "10";
       const root = createRoot(domNode);
       root.render(content);
-      let zoneId = '';
+      let zoneId = "";
       editor.changeViewZones((accessor) => {
         zoneId = accessor.addZone({ afterLineNumber: afterLine, heightInPx: heightPx, domNode });
       });
@@ -59,7 +59,9 @@ export function useEditorViewZoneComments(
         editor.changeViewZones((accessor) => {
           for (const z of newZones) accessor.removeZone(z.id);
         });
-      } catch { /* editor may be disposed */ }
+      } catch {
+        /* editor may be disposed */
+      }
       const roots = newZones.map((z) => z.root);
       queueMicrotask(() => roots.forEach((r) => r.unmount()));
     };

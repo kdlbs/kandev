@@ -1,17 +1,13 @@
-'use client';
+"use client";
 
-import { memo, useCallback, useMemo, useState } from 'react';
-import { cn } from '@kandev/ui/lib/utils';
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@kandev/ui/hover-card';
-import { Button } from '@kandev/ui/button';
-import { IconArrowRight } from '@tabler/icons-react';
-import { moveTask } from '@/lib/api';
-import { StepCapabilityIcons } from '@/components/step-capability-icons';
-import type { KanbanStepEvents } from '@/lib/state/slices/kanban/types';
+import { memo, useCallback, useMemo, useState } from "react";
+import { cn } from "@kandev/ui/lib/utils";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Button } from "@kandev/ui/button";
+import { IconArrowRight } from "@tabler/icons-react";
+import { moveTask } from "@/lib/api";
+import { StepCapabilityIcons } from "@/components/step-capability-icons";
+import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 
 type Step = {
   id: string;
@@ -41,14 +37,11 @@ const WorkflowStepper = memo(function WorkflowStepper({
 }: WorkflowStepperProps) {
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
 
-  const sortedSteps = useMemo(
-    () => [...steps].sort((a, b) => a.position - b.position),
-    [steps]
-  );
+  const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
   const currentIndex = useMemo(
     () => sortedSteps.findIndex((s) => s.id === currentStepId),
-    [sortedSteps, currentStepId]
+    [sortedSteps, currentStepId],
   );
 
   const handleMove = useCallback(
@@ -62,12 +55,12 @@ const WorkflowStepper = memo(function WorkflowStepper({
           position: 0,
         });
       } catch (err) {
-        console.error('[WorkflowStepper] Failed to move task:', err);
+        console.error("[WorkflowStepper] Failed to move task:", err);
       } finally {
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId]
+    [taskId, workflowId],
   );
 
   if (sortedSteps.length === 0) return null;
@@ -134,24 +127,30 @@ function WorkflowStepItem({
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
-  const isAdjacent = currentIndex >= 0 && (index === currentIndex - 1 || index === currentIndex + 1);
-  const canMove = canMoveToStep({ isArchived, isCurrent, taskId, workflowId, isAdjacent, allowManualMove: step.allow_manual_move });
+  const isAdjacent =
+    currentIndex >= 0 && (index === currentIndex - 1 || index === currentIndex + 1);
+  const canMove = canMoveToStep({
+    isArchived,
+    isCurrent,
+    taskId,
+    workflowId,
+    isAdjacent,
+    allowManualMove: step.allow_manual_move,
+  });
 
   return (
     <div className="flex items-center">
-      {index > 0 && (
-        <StepConnector isActive={isCompleted || isCurrent} />
-      )}
+      {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
       <HoverCard openDelay={200} closeDelay={100}>
         <HoverCardTrigger asChild>
           <div
             className={cn(
-              'flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default',
-              isCurrent ? 'bg-muted/40' : 'hover:bg-muted/30'
+              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
+              isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
             )}
           >
             <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
-            <span className={cn('text-xs leading-none', getStepLabelClass(isCurrent, isCompleted))}>
+            <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
               {step.name}
             </span>
           </div>
@@ -171,7 +170,7 @@ function WorkflowStepItem({
 /** Connector line between steps */
 function StepConnector({ isActive }: { isActive: boolean }) {
   return (
-    <div className={cn('h-px w-6 shrink-0', isActive ? 'bg-muted-foreground/40' : 'bg-border')} />
+    <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />
   );
 }
 
@@ -204,19 +203,23 @@ function StepHoverContent({
           onClick={() => onMove(step.id)}
         >
           <IconArrowRight className="h-3 w-3" />
-          {isMoving ? 'Moving...' : 'Move here'}
+          {isMoving ? "Moving..." : "Move here"}
         </Button>
       )}
-      {isCurrent && (
-        <div className="text-[11px] text-muted-foreground">Current step</div>
-      )}
+      {isCurrent && <div className="text-[11px] text-muted-foreground">Current step</div>}
       <StepCapabilityIcons events={step.events} />
     </HoverCardContent>
   );
 }
 
 /** Circle indicator for step state */
-function StepCircleIndicator({ isCurrent, isCompleted }: { isCurrent: boolean; isCompleted: boolean }) {
+function StepCircleIndicator({
+  isCurrent,
+  isCompleted,
+}: {
+  isCurrent: boolean;
+  isCompleted: boolean;
+}) {
   if (isCurrent) {
     return (
       <span className="relative flex items-center justify-center shrink-0">
@@ -241,9 +244,9 @@ function StepCircleIndicator({ isCurrent, isCompleted }: { isCurrent: boolean; i
 
 /** Get CSS class for step label based on state */
 function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {
-  if (isCurrent) return 'text-foreground font-medium';
-  if (isCompleted) return 'text-muted-foreground';
-  return 'text-muted-foreground/60';
+  if (isCurrent) return "text-foreground font-medium";
+  if (isCompleted) return "text-muted-foreground";
+  return "text-muted-foreground/60";
 }
 
 export { WorkflowStepper };

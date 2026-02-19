@@ -1,18 +1,25 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { IconRefresh, IconAlertCircle, IconSelector } from '@tabler/icons-react';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Checkbox } from '@kandev/ui/checkbox';
-import { Button } from '@kandev/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@kandev/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@kandev/ui/command';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { Skeleton } from '@kandev/ui/skeleton';
-import { useDynamicModels } from '@/hooks/domains/settings/use-dynamic-models';
-import type { ModelEntry } from '@/lib/types/http';
+import { useState } from "react";
+import { IconRefresh, IconAlertCircle, IconSelector } from "@tabler/icons-react";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Checkbox } from "@kandev/ui/checkbox";
+import { Button } from "@kandev/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@kandev/ui/command";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Skeleton } from "@kandev/ui/skeleton";
+import { useDynamicModels } from "@/hooks/domains/settings/use-dynamic-models";
+import type { ModelEntry } from "@/lib/types/http";
 
 type DynamicModelSelectorProps = {
   open: boolean;
@@ -120,11 +127,7 @@ function StaticModelSelector({
   onChange,
 }: StaticModelSelectorProps) {
   return (
-    <Select
-      value={value || defaultModel}
-      onValueChange={onChange}
-      disabled={isCustomMode}
-    >
+    <Select value={value || defaultModel} onValueChange={onChange} disabled={isCustomMode}>
       <SelectTrigger className="w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
@@ -144,7 +147,17 @@ function StaticModelSelector({
   );
 }
 
-function DynamicModelControls({ supportsDynamicModels, onRefresh, isCustomMode, error }: { supportsDynamicModels: boolean; onRefresh: () => Promise<void>; isCustomMode: boolean; error: string | null }) {
+function DynamicModelControls({
+  supportsDynamicModels,
+  onRefresh,
+  isCustomMode,
+  error,
+}: {
+  supportsDynamicModels: boolean;
+  onRefresh: () => Promise<void>;
+  isCustomMode: boolean;
+  error: string | null;
+}) {
   if (!supportsDynamicModels) return null;
   return (
     <>
@@ -154,15 +167,23 @@ function DynamicModelControls({ supportsDynamicModels, onRefresh, isCustomMode, 
             <IconRefresh className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent><p>Refresh models from CLI</p></TooltipContent>
+        <TooltipContent>
+          <p>Refresh models from CLI</p>
+        </TooltipContent>
       </Tooltip>
       {error && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center"><IconAlertCircle className="h-4 w-4 text-amber-500" /></div>
+            <div className="flex items-center">
+              <IconAlertCircle className="h-4 w-4 text-amber-500" />
+            </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p className="max-w-xs">Failed to fetch dynamic models: {error}<br />Showing static fallback models.</p>
+            <p className="max-w-xs">
+              Failed to fetch dynamic models: {error}
+              <br />
+              Showing static fallback models.
+            </p>
           </TooltipContent>
         </Tooltip>
       )}
@@ -170,13 +191,34 @@ function DynamicModelControls({ supportsDynamicModels, onRefresh, isCustomMode, 
   );
 }
 
-function CustomModelInput({ customValue, isCustomMode, onValueChange, onModeChange }: { customValue: string; isCustomMode: boolean; onValueChange: (v: string) => void; onModeChange: (custom: boolean) => void }) {
+function CustomModelInput({
+  customValue,
+  isCustomMode,
+  onValueChange,
+  onModeChange,
+}: {
+  customValue: string;
+  isCustomMode: boolean;
+  onValueChange: (v: string) => void;
+  onModeChange: (custom: boolean) => void;
+}) {
   return (
     <div className="flex-1 space-y-2">
-      <Input value={customValue} onChange={(e) => onValueChange(e.target.value)} placeholder="Custom model ID" disabled={!isCustomMode} />
+      <Input
+        value={customValue}
+        onChange={(e) => onValueChange(e.target.value)}
+        placeholder="Custom model ID"
+        disabled={!isCustomMode}
+      />
       <div className="flex items-center space-x-2">
-        <Checkbox id="custom-model-mode" checked={isCustomMode} onCheckedChange={(checked) => onModeChange(checked === true)} />
-        <Label htmlFor="custom-model-mode" className="text-xs text-muted-foreground">Use custom model</Label>
+        <Checkbox
+          id="custom-model-mode"
+          checked={isCustomMode}
+          onCheckedChange={(checked) => onModeChange(checked === true)}
+        />
+        <Label htmlFor="custom-model-mode" className="text-xs text-muted-foreground">
+          Use custom model
+        </Label>
       </div>
     </div>
   );
@@ -192,10 +234,24 @@ type ModelComboboxProps = {
   supportsDynamicModels?: boolean;
 };
 
-export function ModelCombobox({ value, onChange, models: staticModels, defaultModel, placeholder = 'Select a model', agentName, supportsDynamicModels = false }: ModelComboboxProps) {
-  const { models, isLoading, error, refresh } = useDynamicModels(agentName, staticModels, supportsDynamicModels);
+export function ModelCombobox({
+  value,
+  onChange,
+  models: staticModels,
+  defaultModel,
+  placeholder = "Select a model",
+  agentName,
+  supportsDynamicModels = false,
+}: ModelComboboxProps) {
+  const { models, isLoading, error, refresh } = useDynamicModels(
+    agentName,
+    staticModels,
+    supportsDynamicModels,
+  );
   const [open, setOpen] = useState(false);
-  const [customValue, setCustomValue] = useState(() => (value && !staticModels.some((m) => m.id === value)) ? value : '');
+  const [customValue, setCustomValue] = useState(() =>
+    value && !staticModels.some((m) => m.id === value) ? value : "",
+  );
   const isValueCustom = Boolean(value) && !models.some((m) => m.id === value);
   const [userToggle, setUserToggle] = useState<boolean | null>(null);
   const isCustomMode = userToggle ?? isValueCustom;
@@ -206,7 +262,7 @@ export function ModelCombobox({ value, onChange, models: staticModels, defaultMo
       if (customValue) onChange(customValue);
     } else {
       if (isValueCustom && value) setCustomValue(value);
-      onChange(defaultModel || '');
+      onChange(defaultModel || "");
     }
   };
 
@@ -232,14 +288,41 @@ export function ModelCombobox({ value, onChange, models: staticModels, defaultMo
       <div className="flex flex-1 items-center gap-2">
         <div className="flex-1">
           {supportsDynamicModels ? (
-            <DynamicModelSelector open={open} setOpen={setOpen} selectedModel={selectedModel} defaultModel={defaultModel} placeholder={placeholder} isCustomMode={isCustomMode} models={models} value={value} onChange={onChange} />
+            <DynamicModelSelector
+              open={open}
+              setOpen={setOpen}
+              selectedModel={selectedModel}
+              defaultModel={defaultModel}
+              placeholder={placeholder}
+              isCustomMode={isCustomMode}
+              models={models}
+              value={value}
+              onChange={onChange}
+            />
           ) : (
-            <StaticModelSelector value={value} defaultModel={defaultModel} placeholder={placeholder} isCustomMode={isCustomMode} models={models} onChange={onChange} />
+            <StaticModelSelector
+              value={value}
+              defaultModel={defaultModel}
+              placeholder={placeholder}
+              isCustomMode={isCustomMode}
+              models={models}
+              onChange={onChange}
+            />
           )}
         </div>
-        <DynamicModelControls supportsDynamicModels={supportsDynamicModels} onRefresh={refresh} isCustomMode={isCustomMode} error={error} />
+        <DynamicModelControls
+          supportsDynamicModels={supportsDynamicModels}
+          onRefresh={refresh}
+          isCustomMode={isCustomMode}
+          error={error}
+        />
       </div>
-      <CustomModelInput customValue={customValue} isCustomMode={isCustomMode} onValueChange={handleCustomValueChange} onModeChange={handleModeChange} />
+      <CustomModelInput
+        customValue={customValue}
+        isCustomMode={isCustomMode}
+        onValueChange={handleCustomValueChange}
+        onModeChange={handleModeChange}
+      />
     </div>
   );
 }

@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { openSessionFolder } from '@/lib/api';
-import { useRequest } from '@/lib/http/use-request';
+import { openSessionFolder } from "@/lib/api";
+import { useRequest } from "@/lib/http/use-request";
 
 export function useOpenSessionFolder(sessionId?: string | null) {
   const request = useRequest(async () => {
     if (!sessionId) {
       return null;
     }
-    const response = await openSessionFolder(sessionId, { cache: 'no-store' });
+    const response = await openSessionFolder(sessionId, { cache: "no-store" });
     return response ?? null;
   });
 

@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { Button } from '@kandev/ui/button';
-import { Textarea } from '@kandev/ui/textarea';
-import { IconSend, IconX } from '@tabler/icons-react';
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
+import { IconSend, IconX } from "@tabler/icons-react";
 
 interface CommentFormProps {
   /** Initial content for editing */
@@ -19,7 +19,7 @@ interface CommentFormProps {
 }
 
 export function CommentForm({
-  initialContent = '',
+  initialContent = "",
   onSubmit,
   onCancel,
   isEditing = false,
@@ -38,15 +38,15 @@ export function CommentForm({
     const trimmed = content.trim();
     if (trimmed) {
       onSubmit(trimmed);
-      setContent('');
+      setContent("");
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit();
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
     }
@@ -65,7 +65,8 @@ export function CommentForm({
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">
-          {typeof navigator !== 'undefined' && navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to submit
+          {typeof navigator !== "undefined" && navigator.platform?.includes("Mac") ? "⌘" : "Ctrl"}
+          +Enter to submit
         </span>
         <div className="flex gap-1">
           <Button
@@ -84,7 +85,7 @@ export function CommentForm({
             className="h-6 cursor-pointer px-2 text-xs"
           >
             <IconSend className="mr-1 h-3 w-3" />
-            {isEditing ? 'Update' : 'Add'}
+            {isEditing ? "Update" : "Add"}
           </Button>
         </div>
       </div>

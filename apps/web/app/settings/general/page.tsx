@@ -1,11 +1,11 @@
-import { GeneralSettings } from '@/components/settings/general-settings';
-import { StateProvider } from '@/components/state-provider';
-import { fetchUserSettings } from '@/lib/api';
+import { GeneralSettings } from "@/components/settings/general-settings";
+import { StateProvider } from "@/components/state-provider";
+import { fetchUserSettings } from "@/lib/api";
 
 export default async function GeneralSettingsPage() {
   let initialState = {};
   try {
-    const response = await fetchUserSettings({ cache: 'no-store' });
+    const response = await fetchUserSettings({ cache: "no-store" });
     const settings = response.settings;
     initialState = {
       userSettings: settings
@@ -18,7 +18,7 @@ export default async function GeneralSettingsPage() {
             shellOptions: response.shell_options ?? [],
             defaultEditorId: settings.default_editor_id ?? null,
             enablePreviewOnClick: settings.enable_preview_on_click ?? false,
-            chatSubmitKey: settings.chat_submit_key ?? 'cmd_enter',
+            chatSubmitKey: settings.chat_submit_key ?? "cmd_enter",
             loaded: true,
           }
         : undefined,

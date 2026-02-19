@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { listAvailableAgents } from '@/lib/api';
+import { useEffect } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { listAvailableAgents } from "@/lib/api";
 
 export function useAvailableAgents(enabled = true) {
   const availableAgents = useAppStore((state) => state.availableAgents);
@@ -11,7 +11,7 @@ export function useAvailableAgents(enabled = true) {
     if (!enabled) return;
     if (availableAgents.loaded || availableAgents.loading) return;
     setAvailableAgentsLoading(true);
-    listAvailableAgents({ cache: 'no-store' })
+    listAvailableAgents({ cache: "no-store" })
       .then((response) => {
         setAvailableAgents(response.agents);
       })

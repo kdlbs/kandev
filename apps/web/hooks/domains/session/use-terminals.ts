@@ -1,17 +1,18 @@
-'use client';
+"use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { getSessionStorage } from '@/lib/local-storage';
-import { useAppStore } from '@/components/state-provider';
-import { stopProcess } from '@/lib/api';
-import { stopUserShell, createUserShell } from '@/lib/api/domains/user-shell-api';
-import { useUserShells } from './use-user-shells';
-import type { RepositoryScript } from '@/lib/types/http';
-import type { Dispatch, SetStateAction, MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
+import { getSessionStorage } from "@/lib/local-storage";
+import { useAppStore } from "@/components/state-provider";
+import { stopProcess } from "@/lib/api";
+import { stopUserShell, createUserShell } from "@/lib/api/domains/user-shell-api";
+import { useUserShells } from "./use-user-shells";
+import type { RepositoryScript } from "@/lib/types/http";
+import type { Dispatch, SetStateAction, MouseEvent } from "react";
+import type { PreviewStage } from "@/lib/state/slices";
 
-const TERMINAL_TYPE_DEV_SERVER = 'dev-server';
+const TERMINAL_TYPE_DEV_SERVER = "dev-server";
 
-export type TerminalType = 'dev-server' | 'shell' | 'script';
+export type TerminalType = "dev-server" | "shell" | "script";
 
 export type Terminal = {
   id: string;
@@ -47,11 +48,16 @@ function computeTerminalTabValue(
   terminals: Terminal[],
   savedTabExists: boolean,
 ): string {
-  const effectiveActiveTab = (!sessionJustChanged && activeTab && activeTab !== '') ? activeTab : null;
-  return effectiveActiveTab
-    ?? (savedTabFromStorage && (terminals.length === 0 || savedTabExists) ? savedTabFromStorage : null)
-    ?? terminals.find((t) => t.type === 'shell')?.id
-    ?? 'commands';
+  const effectiveActiveTab =
+    !sessionJustChanged && activeTab && activeTab !== "" ? activeTab : null;
+  return (
+    effectiveActiveTab ??
+    (savedTabFromStorage && (terminals.length === 0 || savedTabExists)
+      ? savedTabFromStorage
+      : null) ??
+    terminals.find((t) => t.type === "shell")?.id ??
+    "commands"
+  );
 }
 
 /** Build terminal list from user shells, preserving dev-server terminal if present. */
@@ -59,13 +65,13 @@ function buildTerminalsFromShells(
   prev: Terminal[],
   userShells: Array<{ terminalId: string; label: string; closable: boolean }>,
 ): Terminal[] {
-  const devTerminal = prev.find(t => t.type === TERMINAL_TYPE_DEV_SERVER);
+  const devTerminal = prev.find((t) => t.type === TERMINAL_TYPE_DEV_SERVER);
   const userTerminals: Terminal[] = userShells.map((shell) => {
-    const isScript = shell.terminalId.startsWith('script-');
+    const isScript = shell.terminalId.startsWith("script-");
     return {
       id: shell.terminalId,
-      type: isScript ? 'script' as const : 'shell' as const,
-      label: shell.label || (isScript ? 'Script' : 'Terminal'),
+      type: isScript ? ("script" as const) : ("shell" as const),
+      label: shell.label || (isScript ? "Script" : "Terminal"),
       closable: shell.closable,
     };
   });
@@ -79,7 +85,15 @@ function buildTerminalsFromShells(
 function syncDevTerminal(prev: Terminal[], previewOpen: boolean): Terminal[] {
   const hasDevTerminal = prev.some((t) => t.type === TERMINAL_TYPE_DEV_SERVER);
   if (previewOpen && !hasDevTerminal) {
-    return [{ id: TERMINAL_TYPE_DEV_SERVER, type: TERMINAL_TYPE_DEV_SERVER as TerminalType, label: 'Dev Server', closable: true }, ...prev];
+    return [
+      {
+        id: TERMINAL_TYPE_DEV_SERVER,
+        type: TERMINAL_TYPE_DEV_SERVER as TerminalType,
+        label: "Dev Server",
+        closable: true,
+      },
+      ...prev,
+    ];
   }
   if (!previewOpen && hasDevTerminal) {
     return prev.filter((t) => t.type !== TERMINAL_TYPE_DEV_SERVER);
@@ -97,7 +111,12 @@ type TerminalSyncOptions = {
 };
 
 function useTerminalSync({
-  sessionId, userShells, userShellsLoaded, previewOpen, setTerminals, setRightPanelActiveTab,
+  sessionId,
+  userShells,
+  userShellsLoaded,
+  previewOpen,
+  setTerminals,
+  setRightPanelActiveTab,
 }: TerminalSyncOptions) {
   const prevSessionIdRef = useRef(sessionId);
   const tabRestoredRef = useRef(false);
@@ -107,17 +126,17 @@ function useTerminalSync({
     prevSessionIdRef.current = sessionId;
     tabRestoredRef.current = false;
     setTerminals([]);
-    if (sessionId) setRightPanelActiveTab(sessionId, '');
+    if (sessionId) setRightPanelActiveTab(sessionId, "");
   }, [sessionId, setRightPanelActiveTab, setTerminals]);
 
   useEffect(() => {
     if (!sessionId || !userShellsLoaded) return;
-    setTerminals(prev => buildTerminalsFromShells(prev, userShells));
+    setTerminals((prev) => buildTerminalsFromShells(prev, userShells));
   }, [sessionId, userShells, userShellsLoaded, setTerminals]);
 
   useEffect(() => {
     if (!sessionId) return;
-    setTerminals(prev => syncDevTerminal(prev, previewOpen));
+    setTerminals((prev) => syncDevTerminal(prev, previewOpen));
   }, [previewOpen, sessionId, setTerminals]);
 
   return tabRestoredRef;
@@ -131,22 +150,22 @@ function useTabRestoration(
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void,
 ) {
   useLayoutEffect(() => {
-    const hasActiveTab = activeTab && activeTab !== '';
+    const hasActiveTab = activeTab && activeTab !== "";
     if (!sessionId || tabRestoredRef.current || hasActiveTab) return;
     const savedTab = getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null);
     if (!savedTab) return;
-    if (terminals.some(t => t.id === savedTab)) {
+    if (terminals.some((t) => t.id === savedTab)) {
       setRightPanelActiveTab(sessionId, savedTab);
       tabRestoredRef.current = true;
     }
   }, [sessionId, terminals, activeTab, setRightPanelActiveTab, tabRestoredRef]);
 
   useEffect(() => {
-    if (!sessionId || !activeTab || activeTab === '') return;
+    if (!sessionId || !activeTab || activeTab === "") return;
     if (terminals.length === 0 || !tabRestoredRef.current) return;
-    const tabExists = activeTab === 'commands' || terminals.some((t) => t.id === activeTab);
+    const tabExists = activeTab === "commands" || terminals.some((t) => t.id === activeTab);
     if (!tabExists) {
-      const fallbackShell = terminals.find((t) => t.type === 'shell');
+      const fallbackShell = terminals.find((t) => t.type === "shell");
       if (fallbackShell) setRightPanelActiveTab(sessionId, fallbackShell.id);
     }
   }, [activeTab, sessionId, terminals, setRightPanelActiveTab, tabRestoredRef]);
@@ -154,51 +173,63 @@ function useTabRestoration(
 
 function useTerminalStore(sessionId: string | null, devProcessId: string | undefined) {
   const activeTab = useAppStore((state) =>
-    sessionId ? state.rightPanel.activeTabBySessionId[sessionId] : undefined
+    sessionId ? state.rightPanel.activeTabBySessionId[sessionId] : undefined,
   );
   const setRightPanelActiveTab = useAppStore((state) => state.setRightPanelActiveTab);
   const devOutput = useAppStore((state) =>
-    devProcessId ? state.processes.outputsByProcessId[devProcessId] ?? '' : ''
+    devProcessId ? (state.processes.outputsByProcessId[devProcessId] ?? "") : "",
   );
   const previewOpen = useAppStore((state) =>
-    sessionId ? state.previewPanel.openBySessionId[sessionId] ?? false : false
+    sessionId ? (state.previewPanel.openBySessionId[sessionId] ?? false) : false,
   );
   const setPreviewOpen = useAppStore((state) => state.setPreviewOpen);
   const setPreviewStage = useAppStore((state) => state.setPreviewStage);
-  return { activeTab, setRightPanelActiveTab, devOutput, previewOpen, setPreviewOpen, setPreviewStage };
+  return {
+    activeTab,
+    setRightPanelActiveTab,
+    devOutput,
+    previewOpen,
+    setPreviewOpen,
+    setPreviewStage,
+  };
 }
 
-export function useTerminals({ sessionId, initialTerminals }: UseTerminalsOptions): UseTerminalsReturn {
-  const [terminals, setTerminals] = useState<Terminal[]>(() => initialTerminals ?? []);
+type TerminalActionsOptions = {
+  sessionId: string | null;
+  activeTab: string | undefined;
+  terminals: Terminal[];
+  devProcessId: string | undefined;
+  setTerminals: Dispatch<SetStateAction<Terminal[]>>;
+  setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
+  setPreviewOpen: (sessionId: string, open: boolean) => void;
+  setPreviewStage: (sessionId: string, stage: PreviewStage) => void;
+};
+
+function useTerminalActions({
+  sessionId,
+  activeTab,
+  terminals,
+  devProcessId,
+  setTerminals,
+  setRightPanelActiveTab,
+  setPreviewOpen,
+  setPreviewStage,
+}: TerminalActionsOptions) {
   const [isStoppingDev, setIsStoppingDev] = useState(false);
-
-  const prevSessionIdRef = useRef(sessionId);
-  const sessionJustChanged = sessionId !== prevSessionIdRef.current;
-
-  const devProcessId = useAppStore((state) =>
-    sessionId ? state.processes.devProcessBySessionId[sessionId] : undefined
-  );
-  const { activeTab, setRightPanelActiveTab, devOutput, previewOpen, setPreviewOpen, setPreviewStage } =
-    useTerminalStore(sessionId, devProcessId);
-
-  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(sessionId);
-
-  const tabRestoredRef = useTerminalSync({
-    sessionId, userShells, userShellsLoaded, previewOpen, setTerminals, setRightPanelActiveTab,
-  });
-
-  useTabRestoration(sessionId, terminals, activeTab, tabRestoredRef, setRightPanelActiveTab);
 
   const addTerminal = useCallback(async () => {
     if (!sessionId) return;
     try {
       const result = await createUserShell(sessionId);
-      setTerminals((prev) => [...prev, { id: result.terminalId, type: 'shell', label: result.label, closable: result.closable }]);
+      setTerminals((prev) => [
+        ...prev,
+        { id: result.terminalId, type: "shell", label: result.label, closable: result.closable },
+      ]);
       setRightPanelActiveTab(sessionId, result.terminalId);
     } catch (error) {
-      console.error('Failed to create user shell:', error);
+      console.error("Failed to create user shell:", error);
     }
-  }, [sessionId, setRightPanelActiveTab]);
+  }, [sessionId, setRightPanelActiveTab, setTerminals]);
 
   const removeTerminal = useCallback(
     (id: string) => {
@@ -213,7 +244,7 @@ export function useTerminals({ sessionId, initialTerminals }: UseTerminalsOption
         return prev.filter((t) => t.id !== id);
       });
     },
-    [activeTab, sessionId, setRightPanelActiveTab]
+    [activeTab, sessionId, setRightPanelActiveTab, setTerminals],
   );
 
   const handleCloseDevTab = useCallback(
@@ -229,50 +260,120 @@ export function useTerminals({ sessionId, initialTerminals }: UseTerminalsOption
           setIsStoppingDev(false);
         }
       }
-      const fallbackShell = terminals.find((t) => t.type === 'shell');
+      const fallbackShell = terminals.find((t) => t.type === "shell");
       if (fallbackShell) setRightPanelActiveTab(sessionId, fallbackShell.id);
       setPreviewOpen(sessionId, false);
-      setPreviewStage(sessionId, 'closed');
+      setPreviewStage(sessionId, "closed");
     },
-    [sessionId, devProcessId, terminals, setRightPanelActiveTab, setPreviewOpen, setPreviewStage]
+    [sessionId, devProcessId, terminals, setRightPanelActiveTab, setPreviewOpen, setPreviewStage],
   );
 
-  const handleRunCommand = useCallback(async (script: RepositoryScript) => {
-    if (!sessionId) return;
-    try {
-      const result = await createUserShell(sessionId, script.id);
-      setTerminals(prev => [...prev, { id: result.terminalId, type: 'script', label: result.label, closable: result.closable }]);
-      setRightPanelActiveTab(sessionId, result.terminalId);
-    } catch (error) {
-      console.error('Failed to create script terminal:', error);
-    }
-  }, [sessionId, setRightPanelActiveTab]);
+  const handleRunCommand = useCallback(
+    async (script: RepositoryScript) => {
+      if (!sessionId) return;
+      try {
+        const result = await createUserShell(sessionId, script.id);
+        setTerminals((prev) => [
+          ...prev,
+          { id: result.terminalId, type: "script", label: result.label, closable: result.closable },
+        ]);
+        setRightPanelActiveTab(sessionId, result.terminalId);
+      } catch (error) {
+        console.error("Failed to create script terminal:", error);
+      }
+    },
+    [sessionId, setRightPanelActiveTab, setTerminals],
+  );
 
-  const handleCloseTab = useCallback((event: MouseEvent, terminalId: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-    removeTerminal(terminalId);
-    if (sessionId) {
-      stopUserShell(sessionId, terminalId).catch((error) => {
-        console.error('Failed to stop terminal:', error);
-      });
-    }
-  }, [sessionId, removeTerminal]);
+  const handleCloseTab = useCallback(
+    (event: MouseEvent, terminalId: string) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeTerminal(terminalId);
+      if (sessionId) {
+        stopUserShell(sessionId, terminalId).catch((error) => {
+          console.error("Failed to stop terminal:", error);
+        });
+      }
+    },
+    [sessionId, removeTerminal],
+  );
+
+  return { isStoppingDev, addTerminal, removeTerminal, handleCloseDevTab, handleRunCommand, handleCloseTab };
+}
+
+export function useTerminals({
+  sessionId,
+  initialTerminals,
+}: UseTerminalsOptions): UseTerminalsReturn {
+  const [terminals, setTerminals] = useState<Terminal[]>(() => initialTerminals ?? []);
+  const [prevSessionId, setPrevSessionId] = useState(sessionId);
+  const sessionJustChanged = sessionId !== prevSessionId;
+  if (sessionJustChanged) setPrevSessionId(sessionId);
+
+  const devProcessId = useAppStore((state) =>
+    sessionId ? state.processes.devProcessBySessionId[sessionId] : undefined,
+  );
+  const {
+    activeTab,
+    setRightPanelActiveTab,
+    devOutput,
+    previewOpen,
+    setPreviewOpen,
+    setPreviewStage,
+  } = useTerminalStore(sessionId, devProcessId);
+
+  const { shells: userShells, isLoaded: userShellsLoaded } = useUserShells(sessionId);
+
+  const tabRestoredRef = useTerminalSync({
+    sessionId,
+    userShells,
+    userShellsLoaded,
+    previewOpen,
+    setTerminals,
+    setRightPanelActiveTab,
+  });
+
+  useTabRestoration(sessionId, terminals, activeTab, tabRestoredRef, setRightPanelActiveTab);
+
+  const { isStoppingDev, addTerminal, removeTerminal, handleCloseDevTab, handleRunCommand, handleCloseTab } =
+    useTerminalActions({
+      sessionId,
+      activeTab,
+      terminals,
+      devProcessId,
+      setTerminals,
+      setRightPanelActiveTab,
+      setPreviewOpen,
+      setPreviewStage,
+    });
 
   const savedTabFromStorage = useMemo(() => {
     if (!sessionId) return null;
     return getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null);
   }, [sessionId]);
 
-  const savedTabExists = savedTabFromStorage && terminals.some(t => t.id === savedTabFromStorage);
+  const savedTabExists = savedTabFromStorage && terminals.some((t) => t.id === savedTabFromStorage);
 
   const terminalTabValue = computeTerminalTabValue(
-    activeTab, sessionJustChanged, savedTabFromStorage, terminals, !!savedTabExists,
+    activeTab,
+    sessionJustChanged,
+    savedTabFromStorage,
+    terminals,
+    !!savedTabExists,
   );
 
   return {
-    terminals, activeTab, terminalTabValue, addTerminal, removeTerminal,
-    handleCloseDevTab, handleCloseTab, handleRunCommand,
-    isStoppingDev, devProcessId, devOutput,
+    terminals,
+    activeTab,
+    terminalTabValue,
+    addTerminal,
+    removeTerminal,
+    handleCloseDevTab,
+    handleCloseTab,
+    handleRunCommand,
+    isStoppingDev,
+    devProcessId,
+    devOutput,
   };
 }

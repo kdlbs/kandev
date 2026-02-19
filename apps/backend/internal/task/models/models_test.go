@@ -137,10 +137,10 @@ func TestTaskToAPI(t *testing.T) {
 		WorkspaceID:    "workspace-001",
 		WorkflowID:     "workflow-456",
 		WorkflowStepID: "step-789",
-		Title:       "Test Task",
-		Description: "A test task description",
-		State:       v1.TaskStateInProgress,
-		Priority:    3,
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateInProgress,
+		Priority:       3,
 		Repositories: []*TaskRepository{
 			{
 				ID:           "task-repo-1",
@@ -203,14 +203,14 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 		WorkspaceID:    "workspace-001",
 		WorkflowID:     "workflow-456",
 		WorkflowStepID: "step-789",
-		Title:       "Test Task",
-		Description: "A test task description",
-		State:       v1.TaskStateTODO,
-		Priority:    0,
-		Position:    0,
-		Metadata:    nil,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Title:          "Test Task",
+		Description:    "A test task description",
+		State:          v1.TaskStateTODO,
+		Priority:       0,
+		Position:       0,
+		Metadata:       nil,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	apiTask := task.ToAPI()

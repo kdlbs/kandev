@@ -25,12 +25,12 @@ func assertDefaultModel(t *testing.T, models []Model, wantDef string) {
 
 func TestAuggieParseModels(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantLen  int
-		wantErr  bool
-		wantIDs  []string
-		wantDef  string // expected default model ID
+		name    string
+		input   string
+		wantLen int
+		wantErr bool
+		wantIDs []string
+		wantDef string // expected default model ID
 	}{
 		{
 			name: "normal output with descriptions",

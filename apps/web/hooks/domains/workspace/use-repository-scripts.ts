@@ -1,21 +1,21 @@
-import { useEffect, useRef } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { RepositoryScript } from '@/lib/types/http';
-import { listRepositoryScripts } from '@/lib/api';
+import { useEffect, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { RepositoryScript } from "@/lib/types/http";
+import { listRepositoryScripts } from "@/lib/api";
 
 const EMPTY_SCRIPTS: RepositoryScript[] = [];
 
 export function useRepositoryScripts(repositoryId: string | null, enabled = true) {
   const scripts = useAppStore((state) =>
     repositoryId
-      ? state.repositoryScripts.itemsByRepositoryId[repositoryId] ?? EMPTY_SCRIPTS
-      : EMPTY_SCRIPTS
+      ? (state.repositoryScripts.itemsByRepositoryId[repositoryId] ?? EMPTY_SCRIPTS)
+      : EMPTY_SCRIPTS,
   );
   const isLoading = useAppStore((state) =>
-    repositoryId ? state.repositoryScripts.loadingByRepositoryId[repositoryId] ?? false : false
+    repositoryId ? (state.repositoryScripts.loadingByRepositoryId[repositoryId] ?? false) : false,
   );
   const isLoaded = useAppStore((state) =>
-    repositoryId ? state.repositoryScripts.loadedByRepositoryId[repositoryId] ?? false : false
+    repositoryId ? (state.repositoryScripts.loadedByRepositoryId[repositoryId] ?? false) : false,
   );
   const setRepositoryScripts = useAppStore((state) => state.setRepositoryScripts);
   const setRepositoryScriptsLoading = useAppStore((state) => state.setRepositoryScriptsLoading);
@@ -36,13 +36,13 @@ export function useRepositoryScripts(repositoryId: string | null, enabled = true
     inFlightRef.current = true;
     setRepositoryScriptsLoading(repositoryId, true);
 
-    listRepositoryScripts(repositoryId, { cache: 'no-store' })
+    listRepositoryScripts(repositoryId, { cache: "no-store" })
       .then((response) => {
         if (cancelled) return;
         setRepositoryScripts(repositoryId, response.scripts ?? []);
       })
       .catch((error) => {
-        console.error('[useRepositoryScripts] Fetch error:', { repositoryId, error });
+        console.error("[useRepositoryScripts] Fetch error:", { repositoryId, error });
         if (cancelled) return;
         setRepositoryScripts(repositoryId, []);
       })

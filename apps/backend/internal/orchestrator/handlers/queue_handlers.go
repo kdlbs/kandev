@@ -46,13 +46,13 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 // WebSocket Handlers
 
 type wsQueueMessageRequest struct {
-	SessionID   string                            `json:"session_id"`
-	TaskID      string                            `json:"task_id"`
-	Content     string                            `json:"content"`
-	Model       string                            `json:"model,omitempty"`
-	PlanMode    bool                              `json:"plan_mode,omitempty"`
+	SessionID   string                           `json:"session_id"`
+	TaskID      string                           `json:"task_id"`
+	Content     string                           `json:"content"`
+	Model       string                           `json:"model,omitempty"`
+	PlanMode    bool                             `json:"plan_mode,omitempty"`
 	Attachments []messagequeue.MessageAttachment `json:"attachments,omitempty"`
-	UserID      string                            `json:"user_id,omitempty"`
+	UserID      string                           `json:"user_id,omitempty"`
 }
 
 func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { toRelativePath } from '@/lib/utils';
-import { getImageMimeType } from '@/lib/utils/file-types';
+import { toRelativePath } from "@/lib/utils";
+import { getImageMimeType } from "@/lib/utils/file-types";
 
 type FileImageViewerProps = {
   path: string;

@@ -35,8 +35,8 @@ func (a *MockAgent) DisplayName() string { return "Mock" }
 func (a *MockAgent) Description() string {
 	return "Mock agent for testing. Generates simulated responses with all message types."
 }
-func (a *MockAgent) Enabled() bool      { return a.enabled }
-func (a *MockAgent) DisplayOrder() int   { return 99 }
+func (a *MockAgent) Enabled() bool     { return a.enabled }
+func (a *MockAgent) DisplayOrder() int { return 99 }
 
 func (a *MockAgent) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
@@ -69,9 +69,9 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 func (a *MockAgent) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:         Cmd("mock-agent").Build(),
-		WorkingDir:  "{workspace}",
-		Env:         map[string]string{},
+		Cmd:            Cmd("mock-agent").Build(),
+		WorkingDir:     "{workspace}",
+		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		Protocol:       agent.ProtocolClaudeCode,
 		ModelFlag:      NewParam("--model", "{model}"),

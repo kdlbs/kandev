@@ -58,8 +58,8 @@ type AgentType struct {
 type AgentLog struct {
 	ID               int64                  `json:"id"`
 	AgentExecutionID string                 `json:"agent_execution_id"`
-	LogLevel        string                 `json:"log_level"`
-	Message         string                 `json:"message"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt       time.Time              `json:"created_at"`
+	LogLevel         string                 `json:"log_level"`
+	Message          string                 `json:"message"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
 }

@@ -36,15 +36,15 @@ type SessionHistoryManager struct {
 
 // HistoryEntry represents a single entry in the session history.
 type HistoryEntry struct {
-	Timestamp   time.Time              `json:"timestamp"`
-	Type        string `json:"type"` // "user_message", "agent_message", "tool_call", "tool_result"
-	Role        string `json:"role,omitempty"`
-	Content     string `json:"content,omitempty"`
-	ToolName    string `json:"tool_name,omitempty"`
-	ToolCallID  string `json:"tool_call_id,omitempty"`
-	ToolStatus  string `json:"tool_status,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
-	OperationID string `json:"operation_id,omitempty"`
+	Timestamp   time.Time `json:"timestamp"`
+	Type        string    `json:"type"` // "user_message", "agent_message", "tool_call", "tool_result"
+	Role        string    `json:"role,omitempty"`
+	Content     string    `json:"content,omitempty"`
+	ToolName    string    `json:"tool_name,omitempty"`
+	ToolCallID  string    `json:"tool_call_id,omitempty"`
+	ToolStatus  string    `json:"tool_status,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	OperationID string    `json:"operation_id,omitempty"`
 }
 
 // NewSessionHistoryManager creates a new SessionHistoryManager.

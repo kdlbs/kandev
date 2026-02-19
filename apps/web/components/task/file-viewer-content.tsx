@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import CodeMirror from '@uiw/react-codemirror';
-import { vscodeDark } from '@uiw/codemirror-theme-vscode';
-import { EditorView } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
-import { getCodeMirrorExtensionFromPath } from '@/lib/languages';
+import CodeMirror from "@uiw/react-codemirror";
+import { vscodeDark } from "@uiw/codemirror-theme-vscode";
+import { EditorView } from "@codemirror/view";
+import type { Extension } from "@codemirror/state";
+import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
 
 type FileViewerContentProps = {
   path: string;
@@ -13,10 +13,7 @@ type FileViewerContentProps = {
 
 export function FileViewerContent({ path, content }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
-  const extensions: Extension[] = [
-    EditorView.lineWrapping,
-    EditorView.editable.of(false),
-  ];
+  const extensions: Extension[] = [EditorView.lineWrapping, EditorView.editable.of(false)];
   if (langExt) {
     extensions.push(langExt);
   }
@@ -38,4 +35,3 @@ export function FileViewerContent({ path, content }: FileViewerContentProps) {
     />
   );
 }
-

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { IconMessageQuestion, IconCheck, IconX } from '@tabler/icons-react';
-import type { Message, ClarificationRequestMetadata } from '@/lib/types/http';
+import { IconMessageQuestion, IconCheck, IconX } from "@tabler/icons-react";
+import type { Message, ClarificationRequestMetadata } from "@/lib/types/http";
 
 type ClarificationRequestMessageProps = {
   comment: Message;
@@ -20,9 +20,9 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
 
   const question = metadata.question;
   const status = metadata.status;
-  const isAnswered = status === 'answered';
-  const isSkipped = status === 'rejected';
-  const isExpired = status === 'expired';
+  const isAnswered = status === "answered";
+  const isSkipped = status === "rejected";
+  const isExpired = status === "expired";
 
   const getStatusIndicator = () => {
     if (isAnswered) {
@@ -40,7 +40,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
   // Get the answer summary for display
   const getAnswerSummary = () => {
     const response = metadata.response;
-    if (!response) return 'No selection';
+    if (!response) return "No selection";
 
     const parts: string[] = [];
 
@@ -59,7 +59,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
       parts.push(`"${response.custom_text}"`);
     }
 
-    return parts.length > 0 ? parts.join(', ') : 'No selection';
+    return parts.length > 0 ? parts.join(", ") : "No selection";
   };
 
   return (
@@ -73,9 +73,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
         {/* Content */}
         <div className="flex-1 min-w-0">
           {/* Question */}
-          <div className="text-xs font-medium text-muted-foreground">
-            {question.prompt}
-          </div>
+          <div className="text-xs font-medium text-muted-foreground">{question.prompt}</div>
 
           {/* Answer - indented below question */}
           {isAnswered && (

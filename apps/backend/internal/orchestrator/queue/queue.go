@@ -18,11 +18,11 @@ var (
 
 // QueuedTask represents a task in the priority queue
 type QueuedTask struct {
-	TaskID         string
-	Priority       int       // Higher priority = processed first
-	QueuedAt       time.Time
-	Task           *v1.Task // Full task data
-	index          int      // Index in the heap (used by container/heap)
+	TaskID   string
+	Priority int // Higher priority = processed first
+	QueuedAt time.Time
+	Task     *v1.Task // Full task data
+	index    int      // Index in the heap (used by container/heap)
 }
 
 // taskHeap implements heap.Interface for priority queue
@@ -95,10 +95,10 @@ func (q *TaskQueue) Enqueue(task *v1.Task) error {
 	}
 
 	qt := &QueuedTask{
-		TaskID:         task.ID,
-		Priority:       task.Priority,
-		QueuedAt:       time.Now(),
-		Task:           task,
+		TaskID:   task.ID,
+		Priority: task.Priority,
+		QueuedAt: time.Now(),
+		Task:     task,
 	}
 
 	heap.Push(&q.heap, qt)

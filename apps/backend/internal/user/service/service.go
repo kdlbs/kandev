@@ -26,15 +26,15 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID            *string
-	KanbanViewMode         *string
-	WorkflowFilterID       *string
-	RepositoryIDs          *[]string
-	InitialSetupComplete   *bool
-	PreferredShell         *string
-	DefaultEditorID        *string
-	EnablePreviewOnClick   *bool
-	ChatSubmitKey          *string
+	WorkspaceID             *string
+	KanbanViewMode          *string
+	WorkflowFilterID        *string
+	RepositoryIDs           *[]string
+	InitialSetupComplete    *bool
+	PreferredShell          *string
+	DefaultEditorID         *string
+	EnablePreviewOnClick    *bool
+	ChatSubmitKey           *string
 	ReviewAutoMarkOnScroll  *bool
 	LspAutoStartLanguages   *[]string
 	LspAutoInstallLanguages *[]string
@@ -191,17 +191,17 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":                settings.UserID,
-		"workspace_id":           settings.WorkspaceID,
-		"kanban_view_mode":       settings.KanbanViewMode,
-		"workflow_filter_id":     settings.WorkflowFilterID,
-		"repository_ids":         settings.RepositoryIDs,
-		"initial_setup_complete": settings.InitialSetupComplete,
-		"preferred_shell":        settings.PreferredShell,
-		"default_editor_id":      settings.DefaultEditorID,
+		"user_id":                    settings.UserID,
+		"workspace_id":               settings.WorkspaceID,
+		"kanban_view_mode":           settings.KanbanViewMode,
+		"workflow_filter_id":         settings.WorkflowFilterID,
+		"repository_ids":             settings.RepositoryIDs,
+		"initial_setup_complete":     settings.InitialSetupComplete,
+		"preferred_shell":            settings.PreferredShell,
+		"default_editor_id":          settings.DefaultEditorID,
 		"enable_preview_on_click":    settings.EnablePreviewOnClick,
 		"chat_submit_key":            settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":  settings.ReviewAutoMarkOnScroll,
+		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
 		"lsp_auto_start_languages":   settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages": settings.LspAutoInstallLanguages,
 		"lsp_server_configs":         settings.LspServerConfigs,

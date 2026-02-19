@@ -6,7 +6,7 @@
 export interface PreviewUrlInfo {
   url: string;
   port?: number;
-  scheme: 'http' | 'https';
+  scheme: "http" | "https";
 }
 
 /**
@@ -21,7 +21,7 @@ export interface PreviewUrlInfo {
  * @param line - A line of process output to scan
  * @returns PreviewUrlInfo if a valid URL is found, null otherwise
  */
-const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 
 /** Try to parse a full URL match into a PreviewUrlInfo, returning null if invalid. */
 function tryParseFullUrl(match: string): PreviewUrlInfo | null {
@@ -31,7 +31,7 @@ function tryParseFullUrl(match: string): PreviewUrlInfo | null {
     return {
       url: parsed.toString(),
       port: parsed.port ? Number(parsed.port) : undefined,
-      scheme: parsed.protocol === 'https:' ? 'https' : 'http',
+      scheme: parsed.protocol === "https:" ? "https" : "http",
     };
   } catch {
     return null;
@@ -43,7 +43,7 @@ function tryParseHostPort(line: string, matches: RegExpMatchArray): PreviewUrlIn
   const match = matches[matches.length - 1];
   const portMatch = match.match(/:(\d{2,5})$/);
   const port = portMatch ? Number(portMatch[1]) : undefined;
-  const scheme = /https/i.test(line) ? 'https' : 'http';
+  const scheme = /https/i.test(line) ? "https" : "http";
   return { url: `${scheme}://${match}`, port, scheme };
 }
 
@@ -77,7 +77,7 @@ export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
 export function detectPreviewUrlFromOutput(output: string): string | null {
   if (!output) return null;
 
-  const lines = output.split('\n');
+  const lines = output.split("\n");
   let lastValidUrl: string | null = null;
 
   for (const line of lines) {

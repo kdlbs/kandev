@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import { memo, isValidElement, useState, useCallback, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
-import { IconWand, IconMessageDots, IconFile } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
-import type { Message } from '@/lib/types/http';
-import { RichBlocks } from '@/components/task/chat/messages/rich-blocks';
-import { InlineCode } from '@/components/task/chat/messages/inline-code';
-import { CodeBlock } from '@/components/task/chat/messages/code-block';
-import { MessageActions } from '@/components/task/chat/messages/message-actions';
-import { useMessageNavigation } from '@/hooks/use-message-navigation';
+import { memo, isValidElement, useState, useCallback, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
+import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
+import type { Message } from "@/lib/types/http";
+import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
+import { InlineCode } from "@/components/task/chat/messages/inline-code";
+import { CodeBlock } from "@/components/task/chat/messages/code-block";
+import { MessageActions } from "@/components/task/chat/messages/message-actions";
+import { useMessageNavigation } from "@/hooks/use-message-navigation";
 
 /**
  * Recursively extracts text content from React children.
@@ -19,13 +19,13 @@ import { useMessageNavigation } from '@/hooks/use-message-navigation';
  */
 function getTextContent(children: ReactNode): string {
   // Fast path: most common cases first
-  if (typeof children === 'string') return children;
-  if (typeof children === 'number') return String(children);
-  if (children == null) return '';
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (children == null) return "";
 
   // Use loop instead of map().join() to avoid intermediate array allocation
   if (Array.isArray(children)) {
-    let result = '';
+    let result = "";
     for (let i = 0; i < children.length; i++) {
       result += getTextContent(children[i]);
     }
@@ -38,7 +38,7 @@ function getTextContent(children: ReactNode): string {
       return getTextContent(props.children);
     }
   }
-  return '';
+  return "";
 }
 
 type ChatMessageProps = {
@@ -78,7 +78,7 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
         className="px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-mono text-[0.9em]"
       >
         @{filePath}
-      </code>
+      </code>,
     );
 
     lastIndex = match.index + match[0].length;
@@ -96,34 +96,62 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
 
 const markdownComponents = {
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
-    const content = getTextContent(children).replace(/\n$/, '');
-    const hasLanguage = className?.startsWith('language-');
-    const hasNewlines = content.includes('\n');
+    const content = getTextContent(children).replace(/\n$/, "");
+    const hasLanguage = className?.startsWith("language-");
+    const hasNewlines = content.includes("\n");
     if (hasLanguage || hasNewlines) {
       return <CodeBlock className={className}>{content}</CodeBlock>;
     }
     return <InlineCode>{content}</InlineCode>;
   },
-  ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-6 mb-2">{children}</ol>,
-  ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-6 mb-2">{children}</ul>,
+  ol: ({ children }: { children?: ReactNode }) => (
+    <ol className="list-decimal pl-6 mb-2">{children}</ol>
+  ),
+  ul: ({ children }: { children?: ReactNode }) => (
+    <ul className="list-disc pl-6 mb-2">{children}</ul>
+  ),
   li: ({ children }: { children?: ReactNode }) => <li className="my-0.5">{children}</li>,
-  p: ({ children }: { children?: ReactNode }) => <p className="leading-relaxed mb-1.5">{children}</p>,
-  h1: ({ children }: { children?: ReactNode }) => <p className="my-3 font-bold text-sm">{children}</p>,
-  h2: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold text-sm">{children}</p>,
-  h3: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold text-sm">{children}</p>,
+  p: ({ children }: { children?: ReactNode }) => (
+    <p className="leading-relaxed mb-1.5">{children}</p>
+  ),
+  h1: ({ children }: { children?: ReactNode }) => (
+    <p className="my-3 font-bold text-sm">{children}</p>
+  ),
+  h2: ({ children }: { children?: ReactNode }) => (
+    <p className="my-2 font-bold text-sm">{children}</p>
+  ),
+  h3: ({ children }: { children?: ReactNode }) => (
+    <p className="my-2 font-bold text-sm">{children}</p>
+  ),
   h4: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold">{children}</p>,
   h5: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold">{children}</p>,
   hr: ({ children }: { children?: ReactNode }) => <hr className="my-5">{children}</hr>,
   table: ({ children }: { children?: ReactNode }) => (
     <div className="my-3 overflow-x-auto">
-      <table className="border-collapse border border-border rounded-lg overflow-hidden">{children}</table>
+      <table className="border-collapse border border-border rounded-lg overflow-hidden">
+        {children}
+      </table>
     </div>
   ),
-  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-muted/50">{children}</thead>,
-  tbody: ({ children }: { children?: ReactNode }) => <tbody className="divide-y divide-border">{children}</tbody>,
-  tr: ({ children }: { children?: ReactNode }) => <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">{children}</tr>,
-  th: ({ children }: { children?: ReactNode }) => <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">{children}</th>,
-  td: ({ children }: { children?: ReactNode }) => <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">{children}</td>,
+  thead: ({ children }: { children?: ReactNode }) => (
+    <thead className="bg-muted/50">{children}</thead>
+  ),
+  tbody: ({ children }: { children?: ReactNode }) => (
+    <tbody className="divide-y divide-border">{children}</tbody>
+  ),
+  tr: ({ children }: { children?: ReactNode }) => (
+    <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">{children}</tr>
+  ),
+  th: ({ children }: { children?: ReactNode }) => (
+    <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
+      {children}
+    </th>
+  ),
+  td: ({ children }: { children?: ReactNode }) => (
+    <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
+      {children}
+    </td>
+  ),
 };
 
 function renderUserMessageBody(
@@ -167,16 +195,27 @@ type UserMessageMetadata = {
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
-  const imageAttachments = (metadata?.attachments || []).filter(att => att.type === 'image');
+  const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
   const contextFiles = metadata?.context_files || [];
   const hasPlanMode = !!metadata?.plan_mode;
   const hasReviewComments = !!metadata?.has_review_comments;
-  const hasContent = !!(comment.content && comment.content.trim() !== '');
+  const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0;
-  return { imageAttachments, contextFiles, hasPlanMode, hasReviewComments, hasContent, hasAttachments };
+  return {
+    imageAttachments,
+    contextFiles,
+    hasPlanMode,
+    hasReviewComments,
+    hasContent,
+    hasAttachments,
+  };
 }
 
-function UserContextBadges({ hasPlanMode, hasReviewComments, contextFiles }: {
+function UserContextBadges({
+  hasPlanMode,
+  hasReviewComments,
+  contextFiles,
+}: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string }>;
@@ -195,7 +234,10 @@ function UserContextBadges({ hasPlanMode, hasReviewComments, contextFiles }: {
         </span>
       )}
       {contextFiles.map((f) => (
-        <span key={f.path} className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground">
+        <span
+          key={f.path}
+          className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
+        >
           <IconFile size={10} /> {f.name}
         </span>
       ))}
@@ -206,21 +248,40 @@ function UserContextBadges({ hasPlanMode, hasReviewComments, contextFiles }: {
 function openImageInWindow(mimeType: string, data: string) {
   const win = window.open();
   if (win) {
-    win.document.write(`<img src="data:${mimeType};base64,${data}" style="max-width:100%;height:auto;" />`);
+    win.document.write(
+      `<img src="data:${mimeType};base64,${data}" style="max-width:100%;height:auto;" />`,
+    );
   }
 }
 
-function UserMessageContent({ comment, showRaw, onToggleRaw, allMessages, onScrollToMessage }: UserMessageProps) {
-  const userNavigation = useMessageNavigation(allMessages || [], comment.id, 'user');
-  const { imageAttachments, contextFiles, hasPlanMode, hasReviewComments, hasContent, hasAttachments } = parseUserMessageMetadata(comment);
+function UserMessageContent({
+  comment,
+  showRaw,
+  onToggleRaw,
+  allMessages,
+  onScrollToMessage,
+}: UserMessageProps) {
+  const userNavigation = useMessageNavigation(allMessages || [], comment.id, "user");
+  const {
+    imageAttachments,
+    contextFiles,
+    hasPlanMode,
+    hasReviewComments,
+    hasContent,
+    hasAttachments,
+  } = parseUserMessageMetadata(comment);
 
   return (
     <div className="flex justify-end w-full overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-2xl overflow-hidden group">
-        <UserContextBadges hasPlanMode={hasPlanMode} hasReviewComments={hasReviewComments} contextFiles={contextFiles} />
+        <UserContextBadges
+          hasPlanMode={hasPlanMode}
+          hasReviewComments={hasReviewComments}
+          contextFiles={contextFiles}
+        />
         <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">
           {hasAttachments && (
-            <div className={cn('flex flex-wrap gap-2', hasContent && 'mb-2')}>
+            <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
               {imageAttachments.map((att, index) => (
                 /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
                 <img
@@ -244,7 +305,8 @@ function UserMessageContent({ comment, showRaw, onToggleRaw, allMessages, onScro
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           onNavigatePrev={() => {
-            if (userNavigation.previous && onScrollToMessage) onScrollToMessage(userNavigation.previous.id);
+            if (userNavigation.previous && onScrollToMessage)
+              onScrollToMessage(userNavigation.previous.id);
           }}
           onNavigateNext={() => {
             if (userNavigation.next && onScrollToMessage) onScrollToMessage(userNavigation.next.id);
@@ -272,12 +334,15 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
       <div className="flex-1 min-w-0 text-xs">
         {showRaw ? (
           <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
-            {comment.content || '(empty)'}
+            {comment.content || "(empty)"}
           </pre>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
-              {comment.content || '(empty)'}
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              components={markdownComponents}
+            >
+              {comment.content || "(empty)"}
             </ReactMarkdown>
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}
           </div>
@@ -299,14 +364,21 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
 
 // ── Main component ──────────────────────────────────────────────────
 
-export const ChatMessage = memo(function ChatMessage({ comment, label, className, showRichBlocks, allMessages, onScrollToMessage }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({
+  comment,
+  label,
+  className,
+  showRichBlocks,
+  allMessages,
+  onScrollToMessage,
+}: ChatMessageProps) {
   const [showRaw, setShowRaw] = useState(false);
   const toggleRaw = useCallback(() => setShowRaw((v) => !v), []);
 
   // Keep the old card-based layout for task descriptions (amber banner)
-  if (label === 'Task') {
+  if (label === "Task") {
     return (
-      <div className={cn('w-full rounded-lg  px-4 py-3 text-xs', className)}>
+      <div className={cn("w-full rounded-lg  px-4 py-3 text-xs", className)}>
         <div className="flex items-center">
           <p className="text-[11px] uppercase tracking-wide opacity-70">
             {comment.requests_input ? (
@@ -317,13 +389,13 @@ export const ChatMessage = memo(function ChatMessage({ comment, label, className
           </p>
         </div>
         <p className="whitespace-pre-wrap">
-          {comment.content ? renderContentWithFileRefs(comment.content) : '(empty)'}
+          {comment.content ? renderContentWithFileRefs(comment.content) : "(empty)"}
         </p>
       </div>
     );
   }
 
-  if (comment.author_type === 'user') {
+  if (comment.author_type === "user") {
     return (
       <UserMessageContent
         comment={comment}

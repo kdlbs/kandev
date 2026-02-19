@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useCallback } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { useUserDisplaySettings } from '@/hooks/use-user-display-settings';
-import type { WorkflowsState } from '@/lib/state/slices';
+import { useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
+import type { WorkflowsState } from "@/lib/state/slices";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -54,26 +54,28 @@ export function useKanbanDisplaySettings() {
   const handleWorkspaceChange = useCallback(
     (nextWorkspaceId: string | null) => {
       setActiveWorkspace(nextWorkspaceId);
-      const url = nextWorkspaceId ? `/?workspaceId=${nextWorkspaceId}` : '/';
-      window.history.pushState({}, '', url);
+      const url = nextWorkspaceId ? `/?workspaceId=${nextWorkspaceId}` : "/";
+      window.history.pushState({}, "", url);
       commitSettings({
         workspaceId: nextWorkspaceId,
         workflowId: null,
         repositoryIds: [],
       });
     },
-    [setActiveWorkspace, commitSettings]
+    [setActiveWorkspace, commitSettings],
   );
 
   const handleWorkflowChange = useCallback(
     (nextWorkflowId: string | null) => {
       setActiveWorkflow(nextWorkflowId);
       if (nextWorkflowId) {
-        const workspaceId = workflows.find((workflow: WorkflowsState['items'][number]) => workflow.id === nextWorkflowId)?.workspaceId;
-        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
-        window.history.pushState({}, '', `/?workflowId=${nextWorkflowId}${workspaceParam}`);
+        const workspaceId = workflows.find(
+          (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
+        )?.workspaceId;
+        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
+        window.history.pushState({}, "", `/?workflowId=${nextWorkflowId}${workspaceParam}`);
       } else if (activeWorkspaceId) {
-        window.history.pushState({}, '', `/?workspaceId=${activeWorkspaceId}`);
+        window.history.pushState({}, "", `/?workspaceId=${activeWorkspaceId}`);
       }
       commitSettings({
         workspaceId: userSettings.workspaceId,
@@ -81,29 +83,36 @@ export function useKanbanDisplaySettings() {
         repositoryIds: userSettings.repositoryIds,
       });
     },
-    [setActiveWorkflow, workflows, commitSettings, userSettings.workspaceId, userSettings.repositoryIds, activeWorkspaceId]
+    [
+      setActiveWorkflow,
+      workflows,
+      commitSettings,
+      userSettings.workspaceId,
+      userSettings.repositoryIds,
+      activeWorkspaceId,
+    ],
   );
 
   const handleRepositoryChange = useCallback(
-    (value: string | 'all') => {
+    (value: string | "all") => {
       const base = baseSettingsPayload(userSettings);
-      commitSettings({ ...base, repositoryIds: value === 'all' ? [] : [value] });
+      commitSettings({ ...base, repositoryIds: value === "all" ? [] : [value] });
     },
-    [commitSettings, userSettings]
+    [commitSettings, userSettings],
   );
 
   const handleTogglePreviewOnClick = useCallback(
     (enabled: boolean) => {
       commitSettings({ ...baseSettingsPayload(userSettings), enablePreviewOnClick: enabled });
     },
-    [commitSettings, userSettings]
+    [commitSettings, userSettings],
   );
 
   const handleViewModeChange = useCallback(
     (mode: string) => {
       commitSettings({ ...baseSettingsPayload(userSettings), kanbanViewMode: mode || null });
     },
-    [commitSettings, userSettings]
+    [commitSettings, userSettings],
   );
 
   return {

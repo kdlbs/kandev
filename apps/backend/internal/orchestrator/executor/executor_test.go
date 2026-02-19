@@ -13,10 +13,10 @@ import (
 
 // mockAgentManager implements AgentManagerClient for testing
 type mockAgentManager struct {
-	launchAgentFunc               func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
-	startAgentProcessFunc         func(ctx context.Context, agentExecutionID string) error
-	resolveAgentProfileFunc       func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
-	setExecutionDescriptionFunc   func(ctx context.Context, agentExecutionID string, description string) error
+	launchAgentFunc             func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
+	startAgentProcessFunc       func(ctx context.Context, agentExecutionID string) error
+	resolveAgentProfileFunc     func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
+	setExecutionDescriptionFunc func(ctx context.Context, agentExecutionID string, description string) error
 }
 
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
@@ -287,7 +287,7 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 	return nil, nil
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
 func (m *mockRepository) CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	return 0, nil
 }
@@ -882,9 +882,9 @@ func TestShouldUseWorktree(t *testing.T) {
 
 func TestRepositoryCloneURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		repo     *models.Repository
-		want     string
+		name string
+		repo *models.Repository
+		want string
 	}{
 		{
 			name: "github repo",

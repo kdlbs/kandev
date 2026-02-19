@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { IconEdit, IconGitBranch, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import { Badge } from '@kandev/ui/badge';
-import { Card, CardContent } from '@kandev/ui/card';
-import { Button } from '@kandev/ui/button';
-import { Checkbox } from '@kandev/ui/checkbox';
-import { Input } from '@kandev/ui/input';
-import { Label } from '@kandev/ui/label';
-import { Textarea } from '@kandev/ui/textarea';
+import { useState } from "react";
+import { IconEdit, IconGitBranch, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
+import { Badge } from "@kandev/ui/badge";
+import { Card, CardContent } from "@kandev/ui/card";
+import { Button } from "@kandev/ui/button";
+import { Checkbox } from "@kandev/ui/checkbox";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Textarea } from "@kandev/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -16,12 +16,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@kandev/ui/dialog';
-import { useRequest } from '@/lib/http/use-request';
-import { useToast } from '@/components/toast-provider';
-import { UnsavedChangesBadge, UnsavedSaveButton } from '@/components/settings/unsaved-indicator';
-import { EditableCard } from '@/components/settings/editable-card';
-import type { Repository, RepositoryScript } from '@/lib/types/http';
+} from "@kandev/ui/dialog";
+import { useRequest } from "@/lib/http/use-request";
+import { useToast } from "@/components/toast-provider";
+import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { EditableCard } from "@/components/settings/editable-card";
+import type { Repository, RepositoryScript } from "@/lib/types/http";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
@@ -64,7 +64,7 @@ function RepositoryBasicFields({
             value={repositoryLocalPath}
             onChange={(e) => onUpdate(repositoryId, { local_path: e.target.value })}
             placeholder="/path/to/repository"
-            disabled={sourceType !== 'local'}
+            disabled={sourceType !== "local"}
           />
         </div>
       </div>
@@ -74,14 +74,12 @@ function RepositoryBasicFields({
           <Label>Worktree Branch Prefix</Label>
           <Input
             value={worktreeBranchPrefix}
-            onChange={(e) =>
-              onUpdate(repositoryId, { worktree_branch_prefix: e.target.value })
-            }
+            onChange={(e) => onUpdate(repositoryId, { worktree_branch_prefix: e.target.value })}
             placeholder="feature/"
           />
           <p className="text-xs text-muted-foreground">
-            Used for new worktree branches. Leave empty to use the default.
-            Branches are generated as {'{prefix}{sanitized-title}-{rand}'}.
+            Used for new worktree branches. Leave empty to use the default. Branches are generated
+            as {"{prefix}{sanitized-title}-{rand}"}.
           </p>
         </div>
         <div className="space-y-2">
@@ -166,8 +164,8 @@ function RepositoryScriptFields({
           className="font-mono text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          Used to start the preview dev server for this repository.
-          Use <code className="px-1 py-0.5 bg-muted rounded">$PORT</code> for automatic port allocation.
+          Used to start the preview dev server for this repository. Use{" "}
+          <code className="px-1 py-0.5 bg-muted rounded">$PORT</code> for automatic port allocation.
         </p>
       </div>
     </>
@@ -198,12 +196,7 @@ function RepositoryCustomScripts({
           <span>Custom Scripts</span>
           {areScriptsDirty && <UnsavedChangesBadge />}
         </Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onAddScript(repositoryId)}
-        >
+        <Button type="button" variant="outline" size="sm" onClick={() => onAddScript(repositoryId)}>
           <IconPlus className="h-4 w-4 mr-1" />
           Add Script
         </Button>
@@ -216,7 +209,7 @@ function RepositoryCustomScripts({
             <div key={script.id} className="grid gap-2">
               <div className="flex items-center gap-2">
                 <Input
-                  value={script.name ?? ''}
+                  value={script.name ?? ""}
                   onChange={(e) =>
                     onUpdateScript(repositoryId, script.id, { name: e.target.value })
                   }
@@ -232,7 +225,7 @@ function RepositoryCustomScripts({
                 </Button>
               </div>
               <Textarea
-                value={script.command ?? ''}
+                value={script.command ?? ""}
                 onChange={(e) =>
                   onUpdateScript(repositoryId, script.id, { command: e.target.value })
                 }
@@ -252,7 +245,7 @@ type RepositoryEditViewProps = {
   repository: RepositoryWithScripts;
   isDirty: boolean;
   areScriptsDirty: boolean;
-  saveRequest: { isLoading: boolean; status: 'idle' | 'loading' | 'success' | 'error' };
+  saveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   onUpdate: (repoId: string, updates: Partial<Repository>) => void;
   onAddScript: (repoId: string) => void;
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
@@ -303,19 +296,19 @@ function RepositoryEditView({
           <RepositoryBasicFields
             repositoryId={repository.id}
             onUpdate={onUpdate}
-            repositoryName={repository.name ?? ''}
-            repositoryLocalPath={repository.local_path ?? ''}
+            repositoryName={repository.name ?? ""}
+            repositoryLocalPath={repository.local_path ?? ""}
             sourceType={repository.source_type}
-            worktreeBranchPrefix={repository.worktree_branch_prefix ?? ''}
+            worktreeBranchPrefix={repository.worktree_branch_prefix ?? ""}
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
           />
 
           <RepositoryScriptFields
             repositoryId={repository.id}
             onUpdate={onUpdate}
-            setupScript={repository.setup_script ?? ''}
-            cleanupScript={repository.cleanup_script ?? ''}
-            devScript={repository.dev_script ?? ''}
+            setupScript={repository.setup_script ?? ""}
+            cleanupScript={repository.cleanup_script ?? ""}
+            devScript={repository.dev_script ?? ""}
           />
 
           <RepositoryCustomScripts
@@ -353,30 +346,66 @@ type RepositoryPreviewProps = {
 };
 
 function buildRepoScriptsSummary(repository: RepositoryWithScripts) {
-  const setupScript = repository.setup_script ?? '';
-  const cleanupScript = repository.cleanup_script ?? '';
-  const devScript = repository.dev_script ?? '';
+  const setupScript = repository.setup_script ?? "";
+  const cleanupScript = repository.cleanup_script ?? "";
+  const devScript = repository.dev_script ?? "";
   const scriptsCount = repository.scripts.length;
   const hasSetupScript = Boolean(setupScript.trim());
   const hasCleanupScript = Boolean(cleanupScript.trim());
   const hasDevScript = Boolean(devScript.trim());
   const showScriptsSummary = scriptsCount > 0 || hasSetupScript || hasCleanupScript || hasDevScript;
-  const scriptsLabel = scriptsCount === 0 ? 'No custom scripts' : `${scriptsCount} custom script${scriptsCount === 1 ? '' : 's'}`;
-  return { scriptsCount, hasSetupScript, hasCleanupScript, hasDevScript, showScriptsSummary, scriptsLabel };
+  const scriptsLabel =
+    scriptsCount === 0
+      ? "No custom scripts"
+      : `${scriptsCount} custom script${scriptsCount === 1 ? "" : "s"}`;
+  return {
+    scriptsCount,
+    hasSetupScript,
+    hasCleanupScript,
+    hasDevScript,
+    showScriptsSummary,
+    scriptsLabel,
+  };
 }
 
 function buildRepoPreviewData(repository: RepositoryWithScripts) {
-  const repositoryName = repository.name ?? '';
-  const worktreeBranchPrefix = repository.worktree_branch_prefix ?? '';
-  const sourceLabel = repository.source_type === 'local' ? 'Local' : 'Remote';
-  const subtitle = repository.source_type === 'local'
-    ? repository.local_path || 'Local path not set'
-    : [repository.provider_owner, repository.provider_name].filter(Boolean).join('/') || repository.provider || 'Remote repository';
-  return { repositoryName, worktreeBranchPrefix, sourceLabel, subtitle, ...buildRepoScriptsSummary(repository) };
+  const repositoryName = repository.name ?? "";
+  const worktreeBranchPrefix = repository.worktree_branch_prefix ?? "";
+  const sourceLabel = repository.source_type === "local" ? "Local" : "Remote";
+  const subtitle =
+    repository.source_type === "local"
+      ? repository.local_path || "Local path not set"
+      : [repository.provider_owner, repository.provider_name].filter(Boolean).join("/") ||
+        repository.provider ||
+        "Remote repository";
+  return {
+    repositoryName,
+    worktreeBranchPrefix,
+    sourceLabel,
+    subtitle,
+    ...buildRepoScriptsSummary(repository),
+  };
 }
 
-function RepositoryPreview({ repository, isDirty, deleteLoading, onOpenDelete, open }: RepositoryPreviewProps) {
-  const { repositoryName, worktreeBranchPrefix, scriptsCount, hasSetupScript, hasCleanupScript, hasDevScript, showScriptsSummary, scriptsLabel, sourceLabel, subtitle } = buildRepoPreviewData(repository);
+function RepositoryPreview({
+  repository,
+  isDirty,
+  deleteLoading,
+  onOpenDelete,
+  open,
+}: RepositoryPreviewProps) {
+  const {
+    repositoryName,
+    worktreeBranchPrefix,
+    scriptsCount,
+    hasSetupScript,
+    hasCleanupScript,
+    hasDevScript,
+    showScriptsSummary,
+    scriptsLabel,
+    sourceLabel,
+    subtitle,
+  } = buildRepoPreviewData(repository);
 
   return (
     <Card>
@@ -388,22 +417,18 @@ function RepositoryPreview({ repository, isDirty, deleteLoading, onOpenDelete, o
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="font-medium truncate">
-                  {repositoryName || 'Untitled repository'}
-                </h4>
+                <h4 className="font-medium truncate">{repositoryName || "Untitled repository"}</h4>
                 <Badge variant="secondary" className="text-xs">
                   {sourceLabel}
                 </Badge>
-                {worktreeBranchPrefix.trim() && worktreeBranchPrefix.trim() !== 'feature/' ? (
+                {worktreeBranchPrefix.trim() && worktreeBranchPrefix.trim() !== "feature/" ? (
                   <Badge variant="outline" className="text-xs">
                     {worktreeBranchPrefix.trim()}
                   </Badge>
                 ) : null}
                 {isDirty && <UnsavedChangesBadge />}
               </div>
-              <div className="text-xs text-muted-foreground mt-1 truncate">
-                {subtitle}
-              </div>
+              <div className="text-xs text-muted-foreground mt-1 truncate">{subtitle}</div>
               {showScriptsSummary ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                   {scriptsCount > 0 && <span>{scriptsLabel}</span>}
@@ -507,7 +532,9 @@ export function RepositoryCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(() => autoOpen);
   const saveRequest = useRequest(() => onSave(repository.id));
-  const deleteRequest = useRequest(async () => { await onDelete(repository.id); });
+  const deleteRequest = useRequest(async () => {
+    await onDelete(repository.id);
+  });
   const isDirty = isRepositoryDirty || areScriptsDirty;
 
   const handleSave = async (close: () => void) => {
@@ -516,9 +543,9 @@ export function RepositoryCard({
       close();
     } catch (error) {
       toast({
-        title: 'Failed to save repository',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
+        title: "Failed to save repository",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
       });
     }
   };
@@ -530,9 +557,9 @@ export function RepositoryCard({
       setIsEditing(false);
     } catch (error) {
       toast({
-        title: 'Failed to delete repository',
-        description: error instanceof Error ? error.message : 'Request failed',
-        variant: 'error',
+        title: "Failed to delete repository",
+        description: error instanceof Error ? error.message : "Request failed",
+        variant: "error",
       });
     }
   };

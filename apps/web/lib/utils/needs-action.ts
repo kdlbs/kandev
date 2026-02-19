@@ -1,4 +1,4 @@
-import type { TaskState } from '@/lib/types/http';
+import type { TaskState } from "@/lib/types/http";
 
 /**
  * Determines if a task needs user attention/action.
@@ -6,11 +6,11 @@ import type { TaskState } from '@/lib/types/http';
  */
 export function needsAction(task: {
   state?: TaskState;
-  reviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
 }): boolean {
   return (
-    (task.reviewStatus === 'pending' && task.state !== 'IN_PROGRESS') ||
-    task.reviewStatus === 'changes_requested' ||
-    task.state === 'WAITING_FOR_INPUT'
+    (task.reviewStatus === "pending" && task.state !== "IN_PROGRESS") ||
+    task.reviewStatus === "changes_requested" ||
+    task.state === "WAITING_FOR_INPUT"
   );
 }

@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { memo, useRef, useState, type ReactNode } from 'react';
+import { memo, useRef, useState, type ReactNode } from "react";
 import {
   IconListCheck,
   IconFile,
@@ -9,16 +9,16 @@ import {
   IconAt,
   IconX,
   IconPinFilled,
-} from '@tabler/icons-react';
-import type { TablerIcon } from '@tabler/icons-react';
-import { HoverCard, HoverCardTrigger, HoverCardContent } from '@kandev/ui/hover-card';
-import type { ContextItemKind } from '@/lib/types/context';
+} from "@tabler/icons-react";
+import type { TablerIcon } from "@tabler/icons-react";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
+import type { ContextItemKind } from "@/lib/types/context";
 
 const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   plan: IconListCheck,
   file: IconFile,
   comment: IconMessageDots,
-  'plan-comment': IconMessageDots,
+  "plan-comment": IconMessageDots,
   image: IconPhoto,
   prompt: IconAt,
 };
@@ -49,7 +49,7 @@ export const ContextChip = memo(function ContextChip({
 
   const chip = (
     <div
-      className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? 'cursor-pointer hover:bg-muted/80' : ''}`}
+      className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? "cursor-pointer hover:bg-muted/80" : ""}`}
       onClick={onClick}
     >
       {thumbnail ? (
@@ -87,20 +87,10 @@ export const ContextChip = memo(function ContextChip({
 
   if (!preview) return chip;
 
-  return (
-    <ControlledHoverChip preview={preview}>
-      {chip}
-    </ControlledHoverChip>
-  );
+  return <ControlledHoverChip preview={preview}>{chip}</ControlledHoverChip>;
 });
 
-function ControlledHoverChip({
-  preview,
-  children,
-}: {
-  preview: ReactNode;
-  children: ReactNode;
-}) {
+function ControlledHoverChip({ preview, children }: { preview: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const suppressRef = useRef(false);
 
@@ -118,7 +108,9 @@ function ControlledHoverChip({
         onClick={() => {
           suppressRef.current = true;
           setOpen(false);
-          setTimeout(() => { suppressRef.current = false; }, 300);
+          setTimeout(() => {
+            suppressRef.current = false;
+          }, 300);
         }}
       >
         {children}

@@ -76,6 +76,7 @@ apps/backend/mock-agent
 .next/
 out/
 node_modules/
+.pnpm-store/
 
 # TypeScript
 *.tsbuildinfo

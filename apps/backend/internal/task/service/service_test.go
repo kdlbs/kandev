@@ -116,11 +116,11 @@ func TestService_CreateTask(t *testing.T) {
 
 	req := &CreateTaskRequest{
 		WorkspaceID:    "ws-1",
-		WorkflowID:        "wf-123",
+		WorkflowID:     "wf-123",
 		WorkflowStepID: "step-123",
-		Title:       "Test Task",
-		Description: "A test task",
-		Priority:    5,
+		Title:          "Test Task",
+		Description:    "A test task",
+		Priority:       5,
 		Repositories: []TaskRepositoryInput{
 			{
 				RepositoryID: "repo-123",
@@ -459,8 +459,6 @@ func TestService_ListWorkflows(t *testing.T) {
 		t.Errorf("expected 2 workflows, got %d", len(workflows))
 	}
 }
-
-
 
 // Message tests
 

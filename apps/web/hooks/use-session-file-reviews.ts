@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
+import { useState, useCallback, useEffect, useRef } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 export type FileReviewState = {
   reviewed: boolean;
@@ -34,7 +34,7 @@ let cacheVersion = 0;
 
 function notifyChange() {
   cacheVersion++;
-  window.dispatchEvent(new CustomEvent('file-reviews-change'));
+  window.dispatchEvent(new CustomEvent("file-reviews-change"));
 }
 
 /** Update shared cache with a new map and notify other hook instances. */
@@ -68,7 +68,7 @@ function fetchSessionReviews(
   queueMicrotask(() => setLoading(true));
 
   client
-    .request<{ reviews: SessionFileReview[] }>('session.file_review.get', { session_id: sessionId })
+    .request<{ reviews: SessionFileReview[] }>("session.file_review.get", { session_id: sessionId })
     .then((response) => {
       const map = new Map<string, FileReviewState>();
       if (response?.reviews) {
@@ -79,13 +79,17 @@ function fetchSessionReviews(
       updateCache(sessionId, map);
       setReviews(map);
     })
-    .catch(() => { /* Ignore errors - reviews are not critical */ })
-    .finally(() => { setLoading(false); });
+    .catch(() => {
+      /* Ignore errors - reviews are not critical */
+    })
+    .finally(() => {
+      setLoading(false);
+    });
 }
 
 export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
-  const [reviews, setReviews] = useState<Map<string, FileReviewState>>(
-    () => (sessionId ? reviewsCache[sessionId] ?? new Map() : new Map())
+  const [reviews, setReviews] = useState<Map<string, FileReviewState>>(() =>
+    sessionId ? (reviewsCache[sessionId] ?? new Map()) : new Map(),
   );
   const [loading, setLoading] = useState(false);
   const versionRef = useRef(cacheVersion);
@@ -99,8 +103,8 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
         setReviews(cached);
       }
     };
-    window.addEventListener('file-reviews-change', handler);
-    return () => window.removeEventListener('file-reviews-change', handler);
+    window.addEventListener("file-reviews-change", handler);
+    return () => window.removeEventListener("file-reviews-change", handler);
   }, [sessionId]);
 
   useEffect(() => {
@@ -117,29 +121,59 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   const markReviewed = useCallback(
     (filePath: string, diffHash: string) => {
       if (!sessionId) return;
-      optimisticUpdate(sessionId, (next) => { next.set(filePath, { reviewed: true, diffHash }); }, setReviews);
+      optimisticUpdate(
+        sessionId,
+        (next) => {
+          next.set(filePath, { reviewed: true, diffHash });
+        },
+        setReviews,
+      );
       const client = getWebSocketClient();
       if (!client) return;
       client
-        .request('session.file_review.update', { session_id: sessionId, file_path: filePath, reviewed: true, diff_hash: diffHash })
+        .request("session.file_review.update", {
+          session_id: sessionId,
+          file_path: filePath,
+          reviewed: true,
+          diff_hash: diffHash,
+        })
         .catch(() => {
-          optimisticUpdate(sessionId, (reverted) => { reverted.delete(filePath); }, setReviews);
+          optimisticUpdate(
+            sessionId,
+            (reverted) => {
+              reverted.delete(filePath);
+            },
+            setReviews,
+          );
         });
     },
-    [sessionId]
+    [sessionId],
   );
 
   const markUnreviewed = useCallback(
     (filePath: string) => {
       if (!sessionId) return;
-      optimisticUpdate(sessionId, (next) => { next.set(filePath, { reviewed: false, diffHash: '' }); }, setReviews);
+      optimisticUpdate(
+        sessionId,
+        (next) => {
+          next.set(filePath, { reviewed: false, diffHash: "" });
+        },
+        setReviews,
+      );
       const client = getWebSocketClient();
       if (!client) return;
       client
-        .request('session.file_review.update', { session_id: sessionId, file_path: filePath, reviewed: false, diff_hash: '' })
-        .catch(() => { /* Ignore failures for unmark */ });
+        .request("session.file_review.update", {
+          session_id: sessionId,
+          file_path: filePath,
+          reviewed: false,
+          diff_hash: "",
+        })
+        .catch(() => {
+          /* Ignore failures for unmark */
+        });
     },
-    [sessionId]
+    [sessionId],
   );
 
   const resetReviews = useCallback(() => {
@@ -149,7 +183,9 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
     notifyChange();
     const client = getWebSocketClient();
     if (!client) return;
-    client.request('session.file_review.reset', { session_id: sessionId }).catch(() => { /* Ignore */ });
+    client.request("session.file_review.reset", { session_id: sessionId }).catch(() => {
+      /* Ignore */
+    });
   }, [sessionId]);
 
   return { reviews, markReviewed, markUnreviewed, resetReviews, loading };

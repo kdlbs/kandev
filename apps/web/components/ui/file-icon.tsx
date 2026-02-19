@@ -48,10 +48,7 @@ const collectExtensionCandidates = (fileName: string): string[] => {
 };
 
 /** Look up a key in a map, falling back to its lowercase variant. */
-const lookupWithLowerFallback = (
-  map: Record<string, string>,
-  key: string,
-): string | undefined => {
+const lookupWithLowerFallback = (map: Record<string, string>, key: string): string | undefined => {
   const direct = map[key];
   if (direct) return direct;
   const lower = key.toLowerCase();

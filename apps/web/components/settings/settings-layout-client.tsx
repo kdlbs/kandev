@@ -1,22 +1,17 @@
-'use client';
+"use client";
 
-import { IconArrowLeft } from '@tabler/icons-react';
-import { usePathname } from 'next/navigation';
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-} from '@kandev/ui/breadcrumb';
-import { SidebarInset, SidebarProvider, SidebarTrigger } from '@kandev/ui/sidebar';
-import { SettingsAppSidebar } from '@/components/settings/settings-app-sidebar';
-import { TooltipProvider } from '@kandev/ui/tooltip';
+import { IconArrowLeft } from "@tabler/icons-react";
+import { usePathname } from "next/navigation";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from "@kandev/ui/breadcrumb";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
+import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAgentDetail = pathname.startsWith('/settings/agents/') && pathname !== '/settings/agents';
-  const breadcrumbLabel = isAgentDetail ? 'Agents' : 'Home';
-  const breadcrumbHref = isAgentDetail ? '/settings/agents' : '/';
+  const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
+  const breadcrumbLabel = isAgentDetail ? "Agents" : "Home";
+  const breadcrumbHref = isAgentDetail ? "/settings/agents" : "/";
 
   return (
     <TooltipProvider>
@@ -38,9 +33,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
               </Breadcrumb>
             </div>
           </header>
-          <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-            {children}
-          </div>
+          <div className="flex flex-1 flex-col gap-4 p-4 pt-0">{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

@@ -61,4 +61,3 @@ type CumulativeDiff struct {
 	TotalCommits int                    `json:"total_commits"`
 	Files        map[string]interface{} `json:"files"` // Cumulative file changes
 }
-

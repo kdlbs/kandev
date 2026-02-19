@@ -1,12 +1,16 @@
-'use client';
+"use client";
 
-import { PluginKey } from '@tiptap/pm/state';
-import type { SuggestionOptions, SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion';
-import type { MentionItem } from '@/hooks/use-inline-mention';
-import type { SlashCommand } from '@/hooks/use-inline-slash';
+import { PluginKey } from "@tiptap/pm/state";
+import type {
+  SuggestionOptions,
+  SuggestionProps,
+  SuggestionKeyDownProps,
+} from "@tiptap/suggestion";
+import type { MentionItem } from "@/hooks/use-inline-mention";
+import type { SlashCommand } from "@/hooks/use-inline-slash";
 
-import { getFileName } from '@/lib/utils/file-path';
-import type { MentionKind } from './tiptap-mention-extension';
+import { getFileName } from "@/lib/utils/file-path";
+import type { MentionKind } from "./tiptap-mention-extension";
 
 // ── Shared types ────────────────────────────────────────────────────
 
@@ -21,7 +25,7 @@ export type MenuState<T> = {
 const EMPTY_MENTION_STATE: MenuState<MentionItem> = {
   isOpen: false,
   items: [],
-  query: '',
+  query: "",
   clientRect: null,
   command: null,
 };
@@ -29,7 +33,7 @@ const EMPTY_MENTION_STATE: MenuState<MentionItem> = {
 const EMPTY_SLASH_STATE: MenuState<SlashCommand> = {
   isOpen: false,
   items: [],
-  query: '',
+  query: "",
   clientRect: null,
   command: null,
 };
@@ -40,7 +44,7 @@ export type MentionSuggestionCallbacks = {
   getItems: (query: string) => Promise<MentionItem[]>;
 };
 
-export const MentionSuggestionPluginKey = new PluginKey('mentionSuggestion');
+export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
 
 /**
  * Creates a mention suggestion config for TipTap.
@@ -51,9 +55,11 @@ export function createMentionSuggestion(
   callbacks: MentionSuggestionCallbacks,
   setMenuState: (state: MenuState<MentionItem>) => void,
   onKeyDown: (event: KeyboardEvent) => boolean,
-): Partial<SuggestionOptions<MentionItem, { id: string; label: string; kind: MentionKind; path: string }>> {
+): Partial<
+  SuggestionOptions<MentionItem, { id: string; label: string; kind: MentionKind; path: string }>
+> {
   return {
-    char: '@',
+    char: "@",
     pluginKey: MentionSuggestionPluginKey,
     allowSpaces: false,
 
@@ -66,8 +72,8 @@ export function createMentionSuggestion(
         .chain()
         .focus()
         .insertContentAt(range, [
-          { type: 'contextMention', attrs: mentionAttrs },
-          { type: 'text', text: ' ' },
+          { type: "contextMention", attrs: mentionAttrs },
+          { type: "text", text: " " },
         ])
         .run();
     },
@@ -99,7 +105,7 @@ export function createMentionSuggestion(
         },
 
         onKeyDown(kd: SuggestionKeyDownProps) {
-          if (kd.event.key === 'Escape') {
+          if (kd.event.key === "Escape") {
             setMenuState(EMPTY_MENTION_STATE);
             return true;
           }
@@ -114,19 +120,22 @@ export function createMentionSuggestion(
   };
 }
 
-function mentionItemToAttrs(item: MentionItem): { id: string; label: string; kind: MentionKind; path: string } {
-  const name = item.kind === 'file'
-    ? getFileName(item.label)
-    : item.label;
+function mentionItemToAttrs(item: MentionItem): {
+  id: string;
+  label: string;
+  kind: MentionKind;
+  path: string;
+} {
+  const name = item.kind === "file" ? getFileName(item.label) : item.label;
 
   return {
     id: item.id,
     label: name,
     kind: item.kind,
     path: (() => {
-      if (item.kind === 'file') return item.label;
-      if (item.kind === 'prompt') return `prompt:${item.id}`;
-      return 'plan:context';
+      if (item.kind === "file") return item.label;
+      if (item.kind === "prompt") return `prompt:${item.id}`;
+      return "plan:context";
     })(),
   };
 }
@@ -138,7 +147,7 @@ export type SlashSuggestionCallbacks = {
   onAgentCommand: (commandName: string) => void;
 };
 
-export const SlashSuggestionPluginKey = new PluginKey('slashSuggestion');
+export const SlashSuggestionPluginKey = new PluginKey("slashSuggestion");
 
 export function createSlashSuggestion(
   callbacks: SlashSuggestionCallbacks,
@@ -146,7 +155,7 @@ export function createSlashSuggestion(
   onKeyDown: (event: KeyboardEvent) => boolean,
 ): Partial<SuggestionOptions<SlashCommand>> {
   return {
-    char: '/',
+    char: "/",
     pluginKey: SlashSuggestionPluginKey,
     allowSpaces: false,
 
@@ -206,7 +215,7 @@ export function createSlashSuggestion(
         },
 
         onKeyDown(kd: SuggestionKeyDownProps) {
-          if (kd.event.key === 'Escape') {
+          if (kd.event.key === "Escape") {
             setMenuState(EMPTY_SLASH_STATE);
             return true;
           }

@@ -1,12 +1,12 @@
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { useSession } from '@/hooks/domains/session/use-session';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { useSession } from "@/hooks/domains/session/use-session";
 
 export function useSessionWorktrees(sessionId: string | null) {
   const { session } = useSession(sessionId);
   const worktrees = useAppStore((state) => state.worktrees.items);
   const sessionWorktreesBySessionId = useAppStore(
-    (state) => state.sessionWorktreesBySessionId.itemsBySessionId
+    (state) => state.sessionWorktreesBySessionId.itemsBySessionId,
   );
 
   return useMemo(() => {

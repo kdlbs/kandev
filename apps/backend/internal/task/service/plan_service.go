@@ -195,4 +195,3 @@ func (s *PlanService) publishEvent(ctx context.Context, eventType string, plan *
 		s.logger.Error("failed to publish task plan event", zap.String("event_type", eventType), zap.Error(err))
 	}
 }
-

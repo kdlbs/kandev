@@ -82,9 +82,10 @@ help:
 	@echo "  lint             Run linters for both components"
 	@echo "  lint-backend     Run Go linters"
 	@echo "  lint-web         Run ESLint"
+	@echo "  lint-format      Check formatting with Prettier (web/cli/packages)"
 	@echo "  fmt              Format all code"
 	@echo "  fmt-backend      Format Go code"
-	@echo "  fmt-web          Format web code with ESLint"
+	@echo "  fmt-web          Format web/cli/packages with Prettier, then ESLint --fix (web)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean            Remove all build artifacts"
@@ -220,6 +221,11 @@ lint-web:
 	@printf "$(CYAN)Linting web app...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint
 
+.PHONY: lint-format
+lint-format:
+	@printf "$(CYAN)Checking formatting...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) run format:check
+
 .PHONY: fmt
 fmt: fmt-backend fmt-web
 	@printf "\n$(GREEN)$(BOLD)✓ Code formatting complete!$(RESET)\n"
@@ -232,7 +238,7 @@ fmt-backend:
 .PHONY: fmt-web
 fmt-web:
 	@printf "$(CYAN)Formatting web code...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web lint -- --fix || true
+	@cd $(APPS_DIR) && $(PNPM) run format
 
 .PHONY: typecheck-web
 typecheck-web:

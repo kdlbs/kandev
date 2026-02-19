@@ -18,22 +18,22 @@ import (
 
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
-	SessionID      string            `json:"session_id"`                 // Required: Agent session owning this process
-	Command        []string          `json:"command"`                    // Required: Command and args to execute
-	WorkingDir     string            `json:"working_dir"`                // Working directory
-	Env            map[string]string `json:"env,omitempty"`              // Additional environment variables
-	PromptPattern  string            `json:"prompt_pattern,omitempty"`   // Regex pattern to detect agent prompt for turn completion
-	IdleTimeout    time.Duration     `json:"idle_timeout,omitempty"`     // Idle timeout for turn detection
-	BufferMaxBytes int64             `json:"buffer_max_bytes,omitempty"` // Max output buffer size
-	StatusDetector string            `json:"status_detector,omitempty"`  // Status detector type: "claude_code", "codex", ""
-	CheckInterval   time.Duration    `json:"check_interval,omitempty"`   // How often to check state (default 100ms)
-	StabilityWindow time.Duration    `json:"stability_window,omitempty"` // State stability window (default 0)
-	ImmediateStart  bool             `json:"immediate_start,omitempty"`  // Start immediately with default dimensions (don't wait for resize)
-	DefaultCols     int              `json:"default_cols,omitempty"`     // Default columns if ImmediateStart (default 120)
-	DefaultRows     int              `json:"default_rows,omitempty"`     // Default rows if ImmediateStart (default 40)
-	InitialCommand       string `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
-	DisableTurnDetection bool   `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
-	IsUserShell          bool   `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
+	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
+	Command              []string          `json:"command"`                          // Required: Command and args to execute
+	WorkingDir           string            `json:"working_dir"`                      // Working directory
+	Env                  map[string]string `json:"env,omitempty"`                    // Additional environment variables
+	PromptPattern        string            `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
+	IdleTimeout          time.Duration     `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
+	BufferMaxBytes       int64             `json:"buffer_max_bytes,omitempty"`       // Max output buffer size
+	StatusDetector       string            `json:"status_detector,omitempty"`        // Status detector type: "claude_code", "codex", ""
+	CheckInterval        time.Duration     `json:"check_interval,omitempty"`         // How often to check state (default 100ms)
+	StabilityWindow      time.Duration     `json:"stability_window,omitempty"`       // State stability window (default 0)
+	ImmediateStart       bool              `json:"immediate_start,omitempty"`        // Start immediately with default dimensions (don't wait for resize)
+	DefaultCols          int               `json:"default_cols,omitempty"`           // Default columns if ImmediateStart (default 120)
+	DefaultRows          int               `json:"default_rows,omitempty"`           // Default rows if ImmediateStart (default 40)
+	InitialCommand       string            `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
+	DisableTurnDetection bool              `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
+	IsUserShell          bool              `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
 }
 
 // InteractiveProcessInfo represents the state of an interactive process.
@@ -90,9 +90,9 @@ type userShellEntry struct {
 
 // InteractiveRunner manages interactive PTY-based processes with stdin support.
 type InteractiveRunner struct {
-	logger           *logger.Logger
-	workspaceTracker *WorkspaceTracker
-	bufferMaxBytes   int64
+	logger               *logger.Logger
+	workspaceTracker     *WorkspaceTracker
+	bufferMaxBytes       int64
 	turnCompleteCallback TurnCompleteCallback
 	outputCallback       OutputCallback
 	statusCallback       StatusCallback

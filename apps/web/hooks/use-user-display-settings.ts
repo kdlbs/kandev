@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { fetchUserSettings, updateUserSettings } from '@/lib/api';
-import { mapSelectedRepositoryIds } from '@/lib/kanban/filters';
-import { useAppStore } from '@/components/state-provider';
-import { useRepositories } from '@/hooks/domains/workspace/use-repositories';
-import type { Repository } from '@/lib/types/http';
-import type { UserSettingsState } from '@/lib/state/slices/settings/types';
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api";
+import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { useAppStore } from "@/components/state-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import type { Repository } from "@/lib/types/http";
+import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -30,13 +30,14 @@ function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings):
   return {
     workspaceId: next.workspaceId,
     workflowId: next.workflowId,
-    kanbanViewMode: next.kanbanViewMode !== undefined ? next.kanbanViewMode : (current.kanbanViewMode ?? null),
+    kanbanViewMode:
+      next.kanbanViewMode !== undefined ? next.kanbanViewMode : (current.kanbanViewMode ?? null),
     repositoryIds,
     preferredShell: next.preferredShell ?? current.preferredShell ?? null,
     shellOptions: current.shellOptions ?? [],
     defaultEditorId: current.defaultEditorId ?? null,
     enablePreviewOnClick: next.enablePreviewOnClick ?? current.enablePreviewOnClick,
-    chatSubmitKey: current.chatSubmitKey ?? 'cmd_enter',
+    chatSubmitKey: current.chatSubmitKey ?? "cmd_enter",
     reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
     lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
     lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
@@ -61,12 +62,24 @@ function isSettingsUnchanged(normalized: DisplaySettings, current: DisplaySettin
 function persistSettingsPayload(payload: Record<string, unknown>) {
   const client = getWebSocketClient();
   if (!client) {
-    updateUserSettings(payload, { cache: 'no-store' }).catch(() => { /* ignore */ });
+    updateUserSettings(payload, { cache: "no-store" }).catch(() => {
+      /* ignore */
+    });
     return;
   }
-  client.request('user.settings.update', payload).catch(() => {
-    updateUserSettings(payload, { cache: 'no-store' }).catch(() => { /* ignore */ });
+  client.request("user.settings.update", payload).catch(() => {
+    updateUserSettings(payload, { cache: "no-store" }).catch(() => {
+      /* ignore */
+    });
   });
+}
+
+function useUserSettingsRef(userSettings: DisplaySettings) {
+  const userSettingsRef = useRef(userSettings);
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  }, [userSettings]);
+  return userSettingsRef;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,7 +95,7 @@ function mapFetchedUserSettings(data: any): DisplaySettings {
     shellOptions: data.shell_options ?? [],
     defaultEditorId: s.default_editor_id || null,
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? 'cmd_enter',
+    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
@@ -90,6 +103,23 @@ function mapFetchedUserSettings(data: any): DisplaySettings {
     savedLayouts: s.saved_layouts ?? [],
     loaded: true,
   };
+}
+
+function useLoadUserSettings(
+  loaded: boolean,
+  setUserSettings: (settings: DisplaySettings) => void,
+) {
+  useEffect(() => {
+    if (loaded) return;
+    fetchUserSettings({ cache: "no-store" })
+      .then((data) => {
+        if (!data?.settings) return;
+        setUserSettings(mapFetchedUserSettings(data));
+      })
+      .catch(() => {
+        /* Ignore settings fetch errors for now. */
+      });
+  }, [loaded, setUserSettings]);
 }
 
 export function useUserDisplaySettings({
@@ -101,8 +131,7 @@ export function useUserDisplaySettings({
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
-  const userSettingsRef = useRef(userSettings);
-  useEffect(() => { userSettingsRef.current = userSettings; });
+  const userSettingsRef = useUserSettingsRef(userSettings);
 
   const settingsLoadedOnMountRef = useRef(userSettings.loaded);
 
@@ -113,26 +142,18 @@ export function useUserDisplaySettings({
       if (isSettingsUnchanged(normalized, current)) return;
       setUserSettings(normalized);
       const payload = {
-        workspace_id: normalized.workspaceId ?? '',
-        workflow_filter_id: normalized.workflowId ?? '',
+        workspace_id: normalized.workspaceId ?? "",
+        workflow_filter_id: normalized.workflowId ?? "",
         repository_ids: normalized.repositoryIds,
         enable_preview_on_click: normalized.enablePreviewOnClick,
-        kanban_view_mode: normalized.kanbanViewMode ?? '',
+        kanban_view_mode: normalized.kanbanViewMode ?? "",
       };
       persistSettingsPayload(payload);
     },
-    [setUserSettings]
+    [setUserSettings, userSettingsRef],
   );
 
-  useEffect(() => {
-    if (userSettings.loaded) return;
-    fetchUserSettings({ cache: 'no-store' })
-      .then((data) => {
-        if (!data?.settings) return;
-        setUserSettings(mapFetchedUserSettings(data));
-      })
-      .catch(() => { /* Ignore settings fetch errors for now. */ });
-  }, [setUserSettings, userSettings.loaded]);
+  useLoadUserSettings(userSettings.loaded, setUserSettings);
 
   useEffect(() => {
     if (!userSettings.loaded) return;
@@ -146,9 +167,20 @@ export function useUserDisplaySettings({
   useEffect(() => {
     if (!userSettings.loaded || !(!userSettings.workspaceId && workspaceId)) return;
     queueMicrotask(() => {
-      commitSettings({ workspaceId, workflowId: userSettings.workflowId, repositoryIds: userSettings.repositoryIds });
+      commitSettings({
+        workspaceId,
+        workflowId: userSettings.workflowId,
+        repositoryIds: userSettings.repositoryIds,
+      });
     });
-  }, [commitSettings, userSettings.workflowId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId, workspaceId]);
+  }, [
+    commitSettings,
+    userSettings.workflowId,
+    userSettings.loaded,
+    userSettings.repositoryIds,
+    userSettings.workspaceId,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!userSettings.loaded) return;
@@ -162,20 +194,39 @@ export function useUserDisplaySettings({
     if (!userSettings.loaded || repositories.length === 0) return;
     const repoIds = repositories.map((repo: Repository) => repo.id);
     const validIds = userSettings.repositoryIds.filter((id: string) => repoIds.includes(id));
-    const isSame = validIds.length === userSettings.repositoryIds.length &&
+    const isSame =
+      validIds.length === userSettings.repositoryIds.length &&
       validIds.every((id: string, index: number) => id === userSettings.repositoryIds[index]);
     if (!isSame) {
       queueMicrotask(() => {
-        commitSettings({ workspaceId: userSettings.workspaceId, workflowId: userSettings.workflowId, repositoryIds: validIds });
+        commitSettings({
+          workspaceId: userSettings.workspaceId,
+          workflowId: userSettings.workflowId,
+          repositoryIds: validIds,
+        });
       });
     }
-  }, [commitSettings, repositories, userSettings.workflowId, userSettings.loaded, userSettings.repositoryIds, userSettings.workspaceId]);
+  }, [
+    commitSettings,
+    repositories,
+    userSettings.workflowId,
+    userSettings.loaded,
+    userSettings.repositoryIds,
+    userSettings.workspaceId,
+  ]);
 
   const allRepositoriesSelected = userSettings.repositoryIds.length === 0;
   const selectedRepositoryIds = useMemo(
     () => mapSelectedRepositoryIds(repositories, userSettings.repositoryIds),
-    [repositories, userSettings.repositoryIds]
+    [repositories, userSettings.repositoryIds],
   );
 
-  return { settings: userSettings, commitSettings, repositories, repositoriesLoading, allRepositoriesSelected, selectedRepositoryIds };
+  return {
+    settings: userSettings,
+    commitSettings,
+    repositories,
+    repositoriesLoading,
+    allRepositoriesSelected,
+    selectedRepositoryIds,
+  };
 }

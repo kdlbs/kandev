@@ -100,4 +100,3 @@ type PermissionRespondResponse struct {
 	// Error contains error message if Success is false.
 	Error string `json:"error,omitempty"`
 }
-

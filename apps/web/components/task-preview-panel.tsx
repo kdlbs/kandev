@@ -14,7 +14,12 @@ interface TaskPreviewPanelProps {
   onMaximize?: (task: Task, sessionId: string) => void;
 }
 
-export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }: TaskPreviewPanelProps) {
+export function TaskPreviewPanel({
+  task,
+  sessionId = null,
+  onClose,
+  onMaximize,
+}: TaskPreviewPanelProps) {
   const { taskSessionId } = useTaskChatSession(task?.id ?? null);
   const activeSessionId = sessionId ?? taskSessionId;
 
@@ -33,7 +38,7 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
       await client.request(
         "message.add",
         { task_id: task.id, session_id: activeSessionId, content },
-        10000
+        10000,
       );
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -44,9 +49,7 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
     <div className="flex h-full w-full flex-col border-l bg-background">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold truncate">
-          {task?.title ?? "Task Chat"}
-        </h2>
+        <h2 className="text-sm font-semibold truncate">{task?.title ?? "Task Chat"}</h2>
         <div className="flex items-center gap-1">
           {onMaximize && activeSessionId && task && (
             <Button
@@ -70,10 +73,7 @@ export function TaskPreviewPanel({ task, sessionId = null, onClose, onMaximize }
       {/* Content */}
       <div className="flex-1 min-h-0 p-4 flex flex-col">
         {task ? (
-          <TaskChatPanel
-            onSend={handleSendMessage}
-            sessionId={activeSessionId}
-          />
+          <TaskChatPanel onSend={handleSendMessage} sessionId={activeSessionId} />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Select a task to start chatting

@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { IconAt, IconFile, IconFolder, IconListCheck } from '@tabler/icons-react';
-import type { MentionItem } from '@/hooks/use-inline-mention';
-import { getFileName, isDirectory } from '@/lib/utils/file-path';
-import { PopupMenu, PopupMenuItem, useMenuItemRefs } from './popup-menu';
+import { IconAt, IconFile, IconFolder, IconListCheck } from "@tabler/icons-react";
+import type { MentionItem } from "@/hooks/use-inline-mention";
+import { getFileName, isDirectory } from "@/lib/utils/file-path";
+import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
 
 type MentionMenuProps = {
   isOpen: boolean;
@@ -20,10 +20,10 @@ type MentionMenuProps = {
 
 // Get the appropriate icon for an item
 function getItemIcon(item: MentionItem) {
-  if (item.kind === 'prompt') {
+  if (item.kind === "prompt") {
     return <IconAt className="h-4 w-4" />;
   }
-  if (item.kind === 'plan') {
+  if (item.kind === "plan") {
     return <IconListCheck className="h-4 w-4" />;
   }
   const isDir = isDirectory(item.label);
@@ -32,7 +32,7 @@ function getItemIcon(item: MentionItem) {
 
 // Get the label and description for an item
 function getItemDisplay(item: MentionItem): { label: string; description?: string } {
-  if (item.kind === 'prompt' || item.kind === 'plan') {
+  if (item.kind === "prompt" || item.kind === "plan") {
     return { label: item.label, description: item.description };
   }
   const name = getFileName(item.label);
@@ -57,9 +57,9 @@ export function MentionMenu({
   const emptyState = (
     <div className="px-3 py-1 text-center text-xs text-muted-foreground">
       {(() => {
-        if (isLoading) return 'Loading...';
-        if (query) return 'No results found';
-        return 'Type to search...';
+        if (isLoading) return "Loading...";
+        if (query) return "No results found";
+        return "Type to search...";
       })()}
     </div>
   );

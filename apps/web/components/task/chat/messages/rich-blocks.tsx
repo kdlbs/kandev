@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { IconBrain, IconCode, IconListCheck } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
-import type { Message } from '@/lib/types/http';
-import type { RichMetadata } from '@/components/task/chat/types';
-import { DiffViewBlock } from '@/components/task/chat/messages/diff-view-block';
-import { normalizeDiffString } from '@/lib/diff';
-import type { FileDiffData } from '@/lib/diff/types';
+import { IconBrain, IconCode, IconListCheck } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
+import type { Message } from "@/lib/types/http";
+import type { RichMetadata } from "@/components/task/chat/types";
+import { DiffViewBlock } from "@/components/task/chat/messages/diff-view-block";
+import { normalizeDiffString } from "@/lib/diff";
+import type { FileDiffData } from "@/lib/diff/types";
 
 /**
  * Resolve old diff payload format to new FileDiffData format
@@ -15,13 +15,13 @@ function resolveDiffPayload(diff: unknown): FileDiffData | null {
   if (!diff) return null;
 
   // Handle string diff
-  if (typeof diff === 'string') {
-    const normalized = normalizeDiffString(diff, 'file');
+  if (typeof diff === "string") {
+    const normalized = normalizeDiffString(diff, "file");
     if (!normalized) return null;
     return {
-      filePath: 'file',
-      oldContent: '',
-      newContent: '',
+      filePath: "file",
+      oldContent: "",
+      newContent: "",
       diff: normalized,
       additions: 0,
       deletions: 0,
@@ -30,13 +30,13 @@ function resolveDiffPayload(diff: unknown): FileDiffData | null {
 
   // Handle array of hunks (legacy format)
   if (Array.isArray(diff)) {
-    const hunkStrings = diff.map((hunk) => String(hunk)).join('\n');
-    const normalized = normalizeDiffString(hunkStrings, 'file');
+    const hunkStrings = diff.map((hunk) => String(hunk)).join("\n");
+    const normalized = normalizeDiffString(hunkStrings, "file");
     if (!normalized) return null;
     return {
-      filePath: 'file',
-      oldContent: '',
-      newContent: '',
+      filePath: "file",
+      oldContent: "",
+      newContent: "",
       diff: normalized,
       additions: 0,
       deletions: 0,
@@ -44,17 +44,21 @@ function resolveDiffPayload(diff: unknown): FileDiffData | null {
   }
 
   // Handle object with hunks array (legacy format)
-  if (typeof diff === 'object' && diff !== null) {
-    const candidate = diff as { hunks?: unknown[]; oldFile?: { fileName?: string }; newFile?: { fileName?: string } };
+  if (typeof diff === "object" && diff !== null) {
+    const candidate = diff as {
+      hunks?: unknown[];
+      oldFile?: { fileName?: string };
+      newFile?: { fileName?: string };
+    };
     if (Array.isArray(candidate.hunks)) {
-      const hunkStrings = candidate.hunks.map((hunk) => String(hunk)).join('\n');
-      const filePath = candidate.newFile?.fileName || candidate.oldFile?.fileName || 'file';
+      const hunkStrings = candidate.hunks.map((hunk) => String(hunk)).join("\n");
+      const filePath = candidate.newFile?.fileName || candidate.oldFile?.fileName || "file";
       const normalized = normalizeDiffString(hunkStrings, filePath);
       if (!normalized) return null;
       return {
         filePath,
-        oldContent: '',
-        newContent: '',
+        oldContent: "",
+        newContent: "",
         diff: normalized,
         additions: 0,
         deletions: 0,
@@ -71,10 +75,10 @@ export function RichBlocks({ comment }: { comment: Message }) {
 
   const todos = metadata.todos ?? [];
   const todoItems = todos
-    .map((item) => (typeof item === 'string' ? { text: item, done: false } : item))
+    .map((item) => (typeof item === "string" ? { text: item, done: false } : item))
     .filter((item) => item.text);
   const diffData = resolveDiffPayload(metadata.diff);
-  const diffText = typeof metadata.diff === 'string' ? metadata.diff : null;
+  const diffText = typeof metadata.diff === "string" ? metadata.diff : null;
 
   return (
     <>
@@ -98,11 +102,11 @@ export function RichBlocks({ comment }: { comment: Message }) {
               <div key={todo.text} className="flex items-center gap-2">
                 <span
                   className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    todo.done ? 'bg-green-500' : 'bg-muted-foreground/60'
+                    "h-1.5 w-1.5 rounded-full",
+                    todo.done ? "bg-green-500" : "bg-muted-foreground/60",
                   )}
                 />
-                <span className={cn(todo.done && 'line-through text-muted-foreground')}>
+                <span className={cn(todo.done && "line-through text-muted-foreground")}>
                   {todo.text}
                 </span>
               </div>
@@ -110,9 +114,7 @@ export function RichBlocks({ comment }: { comment: Message }) {
           </div>
         </div>
       )}
-      {diffData && (
-        <DiffViewBlock data={diffData} />
-      )}
+      {diffData && <DiffViewBlock data={diffData} />}
       {!diffData && diffText && (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 uppercase tracking-wide">

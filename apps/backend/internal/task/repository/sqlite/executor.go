@@ -325,4 +325,3 @@ func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, execut
 	}
 	return err == nil, err
 }
-

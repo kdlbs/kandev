@@ -10,9 +10,9 @@
  * ReactMarkViewRenderer caused on multi-line selections.
  */
 
-import { Mark, mergeAttributes } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { Mark, mergeAttributes } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,39 +40,44 @@ export const MIN_COMMENT_TEXT_LENGTH = 3;
 type DocLike = any;
 
 function getTextWithPositions(doc: DocLike): { text: string; positions: number[] } {
-  let text = '';
+  let text = "";
   const positions: number[] = [];
 
-  doc.descendants((node: { isText: boolean; text?: string; type: { name: string }; isBlock: boolean }, pos: number) => {
-    if (node.isText && node.text) {
-      for (let i = 0; i < node.text.length; i++) {
-        positions.push(pos + i);
-        text += node.text[i];
+  doc.descendants(
+    (
+      node: { isText: boolean; text?: string; type: { name: string }; isBlock: boolean },
+      pos: number,
+    ) => {
+      if (node.isText && node.text) {
+        for (let i = 0; i < node.text.length; i++) {
+          positions.push(pos + i);
+          text += node.text[i];
+        }
+      } else if (node.type.name === "hardBreak") {
+        positions.push(-1);
+        text += " ";
+      } else if (node.isBlock && text.length > 0 && !text.endsWith("\n")) {
+        positions.push(-1);
+        text += "\n";
       }
-    } else if (node.type.name === 'hardBreak') {
-      positions.push(-1);
-      text += ' ';
-    } else if (node.isBlock && text.length > 0 && !text.endsWith('\n')) {
-      positions.push(-1);
-      text += '\n';
-    }
-  });
+    },
+  );
 
   return { text, positions };
 }
 
 function normalizeForSearch(text: string): string {
   return text
-    .replace(/\r\n/g, '\n')
-    .replace(/[\t ]+/g, ' ')
-    .replace(/\n+/g, '\n')
+    .replace(/\r\n/g, "\n")
+    .replace(/[\t ]+/g, " ")
+    .replace(/\n+/g, "\n")
     .trim()
     .toLowerCase();
 }
 
 function buildNormToOrigMap(fullText: string, normalizedFullText: string): number[] {
-  const normalizedChars = normalizedFullText.split('');
-  const origChars = fullText.split('');
+  const normalizedChars = normalizedFullText.split("");
+  const origChars = fullText.split("");
   const normToOrig: number[] = [];
   let oi = 0;
   for (let ni = 0; ni < normalizedChars.length; ni++) {
@@ -123,14 +128,26 @@ function findCommentByTextSearch(
 
   let normalizedIndex = normalizedFullText.indexOf(searchText);
   if (normalizedIndex !== -1) {
-    return resolveTextSearchPositions(normalizedIndex, searchText.length, fullText, normalizedFullText, positions);
+    return resolveTextSearchPositions(
+      normalizedIndex,
+      searchText.length,
+      fullText,
+      normalizedFullText,
+      positions,
+    );
   }
 
-  const firstLine = normalizeForSearch(comment.selectedText.split('\n')[0]);
+  const firstLine = normalizeForSearch(comment.selectedText.split("\n")[0]);
   if (firstLine.length >= MIN_COMMENT_TEXT_LENGTH) {
     normalizedIndex = normalizedFullText.indexOf(firstLine);
     if (normalizedIndex !== -1) {
-      return resolveTextSearchPositions(normalizedIndex, firstLine.length, fullText, normalizedFullText, positions);
+      return resolveTextSearchPositions(
+        normalizedIndex,
+        firstLine.length,
+        fullText,
+        normalizedFullText,
+        positions,
+      );
     }
   }
 
@@ -143,15 +160,17 @@ function findCommentByTextSearch(
 
 function collectCommentIds(doc: DocLike, markTypeName: string): Set<string> {
   const ids = new Set<string>();
-  doc.descendants((node: { marks?: Array<{ type: { name: string }; attrs: { commentId?: string } }> }) => {
-    if (node.marks) {
-      for (const mark of node.marks) {
-        if (mark.type.name === markTypeName && mark.attrs.commentId) {
-          ids.add(mark.attrs.commentId);
+  doc.descendants(
+    (node: { marks?: Array<{ type: { name: string }; attrs: { commentId?: string } }> }) => {
+      if (node.marks) {
+        for (const mark of node.marks) {
+          if (mark.type.name === markTypeName && mark.attrs.commentId) {
+            ids.add(mark.attrs.commentId);
+          }
         }
       }
-    }
-  });
+    },
+  );
   return ids;
 }
 
@@ -160,9 +179,9 @@ function collectCommentIds(doc: DocLike, markTypeName: string): Set<string> {
 // ---------------------------------------------------------------------------
 
 function createCommentBadge(commentId: string): HTMLSpanElement {
-  const badge = document.createElement('span');
-  badge.className = 'comment-badge';
-  badge.setAttribute('data-comment-id', commentId);
+  const badge = document.createElement("span");
+  badge.className = "comment-badge";
+  badge.setAttribute("data-comment-id", commentId);
   badge.innerHTML =
     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -175,7 +194,13 @@ function buildBadgeDecorations(doc: DocLike, markTypeName: string): DecorationSe
   const lastPos = new Map<string, number>();
 
   doc.descendants(
-    (node: { marks?: Array<{ type: { name: string }; attrs: { commentId?: string } }>; nodeSize: number }, pos: number) => {
+    (
+      node: {
+        marks?: Array<{ type: { name: string }; attrs: { commentId?: string } }>;
+        nodeSize: number;
+      },
+      pos: number,
+    ) => {
       if (!node.marks) return;
       for (const mark of node.marks) {
         if (mark.type.name === markTypeName && mark.attrs.commentId) {
@@ -203,8 +228,8 @@ function buildBadgeDecorations(doc: DocLike, markTypeName: string): DecorationSe
 // Plugin keys
 // ---------------------------------------------------------------------------
 
-const orphanPluginKey = new PluginKey('commentMark-orphanDetection');
-const badgePluginKey = new PluginKey('commentMark-badges');
+const orphanPluginKey = new PluginKey("commentMark-orphanDetection");
+const badgePluginKey = new PluginKey("commentMark-badges");
 
 // ---------------------------------------------------------------------------
 // Helper: find commentId at a document position
@@ -228,10 +253,10 @@ function commentIdAtPos(doc: DocLike, pos: number, markTypeName: string): string
 // ---------------------------------------------------------------------------
 
 export const CommentMark = Mark.create<CommentMarkOptions>({
-  name: 'commentMark',
+  name: "commentMark",
 
   // Coexist with bold, italic, highlight, etc.
-  excludes: '',
+  excludes: "",
 
   // Typing at the edge of a mark should NOT extend it
   inclusive: false,
@@ -250,13 +275,16 @@ export const CommentMark = Mark.create<CommentMarkOptions>({
   },
 
   parseHTML() {
-    return [{ tag: 'span[data-comment-id]' }];
+    return [{ tag: "span[data-comment-id]" }];
   },
 
   renderHTML({ HTMLAttributes }) {
     return [
-      'span',
-      mergeAttributes({ class: 'comment-highlight', 'data-comment-id': HTMLAttributes.commentId }, HTMLAttributes),
+      "span",
+      mergeAttributes(
+        { class: "comment-highlight", "data-comment-id": HTMLAttributes.commentId },
+        HTMLAttributes,
+      ),
       0,
     ];
   },
@@ -265,7 +293,7 @@ export const CommentMark = Mark.create<CommentMarkOptions>({
   addStorage() {
     return {
       markdown: {
-        serialize: { open: '', close: '', mixable: true, expelEnclosingWhitespace: true },
+        serialize: { open: "", close: "", mixable: true, expelEnclosingWhitespace: true },
         parse: {},
       },
     };
@@ -370,7 +398,7 @@ function resolveCommentRange(
   // Try position-based first — verify text matches to guard against stale positions
   if (comment.from != null && comment.to != null && comment.from < comment.to) {
     if (comment.from >= 0 && comment.to <= docSize + 1) {
-      const textAtRange = doc.textBetween(comment.from, comment.to, ' ');
+      const textAtRange = doc.textBetween(comment.from, comment.to, " ");
       if (normalizeForSearch(textAtRange) === normalizeForSearch(comment.selectedText)) {
         return { from: comment.from, to: comment.to };
       }
@@ -403,7 +431,7 @@ export function rehydrateCommentMarks(
     const markType = schema.marks.commentMark;
     if (!markType) return;
 
-    const existingIds = collectCommentIds(doc, 'commentMark');
+    const existingIds = collectCommentIds(doc, "commentMark");
     const wantedIds = new Set(comments.map((c) => c.id));
     let { tr } = editor.state;
     let changed = false;
@@ -419,7 +447,8 @@ export function rehydrateCommentMarks(
     // Add marks for comments not yet in the editor
     const toApply = comments.filter((c) => !existingIds.has(c.id));
     if (toApply.length > 0) {
-      let textData: { fullText: string; normalizedFullText: string; positions: number[] } | null = null;
+      let textData: { fullText: string; normalizedFullText: string; positions: number[] } | null =
+        null;
       const getTextData = () => {
         if (!textData) {
           const { text, positions } = getTextWithPositions(doc);

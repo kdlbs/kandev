@@ -1,22 +1,33 @@
-'use client';
+"use client";
 
-import { memo, useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { PanelRoot, PanelBody } from './panel-primitives';
-import dynamic from 'next/dynamic';
-import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import { cn } from '@/lib/utils';
-import { useTaskPlan } from '@/hooks/domains/session/use-task-plan';
-import { useAppStore } from '@/components/state-provider';
-import { PlanSelectionPopover } from './plan-selection-popover';
-import { usePlanComments } from '@/hooks/domains/comments/use-plan-comments';
-import type { TextSelection, CommentForEditor } from '@/components/editors/tiptap/tiptap-plan-editor';
-import type { Editor } from '@tiptap/core';
+import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { PanelRoot, PanelBody } from "./panel-primitives";
+import dynamic from "next/dynamic";
+import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import { cn } from "@/lib/utils";
+import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
+import { useAppStore } from "@/components/state-provider";
+import { PlanSelectionPopover } from "./plan-selection-popover";
+import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
+import type {
+  TextSelection,
+  CommentForEditor,
+} from "@/components/editors/tiptap/tiptap-plan-editor";
+import type { Editor } from "@tiptap/core";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
-  () => import('@/components/editors/tiptap/tiptap-plan-editor').then((mod) => mod.TipTapPlanEditor),
-  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Loading editor...</div> }
+  () =>
+    import("@/components/editors/tiptap/tiptap-plan-editor").then((mod) => mod.TipTapPlanEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+        Loading editor...
+      </div>
+    ),
+  },
 );
 
 /** Debounce delay for auto-saving plan content (ms) */
@@ -27,19 +38,25 @@ type TaskPlanPanelProps = {
   visible?: boolean;
 };
 
-export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = true }: TaskPlanPanelProps) {
+function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
   const { plan, isLoading, isSaving, savePlan } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeSession = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
   const sessionState = activeSession?.state;
-  const isAgentBusy = sessionState === 'STARTING' || sessionState === 'RUNNING';
+  const isAgentBusy = sessionState === "STARTING" || sessionState === "RUNNING";
 
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const editorInstanceRef = useRef<Editor | null>(null);
-  const { draftContent, setDraftContent, editorKey, isEditorFocused, handleEmptyStateClick, hasUnsavedChanges } =
-    usePlanDraft(plan, isSaving, savePlan, editorWrapperRef);
+  const {
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+  } = usePlanDraft(plan, isSaving, savePlan, editorWrapperRef);
   const commentState = usePlanComments(activeSessionId);
   const selectionState = usePlanSelection(activeSessionId, commentState);
 
@@ -47,18 +64,77 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
     editorInstanceRef.current = editor;
   }, []);
 
-  const handleCommentDeleted = useCallback((ids: string[]) => {
-    for (const id of ids) {
-      commentState.handleDeleteComment(id);
-    }
-  }, [commentState]);
+  const handleCommentDeleted = useCallback(
+    (ids: string[]) => {
+      for (const id of ids) {
+        commentState.handleDeleteComment(id);
+      }
+    },
+    [commentState],
+  );
 
   const commentHighlights: CommentForEditor[] = useMemo(
-    () => commentState.comments.map((c) => ({
-      id: c.id, selectedText: c.selectedText, from: c.from, to: c.to,
-    })),
+    () =>
+      commentState.comments.map((c) => ({
+        id: c.id,
+        selectedText: c.selectedText,
+        from: c.from,
+        to: c.to,
+      })),
     [commentState.comments],
   );
+
+  const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === "";
+
+  return {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    activeSessionId,
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+    commentState,
+    selectionState,
+    handleEditorReady,
+    handleCommentDeleted,
+    commentHighlights,
+    isAgentCreatingPlan,
+    editorWrapperRef,
+    editorInstanceRef,
+  };
+}
+
+export const TaskPlanPanel = memo(function TaskPlanPanel({
+  taskId,
+  visible = true,
+}: TaskPlanPanelProps) {
+  const state = useTaskPlanPanelState(taskId, visible);
+  const {
+    plan,
+    isLoading,
+    isSaving,
+    savePlan,
+    activeSessionId,
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+    commentState,
+    selectionState,
+    handleEditorReady,
+    handleCommentDeleted,
+    commentHighlights,
+    isAgentCreatingPlan,
+    editorWrapperRef,
+    editorInstanceRef,
+  } = state;
 
   // Ctrl+S to save immediately
   useSaveShortcut(hasUnsavedChanges, isSaving, savePlan, draftContent, plan?.title);
@@ -79,9 +155,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({ taskId, visible = tru
       </div>
     );
   }
-
-  // Show loading state while agent is creating the initial plan
-  const isAgentCreatingPlan = isAgentBusy && !plan && draftContent.trim() === '';
 
   const { textSelection, setTextSelection } = selectionState;
 
@@ -148,9 +221,10 @@ function PlanSelectionPopoverWrapper({
       // Apply the mark to the editor at the selection position
       const editor = editorRef.current;
       if (id && editor && from != null && to != null) {
-        editor.chain()
+        editor
+          .chain()
           .setTextSelection({ from, to })
-          .setMark('commentMark', { commentId: id })
+          .setMark("commentMark", { commentId: id })
           .run();
       }
     },
@@ -159,7 +233,7 @@ function PlanSelectionPopoverWrapper({
 
   if (!textSelection || !activeSessionId) return null;
   const editingComment = commentState.editingCommentId
-    ? commentState.comments.find(c => c.id === commentState.editingCommentId)?.text
+    ? commentState.comments.find((c) => c.id === commentState.editingCommentId)?.text
     : undefined;
   const onDelete = commentState.editingCommentId
     ? () => {
@@ -209,7 +283,7 @@ function usePlanDraft(
   savePlan: (content: string, title?: string) => Promise<unknown>,
   editorWrapperRef: React.RefObject<HTMLDivElement | null>,
 ) {
-  const [draftContent, setDraftContent] = useState(plan?.content ?? '');
+  const [draftContent, setDraftContent] = useState(plan?.content ?? "");
   const draftContentRef = useRef(draftContent);
   const [editorKey, setEditorKey] = useState(0);
   const lastPlanContentRef = useRef<string | undefined>(undefined);
@@ -218,7 +292,7 @@ function usePlanDraft(
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleEmptyStateClick = useCallback(() => {
-    const el = editorWrapperRef.current?.querySelector('.ProseMirror');
+    const el = editorWrapperRef.current?.querySelector(".ProseMirror");
     if (el) (el as HTMLElement).focus();
   }, [editorWrapperRef]);
 
@@ -229,13 +303,18 @@ function usePlanDraft(
       if (!wrapper) return;
       setIsEditorFocused(wrapper.contains(document.activeElement));
     };
-    document.addEventListener('focusin', checkFocus);
-    document.addEventListener('focusout', checkFocus);
+    document.addEventListener("focusin", checkFocus);
+    document.addEventListener("focusout", checkFocus);
     checkFocus();
-    return () => { document.removeEventListener('focusin', checkFocus); document.removeEventListener('focusout', checkFocus); };
+    return () => {
+      document.removeEventListener("focusin", checkFocus);
+      document.removeEventListener("focusout", checkFocus);
+    };
   }, [editorWrapperRef]);
 
-  useEffect(() => { draftContentRef.current = draftContent; }, [draftContent]);
+  useEffect(() => {
+    draftContentRef.current = draftContent;
+  }, [draftContent]);
 
   // Sync from external plan updates
   useEffect(() => {
@@ -243,18 +322,21 @@ function usePlanDraft(
     const newContent = plan?.content;
     lastPlanContentRef.current = newContent;
     if (newContent !== prevContent) {
-      const resolved = newContent ?? '';
+      const resolved = newContent ?? "";
       if (resolved === draftContentRef.current) return;
       isExternalUpdateRef.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing external plan data to local editor state
       setDraftContent(resolved);
-      setEditorKey(k => k + 1);
+      setEditorKey((k) => k + 1);
     }
   }, [plan?.content]);
 
   // Auto-save with debounce
   useEffect(() => {
-    if (isExternalUpdateRef.current) { isExternalUpdateRef.current = false; return; }
+    if (isExternalUpdateRef.current) {
+      isExternalUpdateRef.current = false;
+      return;
+    }
     const hasChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
     if (!hasChanges || isSaving) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
@@ -262,11 +344,23 @@ function usePlanDraft(
       autoSaveTimerRef.current = null;
       savePlan(draftContent, plan?.title);
     }, AUTO_SAVE_DELAY);
-    return () => { if (autoSaveTimerRef.current) { clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; } };
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
   }, [draftContent, plan, isSaving, savePlan]);
 
   const hasUnsavedChanges = plan ? draftContent !== plan.content : draftContent.length > 0;
-  return { draftContent, setDraftContent, editorKey, isEditorFocused, handleEmptyStateClick, hasUnsavedChanges };
+  return {
+    draftContent,
+    setDraftContent,
+    editorKey,
+    isEditorFocused,
+    handleEmptyStateClick,
+    hasUnsavedChanges,
+  };
 }
 
 /** Text selection state for comment popover */
@@ -281,10 +375,15 @@ function usePlanSelection(
       const comment = commentState.comments.find((c) => c.id === id);
       if (comment) {
         commentState.setEditingCommentId(id);
-        setTextSelection({ text: comment.selectedText, from: comment.from, to: comment.to, position });
+        setTextSelection({
+          text: comment.selectedText,
+          from: comment.from,
+          to: comment.to,
+          position,
+        });
       }
     },
-    [commentState]
+    [commentState],
   );
 
   const handleSelectionClose = useCallback(() => {
@@ -306,13 +405,13 @@ function useSaveShortcut(
 ) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         if (hasUnsavedChanges && !isSaving) savePlan(draftContent, title);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hasUnsavedChanges, isSaving, savePlan, draftContent, title]);
 }
 
@@ -330,7 +429,8 @@ function PlanEmptyState({
   isAgentCreatingPlan: boolean;
   onClick: () => void;
 }) {
-  if (isLoading || draftContent.trim() !== '' || isEditorFocused || isAgentCreatingPlan) return null;
+  if (isLoading || draftContent.trim() !== "" || isEditorFocused || isAgentCreatingPlan)
+    return null;
   return (
     <div
       className="absolute inset-0 flex items-center justify-center pointer-events-none"
@@ -356,7 +456,11 @@ function PlanEmptyState({
           <div className="flex items-start gap-3">
             <IconMessage className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Select text and press <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">&#8984;&#8679;C</kbd> to comment
+              Select text and press{" "}
+              <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">
+                &#8984;&#8679;C
+              </kbd>{" "}
+              to comment
             </p>
           </div>
         </div>

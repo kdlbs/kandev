@@ -1,11 +1,16 @@
-import type { DockviewApi, SerializedDockview } from 'dockview-react';
-import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from './types';
-import { computeColumnWidths, computeGroupHeights } from './sizing';
-import { SIDEBAR_LOCK, KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS, LAYOUT_SIDEBAR_MAX_PX } from './constants';
+import type { DockviewApi, SerializedDockview } from "dockview-react";
+import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
+import { computeColumnWidths, computeGroupHeights } from "./sizing";
+import {
+  SIDEBAR_LOCK,
+  KNOWN_PANEL_IDS,
+  STRUCTURAL_COMPONENTS,
+  LAYOUT_SIDEBAR_MAX_PX,
+} from "./constants";
 
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
-  type: 'leaf';
+  type: "leaf";
   data: {
     id: string;
     views: string[];
@@ -17,7 +22,7 @@ type SerializedLeafNode = {
 };
 
 type SerializedBranchNode = {
-  type: 'branch';
+  type: "branch";
   data: SerializedGridNode[];
   size: number;
 };
@@ -40,9 +45,9 @@ function serializeGroup(
 ): SerializedLeafNode {
   const groupId = nextGroupId(ctx);
   const views = group.panels.map((p) => p.id);
-  const isSidebar = columnId === 'sidebar';
+  const isSidebar = columnId === "sidebar";
   return {
-    type: 'leaf',
+    type: "leaf",
     data: {
       id: groupId,
       views,
@@ -65,21 +70,22 @@ function serializeTreeNode(
   columnId: string,
   ctx: SerializationCtx,
 ): SerializedGridNode {
-  if (node.type === 'leaf') {
+  if (node.type === "leaf") {
     return serializeGroup(node.group, columnId, nodeSize, ctx);
   }
 
   // Branch: distribute orthoSize among children proportionally
   const totalCaptured = node.children.reduce((s, c) => s + (c.size ?? 0), 0);
   const children = node.children.map((child) => {
-    const childSize = totalCaptured > 0
-      ? Math.round((child.size ?? 0) / totalCaptured * orthoSize)
-      : Math.floor(orthoSize / node.children.length);
+    const childSize =
+      totalCaptured > 0
+        ? Math.round(((child.size ?? 0) / totalCaptured) * orthoSize)
+        : Math.floor(orthoSize / node.children.length);
     // Recurse: child's orthoSize = this node's nodeSize (orientation alternates)
     return serializeTreeNode(child, childSize, nodeSize, columnId, ctx);
   });
 
-  return { type: 'branch', data: children, size: nodeSize };
+  return { type: "branch", data: children, size: nodeSize };
 }
 
 /** Serialize a column, using tree if available, otherwise flat groups. */
@@ -91,7 +97,7 @@ function serializeColumn(
 ): SerializedGridNode {
   // Tree-based serialization (preserves nested splits)
   if (column.tree) {
-    if (column.tree.type === 'leaf') {
+    if (column.tree.type === "leaf") {
       const leaf = serializeGroup(column.tree.group, column.id, totalHeight, ctx);
       return { ...leaf, size: width };
     }
@@ -106,19 +112,29 @@ function serializeColumn(
   }
   const heights = computeGroupHeights(groups, totalHeight);
   const children = groups.map((g, i) => serializeGroup(g, column.id, heights[i], ctx));
-  return { type: 'branch', data: children, size: width };
+  return { type: "branch", data: children, size: width };
 }
 
-function serializePanels(
-  state: LayoutState,
-): Record<string, { id: string; contentComponent: string; title: string; tabComponent?: string; params?: Record<string, unknown> }> {
-  const panels: Record<string, {
+function serializePanels(state: LayoutState): Record<
+  string,
+  {
     id: string;
     contentComponent: string;
     title: string;
     tabComponent?: string;
     params?: Record<string, unknown>;
-  }> = {};
+  }
+> {
+  const panels: Record<
+    string,
+    {
+      id: string;
+      contentComponent: string;
+      title: string;
+      tabComponent?: string;
+      params?: Record<string, unknown>;
+    }
+  > = {};
 
   for (const column of state.columns) {
     for (const group of column.groups) {
@@ -149,7 +165,7 @@ export function toSerializedDockview(
   const widths = computeColumnWidths(state.columns, totalWidth, pinnedWidths);
 
   const root: SerializedBranchNode = {
-    type: 'branch',
+    type: "branch",
     data: state.columns.map((col, i) => serializeColumn(col, widths[i], totalHeight, ctx)),
     size: totalHeight,
   };
@@ -159,7 +175,7 @@ export function toSerializedDockview(
       root,
       width: totalWidth,
       height: totalHeight,
-      orientation: 'HORIZONTAL',
+      orientation: "HORIZONTAL",
     },
     panels: serializePanels(state),
     activeGroup: undefined,
@@ -209,13 +225,13 @@ function captureNode(
     for (let i = 0; i < node.children.length; i++) {
       children.push(captureNode(node.children[i], childSv, i, flatGroups));
     }
-    return { type: 'branch', children, size };
+    return { type: "branch", children, size };
   }
 
   // LeafNode: extract group
   const group = groupFromGridNode(node) ?? { panels: [] };
   if (group.panels.length > 0) flatGroups.push(group);
-  return { type: 'leaf', group, size };
+  return { type: "leaf", group, size };
 }
 
 /** Determine column ID and pinned status from its groups. */
@@ -225,11 +241,11 @@ function inferColumnMeta(
 ): { columnId: string; isPinned: boolean } {
   if (groups.length === 0) return { columnId: `col-${index}`, isPinned: false };
 
-  const hasSidebar = groups[0].panels.some((p) => p.id === 'sidebar');
-  if (hasSidebar) return { columnId: 'sidebar', isPinned: true };
+  const hasSidebar = groups[0].panels.some((p) => p.id === "sidebar");
+  if (hasSidebar) return { columnId: "sidebar", isPinned: true };
 
   const firstPanelId = groups[0].panels[0]?.id;
-  if (firstPanelId === 'chat') return { columnId: 'center', isPinned: false };
+  if (firstPanelId === "chat") return { columnId: "center", isPinned: false };
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };
 
   return { columnId: `col-${index}`, isPinned: false };
@@ -247,7 +263,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
   const rootChildren = (api as any).component?.gridview?.root?.children;
 
   if (!rootChildren || !sv) {
-    console.warn('fromDockviewApi: no root splitview or children found');
+    console.warn("fromDockviewApi: no root splitview or children found");
     return { columns: [] };
   }
 
@@ -282,15 +298,18 @@ function isStructuralPanel(p: LayoutPanel): boolean {
 /**
  * Normalize dynamic panel IDs so they get fresh sessions on restore.
  */
-function normalizePanel(p: LayoutPanel, counters: { terminal: number; browser: number }): LayoutPanel {
+function normalizePanel(
+  p: LayoutPanel,
+  counters: { terminal: number; browser: number },
+): LayoutPanel {
   if (KNOWN_PANEL_IDS.has(p.id)) return p;
 
-  if (p.component === 'terminal') {
+  if (p.component === "terminal") {
     const id = `terminal-saved-${++counters.terminal}`;
     return { ...p, id, params: { terminalId: id } };
   }
-  if (p.component === 'browser') {
-    const url = (p.params?.url as string) ?? '';
+  if (p.component === "browser") {
+    const url = (p.params?.url as string) ?? "";
     const id = url ? `browser:${url}` : `browser-saved-${++counters.browser}`;
     return { ...p, id, params: { url } };
   }
@@ -301,9 +320,7 @@ function filterGroup(
   group: LayoutGroup,
   counters: { terminal: number; browser: number },
 ): LayoutGroup {
-  const kept = group.panels
-    .filter(isStructuralPanel)
-    .map((p) => normalizePanel(p, counters));
+  const kept = group.panels.filter(isStructuralPanel).map((p) => normalizePanel(p, counters));
   if (kept.length === 0) return { panels: [], activePanel: undefined };
   const activeStillExists = group.activePanel && kept.some((p) => p.id === group.activePanel);
   return {
@@ -317,16 +334,16 @@ function filterTreeNode(
   node: LayoutNode,
   counters: { terminal: number; browser: number },
 ): LayoutNode {
-  if (node.type === 'leaf') {
-    return { type: 'leaf', group: filterGroup(node.group, counters), size: node.size };
+  if (node.type === "leaf") {
+    return { type: "leaf", group: filterGroup(node.group, counters), size: node.size };
   }
   const children = node.children.map((c) => filterTreeNode(c, counters));
-  return { type: 'branch', children, size: node.size };
+  return { type: "branch", children, size: node.size };
 }
 
 /** Collect all groups from a tree (flat list for panels record). */
 function collectGroupsFromTree(node: LayoutNode): LayoutGroup[] {
-  if (node.type === 'leaf') return [node.group];
+  if (node.type === "leaf") return [node.group];
   return node.children.flatMap(collectGroupsFromTree);
 }
 

@@ -22,4 +22,3 @@ func (s *natsSubscription) IsValid() bool {
 	}
 	return s.sub.IsValid()
 }
-

@@ -25,10 +25,22 @@
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
 
   /* Inactive group tabs — more dimmed */
-  --dv-inactivegroup-visiblepanel-tab-background-color: color-mix(in srgb, var(--muted) 100%, transparent);
-  --dv-inactivegroup-visiblepanel-tab-color: color-mix(in srgb, var(--muted-foreground) 100%, transparent);
+  --dv-inactivegroup-visiblepanel-tab-background-color: color-mix(
+    in srgb,
+    var(--muted) 100%,
+    transparent
+  );
+  --dv-inactivegroup-visiblepanel-tab-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 100%,
+    transparent
+  );
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-hiddenpanel-tab-color: color-mix(in srgb, var(--muted-foreground) 100%, transparent);
+  --dv-inactivegroup-hiddenpanel-tab-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 100%,
+    transparent
+  );
 
   /* Close icon */
   --dv-tab-close-icon: var(--muted-foreground);
@@ -69,7 +81,9 @@
   border-radius: 6px;
   border-bottom: none !important;
   outline: none !important;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .dockview-theme-kandev .dv-tab:hover {
@@ -157,7 +171,8 @@
   gap: 2px;
 }
 
-.dv-tab:focus-within:after, .dv-tab:focus:after{
+.dv-tab:focus-within:after,
+.dv-tab:focus:after {
   outline: none !important;
 }
 

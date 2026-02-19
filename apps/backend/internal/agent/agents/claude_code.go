@@ -48,8 +48,8 @@ func (a *ClaudeCode) DisplayName() string { return "Claude" }
 func (a *ClaudeCode) Description() string {
 	return "Anthropic Claude Code CLI-powered autonomous coding agent using the stream-json protocol."
 }
-func (a *ClaudeCode) Enabled() bool      { return true }
-func (a *ClaudeCode) DisplayOrder() int   { return 1 }
+func (a *ClaudeCode) Enabled() bool     { return true }
+func (a *ClaudeCode) DisplayOrder() int { return 1 }
 
 func (a *ClaudeCode) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

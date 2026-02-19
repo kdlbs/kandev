@@ -1,13 +1,13 @@
-import type { AgentProfile, PermissionSetting } from '@/lib/types/http';
+import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 /**
  * Single source of truth for permission keys.
  * Adding a key here that doesn't exist on AgentProfile will cause a compile error.
  */
 export const PERMISSION_KEYS = [
-  'auto_approve',
-  'dangerously_skip_permissions',
-  'allow_indexing',
+  "auto_approve",
+  "dangerously_skip_permissions",
+  "allow_indexing",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -21,7 +21,7 @@ type _AssertKeysExist = {
 /** Extract permission booleans from a profile-like object, using backend defaults for missing values. */
 export function profileToPermissionsMap(
   profile: Partial<Pick<AgentProfile, PermissionKey>>,
-  permissionSettings: Record<string, PermissionSetting>
+  permissionSettings: Record<string, PermissionSetting>,
 ): Record<PermissionKey, boolean> {
   const result = {} as Record<PermissionKey, boolean>;
   for (const key of PERMISSION_KEYS) {
@@ -33,7 +33,7 @@ export function profileToPermissionsMap(
 
 /** Convert an object containing permission keys to a typed patch for API calls. */
 export function permissionsToProfilePatch(
-  perms: Partial<Record<PermissionKey, boolean>>
+  perms: Partial<Record<PermissionKey, boolean>>,
 ): Pick<AgentProfile, PermissionKey> {
   const result = {} as Pick<AgentProfile, PermissionKey>;
   for (const key of PERMISSION_KEYS) {
@@ -44,7 +44,7 @@ export function permissionsToProfilePatch(
 
 /** Create default permission values from backend metadata. */
 export function buildDefaultPermissions(
-  permissionSettings: Record<string, PermissionSetting>
+  permissionSettings: Record<string, PermissionSetting>,
 ): Record<PermissionKey, boolean> {
   const result = {} as Record<PermissionKey, boolean>;
   for (const key of PERMISSION_KEYS) {
@@ -56,7 +56,7 @@ export function buildDefaultPermissions(
 /** Compare permission fields between two profile-like objects. */
 export function arePermissionsDirty(
   draft: Partial<Pick<AgentProfile, PermissionKey>>,
-  saved: Partial<Pick<AgentProfile, PermissionKey>>
+  saved: Partial<Pick<AgentProfile, PermissionKey>>,
 ): boolean {
   for (const key of PERMISSION_KEYS) {
     if (draft[key] !== saved[key]) return true;

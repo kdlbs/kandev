@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef } from 'react';
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 type EditableCardRenderArgs = {
   open: () => void;
@@ -13,8 +13,8 @@ type EditableCardProps = {
   historyId: string;
   onOpen: () => void;
   onClose: () => void;
-  renderPreview: (args: Pick<EditableCardRenderArgs, 'open'>) => ReactNode;
-  renderEdit: (args: Pick<EditableCardRenderArgs, 'close'>) => ReactNode;
+  renderPreview: (args: Pick<EditableCardRenderArgs, "open">) => ReactNode;
+  renderEdit: (args: Pick<EditableCardRenderArgs, "close">) => ReactNode;
 };
 
 export function EditableCard({
@@ -37,13 +37,13 @@ export function EditableCard({
   }, [onClose]);
 
   useEffect(() => {
-    if (!isEditing || typeof window === 'undefined') return;
+    if (!isEditing || typeof window === "undefined") return;
 
     if (!historyPushedRef.current) {
-      window.history.pushState({ ...window.history.state, editableCardId: historyId }, '');
+      window.history.pushState({ ...window.history.state, editableCardId: historyId }, "");
       historyPushedRef.current = true;
     } else {
-      window.history.replaceState({ ...window.history.state, editableCardId: historyId }, '');
+      window.history.replaceState({ ...window.history.state, editableCardId: historyId }, "");
     }
 
     const handlePopState = () => {
@@ -53,14 +53,14 @@ export function EditableCard({
       onClose();
     };
 
-    window.addEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
     return () => {
-      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener("popstate", handlePopState);
     };
   }, [historyId, isEditing, onClose]);
 
   useEffect(() => {
-    if (isEditing || typeof window === 'undefined') return;
+    if (isEditing || typeof window === "undefined") return;
     if (closingFromPopRef.current) {
       closingFromPopRef.current = false;
       historyPushedRef.current = false;

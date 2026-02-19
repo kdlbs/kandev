@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 export type SubagentTaskPayload = {
   description?: string;
@@ -91,7 +91,7 @@ export type ToolCallMetadata = {
   parent_tool_call_id?: string; // For subagent nesting
   tool_name?: string;
   title?: string;
-  status?: 'pending' | 'running' | 'complete' | 'error';
+  status?: "pending" | "running" | "complete" | "error";
   args?: Record<string, unknown>;
   result?: string;
   normalized?: NormalizedPayload;
@@ -102,13 +102,11 @@ export type StatusMetadata = {
   status?: string;
   stage?: string;
   message?: string;
-  variant?: 'default' | 'warning' | 'error';
+  variant?: "default" | "warning" | "error";
   cancelled?: boolean;
 };
 
-export type TodoMetadata =
-  | { text: string; done?: boolean }
-  | string;
+export type TodoMetadata = { text: string; done?: boolean } | string;
 
 export type RichMetadata = {
   thinking?: string;

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useLayoutEffect } from 'react';
-import type { AppState } from '@/lib/state/store';
-import { useAppStoreApi } from '@/components/state-provider';
+import { useLayoutEffect } from "react";
+import type { AppState } from "@/lib/state/store";
+import { useAppStoreApi } from "@/components/state-provider";
 
 type StateHydratorProps = {
   initialState: Partial<AppState>;

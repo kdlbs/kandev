@@ -1,13 +1,13 @@
-import type { Comment, DiffComment, PlanComment } from './types';
-import { isDiffComment, isPlanComment } from './types';
+import type { Comment, DiffComment, PlanComment } from "./types";
+import { isDiffComment, isPlanComment } from "./types";
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
  */
 export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string {
-  if (!comments || comments.length === 0) return '';
+  if (!comments || comments.length === 0) return "";
 
-  const lines: string[] = ['### Review Comments', ''];
+  const lines: string[] = ["### Review Comments", ""];
 
   const byFile = new Map<string, DiffComment[]>();
   for (const comment of comments) {
@@ -18,29 +18,30 @@ export function formatReviewCommentsAsMarkdown(comments: DiffComment[]): string 
 
   for (const [filePath, fileComments] of byFile) {
     for (const comment of fileComments) {
-      const lineRange = comment.startLine === comment.endLine
-        ? `${comment.startLine}`
-        : `${comment.startLine}-${comment.endLine}`;
+      const lineRange =
+        comment.startLine === comment.endLine
+          ? `${comment.startLine}`
+          : `${comment.startLine}-${comment.endLine}`;
 
       lines.push(`**${filePath}:${lineRange}**`);
-      lines.push('```');
+      lines.push("```");
       lines.push(comment.codeContent);
-      lines.push('```');
+      lines.push("```");
       lines.push(`> ${comment.text}`);
-      lines.push('');
+      lines.push("");
     }
   }
 
-  lines.push('---');
-  lines.push('');
-  return lines.join('\n');
+  lines.push("---");
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**
  * Format plan comments as markdown for sending to agent.
  */
 export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
-  if (!comments || comments.length === 0) return '';
+  if (!comments || comments.length === 0) return "";
 
   const lines: string[] = [];
   for (let i = 0; i < comments.length; i++) {
@@ -49,7 +50,7 @@ export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
     lines.push(`- Selected text: "${c.selectedText}"`);
     lines.push(`- Comment: "${c.text}"`);
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**

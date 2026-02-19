@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from "next/link";
 
 interface EmptyStateInlineProps {
   message: string;
@@ -16,4 +16,3 @@ export function EmptyStateInline({ message, linkText, linkHref }: EmptyStateInli
     </div>
   );
 }
-

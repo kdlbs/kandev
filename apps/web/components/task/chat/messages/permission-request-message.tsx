@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useCallback, useState } from 'react';
-import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { Message } from '@/lib/types/http';
-import { PermissionActionRow } from './permission-action-row';
+import { useCallback, useState } from "react";
+import { IconAlertTriangle, IconCheck, IconX } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { Message } from "@/lib/types/http";
+import { PermissionActionRow } from "./permission-action-row";
 
 type PermissionOption = {
   option_id: string;
@@ -23,24 +23,24 @@ type PermissionRequestMetadata = {
     path?: string;
     cwd?: string;
   };
-  status?: 'pending' | 'approved' | 'rejected' | 'expired';
+  status?: "pending" | "approved" | "rejected" | "expired";
 };
 
-function getPermissionStatusBadge(status?: 'pending' | 'approved' | 'rejected' | 'expired') {
+function getPermissionStatusBadge(status?: "pending" | "approved" | "rejected" | "expired") {
   switch (status) {
-    case 'approved':
+    case "approved":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
           <IconCheck className="h-3 w-3" /> Approved
         </span>
       );
-    case 'rejected':
+    case "rejected":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
           <IconX className="h-3 w-3" /> Rejected
         </span>
       );
-    case 'expired':
+    case "expired":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
           Expired
@@ -63,7 +63,10 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
   const [isResponding, setIsResponding] = useState(false);
   const metadata = comment.metadata as PermissionRequestMetadata | undefined;
 
-  const isResolved = metadata?.status === 'approved' || metadata?.status === 'rejected' || metadata?.status === 'expired';
+  const isResolved =
+    metadata?.status === "approved" ||
+    metadata?.status === "rejected" ||
+    metadata?.status === "expired";
   const isPending = !isResolved;
 
   const handleRespond = useCallback(
@@ -72,30 +75,30 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
 
       const client = getWebSocketClient();
       if (!client) {
-        console.error('WebSocket client not available');
+        console.error("WebSocket client not available");
         return;
       }
 
       setIsResponding(true);
       try {
-        await client.request('permission.respond', {
+        await client.request("permission.respond", {
           session_id: comment.session_id,
           pending_id: metadata.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,
         });
       } catch (error) {
-        console.error('Failed to respond to permission request:', error);
+        console.error("Failed to respond to permission request:", error);
       } finally {
         setIsResponding(false);
       }
     },
-    [comment.session_id, metadata]
+    [comment.session_id, metadata],
   );
 
   const handleApprove = useCallback(() => {
     const allowOption = metadata?.options.find(
-      (opt) => opt.kind === 'allow_once' || opt.kind === 'allow_always'
+      (opt) => opt.kind === "allow_once" || opt.kind === "allow_always",
     );
     if (allowOption) {
       handleRespond(allowOption.option_id);
@@ -104,12 +107,12 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
 
   const handleReject = useCallback(() => {
     const rejectOption = metadata?.options.find(
-      (opt) => opt.kind === 'reject_once' || opt.kind === 'reject_always'
+      (opt) => opt.kind === "reject_once" || opt.kind === "reject_always",
     );
     if (rejectOption) {
       handleRespond(rejectOption.option_id);
     } else {
-      handleRespond('', true);
+      handleRespond("", true);
     }
   }, [metadata, handleRespond]);
 
@@ -123,8 +126,8 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
         <div className="flex-shrink-0 mt-0.5">
           <IconAlertTriangle
             className={cn(
-              'h-4 w-4',
-              isPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+              "h-4 w-4",
+              isPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
             )}
           />
         </div>
@@ -132,11 +135,13 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
         {/* Content */}
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="flex items-center gap-2 text-xs">
-            <span className={cn(
-              'font-mono text-xs',
-              isPending ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
-            )}>
-              {comment.content || 'Permission Required'}
+            <span
+              className={cn(
+                "font-mono text-xs",
+                isPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+              )}
+            >
+              {comment.content || "Permission Required"}
             </span>
             {statusBadge}
           </div>

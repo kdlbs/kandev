@@ -6,7 +6,7 @@
 export function httpToWebSocketUrl(baseUrl: string): string {
   try {
     const url = new URL(baseUrl);
-    const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${url.host}/ws`;
   } catch {
     throw new Error(`Invalid URL format: ${baseUrl}`);
@@ -19,7 +19,7 @@ export function httpToWebSocketUrl(baseUrl: string): string {
 export function isValidBackendUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }

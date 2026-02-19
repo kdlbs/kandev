@@ -1,7 +1,7 @@
-import { getWebSocketClient } from '@/lib/ws/connection';
-import type { TaskPlan } from '@/lib/types/http';
+import { getWebSocketClient } from "@/lib/ws/connection";
+import type { TaskPlan } from "@/lib/types/http";
 
-const WS_CLIENT_UNAVAILABLE = 'WebSocket client not available';
+const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /**
  * Get the task plan for a specific task.
@@ -12,7 +12,7 @@ export async function getTaskPlan(taskId: string): Promise<TaskPlan | null> {
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  const response = await client.request('task.plan.get', { task_id: taskId });
+  const response = await client.request("task.plan.get", { task_id: taskId });
 
   if (!response || Object.keys(response).length === 0) {
     return null;
@@ -27,17 +27,17 @@ export async function getTaskPlan(taskId: string): Promise<TaskPlan | null> {
 export async function createTaskPlan(
   taskId: string,
   content: string,
-  title?: string
+  title?: string,
 ): Promise<TaskPlan> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  const response = await client.request('task.plan.create', {
+  const response = await client.request("task.plan.create", {
     task_id: taskId,
-    title: title || 'Plan',
+    title: title || "Plan",
     content,
-    created_by: 'user',
+    created_by: "user",
   });
 
   return response as TaskPlan;
@@ -49,7 +49,7 @@ export async function createTaskPlan(
 export async function updateTaskPlan(
   taskId: string,
   content: string,
-  title?: string
+  title?: string,
 ): Promise<TaskPlan> {
   const client = getWebSocketClient();
   if (!client) {
@@ -58,14 +58,14 @@ export async function updateTaskPlan(
   const payload: Record<string, string> = {
     task_id: taskId,
     content,
-    created_by: 'user',
+    created_by: "user",
   };
 
   if (title !== undefined) {
     payload.title = title;
   }
 
-  const response = await client.request('task.plan.update', payload);
+  const response = await client.request("task.plan.update", payload);
 
   return response as TaskPlan;
 }
@@ -78,6 +78,5 @@ export async function deleteTaskPlan(taskId: string): Promise<void> {
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  await client.request('task.plan.delete', { task_id: taskId });
+  await client.request("task.plan.delete", { task_id: taskId });
 }
-

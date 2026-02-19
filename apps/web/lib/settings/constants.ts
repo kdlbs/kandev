@@ -1,12 +1,12 @@
 export const STORAGE_KEYS = {
-  BACKEND_URL: 'kandev.settings.backendUrl',
-  ONBOARDING_COMPLETED: 'kandev.onboarding.completed',
-  LAST_AGENT_PROFILE_ID: 'kandev.dialog.lastAgentProfileId',
-  LAST_REPOSITORY_ID: 'kandev.dialog.lastRepositoryId',
-  LAST_BRANCH: 'kandev.dialog.lastBranch',
+  BACKEND_URL: "kandev.settings.backendUrl",
+  ONBOARDING_COMPLETED: "kandev.onboarding.completed",
+  LAST_AGENT_PROFILE_ID: "kandev.dialog.lastAgentProfileId",
+  LAST_REPOSITORY_ID: "kandev.dialog.lastRepositoryId",
+  LAST_BRANCH: "kandev.dialog.lastBranch",
 } as const;
 
-export const DEFAULT_BACKEND_URL = 'http://localhost:8080';
+export const DEFAULT_BACKEND_URL = "http://localhost:8080";
 
 // Kanban Preview Panel Settings
 export const PREVIEW_PANEL = {

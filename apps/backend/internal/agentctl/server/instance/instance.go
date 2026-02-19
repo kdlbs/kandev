@@ -142,4 +142,3 @@ func (i *Instance) Info() *InstanceInfo {
 		CreatedAt:     i.CreatedAt,
 	}
 }
-

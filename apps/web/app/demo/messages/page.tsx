@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import type { Message } from '@/lib/types/http';
-import { MessageRenderer } from '@/components/task/chat/message-renderer';
-import { dummyMessages } from './demo-messages-data';
+import type { Message } from "@/lib/types/http";
+import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { dummyMessages } from "./demo-messages-data";
 
 export default function MessagesDemoPage() {
   const permissionsByToolCallId = new Map<string, Message>();
-  const permMsg = dummyMessages.find(m => m.id === 'permission-1');
+  const permMsg = dummyMessages.find((m) => m.id === "permission-1");
   if (permMsg) {
-    permissionsByToolCallId.set('tool-4', permMsg);
+    permissionsByToolCallId.set("tool-4", permMsg);
   }
 
   return (
@@ -26,7 +26,7 @@ export default function MessagesDemoPage() {
             <MessageRenderer
               key={message.id}
               comment={message}
-              isTaskDescription={message.id === 'task-description'}
+              isTaskDescription={message.id === "task-description"}
               taskId="demo-task"
               permissionsByToolCallId={permissionsByToolCallId}
             />

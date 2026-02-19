@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { Repository } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { Repository } from "@/lib/types/http";
 
 export function useRepository(repositoryId: string | null) {
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);

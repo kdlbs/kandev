@@ -1,10 +1,14 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import type { PlanCommentContextItem } from '@/lib/types/context';
-import { ContextChip } from './context-chip';
+import { memo } from "react";
+import type { PlanCommentContextItem } from "@/lib/types/context";
+import { ContextChip } from "./context-chip";
 
-export const PlanCommentItem = memo(function PlanCommentItem({ item }: { item: PlanCommentContextItem }) {
+export const PlanCommentItem = memo(function PlanCommentItem({
+  item,
+}: {
+  item: PlanCommentContextItem;
+}) {
   const preview = (
     <div className="space-y-1.5">
       {item.comments.map((comment) => (

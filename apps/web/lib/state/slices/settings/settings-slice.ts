@@ -1,5 +1,5 @@
-import type { StateCreator } from 'zustand';
-import type { SettingsSlice, SettingsSliceState } from './types';
+import type { StateCreator } from "zustand";
+import type { SettingsSlice, SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -27,7 +27,7 @@ export const defaultSettingsState: SettingsSliceState = {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
-    chatSubmitKey: 'cmd_enter',
+    chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
@@ -39,7 +39,7 @@ export const defaultSettingsState: SettingsSliceState = {
 
 export const createSettingsSlice: StateCreator<
   SettingsSlice,
-  [['zustand/immer', never]],
+  [["zustand/immer", never]],
   [],
   SettingsSlice
 > = (set) => ({

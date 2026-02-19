@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { cn } from './lib/utils';
+import * as React from "react";
+import { cn } from "./lib/utils";
 
 interface ScrollOnOverflowProps {
   children: React.ReactNode;
@@ -40,25 +40,28 @@ const ScrollOnOverflow = React.memo(
       inner.style.transition = `transform ${duration}s linear`;
       inner.style.transform = `translateX(-${overflow}px)`;
 
-      timeoutRef.current = setTimeout(() => {
-        inner.style.transition = `transform ${duration}s linear`;
-        inner.style.transform = 'translateX(0)';
-      }, duration * 1000 + 1500);
+      timeoutRef.current = setTimeout(
+        () => {
+          inner.style.transition = `transform ${duration}s linear`;
+          inner.style.transform = "translateX(0)";
+        },
+        duration * 1000 + 1500,
+      );
     }, [speed]);
 
     const handleMouseLeave = React.useCallback(() => {
       clearTimeout(timeoutRef.current);
       const inner = innerRef.current;
       if (!inner) return;
-      inner.style.transition = '';
-      inner.style.transform = '';
+      inner.style.transition = "";
+      inner.style.transform = "";
     }, []);
 
     // Merge forwarded ref with internal ref
     const mergedRef = React.useCallback(
       (node: HTMLSpanElement | null) => {
         (outerRef as React.MutableRefObject<HTMLSpanElement | null>).current = node;
-        if (typeof ref === 'function') ref(node);
+        if (typeof ref === "function") ref(node);
         else if (ref) (ref as React.MutableRefObject<HTMLSpanElement | null>).current = node;
       },
       [ref],
@@ -67,7 +70,7 @@ const ScrollOnOverflow = React.memo(
     return (
       <span
         ref={mergedRef}
-        className={cn('inline-block min-w-0 overflow-hidden', className)}
+        className={cn("inline-block min-w-0 overflow-hidden", className)}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
@@ -78,6 +81,6 @@ const ScrollOnOverflow = React.memo(
     );
   }),
 );
-ScrollOnOverflow.displayName = 'ScrollOnOverflow';
+ScrollOnOverflow.displayName = "ScrollOnOverflow";
 
 export { ScrollOnOverflow };

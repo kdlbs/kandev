@@ -1,34 +1,50 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useRef, memo } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { GridSpinner } from '@/components/grid-spinner';
-import { SessionPanelContent } from '@kandev/ui/pannel-session';
-import type { Message, TaskSessionState } from '@/lib/types/http';
-import type { RenderItem } from '@/hooks/use-processed-messages';
-import { MessageRenderer } from '@/components/task/chat/message-renderer';
-import { TurnGroupMessage } from '@/components/task/chat/messages/turn-group-message';
-import { AgentStatus } from '@/components/task/chat/messages/agent-status';
-import { useLazyLoadMessages } from '@/hooks/use-lazy-load-messages';
+import { useCallback, useEffect, useMemo, useRef, memo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { Virtualizer } from "@tanstack/react-virtual";
+import { GridSpinner } from "@/components/grid-spinner";
+import { SessionPanelContent } from "@kandev/ui/pannel-session";
+import type { Message, TaskSessionState } from "@/lib/types/http";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
+import { AgentStatus } from "@/components/task/chat/messages/agent-status";
+import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 
 type ContainerResizeContext = {
   isHiddenRef: React.RefObject<boolean>;
   previousHeightRef: React.RefObject<number>;
   previousWidthRef: React.RefObject<number>;
   wasAtBottomRef: React.RefObject<boolean>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  virtualizerRef: React.RefObject<ReturnType<typeof useVirtualizer<any, any>>>;
+  virtualizerRef: React.RefObject<MessageVirtualizer>;
   scrollSnapshot: React.RefObject<{ wasAtBottom: boolean; firstVisibleIndex: number }>;
 };
 
-function handleContainerResize(entry: ResizeObserverEntry, element: HTMLDivElement, ctx: ContainerResizeContext): void {
-  const { isHiddenRef, previousHeightRef, previousWidthRef, wasAtBottomRef, virtualizerRef, scrollSnapshot } = ctx;
+type MessageVirtualizer = Virtualizer<HTMLDivElement, Element>;
+
+function handleContainerResize(
+  entry: ResizeObserverEntry,
+  element: HTMLDivElement,
+  ctx: ContainerResizeContext,
+): void {
+  const {
+    isHiddenRef,
+    previousHeightRef,
+    previousWidthRef,
+    wasAtBottomRef,
+    virtualizerRef,
+    scrollSnapshot,
+  } = ctx;
   const currentHeight = entry.contentRect.height;
   const currentWidth = entry.contentRect.width;
   const previousHeight = previousHeightRef.current;
   const previousWidth = previousWidthRef.current;
 
-  if (currentWidth === 0 || currentHeight === 0) { isHiddenRef.current = true; return; }
+  if (currentWidth === 0 || currentHeight === 0) {
+    isHiddenRef.current = true;
+    return;
+  }
 
   if (isHiddenRef.current) {
     isHiddenRef.current = false;
@@ -40,30 +56,39 @@ function handleContainerResize(entry: ResizeObserverEntry, element: HTMLDivEleme
     requestAnimationFrame(() => {
       if (snapshot.wasAtBottom) {
         const count = virt.options.count;
-        if (count > 0) virt.scrollToIndex(count - 1, { align: 'end' });
+        if (count > 0) virt.scrollToIndex(count - 1, { align: "end" });
       } else {
-        virt.scrollToIndex(snapshot.firstVisibleIndex, { align: 'start' });
+        virt.scrollToIndex(snapshot.firstVisibleIndex, { align: "start" });
       }
     });
     return;
   }
 
-  if (previousWidth > 0 && Math.abs(currentWidth - previousWidth) > 20) virtualizerRef.current.measure();
+  if (previousWidth > 0 && Math.abs(currentWidth - previousWidth) > 20)
+    virtualizerRef.current.measure();
   if (previousHeight > 0 && currentHeight < previousHeight && wasAtBottomRef.current) {
-    requestAnimationFrame(() => { element.scrollTop = element.scrollHeight; });
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
   }
   previousHeightRef.current = currentHeight;
   previousWidthRef.current = currentWidth;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function useVirtualListScrolling(sessionId: string | null, virtualizer: ReturnType<typeof useVirtualizer<any, any>>, messagesContainerRef: React.RefObject<HTMLDivElement | null>) {
+function useVirtualListScrolling(
+  sessionId: string | null,
+  virtualizer: MessageVirtualizer,
+  messagesContainerRef: React.RefObject<HTMLDivElement | null>,
+) {
   const wasAtBottomRef = useRef(true);
   const savedScrollTopRef = useRef(0);
   const previousHeightRef = useRef(0);
   const previousWidthRef = useRef(0);
   const isHiddenRef = useRef(false);
-  const scrollSnapshot = useRef<{ wasAtBottom: boolean; firstVisibleIndex: number }>({ wasAtBottom: true, firstVisibleIndex: 0 });
+  const scrollSnapshot = useRef<{ wasAtBottom: boolean; firstVisibleIndex: number }>({
+    wasAtBottom: true,
+    firstVisibleIndex: 0,
+  });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const loadingRef = useRef({ hasMore, isLoadingMore });
   loadingRef.current = { hasMore, isLoadingMore };
@@ -78,7 +103,10 @@ function useVirtualListScrolling(sessionId: string | null, virtualizer: ReturnTy
     savedScrollTopRef.current = scrollTop;
     const virt = virtualizerRef.current;
     const visibleItems = virt.getVirtualItems();
-    scrollSnapshot.current = { wasAtBottom: wasAtBottomRef.current, firstVisibleIndex: visibleItems.length > 0 ? visibleItems[0].index : 0 };
+    scrollSnapshot.current = {
+      wasAtBottom: wasAtBottomRef.current,
+      firstVisibleIndex: visibleItems.length > 0 ? visibleItems[0].index : 0,
+    };
     if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
       const prevScrollHeight = scrollHeight;
       const prevScrollTop = scrollTop;
@@ -95,20 +123,27 @@ function useVirtualListScrolling(sessionId: string | null, virtualizer: ReturnTy
   useEffect(() => {
     const element = messagesContainerRef.current;
     if (!element) return;
-    element.addEventListener('scroll', handleScroll);
-    return () => element.removeEventListener('scroll', handleScroll);
+    element.addEventListener("scroll", handleScroll);
+    return () => element.removeEventListener("scroll", handleScroll);
   }, [handleScroll, messagesContainerRef]);
 
   useEffect(() => {
     const element = messagesContainerRef.current;
     if (!element) return;
-    const resizeCtx: ContainerResizeContext = { isHiddenRef, previousHeightRef, previousWidthRef, wasAtBottomRef, virtualizerRef, scrollSnapshot };
+    const resizeCtx: ContainerResizeContext = {
+      isHiddenRef,
+      previousHeightRef,
+      previousWidthRef,
+      wasAtBottomRef,
+      virtualizerRef,
+      scrollSnapshot,
+    };
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) handleContainerResize(entry, element, resizeCtx);
     });
     resizeObserver.observe(element);
     return () => resizeObserver.disconnect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { wasAtBottomRef, hasMore, isLoadingMore };
@@ -138,14 +173,27 @@ type MessageListBodyProps = {
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   isInitialLoading: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  virtualizer: ReturnType<typeof useVirtualizer<any, any>>;
+  virtualizer: MessageVirtualizer;
   lastTurnGroupId: string | null;
   isRunning: boolean;
   handleScrollToMessage: (messageId: string) => void;
 };
 
-function MessageListBody({ items, messages, permissionsByToolCallId, childrenByParentToolCallId, taskId, sessionId, worktreePath, onOpenFile, isInitialLoading, virtualizer, lastTurnGroupId, isRunning, handleScrollToMessage }: MessageListBodyProps) {
+function MessageListBody({
+  items,
+  messages,
+  permissionsByToolCallId,
+  childrenByParentToolCallId,
+  taskId,
+  sessionId,
+  worktreePath,
+  onOpenFile,
+  isInitialLoading,
+  virtualizer,
+  lastTurnGroupId,
+  isRunning,
+  handleScrollToMessage,
+}: MessageListBodyProps) {
   const itemCount = items.length;
   if (isInitialLoading || itemCount === 0) return null;
   return (
@@ -153,12 +201,41 @@ function MessageListBody({ items, messages, permissionsByToolCallId, childrenByP
       {virtualizer.getVirtualItems().map((virtualRow) => {
         const item = items[virtualRow.index];
         return (
-          <div key={virtualRow.key} ref={virtualizer.measureElement} data-index={virtualRow.index} className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${virtualRow.start}px)` }}>
+          <div
+            key={virtualRow.key}
+            ref={virtualizer.measureElement}
+            data-index={virtualRow.index}
+            className="absolute left-0 top-0 w-full"
+            style={{ transform: `translateY(${virtualRow.start}px)` }}
+          >
             <div className="pb-2">
-              {item.type === 'turn_group' ? (
-                <TurnGroupMessage group={item} sessionId={sessionId} permissionsByToolCallId={permissionsByToolCallId} childrenByParentToolCallId={childrenByParentToolCallId} taskId={taskId} worktreePath={worktreePath} onOpenFile={onOpenFile} isLastGroup={item.id === lastTurnGroupId} isTurnActive={isRunning} allMessages={messages} onScrollToMessage={handleScrollToMessage} />
+              {item.type === "turn_group" ? (
+                <TurnGroupMessage
+                  group={item}
+                  sessionId={sessionId}
+                  permissionsByToolCallId={permissionsByToolCallId}
+                  childrenByParentToolCallId={childrenByParentToolCallId}
+                  taskId={taskId}
+                  worktreePath={worktreePath}
+                  onOpenFile={onOpenFile}
+                  isLastGroup={item.id === lastTurnGroupId}
+                  isTurnActive={isRunning}
+                  allMessages={messages}
+                  onScrollToMessage={handleScrollToMessage}
+                />
               ) : (
-                <MessageRenderer comment={item.message} isTaskDescription={item.message.id === 'task-description'} taskId={taskId} permissionsByToolCallId={permissionsByToolCallId} childrenByParentToolCallId={childrenByParentToolCallId} worktreePath={worktreePath} sessionId={sessionId ?? undefined} onOpenFile={onOpenFile} allMessages={messages} onScrollToMessage={handleScrollToMessage} />
+                <MessageRenderer
+                  comment={item.message}
+                  isTaskDescription={item.message.id === "task-description"}
+                  taskId={taskId}
+                  permissionsByToolCallId={permissionsByToolCallId}
+                  childrenByParentToolCallId={childrenByParentToolCallId}
+                  worktreePath={worktreePath}
+                  sessionId={sessionId ?? undefined}
+                  onOpenFile={onOpenFile}
+                  allMessages={messages}
+                  onScrollToMessage={handleScrollToMessage}
+                />
               )}
             </div>
           </div>
@@ -168,60 +245,94 @@ function MessageListBody({ items, messages, permissionsByToolCallId, childrenByP
   );
 }
 
+function getSessionRunningState(sessionState: string | null | undefined) {
+  return (
+    sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING"
+  );
+}
+
+function getLastTurnGroupId(items: RenderItem[]) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type === "turn_group") return item.id;
+  }
+  return null;
+}
+
 export const VirtualizedMessageList = memo(function VirtualizedMessageList({
-  items, messages, permissionsByToolCallId, childrenByParentToolCallId,
-  taskId, sessionId, messagesLoading, isWorking, sessionState, worktreePath, onOpenFile,
+  items,
+  messages,
+  permissionsByToolCallId,
+  childrenByParentToolCallId,
+  taskId,
+  sessionId,
+  messagesLoading,
+  isWorking,
+  sessionState,
+  worktreePath,
+  onOpenFile,
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isInitialLoading = messagesLoading && messages.length === 0;
-  const isCreatedSession = sessionState === 'CREATED';
+  const isCreatedSession = sessionState === "CREATED";
   const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking && !isCreatedSession;
   const itemCount = items.length;
 
   // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({ count: itemCount, getScrollElement: () => messagesContainerRef.current, estimateSize: () => 96, overscan: 6 });
-  const { wasAtBottomRef, hasMore, isLoadingMore } = useVirtualListScrolling(sessionId, virtualizer, messagesContainerRef);
+  const virtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement: () => messagesContainerRef.current,
+    estimateSize: () => 96,
+    overscan: 6,
+  });
+  const { wasAtBottomRef, hasMore, isLoadingMore } = useVirtualListScrolling(
+    sessionId,
+    virtualizer,
+    messagesContainerRef,
+  );
 
-  const handleScrollToMessage = useCallback((messageId: string) => {
-    const index = items.findIndex(item => {
-      if (item.type === 'turn_group') return item.messages.some(msg => msg.id === messageId);
-      return item.message?.id === messageId;
-    });
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
-  }, [items, virtualizer]);
+  const handleScrollToMessage = useCallback(
+    (messageId: string) => {
+      const index = items.findIndex((item) => {
+        if (item.type === "turn_group") return item.messages.some((msg) => msg.id === messageId);
+        return item.message?.id === messageId;
+      });
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" });
+    },
+    [items, virtualizer],
+  );
 
   const lastMessageContent = useMemo(() => {
-    if (items.length === 0) return '';
+    if (items.length === 0) return "";
     const lastItem = items[items.length - 1];
-    if (lastItem.type === 'turn_group') return lastItem.messages[lastItem.messages.length - 1]?.content ?? '';
-    return lastItem.message?.content ?? '';
+    if (lastItem.type === "turn_group")
+      return lastItem.messages[lastItem.messages.length - 1]?.content ?? "";
+    return lastItem.message?.content ?? "";
   }, [items]);
 
   useEffect(() => {
     if (itemCount === 0) return;
-    if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: 'end' });
+    if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: "end" });
   }, [itemCount, lastMessageContent, virtualizer, wasAtBottomRef]);
 
-  const isRunning = sessionState === 'CREATED' || sessionState === 'STARTING' || sessionState === 'RUNNING';
-
-  const lastTurnGroupId = useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]; if (item.type === 'turn_group') return item.id;
-    }
-    return null;
-  }, [items]);
+  const isRunning = getSessionRunningState(sessionState);
+  const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
 
   useEffect(() => {
     if (!isRunning) return;
     const element = messagesContainerRef.current;
     if (!element) return;
-    requestAnimationFrame(() => { element.scrollTop = element.scrollHeight; });
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
   }, [isRunning]);
 
   return (
     <SessionPanelContent ref={messagesContainerRef} className="relative p-4">
       {isLoadingMore && hasMore && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">Loading older messages...</div>
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
+          Loading older messages...
+        </div>
       )}
       {showLoadingState && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -234,7 +345,21 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
           <span>No messages yet. Start the conversation!</span>
         </div>
       )}
-      <MessageListBody items={items} messages={messages} permissionsByToolCallId={permissionsByToolCallId} childrenByParentToolCallId={childrenByParentToolCallId} taskId={taskId} sessionId={sessionId} worktreePath={worktreePath} onOpenFile={onOpenFile} isInitialLoading={isInitialLoading} virtualizer={virtualizer} lastTurnGroupId={lastTurnGroupId} isRunning={isRunning} handleScrollToMessage={handleScrollToMessage} />
+      <MessageListBody
+        items={items}
+        messages={messages}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        isInitialLoading={isInitialLoading}
+        virtualizer={virtualizer}
+        lastTurnGroupId={lastTurnGroupId}
+        isRunning={isRunning}
+        handleScrollToMessage={handleScrollToMessage}
+      />
       <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
     </SessionPanelContent>
   );

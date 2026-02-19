@@ -30,8 +30,8 @@ func newSessionTestLogger() *logger.Logger {
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
-	server       *httptest.Server
-	mu           sync.Mutex
+	server      *httptest.Server
+	mu          sync.Mutex
 	actionLog   []string // ordered log of actions received
 	upgrader    websocket.Upgrader
 	handler     func(msg ws.Message) *ws.Message

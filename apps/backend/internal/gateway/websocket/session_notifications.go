@@ -25,8 +25,8 @@ type SessionStreamBroadcaster struct {
 
 	// File change debouncing
 	fileChangeMu     sync.Mutex
-	fileChangeBatch  map[string][]any // sessionID -> list of file change payloads
-	fileChangeTimers map[string]*time.Timer   // sessionID -> debounce timer
+	fileChangeBatch  map[string][]any       // sessionID -> list of file change payloads
+	fileChangeTimers map[string]*time.Timer // sessionID -> debounce timer
 }
 
 func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *SessionStreamBroadcaster {

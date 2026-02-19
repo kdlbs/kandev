@@ -3,19 +3,19 @@
  * Ported from the Milkdown mermaidCodeBlockView in markdown-editor.tsx.
  */
 
-import { Node, mergeAttributes } from '@tiptap/core';
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
-import { createElement, useEffect, useRef, useState } from 'react';
-import mermaid from 'mermaid';
+import { Node, mergeAttributes } from "@tiptap/core";
+import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
+import { createElement, useEffect, useRef, useState } from "react";
+import mermaid from "mermaid";
 
 let mermaidInitialized = false;
 let mermaidIdCounter = 0;
 
-function initMermaid(theme: 'dark' | 'light' = 'dark') {
+function initMermaid(theme: "dark" | "light" = "dark") {
   mermaid.initialize({
     startOnLoad: false,
-    theme: theme === 'dark' ? 'dark' : 'default',
-    securityLevel: 'loose',
+    theme: theme === "dark" ? "dark" : "default",
+    securityLevel: "loose",
   });
   mermaidInitialized = true;
 }
@@ -46,10 +46,10 @@ function MermaidNodeView({ node }: { node: any }) {
 
   return createElement(
     NodeViewWrapper,
-    { className: 'mermaid-container' },
+    { className: "mermaid-container" },
     error
-      ? createElement('pre', { className: 'mermaid-error' }, `Error rendering diagram: ${error}`)
-      : createElement('div', { ref: containerRef })
+      ? createElement("pre", { className: "mermaid-error" }, `Error rendering diagram: ${error}`)
+      : createElement("div", { ref: containerRef }),
   );
 }
 
@@ -58,10 +58,10 @@ function MermaidNodeView({ node }: { node: any }) {
  * For non-mermaid blocks, uses default rendering.
  */
 export const MermaidCodeBlock = Node.create({
-  name: 'mermaidCodeBlock',
-  group: 'block',
-  content: 'text*',
-  marks: '',
+  name: "mermaidCodeBlock",
+  group: "block",
+  content: "text*",
+  marks: "",
   code: true,
   defining: true,
 
@@ -69,10 +69,10 @@ export const MermaidCodeBlock = Node.create({
     return {
       language: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-language'),
+        parseHTML: (element) => element.getAttribute("data-language"),
         renderHTML: (attributes) => {
           if (!attributes.language) return {};
-          return { 'data-language': attributes.language };
+          return { "data-language": attributes.language };
         },
       },
     };
@@ -81,13 +81,13 @@ export const MermaidCodeBlock = Node.create({
   parseHTML() {
     return [
       {
-        tag: 'pre',
-        preserveWhitespace: 'full',
+        tag: "pre",
+        preserveWhitespace: "full",
         getAttrs: (node) => {
           const el = node as HTMLElement;
-          const code = el.querySelector('code');
+          const code = el.querySelector("code");
           const lang = code?.className?.match(/language-(\w+)/)?.[1];
-          if (lang === 'mermaid') return { language: 'mermaid' };
+          if (lang === "mermaid") return { language: "mermaid" };
           return false; // Let default code block handle non-mermaid
         },
       },
@@ -95,7 +95,7 @@ export const MermaidCodeBlock = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['pre', mergeAttributes(HTMLAttributes), ['code', {}, 0]];
+    return ["pre", mergeAttributes(HTMLAttributes), ["code", {}, 0]];
   },
 
   addNodeView() {

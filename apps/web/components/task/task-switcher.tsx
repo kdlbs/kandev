@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo, useMemo } from 'react';
-import type { TaskState } from '@/lib/types/http';
-import { truncateRepoPath } from '@/lib/utils';
-import { TaskItem } from './task-item';
+import { memo, useMemo } from "react";
+import type { TaskState } from "@/lib/types/http";
+import { truncateRepoPath } from "@/lib/utils";
+import { TaskItem } from "./task-item";
 
 type DiffStats = {
   additions: number;
@@ -68,8 +68,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   const sortedTasks = useMemo(() => {
     const stepOrder = new Map(steps.map((col, i) => [col.id, i]));
     return [...tasks].sort((a, b) => {
-      const aOrder = stepOrder.get(a.workflowStepId ?? '') ?? 999;
-      const bOrder = stepOrder.get(b.workflowStepId ?? '') ?? 999;
+      const aOrder = stepOrder.get(a.workflowStepId ?? "") ?? 999;
+      const bOrder = stepOrder.get(b.workflowStepId ?? "") ?? 999;
       if (aOrder !== bOrder) return aOrder - bOrder;
       return a.title.localeCompare(b.title);
     });
@@ -87,12 +87,8 @@ export const TaskSwitcher = memo(function TaskSwitcher({
         sortedTasks.map((task) => {
           const isActive = task.id === activeTaskId;
           const isSelected = task.id === selectedTaskId || isActive;
-          const repoLabel = task.repositoryPath
-            ? truncateRepoPath(task.repositoryPath)
-            : undefined;
-          const stepName = task.workflowStepId
-            ? stepNameById.get(task.workflowStepId)
-            : undefined;
+          const repoLabel = task.repositoryPath ? truncateRepoPath(task.repositoryPath) : undefined;
+          const stepName = task.workflowStepId ? stepNameById.get(task.workflowStepId) : undefined;
           return (
             <TaskItem
               key={task.id}

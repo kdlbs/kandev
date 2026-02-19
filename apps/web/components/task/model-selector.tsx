@@ -1,29 +1,35 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { IconChevronDown } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+import { memo } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { useAppStore } from '@/components/state-provider';
-import { useAvailableAgents } from '@/hooks/domains/settings/use-available-agents';
-import { useSettingsData } from '@/hooks/domains/settings/use-settings-data';
-import type { Agent, AgentProfile, AvailableAgent } from '@/lib/types/http';
+} from "@kandev/ui/dropdown-menu";
+import { useAppStore } from "@/components/state-provider";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 
 type ModelSelectorProps = {
   sessionId: string | null;
 };
 
-type ModelOption = { id: string; name: string; provider: string; context_window: number; is_default: boolean };
+type ModelOption = {
+  id: string;
+  name: string;
+  provider: string;
+  context_window: number;
+  is_default: boolean;
+};
 
 function resolveSnapshotModel(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== 'object') return null;
+  if (!snapshot || typeof snapshot !== "object") return null;
   const model = (snapshot as Record<string, unknown>).model;
-  return typeof model === 'string' && model ? model : null;
+  return typeof model === "string" && model ? model : null;
 }
 
 function resolveAvailableModels(
@@ -41,17 +47,31 @@ function resolveAvailableModels(
   return [];
 }
 
-function buildModelOptions(availableModels: ModelOption[], currentModel: string | null): ModelOption[] {
+function buildModelOptions(
+  availableModels: ModelOption[],
+  currentModel: string | null,
+): ModelOption[] {
   const options = [...availableModels];
   if (currentModel && !options.some((m) => m.id === currentModel)) {
-    options.unshift({ id: currentModel, name: currentModel, provider: 'unknown', context_window: 0, is_default: false });
+    options.unshift({
+      id: currentModel,
+      name: currentModel,
+      provider: "unknown",
+      context_window: 0,
+      is_default: false,
+    });
   }
   return options;
 }
 
 function NoModelButton() {
   return (
-    <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 cursor-not-allowed opacity-50 whitespace-nowrap" disabled>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1 px-2 cursor-not-allowed opacity-50 whitespace-nowrap"
+      disabled
+    >
       <span className="text-xs">No model</span>
       <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
     </Button>
@@ -69,8 +89,12 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
 
   const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
-  const availableModels = resolveAvailableModels(settingsAgents as Agent[], session?.agent_profile_id, availableAgents);
-  const activeModel = sessionId ? (activeModels[sessionId] || null) : null;
+  const availableModels = resolveAvailableModels(
+    settingsAgents as Agent[],
+    session?.agent_profile_id,
+    availableAgents,
+  );
+  const activeModel = sessionId ? activeModels[sessionId] || null : null;
   const currentModel = activeModel || snapshotModel;
   const modelOptions = buildModelOptions(availableModels, currentModel);
 
@@ -86,7 +110,11 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap"
+        >
           <span className="text-xs">{displayName}</span>
           <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
         </Button>
@@ -96,7 +124,7 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
           <DropdownMenuItem
             key={model.id}
             onClick={() => handleModelChange(model.id)}
-            className={model.id === currentModel ? 'bg-accent' : ''}
+            className={model.id === currentModel ? "bg-accent" : ""}
           >
             {model.name}
           </DropdownMenuItem>

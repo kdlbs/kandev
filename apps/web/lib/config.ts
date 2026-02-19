@@ -12,22 +12,22 @@ const DEFAULT_API_BASE_URL = `http://localhost:${DEFAULT_API_PORT}`;
 const DEFAULT_MCP_SERVER_URL = `http://localhost:${DEFAULT_MCP_PORT}/sse`;
 
 export const DEBUG_UI =
-  process.env.NEXT_PUBLIC_KANDEV_DEBUG === 'true' ||
-  (typeof window !== 'undefined' && window.__KANDEV_DEBUG === true);
+  process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
+  (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
 
 /**
  * Build URL from current page hostname and port.
  * This allows accessing the app from any device (iPhone, Tailscale, etc.)
  * without manual configuration.
  */
-function buildClientUrl(port: number, path = ''): string {
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+function buildClientUrl(port: number, path = ""): string {
+  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
   return `${protocol}//${window.location.hostname}:${port}${path}`;
 }
 
 export function getBackendConfig(): AppConfig {
   // Server-side: use env vars or localhost defaults (SSR runs on same machine as backend)
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return {
       apiBaseUrl: process.env.KANDEV_API_BASE_URL ?? DEFAULT_API_BASE_URL,
       mcpServerUrl: process.env.KANDEV_MCP_SERVER_URL ?? DEFAULT_MCP_SERVER_URL,
@@ -46,23 +46,23 @@ export function getBackendConfig(): AppConfig {
     // Full URL override - use as-is (for custom domains/proxies)
     return {
       apiBaseUrl: window.__KANDEV_API_BASE_URL,
-      mcpServerUrl: window.__KANDEV_MCP_SERVER_URL || buildClientUrl(DEFAULT_MCP_PORT, '/sse'),
+      mcpServerUrl: window.__KANDEV_MCP_SERVER_URL || buildClientUrl(DEFAULT_MCP_PORT, "/sse"),
     };
   }
 
   // Build URLs dynamically from current hostname + port
   const apiPort =
-    parseInt(window.__KANDEV_API_PORT || '', 10) ||
-    parseInt(process.env.NEXT_PUBLIC_KANDEV_API_PORT || '', 10) ||
+    parseInt(window.__KANDEV_API_PORT || "", 10) ||
+    parseInt(process.env.NEXT_PUBLIC_KANDEV_API_PORT || "", 10) ||
     DEFAULT_API_PORT;
 
   const mcpPort =
-    parseInt(window.__KANDEV_MCP_PORT || '', 10) ||
-    parseInt(process.env.NEXT_PUBLIC_KANDEV_MCP_PORT || '', 10) ||
+    parseInt(window.__KANDEV_MCP_PORT || "", 10) ||
+    parseInt(process.env.NEXT_PUBLIC_KANDEV_MCP_PORT || "", 10) ||
     DEFAULT_MCP_PORT;
 
   return {
     apiBaseUrl: buildClientUrl(apiPort),
-    mcpServerUrl: buildClientUrl(mcpPort, '/sse'),
+    mcpServerUrl: buildClientUrl(mcpPort, "/sse"),
   };
 }

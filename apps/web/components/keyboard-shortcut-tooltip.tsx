@@ -2,10 +2,10 @@
  * Reusable tooltip component for displaying keyboard shortcuts
  */
 
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { Kbd, KbdGroup } from '@kandev/ui/kbd';
-import type { KeyboardShortcut } from '@/lib/keyboard/constants';
-import { formatShortcut, detectPlatform } from '@/lib/keyboard/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Kbd, KbdGroup } from "@kandev/ui/kbd";
+import type { KeyboardShortcut } from "@/lib/keyboard/constants";
+import { formatShortcut, detectPlatform } from "@/lib/keyboard/utils";
 
 type KeyboardShortcutTooltipProps = {
   shortcut: KeyboardShortcut;
@@ -18,7 +18,7 @@ type KeyboardShortcutTooltipProps = {
 
 /**
  * Tooltip that displays a keyboard shortcut hint
- * 
+ *
  * @example
  * ```tsx
  * <KeyboardShortcutTooltip shortcut={SHORTCUTS.SUBMIT}>
@@ -38,7 +38,7 @@ export function KeyboardShortcutTooltip({
 
   const platform = detectPlatform();
   const formattedShortcut = formatShortcut(shortcut, platform);
-  const parts = formattedShortcut.split('+');
+  const parts = formattedShortcut.split("+");
 
   return (
     <Tooltip>
@@ -60,7 +60,7 @@ export function KeyboardShortcutTooltip({
 /**
  * Simple text-only version that just shows the formatted shortcut
  * Useful for inline display without tooltip
- * 
+ *
  * @example
  * ```tsx
  * <KeyboardShortcutText shortcut={SHORTCUTS.SUBMIT} />
@@ -74,7 +74,7 @@ export function KeyboardShortcutText({ shortcut }: { shortcut: KeyboardShortcut 
 
 /**
  * Kbd group version for displaying shortcuts with proper styling
- * 
+ *
  * @example
  * ```tsx
  * <KeyboardShortcutKbd shortcut={SHORTCUTS.SUBMIT} />
@@ -83,7 +83,7 @@ export function KeyboardShortcutText({ shortcut }: { shortcut: KeyboardShortcut 
 export function KeyboardShortcutKbd({ shortcut }: { shortcut: KeyboardShortcut }) {
   const platform = detectPlatform();
   const formattedShortcut = formatShortcut(shortcut, platform);
-  const parts = formattedShortcut.split('+');
+  const parts = formattedShortcut.split("+");
 
   return (
     <KbdGroup>
@@ -93,4 +93,3 @@ export function KeyboardShortcutKbd({ shortcut }: { shortcut: KeyboardShortcut }
     </KbdGroup>
   );
 }
-

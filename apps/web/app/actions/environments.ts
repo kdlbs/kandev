@@ -1,16 +1,16 @@
-'use server';
+"use server";
 
-import { getBackendConfig } from '@/lib/config';
-import type { Environment, ListEnvironmentsResponse } from '@/lib/types/http';
+import { getBackendConfig } from "@/lib/config";
+import type { Environment, ListEnvironmentsResponse } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
-    cache: 'no-store',
+    cache: "no-store",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(options?.headers ?? {}),
     },
   });
@@ -44,21 +44,26 @@ export async function createEnvironmentAction(payload: {
   build_config?: Record<string, string>;
 }): Promise<Environment> {
   return fetchJson<Environment>(`${apiBaseUrl}/api/v1/environments`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateEnvironmentAction(
   id: string,
-  payload: Partial<Pick<Environment, 'name' | 'kind' | 'worktree_root' | 'image_tag' | 'dockerfile' | 'build_config'>>
+  payload: Partial<
+    Pick<
+      Environment,
+      "name" | "kind" | "worktree_root" | "image_tag" | "dockerfile" | "build_config"
+    >
+  >,
 ): Promise<Environment> {
   return fetchJson<Environment>(`${apiBaseUrl}/api/v1/environments/${id}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteEnvironmentAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/environments/${id}`, { method: 'DELETE' });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/environments/${id}`, { method: "DELETE" });
 }

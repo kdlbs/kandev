@@ -1,8 +1,12 @@
-import { create } from 'zustand';
-import { immer } from 'zustand/middleware/immer';
-import type { Comment, DiffComment, CommentsSlice, CommentsState } from './types';
-import { isDiffComment } from './types';
-import { persistSessionComments, loadSessionComments, clearPersistedSessionComments } from './persistence';
+import { create } from "zustand";
+import { immer } from "zustand/middleware/immer";
+import type { Comment, DiffComment, CommentsSlice, CommentsState } from "./types";
+import { isDiffComment } from "./types";
+import {
+  persistSessionComments,
+  loadSessionComments,
+  clearPersistedSessionComments,
+} from "./persistence";
 
 const defaultState: CommentsState = {
   byId: {},
@@ -59,7 +63,8 @@ function markSentInState(state: CommentsState, commentIds: string[]): void {
     if (state.bySession[sessionId].length === 0) delete state.bySession[sessionId];
   }
   state.pendingForChat = state.pendingForChat.filter((id) => !idsToRemove.has(id));
-  if (state.editingCommentId && idsToRemove.has(state.editingCommentId)) state.editingCommentId = null;
+  if (state.editingCommentId && idsToRemove.has(state.editingCommentId))
+    state.editingCommentId = null;
   for (const sessionId of affectedSessions) persistSession(state, sessionId);
 }
 
@@ -83,7 +88,7 @@ function hydrateSessionInState(state: CommentsState, sessionId: string): void {
   for (const comment of comments) {
     state.byId[comment.id] = comment;
     ids.push(comment.id);
-    if (comment.status === 'pending' && !state.pendingForChat.includes(comment.id)) {
+    if (comment.status === "pending" && !state.pendingForChat.includes(comment.id)) {
       state.pendingForChat.push(comment.id);
     }
   }
@@ -99,7 +104,7 @@ export const useCommentsStore = create<CommentsSlice>()(
         state.byId[comment.id] = comment;
         if (!state.bySession[comment.sessionId]) state.bySession[comment.sessionId] = [];
         state.bySession[comment.sessionId].push(comment.id);
-        if (comment.status === 'pending') state.pendingForChat.push(comment.id);
+        if (comment.status === "pending") state.pendingForChat.push(comment.id);
         persistSession(state, comment.sessionId);
       }),
 
@@ -119,15 +124,24 @@ export const useCommentsStore = create<CommentsSlice>()(
       }),
 
     removeFromPending: (commentId: string) =>
-      set((state) => { state.pendingForChat = state.pendingForChat.filter((id) => id !== commentId); }),
+      set((state) => {
+        state.pendingForChat = state.pendingForChat.filter((id) => id !== commentId);
+      }),
 
-    clearPending: () => set((state) => { state.pendingForChat = []; }),
+    clearPending: () =>
+      set((state) => {
+        state.pendingForChat = [];
+      }),
 
-    setEditingComment: (commentId: string | null) => set((state) => { state.editingCommentId = commentId; }),
+    setEditingComment: (commentId: string | null) =>
+      set((state) => {
+        state.editingCommentId = commentId;
+      }),
 
     markCommentsSent: (commentIds: string[]) => set((state) => markSentInState(state, commentIds)),
 
-    clearSessionComments: (sessionId: string) => set((state) => clearSessionInState(state, sessionId)),
+    clearSessionComments: (sessionId: string) =>
+      set((state) => clearSessionInState(state, sessionId)),
 
     hydrateSession: (sessionId: string) => set((state) => hydrateSessionInState(state, sessionId)),
 
@@ -138,7 +152,8 @@ export const useCommentsStore = create<CommentsSlice>()(
       const result: DiffComment[] = [];
       for (const id of ids) {
         const comment = state.byId[id];
-        if (comment && isDiffComment(comment) && comment.filePath === filePath) result.push(comment);
+        if (comment && isDiffComment(comment) && comment.filePath === filePath)
+          result.push(comment);
       }
       return result;
     },
@@ -152,5 +167,5 @@ export const useCommentsStore = create<CommentsSlice>()(
       }
       return pending;
     },
-  }))
+  })),
 );

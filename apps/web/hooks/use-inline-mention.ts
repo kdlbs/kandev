@@ -1,19 +1,24 @@
-'use client';
+"use client";
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { searchWorkspaceFiles } from '@/lib/ws/workspace-files';
-import { getFileName } from '@/lib/utils/file-path';
-import type { RichTextInputHandle } from '@/components/task/chat/rich-text-input';
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
+import { getFileName } from "@/lib/utils/file-path";
+import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
 
 export type MentionItem = {
   id: string;
-  kind: 'prompt' | 'file' | 'plan';
+  kind: "prompt" | "file" | "plan";
   label: string;
   description?: string;
   /** What happens on selection. Each kind provides its own. */
-  onSelect: (input: RichTextInputHandle, value: string, triggerStart: number, onChange: (v: string) => void) => void;
+  onSelect: (
+    input: RichTextInputHandle,
+    value: string,
+    triggerStart: number,
+    onChange: (v: string) => void,
+  ) => void;
 };
 
 type Position = {
@@ -30,7 +35,7 @@ const NO_RESULTS_CLOSE_THRESHOLD = 3;
 function isValidMentionTrigger(text: string, pos: number): boolean {
   if (pos === 0) return true;
   const charBefore = text[pos - 1];
-  return charBefore === ' ' || charBefore === '\n' || charBefore === '\t';
+  return charBefore === " " || charBefore === "\n" || charBefore === "\t";
 }
 
 function filterItems(items: MentionItem[], query: string): MentionItem[] {
@@ -57,7 +62,10 @@ function makeFileItem(
   onFileSelect?: (path: string, name: string) => void,
 ): MentionItem {
   return {
-    id: filePath, kind: 'file', label: filePath, description: 'File',
+    id: filePath,
+    kind: "file",
+    label: filePath,
+    description: "File",
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
@@ -72,7 +80,10 @@ function makeFileItem(
 
 function makePlanItem(onPlanSelect: () => void): MentionItem {
   return {
-    id: '__plan__', kind: 'plan', label: 'Plan', description: 'Include the plan as context',
+    id: "__plan__",
+    kind: "plan",
+    label: "Plan",
+    description: "Include the plan as context",
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
@@ -91,8 +102,11 @@ function makePromptItem(
   onPromptSelect?: (id: string, name: string) => void,
 ): MentionItem {
   return {
-    id: prompt.id, kind: 'prompt', label: prompt.name,
-    description: prompt.content.length > 100 ? prompt.content.slice(0, 100) + '...' : prompt.content,
+    id: prompt.id,
+    kind: "prompt",
+    label: prompt.name,
+    description:
+      prompt.content.length > 100 ? prompt.content.slice(0, 100) + "..." : prompt.content,
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
       onChange(value.substring(0, triggerStart) + value.substring(cursorPos));
@@ -105,10 +119,23 @@ function makePromptItem(
   };
 }
 
+function clearMentionState(
+  setIsOpen: (open: boolean) => void,
+  setTriggerStart: (start: number) => void,
+  setQuery: (query: string) => void,
+) {
+  setIsOpen(false);
+  setTriggerStart(-1);
+  setQuery("");
+}
+
 /** Detect an @-trigger in text before cursor and return the query, or null if none. */
-function detectMentionTrigger(text: string, cursorPos: number): { triggerStart: number; query: string } | null {
+function detectMentionTrigger(
+  text: string,
+  cursorPos: number,
+): { triggerStart: number; query: string } | null {
   const textBeforeCursor = text.substring(0, cursorPos);
-  const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+  const lastAtIndex = textBeforeCursor.lastIndexOf("@");
   if (lastAtIndex < 0 || !isValidMentionTrigger(text, lastAtIndex)) return null;
   const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
   if (/\s/.test(textAfterAt)) return null;
@@ -129,26 +156,26 @@ function useFileSearch(sessionId: string | null | undefined, isOpen: boolean, qu
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSearchRef = useRef<{ query: string; results: string[] }>({ query: '', results: [] });
+  const lastSearchRef = useRef<{ query: string; results: string[] }>({ query: "", results: [] });
 
   const searchFiles = useCallback(
     async (searchQuery: string): Promise<string[]> => {
       if (!sessionId) return [];
-      const cacheKey = searchQuery || '__empty__';
+      const cacheKey = searchQuery || "__empty__";
       if (lastSearchRef.current.query === cacheKey) return lastSearchRef.current.results;
       try {
         const client = getWebSocketClient();
         if (!client) return [];
-        const response = await searchWorkspaceFiles(client, sessionId, searchQuery || '', 20);
+        const response = await searchWorkspaceFiles(client, sessionId, searchQuery || "", 20);
         const results = response.files || [];
         lastSearchRef.current = { query: cacheKey, results };
         return results;
       } catch (error) {
-        console.error('File search failed:', error);
+        console.error("File search failed:", error);
         return [];
       }
     },
-    [sessionId]
+    [sessionId],
   );
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -158,7 +185,7 @@ function useFileSearch(sessionId: string | null | undefined, isOpen: boolean, qu
       return;
     }
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    const delay = query === '' ? 0 : FILE_SEARCH_DEBOUNCE;
+    const delay = query === "" ? 0 : FILE_SEARCH_DEBOUNCE;
     setIsLoading(true);
     searchTimeoutRef.current = setTimeout(async () => {
       const results = await searchFiles(query);
@@ -184,79 +211,110 @@ type MentionKeyboardParams = {
 };
 
 function useMentionKeyboard({
-  isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu,
+  isOpen,
+  filteredItems,
+  selectedIndex,
+  setSelectedIndex,
+  handleSelect,
+  closeMenu,
 }: MentionKeyboardParams) {
   return useCallback(
     (event: React.KeyboardEvent) => {
       if (!isOpen) return;
       switch (event.key) {
-        case 'ArrowDown':
+        case "ArrowDown":
           event.preventDefault();
           setSelectedIndex((prev) => Math.min(prev + 1, filteredItems.length - 1));
           break;
-        case 'ArrowUp':
+        case "ArrowUp":
           event.preventDefault();
           setSelectedIndex((prev) => Math.max(prev - 1, 0));
           break;
-        case 'Enter':
-        case 'Tab':
+        case "Enter":
+        case "Tab":
           if (filteredItems.length > 0) {
             event.preventDefault();
             handleSelect(filteredItems[selectedIndex]);
           }
           break;
-        case 'Escape':
+        case "Escape":
           event.preventDefault();
           closeMenu();
           break;
       }
     },
-    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu]
+    [isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu],
   );
 }
 
-export function useInlineMention({
-  inputRef, value, onChange, sessionId, onPlanSelect, onFileSelect, onPromptSelect,
-}: UseInlineMentionParams) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState<Position | null>(null);
-  const [triggerStart, setTriggerStart] = useState<number>(-1);
-  const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(0);
+type MentionItemsOptions = {
+  query: string;
+  fileResults: string[];
+  prompts: Array<{ id: string; name: string; content: string }>;
+  onPlanSelect?: () => void;
+  onFileSelect?: (path: string, name: string) => void;
+  onPromptSelect?: (id: string, name: string) => void;
+};
 
-  const { prompts } = useCustomPrompts();
-  const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
-
+function useMentionItems({ query, fileResults, prompts, onPlanSelect, onFileSelect, onPromptSelect }: MentionItemsOptions) {
   const planItem = useMemo((): MentionItem | null => {
     if (!onPlanSelect) return null;
     return makePlanItem(onPlanSelect);
   }, [onPlanSelect]);
 
-  const promptItems = useMemo((): MentionItem[] => {
-    return prompts.map((prompt) => makePromptItem(prompt, onPromptSelect));
-  }, [prompts, onPromptSelect]);
+  const promptItems = useMemo(
+    () => prompts.map((prompt) => makePromptItem(prompt, onPromptSelect)),
+    [prompts, onPromptSelect],
+  );
 
-  const fileItems = useMemo((): MentionItem[] => {
-    return fileResults.map((filePath) => makeFileItem(filePath, onFileSelect));
-  }, [fileResults, onFileSelect]);
+  const fileItems = useMemo(
+    () => fileResults.map((filePath) => makeFileItem(filePath, onFileSelect)),
+    [fileResults, onFileSelect],
+  );
 
-  const filteredItems = useMemo(() => {
+  return useMemo(() => {
     const allItems: MentionItem[] = [];
     if (planItem) allItems.push(planItem);
-    allItems.push(...promptItems);
-    allItems.push(...fileItems);
+    allItems.push(...promptItems, ...fileItems);
     return filterItems(allItems, query);
   }, [planItem, promptItems, fileItems, query]);
+}
+
+export function useInlineMention({
+  inputRef,
+  value,
+  onChange,
+  sessionId,
+  onPlanSelect,
+  onFileSelect,
+  onPromptSelect,
+}: UseInlineMentionParams) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState<Position | null>(null);
+  const [triggerStart, setTriggerStart] = useState<number>(-1);
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const { prompts } = useCustomPrompts();
+  const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
+  const filteredItems = useMentionItems({
+    query,
+    fileResults,
+    prompts,
+    onPlanSelect,
+    onFileSelect,
+    onPromptSelect,
+  });
 
   /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => { setSelectedIndex(0); }, [filteredItems.length]);
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [filteredItems.length]);
 
   useEffect(() => {
     if (!isOpen || isLoading) return;
     if (filteredItems.length === 0 && query.length >= NO_RESULTS_CLOSE_THRESHOLD) {
-      setIsOpen(false);
-      setTriggerStart(-1);
-      setQuery('');
+      clearMentionState(setIsOpen, setTriggerStart, setQuery);
     }
   }, [isOpen, isLoading, filteredItems.length, query.length]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -280,19 +338,15 @@ export function useInlineMention({
           }
         }
         if (isOpen) {
-          setIsOpen(false);
-          setTriggerStart(-1);
-          setQuery('');
+          clearMentionState(setIsOpen, setTriggerStart, setQuery);
         }
       });
     },
-    [inputRef, isOpen, onChange]
+    [inputRef, isOpen, onChange],
   );
 
   const closeMenu = useCallback(() => {
-    setIsOpen(false);
-    setTriggerStart(-1);
-    setQuery('');
+    clearMentionState(setIsOpen, setTriggerStart, setQuery);
   }, []);
 
   const handleSelect = useCallback(
@@ -302,14 +356,29 @@ export function useInlineMention({
       item.onSelect(input, value, triggerStart, onChange);
       closeMenu();
     },
-    [inputRef, triggerStart, value, onChange, closeMenu]
+    [inputRef, triggerStart, value, onChange, closeMenu],
   );
 
-  const handleKeyDown = useMentionKeyboard({ isOpen, filteredItems, selectedIndex, setSelectedIndex, handleSelect, closeMenu });
+  const handleKeyDown = useMentionKeyboard({
+    isOpen,
+    filteredItems,
+    selectedIndex,
+    setSelectedIndex,
+    handleSelect,
+    closeMenu,
+  });
 
   return {
-    isOpen, isLoading, position, query,
-    items: filteredItems, selectedIndex, setSelectedIndex,
-    handleChange, handleSelect, handleKeyDown, closeMenu,
+    isOpen,
+    isLoading,
+    position,
+    query,
+    items: filteredItems,
+    selectedIndex,
+    setSelectedIndex,
+    handleChange,
+    handleSelect,
+    handleKeyDown,
+    closeMenu,
   };
 }

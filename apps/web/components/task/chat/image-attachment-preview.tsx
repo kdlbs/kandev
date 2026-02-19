@@ -1,21 +1,21 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import { IconX } from '@tabler/icons-react';
-import { cn } from '@/lib/utils';
+import { memo } from "react";
+import { IconX } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 
 export type ImageAttachment = {
   id: string;
-  data: string;       // Base64-encoded image data (without data: prefix)
-  mimeType: string;   // "image/png", "image/jpeg", "image/gif", "image/webp"
-  preview: string;    // Data URL for preview display
-  size: number;       // File size in bytes
-  width: number;      // Image width in pixels
-  height: number;     // Image height in pixels
+  data: string; // Base64-encoded image data (without data: prefix)
+  mimeType: string; // "image/png", "image/jpeg", "image/gif", "image/webp"
+  preview: string; // Data URL for preview display
+  size: number; // File size in bytes
+  width: number; // Image width in pixels
+  height: number; // Image height in pixels
 };
 
 // Supported image types
-export const SUPPORTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+export const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 // Size limits
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB per image
@@ -23,9 +23,9 @@ export const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 20MB total
 export const MAX_IMAGES = 10;
 
 export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
+  if (bytes === 0) return "0 B";
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
@@ -49,8 +49,8 @@ export const ImageAttachmentPreview = memo(function ImageAttachmentPreview({
         <div
           key={attachment.id}
           className={cn(
-            'relative group rounded-md overflow-hidden border border-border bg-muted/30',
-            disabled && 'opacity-50'
+            "relative group rounded-md overflow-hidden border border-border bg-muted/30",
+            disabled && "opacity-50",
           )}
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- base64/blob preview URLs are not compatible with next/image */}
@@ -66,11 +66,11 @@ export const ImageAttachmentPreview = memo(function ImageAttachmentPreview({
               type="button"
               onClick={() => onRemove(attachment.id)}
               className={cn(
-                'absolute top-0.5 right-0.5 p-0.5 rounded-full',
-                'bg-black/70 text-white',
-                'opacity-0 group-hover:opacity-100 transition-opacity',
-                'hover:bg-black/90 cursor-pointer',
-                'focus:outline-none focus:ring-1 focus:ring-white/50'
+                "absolute top-0.5 right-0.5 p-0.5 rounded-full",
+                "bg-black/70 text-white",
+                "opacity-0 group-hover:opacity-100 transition-opacity",
+                "hover:bg-black/90 cursor-pointer",
+                "focus:outline-none focus:ring-1 focus:ring-white/50",
               )}
               aria-label="Remove image"
             >
@@ -98,7 +98,9 @@ export function processImageFile(file: File): Promise<ImageAttachment | null> {
 
     // Validate size
     if (file.size > MAX_IMAGE_SIZE) {
-      console.warn(`Image too large: ${formatBytes(file.size)} (max: ${formatBytes(MAX_IMAGE_SIZE)})`);
+      console.warn(
+        `Image too large: ${formatBytes(file.size)} (max: ${formatBytes(MAX_IMAGE_SIZE)})`,
+      );
       resolve(null);
       return;
     }
@@ -112,8 +114,8 @@ export function processImageFile(file: File): Promise<ImageAttachment | null> {
       }
 
       // Extract base64 data (remove "data:image/png;base64," prefix)
-      const base64 = dataUrl.split(',')[1];
-      const mimeType = dataUrl.split(';')[0].split(':')[1];
+      const base64 = dataUrl.split(",")[1];
+      const mimeType = dataUrl.split(";")[0].split(":")[1];
 
       // Read image dimensions
       const img = new Image();
@@ -132,10 +134,9 @@ export function processImageFile(file: File): Promise<ImageAttachment | null> {
       img.src = dataUrl;
     };
     reader.onerror = () => {
-      console.error('Failed to read image file');
+      console.error("Failed to read image file");
       resolve(null);
     };
     reader.readAsDataURL(file);
   });
 }
-

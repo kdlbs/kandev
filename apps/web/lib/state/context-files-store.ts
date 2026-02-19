@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { getSessionStorage, setSessionStorage } from '@/lib/local-storage';
+import { create } from "zustand";
+import { getSessionStorage, setSessionStorage } from "@/lib/local-storage";
 
 export type ContextFile = { path: string; name: string; pinned?: boolean };
 
@@ -18,10 +18,13 @@ type ContextFilesStore = {
   hydrateSession: (sessionId: string) => void;
 };
 
-const STORAGE_PREFIX = 'kandev.contextFiles.';
+const STORAGE_PREFIX = "kandev.contextFiles.";
 
 function persistFiles(sessionId: string, files: ContextFile[]) {
-  setSessionStorage(`${STORAGE_PREFIX}${sessionId}`, files.map(f => ({ path: f.path, name: f.name, pinned: f.pinned ?? false })));
+  setSessionStorage(
+    `${STORAGE_PREFIX}${sessionId}`,
+    files.map((f) => ({ path: f.path, name: f.name, pinned: f.pinned ?? false })),
+  );
 }
 
 function hydrateFiles(sessionId: string): ContextFile[] {

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
-import { useAppStoreApi } from '@/components/state-provider';
-import { getBackendConfig } from '@/lib/config';
-import { httpToWebSocketUrl } from '@/lib/ws/utils';
-import { useWebSocket } from '@/lib/ws/use-websocket';
+import { useAppStoreApi } from "@/components/state-provider";
+import { getBackendConfig } from "@/lib/config";
+import { httpToWebSocketUrl } from "@/lib/ws/utils";
+import { useWebSocket } from "@/lib/ws/use-websocket";
 
 export function WebSocketConnector() {
   const store = useAppStoreApi();

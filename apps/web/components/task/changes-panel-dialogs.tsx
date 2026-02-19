@@ -1,13 +1,8 @@
-'use client';
+"use client";
 
-import {
-  IconGitCommit,
-  IconGitPullRequest,
-  IconLoader2,
-  IconCheck,
-} from '@tabler/icons-react';
+import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
 
-import { Button } from '@kandev/ui/button';
+import { Button } from "@kandev/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +10,7 @@ import {
   DialogTitle,
   DialogFooter,
   DialogClose,
-} from '@kandev/ui/dialog';
+} from "@kandev/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,10 +20,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@kandev/ui/alert-dialog';
-import { Checkbox } from '@kandev/ui/checkbox';
-import { Label } from '@kandev/ui/label';
-import { Textarea } from '@kandev/ui/textarea';
+} from "@kandev/ui/alert-dialog";
+import { Checkbox } from "@kandev/ui/checkbox";
+import { Label } from "@kandev/ui/label";
+import { Textarea } from "@kandev/ui/textarea";
 
 // --- Discard Confirmation Dialog ---
 
@@ -39,20 +34,28 @@ type DiscardDialogProps = {
   onConfirm: () => void;
 };
 
-export function DiscardDialog({ open, onOpenChange, fileToDiscard, onConfirm }: DiscardDialogProps) {
+export function DiscardDialog({
+  open,
+  onOpenChange,
+  fileToDiscard,
+  onConfirm,
+}: DiscardDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Discard changes?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently discard all changes to{' '}
+            This will permanently discard all changes to{" "}
             <span className="font-semibold">{fileToDiscard}</span>. This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             Discard
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -116,10 +119,7 @@ export function CommitDialog({
               Cancel
             </Button>
           </DialogClose>
-          <Button
-            onClick={onCommit}
-            disabled={!commitMessage.trim() || isLoading}
-          >
+          <Button onClick={onCommit} disabled={!commitMessage.trim() || isLoading}>
             {isLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
@@ -151,12 +151,12 @@ function CommitDialogStats({
     <div className="text-sm text-muted-foreground">
       {stagedFileCount > 0 ? (
         <span>
-          <span className="font-medium text-foreground">{stagedFileCount}</span>{' '}
-          staged file{stagedFileCount !== 1 ? 's' : ''}
+          <span className="font-medium text-foreground">{stagedFileCount}</span> staged file
+          {stagedFileCount !== 1 ? "s" : ""}
           {(stagedAdditions > 0 || stagedDeletions > 0) && (
             <span className="ml-2">
               (<span className="text-green-600">+{stagedAdditions}</span>
-              {' / '}
+              {" / "}
               <span className="text-red-600">-{stagedDeletions}</span>)
             </span>
           )}
@@ -209,9 +209,7 @@ export function PRDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          {displayBranch && (
-            <PRBranchInfo displayBranch={displayBranch} baseBranch={baseBranch} />
-          )}
+          {displayBranch && <PRBranchInfo displayBranch={displayBranch} baseBranch={baseBranch} />}
           <div className="space-y-2">
             <Label htmlFor="changes-pr-title" className="text-sm">
               Title
@@ -256,10 +254,7 @@ export function PRDialog({
               Cancel
             </Button>
           </DialogClose>
-          <Button
-            onClick={onCreatePR}
-            disabled={!prTitle.trim() || isLoading}
-          >
+          <Button onClick={onCreatePR} disabled={!prTitle.trim() || isLoading}>
             {isLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
@@ -289,15 +284,12 @@ function PRBranchInfo({
     <div className="text-sm text-muted-foreground">
       {baseBranch ? (
         <span>
-          Creating PR from{' '}
-          <span className="font-medium text-foreground">{displayBranch}</span>{' '}
-          &rarr;{' '}
-          <span className="font-medium text-foreground">{baseBranch}</span>
+          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>{" "}
+          &rarr; <span className="font-medium text-foreground">{baseBranch}</span>
         </span>
       ) : (
         <span>
-          Creating PR from{' '}
-          <span className="font-medium text-foreground">{displayBranch}</span>
+          Creating PR from <span className="font-medium text-foreground">{displayBranch}</span>
         </span>
       )}
     </div>

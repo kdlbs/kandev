@@ -231,8 +231,6 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	}
 }
 
-
-
 // checkPortAvailable verifies the given port is not in use.
 // It checks by attempting a wildcard bind (matching what agentctl does with ":port").
 func checkPortAvailable(port int) error {

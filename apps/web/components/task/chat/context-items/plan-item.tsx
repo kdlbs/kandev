@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { memo } from 'react';
-import type { PlanContextItem } from '@/lib/types/context';
-import { ContextChip } from './context-chip';
-import { LazyPlanPreview } from './lazy-plan-preview';
+import { memo } from "react";
+import type { PlanContextItem } from "@/lib/types/context";
+import { ContextChip } from "./context-chip";
+import { LazyPlanPreview } from "./lazy-plan-preview";
 
 export const PlanItem = memo(function PlanItem({ item }: { item: PlanContextItem }) {
   return (

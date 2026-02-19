@@ -24,13 +24,13 @@ type MemoryEventBus struct {
 
 // memorySubscription represents an in-memory subscription
 type memorySubscription struct {
-	bus      *MemoryEventBus
-	subject  string
-	pattern  *regexp.Regexp // For wildcard matching
-	handler  EventHandler
-	queue    string // Empty for regular subscriptions
-	active   bool
-	mu       sync.Mutex
+	bus     *MemoryEventBus
+	subject string
+	pattern *regexp.Regexp // For wildcard matching
+	handler EventHandler
+	queue   string // Empty for regular subscriptions
+	active  bool
+	mu      sync.Mutex
 }
 
 // queueGroup manages load balancing for queue subscriptions

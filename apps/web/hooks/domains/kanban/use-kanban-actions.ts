@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAppStoreApi } from '@/components/state-provider';
-import { useTaskCRUD } from '@/hooks/use-task-crud';
-import type { Task as BackendTask } from '@/lib/types/http';
-import type { KanbanState, WorkspaceState, WorkflowsState } from '@/lib/state/slices';
+import { useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useAppStoreApi } from "@/components/state-provider";
+import { useTaskCRUD } from "@/hooks/use-task-crud";
+import type { Task as BackendTask } from "@/lib/types/http";
+import type { KanbanState, WorkspaceState, WorkflowsState } from "@/lib/state/slices";
 
 type UseKanbanActionsOptions = {
   workspaceState: WorkspaceState;
   workflowsState: WorkflowsState;
 };
 
-type KanbanTask = KanbanState['tasks'][number];
+type KanbanTask = KanbanState["tasks"][number];
 
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
 function hydrateCreatedTask(
@@ -28,7 +28,7 @@ function hydrateCreatedTask(
         kanban: {
           ...currentKanban,
           tasks: currentKanban.tasks.map((t: KanbanTask) =>
-            t.id === task.id ? { ...t, repositoryId: repoId } : t
+            t.id === task.id ? { ...t, repositoryId: repoId } : t,
           ),
         },
       });
@@ -74,7 +74,7 @@ function hydrateEditedTask(
               description: task.description ?? undefined,
               repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
             }
-          : item
+          : item,
       ),
     },
   });
@@ -101,15 +101,15 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
   // Read current kanban state at call time (not from closure) to avoid
   // overwriting WebSocket-driven updates that arrived while the dialog was open.
   const handleDialogSuccess = useCallback(
-    (task: BackendTask, mode: 'create' | 'edit') => {
+    (task: BackendTask, mode: "create" | "edit") => {
       const currentKanban = store.getState().kanban;
-      if (mode === 'create') {
+      if (mode === "create") {
         hydrateCreatedTask(store, task, currentKanban);
         return;
       }
       hydrateEditedTask(store, task, currentKanban);
     },
-    [store]
+    [store],
   );
 
   // Handle workspace change with navigation
@@ -122,10 +122,10 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
       if (nextWorkspaceId) {
         router.push(`/?workspaceId=${nextWorkspaceId}`);
       } else {
-        router.push('/');
+        router.push("/");
       }
     },
-    [router, store, workspaceState.activeId]
+    [router, store, workspaceState.activeId],
   );
 
   // Handle workflow change with navigation
@@ -136,12 +136,14 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
       }
       store.getState().setActiveWorkflow(nextWorkflowId);
       if (nextWorkflowId) {
-        const workspaceId = workflowsState.items.find((workflow: WorkflowsState['items'][number]) => workflow.id === nextWorkflowId)?.workspaceId;
-        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : '';
+        const workspaceId = workflowsState.items.find(
+          (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
+        )?.workspaceId;
+        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
         router.push(`/?workflowId=${nextWorkflowId}${workspaceParam}`);
       }
     },
-    [router, store, workflowsState.activeId, workflowsState.items]
+    [router, store, workflowsState.activeId, workflowsState.items],
   );
 
   return {

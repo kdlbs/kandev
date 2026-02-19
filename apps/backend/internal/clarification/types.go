@@ -64,4 +64,3 @@ const (
 	StatusExpired   Status = "expired"
 	StatusCancelled Status = "cancelled"
 )
-

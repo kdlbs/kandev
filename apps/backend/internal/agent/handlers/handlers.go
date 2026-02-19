@@ -159,4 +159,3 @@ func (h *Handlers) wsListAgentTypes(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
-

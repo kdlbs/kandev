@@ -40,7 +40,7 @@ export type ProcessState = {
 
 export type FileInfo = {
   path: string;
-  status: 'modified' | 'added' | 'deleted' | 'untracked' | 'renamed';
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;
   additions?: number;
   deletions?: number;
@@ -67,7 +67,12 @@ export type GitStatusState = {
 };
 
 // Git Snapshot types for historical tracking
-export type SnapshotType = 'status_update' | 'pre_commit' | 'post_commit' | 'pre_stage' | 'post_stage';
+export type SnapshotType =
+  | "status_update"
+  | "pre_commit"
+  | "post_commit"
+  | "pre_stage"
+  | "post_stage";
 
 export type GitSnapshot = {
   id: string;
@@ -134,7 +139,7 @@ export type ContextWindowState = {
 };
 
 export type AgentState = {
-  agents: Array<{ id: string; status: 'idle' | 'running' | 'error' }>;
+  agents: Array<{ id: string; status: "idle" | "running" | "error" }>;
 };
 
 export type AvailableCommand = {
@@ -150,8 +155,8 @@ export type UserShellInfo = {
   terminalId: string;
   processId: string;
   running: boolean;
-  label: string;           // Display name (e.g., "Terminal" or script name)
-  closable: boolean;       // Whether the terminal can be closed (first terminal is not closable)
+  label: string; // Display name (e.g., "Terminal" or script name)
+  closable: boolean; // Whether the terminal can be closed (first terminal is not closable)
   initialCommand?: string; // Command that was run (empty for plain shells)
 };
 
@@ -179,7 +184,7 @@ export type SessionRuntimeSliceActions = {
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
     sessionId: string,
-    status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
+    status: { available: boolean; running?: boolean; shell?: string; cwd?: string },
   ) => void;
   clearShellOutput: (sessionId: string) => void;
   appendProcessOutput: (processId: string, data: string) => void;

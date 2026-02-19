@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +8,8 @@ import {
   DialogTitle,
   DialogFooter,
   DialogDescription,
-} from '@kandev/ui/dialog';
-import { Button } from '@kandev/ui/button';
+} from "@kandev/ui/dialog";
+import { Button } from "@kandev/ui/button";
 import {
   IconArrowRight,
   IconArrowLeft,
@@ -26,15 +26,15 @@ import {
   IconGitCommit,
   IconTerminal2,
   IconArrowDown,
-} from '@tabler/icons-react';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@kandev/ui/collapsible';
-import { Kbd } from '@kandev/ui/kbd';
-import { AgentLogo } from '@/components/agent-logo';
-import { ProfileFormFields, type ProfileFormData } from '@/components/settings/profile-form-fields';
-import { profileToPermissionsMap, permissionsToProfilePatch } from '@/lib/agent-permissions';
-import { listAvailableAgents, listWorkflowTemplates } from '@/lib/api';
-import { listAgentsAction, updateAgentProfileAction } from '@/app/actions/agents';
-import type { AvailableAgent, WorkflowTemplate, AgentProfile } from '@/lib/types/http';
+} from "@tabler/icons-react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
+import { Kbd } from "@kandev/ui/kbd";
+import { AgentLogo } from "@/components/agent-logo";
+import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import { profileToPermissionsMap, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
+import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
+import type { AvailableAgent, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
 
 interface OnboardingDialogProps {
   open: boolean;
@@ -51,56 +51,155 @@ const TOTAL_STEPS = 4;
 
 const RUNTIMES = [
   {
-    name: 'Local',
-    description: 'Run agents directly on your machine with full access to your local filesystem.',
+    name: "Local",
+    description: "Run agents directly on your machine with full access to your local filesystem.",
     icon: IconFolder,
   },
   {
-    name: 'Git Worktree',
-    description: 'Isolated branch environment under a worktree root for parallel work.',
+    name: "Git Worktree",
+    description: "Isolated branch environment under a worktree root for parallel work.",
     icon: IconFolders,
   },
   {
-    name: 'Docker',
-    description: 'Containerized execution for full isolation and reproducibility.',
+    name: "Docker",
+    description: "Containerized execution for full isolation and reproducibility.",
     icon: IconBrandDocker,
   },
 ];
 
-const STEP_TITLES = ['AI Agents', 'Environments', 'Agentic Workflows', 'Command Panel'];
+const STEP_TITLES = ["AI Agents", "Environments", "Agentic Workflows", "Command Panel"];
 const STEP_DESCRIPTIONS = [
-  'These AI coding agents were discovered on your system.',
-  'Agents can run in different runtime environments.',
-  'Workflows define the steps and automation for your tasks.',
-  'Quick access to actions from anywhere with a keyboard shortcut.',
+  "These AI coding agents were discovered on your system.",
+  "Agents can run in different runtime environments.",
+  "Workflows define the steps and automation for your tasks.",
+  "Quick access to actions from anywhere with a keyboard shortcut.",
 ];
 
-function buildAgentSettings(avail: AvailableAgent[], saved: { name: string; profiles?: { id: string; name: string; model?: string | null; cli_passthrough?: boolean | null }[] }[]): Record<string, AgentSetting> {
+function buildAgentSettings(
+  avail: AvailableAgent[],
+  saved: {
+    name: string;
+    profiles?: {
+      id: string;
+      name: string;
+      model?: string | null;
+      cli_passthrough?: boolean | null;
+    }[];
+  }[],
+): Record<string, AgentSetting> {
   const settings: Record<string, AgentSetting> = {};
   for (const aa of avail) {
     const dbAgent = saved.find((a) => a.name === aa.name);
     const profile = dbAgent?.profiles?.[0];
     if (profile) {
-      const perms = profileToPermissionsMap(profile as Partial<Pick<AgentProfile, 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing'>>, aa.permission_settings ?? {});
-      settings[aa.name] = { profileId: profile.id, formData: { name: profile.name, model: profile.model || aa.model_config.default_model, cli_passthrough: profile.cli_passthrough ?? false, ...perms }, dirty: false };
+      const perms = profileToPermissionsMap(
+        profile as Partial<
+          Pick<AgentProfile, "auto_approve" | "dangerously_skip_permissions" | "allow_indexing">
+        >,
+        aa.permission_settings ?? {},
+      );
+      settings[aa.name] = {
+        profileId: profile.id,
+        formData: {
+          name: profile.name,
+          model: profile.model || aa.model_config.default_model,
+          cli_passthrough: profile.cli_passthrough ?? false,
+          ...perms,
+        },
+        dirty: false,
+      };
     }
   }
   return settings;
 }
 
-type OnboardingFooterProps = { step: number; onSkip: () => void; onBack: () => void; onNext: () => void; onGetStarted: () => void };
+type OnboardingFooterProps = {
+  step: number;
+  onSkip: () => void;
+  onBack: () => void;
+  onNext: () => void;
+  onGetStarted: () => void;
+};
+
+function OnboardingStepDots({ step }: { step: number }) {
+  return (
+    <div className="flex justify-center gap-1.5 pb-2">
+      {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+        <div
+          key={i}
+          className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useOnboardingResources(open: boolean) {
+  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
+  const [agentSettings, setAgentSettings] = useState<Record<string, AgentSetting>>({});
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+
+  useEffect(() => {
+    if (!open) return;
+    queueMicrotask(() => {
+      setLoadingAgents(true);
+      setLoadingTemplates(true);
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([listAvailableAgents({ cache: "no-store" }), listAgentsAction()])
+      .then(([availRes, savedRes]) => {
+        setAvailableAgents(availRes.agents ?? []);
+        setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingAgents(false));
+    listWorkflowTemplates()
+      .then((res) => setTemplates(res.templates ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingTemplates(false));
+  }, [open]);
+
+  return {
+    availableAgents,
+    agentSettings,
+    setAgentSettings,
+    templates,
+    loadingAgents,
+    loadingTemplates,
+  };
+}
 
 function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: OnboardingFooterProps) {
   return (
     <DialogFooter>
       <div className="flex w-full items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onSkip} className="cursor-pointer"><IconX className="mr-1.5 h-3.5 w-3.5" />Skip</Button>
+        <Button variant="ghost" size="sm" onClick={onSkip} className="cursor-pointer">
+          <IconX className="mr-1.5 h-3.5 w-3.5" />
+          Skip
+        </Button>
         <div className="flex gap-2">
-          {step > 0 && <Button variant="outline" onClick={onBack} className="cursor-pointer"><IconArrowLeft className="mr-1.5 h-4 w-4" />Back</Button>}
-          {step < TOTAL_STEPS - 1
-            ? <Button onClick={onNext} className="cursor-pointer">Next<IconArrowRight className="ml-1.5 h-4 w-4" /></Button>
-            : <Button onClick={onGetStarted} className="cursor-pointer"><IconCheck className="mr-1.5 h-4 w-4" />Get Started</Button>
-          }
+          {step > 0 && (
+            <Button variant="outline" onClick={onBack} className="cursor-pointer">
+              <IconArrowLeft className="mr-1.5 h-4 w-4" />
+              Back
+            </Button>
+          )}
+          {step < TOTAL_STEPS - 1 ? (
+            <Button onClick={onNext} className="cursor-pointer">
+              Next
+              <IconArrowRight className="ml-1.5 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button onClick={onGetStarted} className="cursor-pointer">
+              <IconCheck className="mr-1.5 h-4 w-4" />
+              Get Started
+            </Button>
+          )}
         </div>
       </div>
     </DialogFooter>
@@ -109,53 +208,78 @@ function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: Onboar
 
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [step, setStep] = useState(0);
-  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
-  const [agentSettings, setAgentSettings] = useState<Record<string, AgentSetting>>({});
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [loadingAgents, setLoadingAgents] = useState(true);
-  const [loadingTemplates, setLoadingTemplates] = useState(true);
-  const [prevOpen, setPrevOpen] = useState(false);
-
-  if (open && !prevOpen) { setPrevOpen(true); setLoadingAgents(true); setLoadingTemplates(true); }
-  else if (!open && prevOpen) { setPrevOpen(false); }
-
-  useEffect(() => {
-    if (!open) return;
-    Promise.all([listAvailableAgents({ cache: 'no-store' }), listAgentsAction()])
-      .then(([availRes, savedRes]) => { setAvailableAgents(availRes.agents ?? []); setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? [])); })
-      .catch(() => { }).finally(() => setLoadingAgents(false));
-    listWorkflowTemplates().then((res) => setTemplates(res.templates ?? [])).catch(() => { }).finally(() => setLoadingTemplates(false));
-  }, [open]);
+  const { availableAgents, agentSettings, setAgentSettings, templates, loadingAgents, loadingTemplates } =
+    useOnboardingResources(open);
 
   const saveAgentSettings = useCallback(async () => {
-    await Promise.all(Object.values(agentSettings).filter((s) => s.dirty).map((s) => updateAgentProfileAction(s.profileId, { model: s.formData.model, ...permissionsToProfilePatch(s.formData), cli_passthrough: s.formData.cli_passthrough })));
+    await Promise.all(
+      Object.values(agentSettings)
+        .filter((s) => s.dirty)
+        .map((s) =>
+          updateAgentProfileAction(s.profileId, {
+            model: s.formData.model,
+            ...permissionsToProfilePatch(s.formData),
+            cli_passthrough: s.formData.cli_passthrough,
+          }),
+        ),
+    );
   }, [agentSettings]);
 
-  const handleSkip = () => { onComplete(); setStep(0); };
-  const handleNext = async () => { if (step === 0) await saveAgentSettings(); if (step < TOTAL_STEPS - 1) setStep(step + 1); };
-  const handleBack = () => { if (step > 0) setStep(step - 1); };
-  const handleGetStarted = async () => { await saveAgentSettings(); onComplete(); setStep(0); };
+  const handleSkip = () => {
+    onComplete();
+    setStep(0);
+  };
+  const handleNext = async () => {
+    if (step === 0) await saveAgentSettings();
+    if (step < TOTAL_STEPS - 1) setStep(step + 1);
+  };
+  const handleBack = () => {
+    if (step > 0) setStep(step - 1);
+  };
+  const handleGetStarted = async () => {
+    await saveAgentSettings();
+    onComplete();
+    setStep(0);
+  };
   const updateSetting = (agentName: string, formPatch: Partial<ProfileFormData>) => {
-    setAgentSettings((prev) => ({ ...prev, [agentName]: { ...prev[agentName], formData: { ...prev[agentName].formData, ...formPatch }, dirty: true } }));
+    setAgentSettings((prev) => ({
+      ...prev,
+      [agentName]: {
+        ...prev[agentName],
+        formData: { ...prev[agentName].formData, ...formPatch },
+        dirty: true,
+      },
+    }));
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => { }}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
           <DialogDescription className="text-center">{STEP_DESCRIPTIONS[step]}</DialogDescription>
         </DialogHeader>
         <div className="py-4 min-h-[220px]">
-          {step === 0 && <StepAgents availableAgents={availableAgents} agentSettings={agentSettings} loading={loadingAgents} onUpdateSetting={updateSetting} />}
+          {step === 0 && (
+            <StepAgents
+              availableAgents={availableAgents}
+              agentSettings={agentSettings}
+              loading={loadingAgents}
+              onUpdateSetting={updateSetting}
+            />
+          )}
           {step === 1 && <StepEnvironments />}
           {step === 2 && <StepWorkflows templates={templates} loading={loadingTemplates} />}
           {step === 3 && <StepCommandPanel />}
         </div>
-        <div className="flex justify-center gap-1.5 pb-2">
-          {Array.from({ length: TOTAL_STEPS }).map((_, i) => (<div key={i} className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-primary' : 'w-1.5 bg-muted-foreground/30'}`} />))}
-        </div>
-        <OnboardingFooter step={step} onSkip={handleSkip} onBack={handleBack} onNext={handleNext} onGetStarted={handleGetStarted} />
+        <OnboardingStepDots step={step} />
+        <OnboardingFooter
+          step={step}
+          onSkip={handleSkip}
+          onBack={handleBack}
+          onNext={handleNext}
+          onGetStarted={handleGetStarted}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -255,10 +379,7 @@ function StepEnvironments() {
         {RUNTIMES.map((runtime) => {
           const Icon = runtime.icon;
           return (
-            <div
-              key={runtime.name}
-              className="flex items-start gap-3 rounded-lg border p-3"
-            >
+            <div key={runtime.name} className="flex items-start gap-3 rounded-lg border p-3">
               <div className="h-8 w-8 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
                 <Icon className="h-4.5 w-4.5 text-muted-foreground" />
               </div>
@@ -277,7 +398,13 @@ function StepEnvironments() {
   );
 }
 
-function StepWorkflows({ templates, loading }: { templates: WorkflowTemplate[]; loading: boolean }) {
+function StepWorkflows({
+  templates,
+  loading,
+}: {
+  templates: WorkflowTemplate[];
+  loading: boolean;
+}) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-sm text-muted-foreground">
@@ -287,15 +414,13 @@ function StepWorkflows({ templates, loading }: { templates: WorkflowTemplate[]; 
     );
   }
 
-  const defaultTemplate = templates.find((t) => t.id === 'simple');
-  const otherTemplates = templates.filter((t) => t.id !== 'simple');
+  const defaultTemplate = templates.find((t) => t.id === "simple");
+  const otherTemplates = templates.filter((t) => t.id !== "simple");
 
   return (
     <div className="space-y-3">
       <div className="grid gap-2 max-h-[320px] overflow-y-auto pr-1">
-        {defaultTemplate && (
-          <TemplateCard template={defaultTemplate} isDefault />
-        )}
+        {defaultTemplate && <TemplateCard template={defaultTemplate} isDefault />}
         {otherTemplates.length > 0 && (
           <>
             <p className="text-xs text-muted-foreground mt-1">Available templates</p>
@@ -306,19 +431,19 @@ function StepWorkflows({ templates, loading }: { templates: WorkflowTemplate[]; 
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Workflows control the steps, automation, and agent behavior for your tasks. You can add
-        more workflows from Settings.
+        Workflows control the steps, automation, and agent behavior for your tasks. You can add more
+        workflows from Settings.
       </p>
     </div>
   );
 }
 
 const COMMAND_PANEL_PREVIEW_ITEMS = [
-  { icon: IconSearch, label: 'Search Tasks', trailing: '→' },
-  { icon: IconHome, label: 'Go to Home' },
-  { icon: IconGitCommit, label: 'Commit Changes' },
-  { icon: IconArrowDown, label: 'Pull' },
-  { icon: IconTerminal2, label: 'Add Terminal Panel' },
+  { icon: IconSearch, label: "Search Tasks", trailing: "→" },
+  { icon: IconHome, label: "Go to Home" },
+  { icon: IconGitCommit, label: "Commit Changes" },
+  { icon: IconArrowDown, label: "Pull" },
+  { icon: IconTerminal2, label: "Add Terminal Panel" },
 ];
 
 function StepCommandPanel() {
@@ -371,7 +496,9 @@ function StepCommandPanel() {
       <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
         <span>Press</span>
         <span className="inline-flex items-center gap-0.5">
-          <Kbd><IconCommand className="size-3" /></Kbd>
+          <Kbd>
+            <IconCommand className="size-3" />
+          </Kbd>
           <Kbd>K</Kbd>
         </span>
         <span>to open it anytime</span>
@@ -385,14 +512,18 @@ function StepCommandPanel() {
   );
 }
 
-function TemplateCard({ template, isDefault }: { template: WorkflowTemplate; isDefault?: boolean }) {
-  const steps = (template.default_steps ?? [])
-    .slice()
-    .sort((a, b) => a.position - b.position);
+function TemplateCard({
+  template,
+  isDefault,
+}: {
+  template: WorkflowTemplate;
+  isDefault?: boolean;
+}) {
+  const steps = (template.default_steps ?? []).slice().sort((a, b) => a.position - b.position);
 
   return (
     <div
-      className={`rounded-lg border p-3 ${isDefault ? 'border-primary/50 bg-primary/5' : 'opacity-60'}`}
+      className={`rounded-lg border p-3 ${isDefault ? "border-primary/50 bg-primary/5" : "opacity-60"}`}
     >
       <div className="flex items-center gap-2">
         <p className="text-sm font-medium">{template.name}</p>
@@ -414,7 +545,7 @@ function TemplateCard({ template, isDefault }: { template: WorkflowTemplate; isD
               <span className="flex items-center gap-1">
                 <span
                   className="h-1.5 w-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: s.color || 'hsl(var(--muted-foreground))' }}
+                  style={{ backgroundColor: s.color || "hsl(var(--muted-foreground))" }}
                 />
                 {s.name}
               </span>

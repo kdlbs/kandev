@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import { useCommentsStore } from '@/lib/state/slices/comments';
-import type { PlanComment } from '@/lib/state/slices/comments';
-import { isPlanComment } from '@/lib/state/slices/comments';
+import { useCallback, useEffect, useMemo } from "react";
+import { useCommentsStore } from "@/lib/state/slices/comments";
+import type { PlanComment } from "@/lib/state/slices/comments";
+import { isPlanComment } from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: PlanComment[] = [];
 
@@ -14,7 +14,7 @@ const EMPTY_COMMENTS: PlanComment[] = [];
 export function usePlanComments(sessionId: string | null | undefined) {
   const byId = useCommentsStore((state) => state.byId);
   const sessionIds = useCommentsStore((state) =>
-    sessionId ? state.bySession[sessionId] : undefined
+    sessionId ? state.bySession[sessionId] : undefined,
   );
   const addCommentToStore = useCommentsStore((state) => state.addComment);
   const updateCommentInStore = useCommentsStore((state) => state.updateComment);
@@ -45,7 +45,10 @@ export function usePlanComments(sessionId: string | null | undefined) {
       if (!sessionId) return null;
 
       if (editingCommentId) {
-        updateCommentInStore(editingCommentId, { text: commentText, selectedText } as Partial<PlanComment>);
+        updateCommentInStore(editingCommentId, {
+          text: commentText,
+          selectedText,
+        } as Partial<PlanComment>);
         setEditingComment(null);
         return editingCommentId;
       } else {
@@ -53,26 +56,26 @@ export function usePlanComments(sessionId: string | null | undefined) {
         const comment: PlanComment = {
           id,
           sessionId,
-          source: 'plan',
+          source: "plan",
           text: commentText,
           selectedText,
           from,
           to,
           createdAt: new Date().toISOString(),
-          status: 'pending',
+          status: "pending",
         };
         addCommentToStore(comment);
         return id;
       }
     },
-    [sessionId, editingCommentId, addCommentToStore, updateCommentInStore, setEditingComment]
+    [sessionId, editingCommentId, addCommentToStore, updateCommentInStore, setEditingComment],
   );
 
   const handleDeleteComment = useCallback(
     (commentId: string) => {
       removeCommentFromStore(commentId);
     },
-    [removeCommentFromStore]
+    [removeCommentFromStore],
   );
 
   return {

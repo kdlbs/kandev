@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { listNotificationProviders } from '@/lib/api';
-import { useAppStore } from '@/components/state-provider';
+import { useEffect } from "react";
+import { listNotificationProviders } from "@/lib/api";
+import { useAppStore } from "@/components/state-provider";
 
 export function useNotificationProviders() {
   const providers = useAppStore((state) => state.notificationProviders.items);
@@ -12,13 +12,13 @@ export function useNotificationProviders() {
   const loading = useAppStore((state) => state.notificationProviders.loading);
   const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
   const setNotificationProvidersLoading = useAppStore(
-    (state) => state.setNotificationProvidersLoading
+    (state) => state.setNotificationProvidersLoading,
   );
 
   useEffect(() => {
     if (loaded || loading) return;
     setNotificationProvidersLoading(true);
-    listNotificationProviders({ cache: 'no-store' })
+    listNotificationProviders({ cache: "no-store" })
       .then((response) => {
         setNotificationProviders({
           items: response.providers ?? [],
@@ -40,12 +40,7 @@ export function useNotificationProviders() {
       .finally(() => {
         setNotificationProvidersLoading(false);
       });
-  }, [
-    loaded,
-    loading,
-    setNotificationProviders,
-    setNotificationProvidersLoading,
-  ]);
+  }, [loaded, loading, setNotificationProviders, setNotificationProvidersLoading]);
 
   return {
     providers,

@@ -9,7 +9,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
-} from '@/lib/types/http';
+} from "@/lib/types/http";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -43,8 +43,8 @@ export type AgentProfileOption = {
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
-  agent: Pick<Agent, 'id' | 'name'>,
-  profile: Pick<AgentProfile, 'id' | 'agent_display_name' | 'name'> & { cli_passthrough?: boolean },
+  agent: Pick<Agent, "id" | "name">,
+  profile: Pick<AgentProfile, "id" | "agent_display_name" | "name"> & { cli_passthrough?: boolean },
 ): AgentProfileOption {
   return {
     id: profile.id,
@@ -95,7 +95,7 @@ export type UserSettingsState = {
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
-  chatSubmitKey: 'enter' | 'cmd_enter';
+  chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
@@ -119,16 +119,16 @@ export type SettingsSliceState = {
 };
 
 export type SettingsSliceActions = {
-  setExecutors: (executors: ExecutorsState['items']) => void;
-  setEnvironments: (environments: EnvironmentsState['items']) => void;
-  setSettingsAgents: (agents: SettingsAgentsState['items']) => void;
-  setAgentDiscovery: (agents: AgentDiscoveryState['items']) => void;
-  setAvailableAgents: (agents: AvailableAgentsState['items']) => void;
+  setExecutors: (executors: ExecutorsState["items"]) => void;
+  setEnvironments: (environments: EnvironmentsState["items"]) => void;
+  setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
+  setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
+  setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
-  setAgentProfiles: (profiles: AgentProfilesState['items']) => void;
-  setEditors: (editors: EditorsState['items']) => void;
+  setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
+  setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;
-  setPrompts: (prompts: PromptsState['items']) => void;
+  setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;

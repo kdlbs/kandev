@@ -373,8 +373,8 @@ func (a *CopilotAdapter) Prompt(ctx context.Context, message string, _ []v1.Mess
 	operationID := uuid.New().String()
 	a.operationID = operationID
 	a.resultCh = make(chan resultComplete, 1)
-	a.completeSent = false    // Reset completion flag for new operation
-	a.receivedDeltas = false  // Reset delta tracking for new operation
+	a.completeSent = false   // Reset completion flag for new operation
+	a.receivedDeltas = false // Reset delta tracking for new operation
 	a.mu.Unlock()
 
 	a.logger.Info("sending prompt via SDK",
@@ -982,7 +982,7 @@ func (a *CopilotAdapter) resolvePermissionActionDetails(
 		if se := cachedPayload.ShellExec(); se != nil {
 			return se.Command, types.ActionTypeCommand, map[string]interface{}{
 				"command": se.Command,
-				"cwd":    se.WorkDir,
+				"cwd":     se.WorkDir,
 			}
 		}
 	case streams.ToolKindModifyFile:

@@ -1,5 +1,5 @@
-import type { DiffComment, PlanComment } from '@/lib/state/slices/comments';
-import type { ImageAttachment } from '@/components/task/chat/image-attachment-preview';
+import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
+import type { ImageAttachment } from "@/components/task/chat/image-attachment-preview";
 
 type ContextItemBase = {
   id: string;
@@ -10,25 +10,25 @@ type ContextItemBase = {
 };
 
 export type PlanContextItem = ContextItemBase & {
-  kind: 'plan';
+  kind: "plan";
   taskId?: string;
   onOpen: () => void;
 };
 
 export type FileContextItem = ContextItemBase & {
-  kind: 'file';
+  kind: "file";
   path: string;
   onOpen: (path: string) => void;
 };
 
 export type PromptContextItem = ContextItemBase & {
-  kind: 'prompt';
+  kind: "prompt";
   promptContent?: string;
   onClick: () => void;
 };
 
 export type CommentContextItem = ContextItemBase & {
-  kind: 'comment';
+  kind: "comment";
   filePath: string;
   comments: DiffComment[];
   onRemoveComment: (id: string) => void;
@@ -36,13 +36,13 @@ export type CommentContextItem = ContextItemBase & {
 };
 
 export type PlanCommentContextItem = ContextItemBase & {
-  kind: 'plan-comment';
+  kind: "plan-comment";
   comments: PlanComment[];
   onOpen: () => void;
 };
 
 export type ImageContextItem = ContextItemBase & {
-  kind: 'image';
+  kind: "image";
   attachment: ImageAttachment;
 };
 
@@ -54,4 +54,4 @@ export type ContextItem =
   | PlanCommentContextItem
   | ImageContextItem;
 
-export type ContextItemKind = ContextItem['kind'];
+export type ContextItemKind = ContextItem["kind"];

@@ -1,6 +1,6 @@
-import { useAppStore } from '@/components/state-provider';
-import { useTask } from '@/hooks/use-task';
-import type { Repository } from '@/lib/types/http';
+import { useAppStore } from "@/components/state-provider";
+import { useTask } from "@/hooks/use-task";
+import type { Repository } from "@/lib/types/http";
 
 export function useTaskRepositories(taskId: string | null) {
   const task = useTask(taskId);

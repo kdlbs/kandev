@@ -1,5 +1,5 @@
-import { Card, CardContent, CardHeader } from '@kandev/ui/card';
-import { Skeleton } from '@kandev/ui/skeleton';
+import { Card, CardContent, CardHeader } from "@kandev/ui/card";
+import { Skeleton } from "@kandev/ui/skeleton";
 
 function OverviewCardsSkeleton() {
   return (

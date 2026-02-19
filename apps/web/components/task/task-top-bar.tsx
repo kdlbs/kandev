@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { memo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { memo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   IconBug,
   IconCopy,
@@ -10,8 +10,8 @@ import {
   IconCheck,
   IconHome,
   IconSettings,
-} from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -19,18 +19,18 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from '@kandev/ui/breadcrumb';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@kandev/ui/popover';
-import { CommitStatBadge } from '@/components/diff-stat';
-import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
-import { formatUserHomePath } from '@/lib/utils';
-import { EditorsMenu } from '@/components/task/editors-menu';
-import { LayoutPresetSelector } from '@/components/task/layout-preset-selector';
-import { DocumentControls } from '@/components/task/document/document-controls';
-import { VcsSplitButton } from '@/components/vcs-split-button';
-import { WorkflowStepper, type WorkflowStepperStep } from '@/components/task/workflow-stepper';
-import { DEBUG_UI } from '@/lib/config';
+} from "@kandev/ui/breadcrumb";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { CommitStatBadge } from "@/components/diff-stat";
+import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { formatUserHomePath } from "@/lib/utils";
+import { EditorsMenu } from "@/components/task/editors-menu";
+import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
+import { DocumentControls } from "@/components/task/document/document-controls";
+import { VcsSplitButton } from "@/components/vcs-split-button";
+import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
+import { DEBUG_UI } from "@/lib/config";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -128,22 +128,17 @@ function CopyIconButton({
 }) {
   return (
     <button type="button" onClick={onClick} className={className}>
-      {copied
-        ? <IconCheck className="h-3 w-3 text-green-500" />
-        : <IconCopy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-      }
+      {copied ? (
+        <IconCheck className="h-3 w-3 text-green-500" />
+      ) : (
+        <IconCopy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+      )}
     </button>
   );
 }
 
 /** Copiable path row used in the branch popover */
-function PathRow({
-  label,
-  path,
-}: {
-  label: string;
-  path: string;
-}) {
+function PathRow({ label, path }: { label: string; path: string }) {
   const [copied, handleCopy] = useCopyToClipboard();
   return (
     <div className="space-y-0.5">
@@ -154,7 +149,10 @@ function PathRow({
         </div>
         <CopyIconButton
           copied={copied}
-          onClick={(e) => { e.stopPropagation(); handleCopy(formatUserHomePath(path)); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopy(formatUserHomePath(path));
+          }}
           className="absolute right-1 top-1 p-1 rounded bg-background/80 backdrop-blur-sm hover:bg-background transition-all shadow-sm"
         />
       </div>
@@ -187,7 +185,10 @@ function TopBarLeft({
         <BreadcrumbList className="flex-nowrap text-sm">
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+              <Link
+                href="/"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
                 <IconHome className="h-4 w-4" />
               </Link>
             </BreadcrumbLink>
@@ -202,9 +203,7 @@ function TopBarLeft({
           )}
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage className="font-medium">
-              {taskTitle ?? 'Task details'}
-            </BreadcrumbPage>
+            <BreadcrumbPage className="font-medium">{taskTitle ?? "Task details"}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -219,7 +218,10 @@ function TopBarLeft({
                   <span className="text-xs text-muted-foreground">{displayBranch}</span>
                   <CopyIconButton
                     copied={copiedBranch}
-                    onClick={(e) => { e.stopPropagation(); handleCopyBranch(displayBranch); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopyBranch(displayBranch);
+                    }}
                     className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ml-0.5"
                   />
                 </div>
@@ -242,11 +244,15 @@ function TopBarLeft({
 }
 
 /** Ahead/Behind commit status badges */
-function GitAheadBehindBadges({ gitStatus }: { gitStatus: ReturnType<typeof useSessionGitStatus> }) {
+function GitAheadBehindBadges({
+  gitStatus,
+}: {
+  gitStatus: ReturnType<typeof useSessionGitStatus>;
+}) {
   const ahead = gitStatus?.ahead ?? 0;
   const behind = gitStatus?.behind ?? 0;
   if (ahead === 0 && behind === 0) return null;
-  const remoteBranch = gitStatus?.remote_branch || 'remote';
+  const remoteBranch = gitStatus?.remote_branch || "remote";
   return (
     <div className="flex items-center gap-1">
       {ahead > 0 && (
@@ -256,7 +262,9 @@ function GitAheadBehindBadges({ gitStatus }: { gitStatus: ReturnType<typeof useS
               <CommitStatBadge label={`${ahead} ahead`} tone="ahead" />
             </span>
           </TooltipTrigger>
-          <TooltipContent>{ahead} commit{ahead !== 1 ? 's' : ''} ahead of {remoteBranch}</TooltipContent>
+          <TooltipContent>
+            {ahead} commit{ahead !== 1 ? "s" : ""} ahead of {remoteBranch}
+          </TooltipContent>
         </Tooltip>
       )}
       {behind > 0 && (
@@ -266,7 +274,9 @@ function GitAheadBehindBadges({ gitStatus }: { gitStatus: ReturnType<typeof useS
               <CommitStatBadge label={`${behind} behind`} tone="behind" />
             </span>
           </TooltipTrigger>
-          <TooltipContent>{behind} commit{behind !== 1 ? 's' : ''} behind {remoteBranch}</TooltipContent>
+          <TooltipContent>
+            {behind} commit{behind !== 1 ? "s" : ""} behind {remoteBranch}
+          </TooltipContent>
         </Tooltip>
       )}
     </div>
@@ -304,7 +314,7 @@ function TopBarRight({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {showDebugOverlay ? 'Hide Debug Info' : 'Show Debug Info'}
+            {showDebugOverlay ? "Hide Debug Info" : "Show Debug Info"}
           </TooltipContent>
         </Tooltip>
       )}
@@ -313,10 +323,7 @@ function TopBarRight({
         <>
           <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
-          <VcsSplitButton
-            sessionId={activeSessionId ?? null}
-            baseBranch={baseBranch}
-          />
+          <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
         </>
       )}
       <Tooltip>
@@ -325,7 +332,7 @@ function TopBarRight({
             size="sm"
             variant="outline"
             className="cursor-pointer px-2"
-            onClick={() => router.push('/settings/general')}
+            onClick={() => router.push("/settings/general")}
           >
             <IconSettings className="h-4 w-4" />
           </Button>

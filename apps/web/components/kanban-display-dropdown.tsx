@@ -1,34 +1,35 @@
-'use client';
+"use client";
 
-import { Button } from '@kandev/ui/button';
-import { Checkbox } from '@kandev/ui/checkbox';
+import { Button } from "@kandev/ui/button";
+import { Checkbox } from "@kandev/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@kandev/ui/select';
-import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
-import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
-import type { Workspace, Repository } from '@/lib/types/http';
-import type { WorkflowsState } from '@/lib/state/slices';
-import { Badge } from '@kandev/ui/badge';
+} from "@kandev/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
+import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import type { Workspace, Repository } from "@/lib/types/http";
+import type { WorkflowsState } from "@/lib/state/slices";
+import { Badge } from "@kandev/ui/badge";
 
-function getRepositoryPlaceholder(repositoriesLoading: boolean, repositoriesEmpty: boolean): string {
-  if (repositoriesLoading) return 'Loading repositories...';
-  if (repositoriesEmpty) return 'No repositories';
-  return 'Select repository';
+function getRepositoryPlaceholder(
+  repositoriesLoading: boolean,
+  repositoriesEmpty: boolean,
+): string {
+  if (repositoriesLoading) return "Loading repositories...";
+  if (repositoriesEmpty) return "No repositories";
+  return "Select repository";
 }
 
-function WorkspaceSection({ activeWorkspaceId, workspaces, onWorkspaceChange }: {
+function WorkspaceSection({
+  activeWorkspaceId,
+  workspaces,
+  onWorkspaceChange,
+}: {
   activeWorkspaceId: string | null;
   workspaces: Workspace[];
   onWorkspaceChange: (id: string | null) => void;
@@ -37,7 +38,7 @@ function WorkspaceSection({ activeWorkspaceId, workspaces, onWorkspaceChange }: 
     <div className="space-y-1.5">
       <DropdownMenuLabel className="px-0 text-foreground">Workspace</DropdownMenuLabel>
       <Select
-        value={activeWorkspaceId ?? ''}
+        value={activeWorkspaceId ?? ""}
         onValueChange={(value) => onWorkspaceChange(value || null)}
       >
         <SelectTrigger className="w-full border-border">
@@ -55,24 +56,28 @@ function WorkspaceSection({ activeWorkspaceId, workspaces, onWorkspaceChange }: 
   );
 }
 
-function WorkflowSection({ activeWorkflowId, workflows, onWorkflowChange }: {
+function WorkflowSection({
+  activeWorkflowId,
+  workflows,
+  onWorkflowChange,
+}: {
   activeWorkflowId: string | null;
-  workflows: WorkflowsState['items'];
+  workflows: WorkflowsState["items"];
   onWorkflowChange: (id: string | null) => void;
 }) {
   return (
     <div className="space-y-1.5">
       <DropdownMenuLabel className="px-0 text-foreground">Workflow</DropdownMenuLabel>
       <Select
-        value={activeWorkflowId ?? 'all'}
-        onValueChange={(value) => onWorkflowChange(value === 'all' ? null : value)}
+        value={activeWorkflowId ?? "all"}
+        onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
       >
         <SelectTrigger className="w-full border-border">
           <SelectValue placeholder="Select workflow" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Workflows</SelectItem>
-          {workflows.map((workflow: WorkflowsState['items'][number]) => (
+          {workflows.map((workflow: WorkflowsState["items"][number]) => (
             <SelectItem key={workflow.id} value={workflow.id}>
               {workflow.name}
             </SelectItem>
@@ -83,22 +88,29 @@ function WorkflowSection({ activeWorkflowId, workflows, onWorkflowChange }: {
   );
 }
 
-function RepositorySection({ repositoryValue, repositories, repositoriesLoading, onRepositoryChange }: {
+function RepositorySection({
+  repositoryValue,
+  repositories,
+  repositoriesLoading,
+  onRepositoryChange,
+}: {
   repositoryValue: string;
   repositories: Repository[];
   repositoriesLoading: boolean;
-  onRepositoryChange: (value: string | 'all') => void;
+  onRepositoryChange: (value: string | "all") => void;
 }) {
   return (
     <div className="space-y-1.5">
       <DropdownMenuLabel className="px-0 text-foreground">Repository</DropdownMenuLabel>
       <Select
         value={repositoryValue}
-        onValueChange={(value) => onRepositoryChange(value as string | 'all')}
+        onValueChange={(value) => onRepositoryChange(value as string | "all")}
         disabled={repositories.length === 0}
       >
         <SelectTrigger className="w-full border-border">
-          <SelectValue placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)} />
+          <SelectValue
+            placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
+          />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All repositories</SelectItem>
@@ -130,7 +142,7 @@ export function KanbanDisplayDropdown() {
     onTogglePreviewOnClick,
   } = useKanbanDisplaySettings();
 
-  const repositoryValue = allRepositoriesSelected ? 'all' : selectedRepositoryId ?? 'all';
+  const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
 
   return (
     <DropdownMenu>
@@ -142,11 +154,24 @@ export function KanbanDisplayDropdown() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[280px] p-3">
         <div className="space-y-3">
-          <WorkspaceSection activeWorkspaceId={activeWorkspaceId} workspaces={workspaces} onWorkspaceChange={onWorkspaceChange} />
+          <WorkspaceSection
+            activeWorkspaceId={activeWorkspaceId}
+            workspaces={workspaces}
+            onWorkspaceChange={onWorkspaceChange}
+          />
           <DropdownMenuSeparator />
-          <WorkflowSection activeWorkflowId={activeWorkflowId} workflows={workflows} onWorkflowChange={onWorkflowChange} />
+          <WorkflowSection
+            activeWorkflowId={activeWorkflowId}
+            workflows={workflows}
+            onWorkflowChange={onWorkflowChange}
+          />
           <DropdownMenuSeparator />
-          <RepositorySection repositoryValue={repositoryValue} repositories={repositories} repositoriesLoading={repositoriesLoading} onRepositoryChange={onRepositoryChange} />
+          <RepositorySection
+            repositoryValue={repositoryValue}
+            repositories={repositories}
+            repositoriesLoading={repositoriesLoading}
+            onRepositoryChange={onRepositoryChange}
+          />
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
             <DropdownMenuLabel className="px-0 text-foreground">Preview Panel</DropdownMenuLabel>
@@ -158,12 +183,15 @@ export function KanbanDisplayDropdown() {
                 }}
               />
               <span className="text-sm text-foreground">
-                Open preview on click {" "}
-                <Badge variant="secondary" className="mr-1">beta</Badge>
+                Open preview on click{" "}
+                <Badge variant="secondary" className="mr-1">
+                  beta
+                </Badge>
               </span>
             </label>
             <p className="text-xs text-muted-foreground pl-6">
-              When enabled, clicking a task opens the preview panel. When disabled, clicking navigates directly to the session.
+              When enabled, clicking a task opens the preview panel. When disabled, clicking
+              navigates directly to the session.
             </p>
           </div>
         </div>

@@ -53,32 +53,34 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="Kandev" />
       </head>
       <body className="antialiased font-sans">
-        {(apiPort || mcpPort || debugMode) ? (
+        {apiPort || mcpPort || debugMode ? (
           // Inject runtime config for production bundles where ports are chosen at launch.
           // Client will build full URLs using window.location.hostname + port
           <script
             dangerouslySetInnerHTML={{
               __html: [
-                apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : '',
-                mcpPort ? `window.__KANDEV_MCP_PORT = ${JSON.stringify(mcpPort)};` : '',
-                debugMode ? `window.__KANDEV_DEBUG = true;` : '',
-              ].filter(Boolean).join('\n'),
+                apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
+                mcpPort ? `window.__KANDEV_MCP_PORT = ${JSON.stringify(mcpPort)};` : "",
+                debugMode ? `window.__KANDEV_DEBUG = true;` : "",
+              ]
+                .filter(Boolean)
+                .join("\n"),
             }}
           />
         ) : null}
         <StateProvider>
           <ThemeProvider>
             <DiffWorkerPoolProvider>
-            <TooltipProvider>
-              <ToastProvider>
-                <CommandRegistryProvider>
-                  <WebSocketConnector />
-                  <GlobalCommands />
-                  <CommandPanel />
-                  {children}
-                </CommandRegistryProvider>
-              </ToastProvider>
-            </TooltipProvider>
+              <TooltipProvider>
+                <ToastProvider>
+                  <CommandRegistryProvider>
+                    <WebSocketConnector />
+                    <GlobalCommands />
+                    <CommandPanel />
+                    {children}
+                  </CommandRegistryProvider>
+                </ToastProvider>
+              </TooltipProvider>
             </DiffWorkerPoolProvider>
           </ThemeProvider>
         </StateProvider>

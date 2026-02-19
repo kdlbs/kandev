@@ -1,6 +1,6 @@
-'use server';
+"use server";
 
-import { getBackendConfig } from '@/lib/config';
+import { getBackendConfig } from "@/lib/config";
 import type {
   Agent,
   AgentProfile,
@@ -8,8 +8,8 @@ import type {
   McpServerDef,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
-} from '@/lib/types/http';
-import type { PermissionKey } from '@/lib/agent-permissions';
+} from "@/lib/types/http";
+import type { PermissionKey } from "@/lib/agent-permissions";
 
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
@@ -18,9 +18,9 @@ const { apiBaseUrl } = getBackendConfig();
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
-    cache: 'no-store',
+    cache: "no-store",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(options?.headers ?? {}),
     },
   });
@@ -51,61 +51,86 @@ export async function createAgentAction(payload: {
   profiles?: Array<{ name: string; model: string; cli_passthrough: boolean } & ProfilePermissions>;
 }): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateAgentAction(
   id: string,
-  payload: { workspace_id?: string | null; supports_mcp?: boolean; mcp_config_path?: string | null }
+  payload: {
+    workspace_id?: string | null;
+    supports_mcp?: boolean;
+    mcp_config_path?: string | null;
+  },
 ): Promise<Agent> {
   return fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents/${id}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteAgentAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/agents/${id}`, { method: 'DELETE' });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/agents/${id}`, { method: "DELETE" });
 }
 
 export async function createAgentProfileAction(
   agentId: string,
-  payload: { name: string; model: string; cli_passthrough: boolean } & ProfilePermissions
+  payload: { name: string; model: string; cli_passthrough: boolean } & ProfilePermissions,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateAgentProfileAction(
   id: string,
-  payload: Partial<Pick<AgentProfile, 'name' | 'model' | 'auto_approve' | 'dangerously_skip_permissions' | 'allow_indexing' | 'cli_passthrough'>>
+  payload: Partial<
+    Pick<
+      AgentProfile,
+      | "name"
+      | "model"
+      | "auto_approve"
+      | "dangerously_skip_permissions"
+      | "allow_indexing"
+      | "cli_passthrough"
+    >
+  >,
 ): Promise<AgentProfile> {
   return fetchJson<AgentProfile>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteAgentProfileAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, { method: 'DELETE' });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, { method: "DELETE" });
 }
 
-export async function getAgentProfileMcpConfigAction(profileId: string): Promise<AgentProfileMcpConfig> {
-  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`);
+export async function getAgentProfileMcpConfigAction(
+  profileId: string,
+): Promise<AgentProfileMcpConfig> {
+  return fetchJson<AgentProfileMcpConfig>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
+  );
 }
 
 export async function updateAgentProfileMcpConfigAction(
   profileId: string,
-  payload: { enabled: boolean; mcpServers: Record<string, McpServerDef>; meta?: Record<string, unknown> }
+  payload: {
+    enabled: boolean;
+    mcpServers: Record<string, McpServerDef>;
+    meta?: Record<string, unknown>;
+  },
 ): Promise<AgentProfileMcpConfig> {
-  return fetchJson<AgentProfileMcpConfig>(`${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return fetchJson<AgentProfileMcpConfig>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export type CommandPreviewRequest = {
@@ -122,10 +147,13 @@ export type CommandPreviewResponse = {
 
 export async function previewAgentCommandAction(
   agentName: string,
-  payload: CommandPreviewRequest
+  payload: CommandPreviewRequest,
 ): Promise<CommandPreviewResponse> {
-  return fetchJson<CommandPreviewResponse>(`${apiBaseUrl}/api/v1/agent-command-preview/${agentName}`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return fetchJson<CommandPreviewResponse>(
+    `${apiBaseUrl}/api/v1/agent-command-preview/${agentName}`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }

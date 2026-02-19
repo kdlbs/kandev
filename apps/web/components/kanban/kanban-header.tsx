@@ -1,24 +1,32 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Button } from '@kandev/ui/button';
-import { ToggleGroup, ToggleGroupItem } from '@kandev/ui/toggle-group';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@kandev/ui/tooltip';
-import { IconPlus, IconSettings, IconList, IconLayoutKanban, IconMenu2, IconChartBar, IconTimeline } from '@tabler/icons-react';
-import { KanbanDisplayDropdown } from '../kanban-display-dropdown';
-import { TaskSearchInput } from './task-search-input';
-import { KanbanHeaderMobile } from './kanban-header-mobile';
-import { MobileMenuSheet } from './mobile-menu-sheet';
-import { linkToTasks } from '@/lib/links';
-import { useResponsiveBreakpoint } from '@/hooks/use-responsive-breakpoint';
-import { useAppStore } from '@/components/state-provider';
-import { useKanbanDisplaySettings } from '@/hooks/use-kanban-display-settings';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Button } from "@kandev/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  IconPlus,
+  IconSettings,
+  IconList,
+  IconLayoutKanban,
+  IconMenu2,
+  IconChartBar,
+  IconTimeline,
+} from "@tabler/icons-react";
+import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { TaskSearchInput } from "./task-search-input";
+import { KanbanHeaderMobile } from "./kanban-header-mobile";
+import { MobileMenuSheet } from "./mobile-menu-sheet";
+import { linkToTasks } from "@/lib/links";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useAppStore } from "@/components/state-provider";
+import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
   workspaceId?: string;
-  currentPage?: 'kanban' | 'tasks';
+  currentPage?: "kanban" | "tasks";
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -31,9 +39,9 @@ type ViewToggleItem = {
 };
 
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
-  { value: 'kanban', icon: IconLayoutKanban, label: 'Kanban' },
-  { value: 'pipeline', icon: IconTimeline, label: 'Pipeline' },
-  { value: 'list', icon: IconList, label: 'List' },
+  { value: "kanban", icon: IconLayoutKanban, label: "Kanban" },
+  { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
+  { value: "list", icon: IconList, label: "List" },
 ];
 
 function ViewToggleGroup({
@@ -59,7 +67,7 @@ function ViewToggleGroup({
         <ToggleGroupItem
           key={value}
           value={value}
-          className={`cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground ${itemClassName ?? ''}`}
+          className={`cursor-pointer data-[state=on]:bg-muted data-[state=on]:text-foreground ${itemClassName ?? ""}`}
         >
           <Tooltip>
             <TooltipTrigger asChild>
@@ -76,9 +84,9 @@ function ViewToggleGroup({
 }
 
 function getToggleValue(currentPage: string, kanbanViewMode: string | null): string {
-  if (currentPage === 'tasks') return 'list';
-  if (kanbanViewMode === 'graph2') return 'pipeline';
-  return 'kanban';
+  if (currentPage === "tasks") return "list";
+  if (kanbanViewMode === "graph2") return "pipeline";
+  return "kanban";
 }
 
 function TabletHeader({
@@ -201,7 +209,14 @@ function DesktopHeader({
   );
 }
 
-export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban', searchQuery = '', onSearchChange, isSearchLoading = false }: KanbanHeaderProps) {
+export function KanbanHeader({
+  onCreateTask,
+  workspaceId,
+  currentPage = "kanban",
+  searchQuery = "",
+  onSearchChange,
+  isSearchLoading = false,
+}: KanbanHeaderProps) {
   const router = useRouter();
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
@@ -212,14 +227,14 @@ export function KanbanHeader({ onCreateTask, workspaceId, currentPage = 'kanban'
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
 
   const handleViewChange = (value: string) => {
-    if (value === 'list') {
-      if (currentPage !== 'tasks') router.push(linkToTasks(workspaceId));
-    } else if (value === 'kanban') {
-      if (currentPage !== 'kanban') router.push('/');
-      onViewModeChange('');
-    } else if (value === 'pipeline') {
-      if (currentPage !== 'kanban') router.push('/');
-      onViewModeChange('graph2');
+    if (value === "list") {
+      if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
+    } else if (value === "kanban") {
+      if (currentPage !== "kanban") router.push("/");
+      onViewModeChange("");
+    } else if (value === "pipeline") {
+      if (currentPage !== "kanban") router.push("/");
+      onViewModeChange("graph2");
     }
   };
 

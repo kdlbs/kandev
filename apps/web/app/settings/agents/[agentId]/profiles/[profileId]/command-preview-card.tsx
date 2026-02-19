@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useEffect, useState, useMemo } from 'react';
-import { IconCopy, IconCheck, IconTerminal2 } from '@tabler/icons-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@kandev/ui/card';
-import { Button } from '@kandev/ui/button';
-import { Skeleton } from '@kandev/ui/skeleton';
-import { previewAgentCommandAction, type CommandPreviewResponse } from '@/app/actions/agents';
+import { useEffect, useState, useMemo } from "react";
+import { IconCopy, IconCheck, IconTerminal2 } from "@tabler/icons-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Button } from "@kandev/ui/button";
+import { Skeleton } from "@kandev/ui/skeleton";
+import { previewAgentCommandAction, type CommandPreviewResponse } from "@/app/actions/agents";
 
 type CommandPreviewCardProps = {
   agentName: string;
@@ -55,11 +55,11 @@ function CommandPreviewContent({ preview, cliPassthrough }: CommandPreviewConten
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      const textArea = document.createElement('textarea');
+      const textArea = document.createElement("textarea");
       textArea.value = preview.command_string;
       document.body.appendChild(textArea);
       textArea.select();
-      document.execCommand('copy');
+      document.execCommand("copy");
       document.body.removeChild(textArea);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -89,7 +89,8 @@ function CommandPreviewContent({ preview, cliPassthrough }: CommandPreviewConten
 
       {!cliPassthrough && (
         <p className="text-xs text-muted-foreground">
-          <code className="rounded bg-muted px-1 py-0.5">{'{prompt}'}</code> will be replaced with your task description or follow-up message.
+          <code className="rounded bg-muted px-1 py-0.5">{"{prompt}"}</code> will be replaced with
+          your task description or follow-up message.
         </p>
       )}
     </>
@@ -106,9 +107,9 @@ export function CommandPreviewCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const settingsKey = useMemo(() =>
-    JSON.stringify({ model, permissionSettings, cliPassthrough }),
-    [model, permissionSettings, cliPassthrough]
+  const settingsKey = useMemo(
+    () => JSON.stringify({ model, permissionSettings, cliPassthrough }),
+    [model, permissionSettings, cliPassthrough],
   );
 
   useEffect(() => {
@@ -125,7 +126,7 @@ export function CommandPreviewCard({
         setPreview(response);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load command preview');
+        setError(err instanceof Error ? err.message : "Failed to load command preview");
         setPreview(null);
       } finally {
         setLoading(false);
@@ -151,7 +152,9 @@ export function CommandPreviewCard({
 
         {loading && <CommandPreviewLoading />}
         {error && <CommandPreviewError error={error} />}
-        {!loading && !error && preview && <CommandPreviewContent preview={preview} cliPassthrough={cliPassthrough} />}
+        {!loading && !error && preview && (
+          <CommandPreviewContent preview={preview} cliPassthrough={cliPassthrough} />
+        )}
         {!loading && !error && !preview && <CommandPreviewEmpty />}
       </CardContent>
     </Card>

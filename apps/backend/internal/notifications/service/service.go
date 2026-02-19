@@ -281,10 +281,10 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 		return nil
 	}
 	provider := &models.Provider{
-		ID:      uuid.New().String(),
-		UserID:  userID,
-		Name:    "System Notifications",
-		Type:    models.ProviderTypeSystem,
+		ID:     uuid.New().String(),
+		UserID: userID,
+		Name:   "System Notifications",
+		Type:   models.ProviderTypeSystem,
 		Config: map[string]interface{}{
 			"sound_enabled": false,
 		},

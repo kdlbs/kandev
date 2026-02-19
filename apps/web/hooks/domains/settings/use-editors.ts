@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { fetchUserSettings, listEditors } from '@/lib/api';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useAppStore } from '@/components/state-provider';
-import type { UserSettingsState } from '@/lib/state/slices/settings/types';
+import { useEffect } from "react";
+import { fetchUserSettings, listEditors } from "@/lib/api";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStore } from "@/components/state-provider";
+import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapUserSettingsResponse(data: any): UserSettingsState {
@@ -18,7 +18,7 @@ function mapUserSettingsResponse(data: any): UserSettingsState {
     shellOptions: data.shell_options ?? [],
     defaultEditorId: s.default_editor_id || null,
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? 'cmd_enter',
+    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
@@ -47,15 +47,21 @@ export function useEditors() {
   useEffect(() => {
     if (loaded || loading) return;
     setEditorsLoading(true);
-    listEditors({ cache: 'no-store' })
-      .then((response) => { setEditors(response.editors ?? []); })
-      .catch(() => { setEditors([]); })
-      .finally(() => { setEditorsLoading(false); });
+    listEditors({ cache: "no-store" })
+      .then((response) => {
+        setEditors(response.editors ?? []);
+      })
+      .catch(() => {
+        setEditors([]);
+      })
+      .finally(() => {
+        setEditorsLoading(false);
+      });
   }, [loaded, loading, setEditors, setEditorsLoading]);
 
   useEffect(() => {
     if (userSettingsLoaded) return;
-    fetchUserSettings({ cache: 'no-store' })
+    fetchUserSettings({ cache: "no-store" })
       .then((data) => {
         if (!data?.settings) return;
         setUserSettings(mapUserSettingsResponse(data));

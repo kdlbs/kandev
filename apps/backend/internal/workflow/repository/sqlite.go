@@ -109,7 +109,6 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
-
 // seedDefaultWorkflowSteps creates default workflow steps for workflows that don't have any.
 // Uses the simple template as the default workflow.
 func (r *Repository) seedDefaultWorkflowSteps() error {
@@ -405,7 +404,6 @@ func (r *Repository) getKanbanTemplate(now time.Time) *models.WorkflowTemplate {
 		},
 	}
 }
-
 
 // getPRReviewTemplate returns the PR review workflow template.
 func (r *Repository) getPRReviewTemplate(now time.Time) *models.WorkflowTemplate {

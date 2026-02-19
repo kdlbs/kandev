@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import type { ReactNode } from 'react';
-import { SwimlaneHeader } from './swimlane-header';
+import type { ReactNode } from "react";
+import { SwimlaneHeader } from "./swimlane-header";
 
 export type SwimlaneSectionProps = {
   workflowId: string;

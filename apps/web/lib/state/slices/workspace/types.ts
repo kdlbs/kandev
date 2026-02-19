@@ -1,4 +1,4 @@
-import type { Repository, Branch, RepositoryScript } from '@/lib/types/http';
+import type { Repository, Branch, RepositoryScript } from "@/lib/types/http";
 
 export type WorkspaceState = {
   items: Array<{
@@ -42,7 +42,7 @@ export type WorkspaceSliceState = {
 
 export type WorkspaceSliceActions = {
   setActiveWorkspace: (workspaceId: string | null) => void;
-  setWorkspaces: (workspaces: WorkspaceState['items']) => void;
+  setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;

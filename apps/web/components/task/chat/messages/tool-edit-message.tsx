@@ -1,14 +1,21 @@
-'use client';
+"use client";
 
-import { useState, memo } from 'react';
-import { IconCheck, IconX, IconEdit, IconFilePlus, IconExternalLink, IconCopy } from '@tabler/icons-react';
-import { GridSpinner } from '@/components/grid-spinner';
-import { transformPathsInText } from '@/lib/utils';
-import type { Message } from '@/lib/types/http';
-import { DiffViewBlock } from './diff-view-block';
-import { ExpandableRow } from './expandable-row';
-import { transformFileMutation, type FileMutation } from '@/lib/diff';
-import { useExpandState } from './use-expand-state';
+import { useState, memo } from "react";
+import {
+  IconCheck,
+  IconX,
+  IconEdit,
+  IconFilePlus,
+  IconExternalLink,
+  IconCopy,
+} from "@tabler/icons-react";
+import { GridSpinner } from "@/components/grid-spinner";
+import { transformPathsInText } from "@/lib/utils";
+import type { Message } from "@/lib/types/http";
+import { DiffViewBlock } from "./diff-view-block";
+import { ExpandableRow } from "./expandable-row";
+import { transformFileMutation, type FileMutation } from "@/lib/diff";
+import { useExpandState } from "./use-expand-state";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -17,7 +24,7 @@ type ModifyFilePayload = {
 
 type ToolEditMetadata = {
   tool_call_id?: string;
-  status?: 'pending' | 'running' | 'complete' | 'error';
+  status?: "pending" | "running" | "complete" | "error";
   normalized?: { modify_file?: ModifyFilePayload };
 };
 
@@ -28,16 +35,21 @@ type ToolEditMessageProps = {
 };
 
 function EditStatusIcon({ status }: { status: string | undefined }) {
-  if (status === 'complete') return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
-  if (status === 'error') return <IconX className="h-3.5 w-3.5 text-red-500" />;
-  if (status === 'running') return <GridSpinner className="text-muted-foreground" />;
+  if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
+  if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
+  if (status === "running") return <GridSpinner className="text-muted-foreground" />;
   return null;
 }
 
-function getEditSummary(content: string, worktreePath: string | undefined, isWriteOperation: boolean, lineCount: number): string {
+function getEditSummary(
+  content: string,
+  worktreePath: string | undefined,
+  isWriteOperation: boolean,
+  lineCount: number,
+): string {
   const baseSummary = transformPathsInText(content, worktreePath);
   if (isWriteOperation && lineCount > 0) {
-    return `${baseSummary} (${lineCount} line${lineCount !== 1 ? 's' : ''})`;
+    return `${baseSummary} (${lineCount} line${lineCount !== 1 ? "s" : ""})`;
   }
   return baseSummary;
 }
@@ -50,13 +62,22 @@ type FileActionButtonProps = {
   onCopyPath: (e: React.MouseEvent) => void;
 };
 
-function FileActionButton({ filePath, worktreePath, onOpenFile, copied, onCopyPath }: FileActionButtonProps) {
+function FileActionButton({
+  filePath,
+  worktreePath,
+  onOpenFile,
+  copied,
+  onCopyPath,
+}: FileActionButtonProps) {
   const isFileInWorktree = worktreePath && filePath.startsWith(worktreePath);
   if (onOpenFile && isFileInWorktree) {
     return (
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); onOpenFile(filePath); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenFile(filePath);
+        }}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
         title="Open file"
       >
@@ -70,12 +91,13 @@ function FileActionButton({ filePath, worktreePath, onOpenFile, copied, onCopyPa
         type="button"
         onClick={onCopyPath}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        title={copied ? 'Copied!' : 'Copy path'}
+        title={copied ? "Copied!" : "Copy path"}
       >
-        {copied
-          ? <IconCheck className="h-3.5 w-3.5 text-green-500" />
-          : <IconCopy className="h-3.5 w-3.5" />
-        }
+        {copied ? (
+          <IconCheck className="h-3.5 w-3.5 text-green-500" />
+        ) : (
+          <IconCopy className="h-3.5 w-3.5" />
+        )}
       </button>
     );
   }
@@ -83,7 +105,7 @@ function FileActionButton({ filePath, worktreePath, onOpenFile, copied, onCopyPa
 }
 
 type EditExpandedContentProps = {
-  diffData: import('@/lib/diff/types').FileDiffData | null;
+  diffData: import("@/lib/diff/types").FileDiffData | null;
   writeContent: string | undefined;
 };
 
@@ -108,18 +130,40 @@ function parseEditMetadata(comment: Message) {
   const filePath = modifyFile?.file_path;
   const mutation = modifyFile?.mutations?.[0];
   const writeContent = mutation?.content;
-  const isWriteOperation = mutation?.type === 'create';
+  const isWriteOperation = mutation?.type === "create";
   const diffData = filePath && mutation ? transformFileMutation(filePath, mutation) : null;
   const hasExpandableContent = !!(diffData?.diff || writeContent);
-  const isSuccess = status === 'complete';
-  const lineCount = writeContent ? writeContent.split('\n').length : 0;
-  return { status, filePath, writeContent, isWriteOperation, diffData, hasExpandableContent, isSuccess, lineCount };
+  const isSuccess = status === "complete";
+  const lineCount = writeContent ? writeContent.split("\n").length : 0;
+  return {
+    status,
+    filePath,
+    writeContent,
+    isWriteOperation,
+    diffData,
+    hasExpandableContent,
+    isSuccess,
+    lineCount,
+  };
 }
 
-export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktreePath, onOpenFile }: ToolEditMessageProps) {
-  const { status, filePath, writeContent, isWriteOperation, diffData, hasExpandableContent, isSuccess, lineCount } = parseEditMetadata(comment);
+export const ToolEditMessage = memo(function ToolEditMessage({
+  comment,
+  worktreePath,
+  onOpenFile,
+}: ToolEditMessageProps) {
+  const {
+    status,
+    filePath,
+    writeContent,
+    isWriteOperation,
+    diffData,
+    hasExpandableContent,
+    isSuccess,
+    lineCount,
+  } = parseEditMetadata(comment);
   const [copied, setCopied] = useState(false);
-  const autoExpanded = status === 'running';
+  const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const Icon = isWriteOperation ? IconFilePlus : IconEdit;
   const summary = getEditSummary(comment.content, worktreePath, isWriteOperation, lineCount);
@@ -143,7 +187,13 @@ export const ToolEditMessage = memo(function ToolEditMessage({ comment, worktree
             {!isSuccess && <EditStatusIcon status={status} />}
           </span>
           {filePath && (
-            <FileActionButton filePath={filePath} worktreePath={worktreePath} onOpenFile={onOpenFile} copied={copied} onCopyPath={handleCopyPath} />
+            <FileActionButton
+              filePath={filePath}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+              copied={copied}
+              onCopyPath={handleCopyPath}
+            />
           )}
         </div>
       }

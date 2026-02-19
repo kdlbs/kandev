@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { createElement } from 'react';
-import { PopupMenu, PopupMenuItem, useMenuItemRefs } from '@/components/task/chat/popup-menu';
-import type { MenuState } from '@/components/task/chat/tiptap-suggestion';
-import type { PlanSlashCommand } from './plan-slash-commands';
+import { createElement } from "react";
+import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "@/components/task/chat/popup-menu";
+import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
+import type { PlanSlashCommand } from "./plan-slash-commands";
 
 type PlanSlashMenuProps = {
   menuState: MenuState<PlanSlashCommand>;
@@ -52,7 +52,7 @@ export function PlanSlashMenu({ menuState, selectedIndex, setSelectedIndex }: Pl
             return (
               <PopupMenuItem
                 key={item.id}
-                icon={createElement(item.icon, { className: 'h-4 w-4' })}
+                icon={createElement(item.icon, { className: "h-4 w-4" })}
                 label={item.label}
                 description={item.description}
                 isSelected={itemIndex === selectedIndex}

@@ -207,8 +207,8 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
 		Workflow: dto.FromWorkflow(workflow),
-		Steps:   steps,
-		Tasks:   taskDTOs,
+		Steps:    steps,
+		Tasks:    taskDTOs,
 	})
 }
 
@@ -267,8 +267,8 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
 		Workflow: dto.FromWorkflow(workflow),
-		Steps:   steps,
-		Tasks:   taskDTOs,
+		Steps:    steps,
+		Tasks:    taskDTOs,
 	})
 }
 

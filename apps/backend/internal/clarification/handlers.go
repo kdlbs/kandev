@@ -202,8 +202,8 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
 		c.JSON(http.StatusGone, gin.H{
-			"error": "clarification request expired",
-			"code": "CLARIFICATION_EXPIRED",
+			"error":   "clarification request expired",
+			"code":    "CLARIFICATION_EXPIRED",
 			"message": "This question has timed out. The agent may have already moved on.",
 		})
 		return
@@ -261,4 +261,3 @@ func (h *Handlers) markRequestExpired(c *gin.Context, pendingID string) {
 func generateOptionID(questionIndex, optionIndex int) string {
 	return fmt.Sprintf("q%d_opt%d", questionIndex+1, optionIndex+1)
 }
-

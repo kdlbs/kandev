@@ -1,37 +1,42 @@
-'use client';
+"use client";
 
-import { memo, useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { IconCheck, IconChevronDown, IconX } from '@tabler/icons-react';
-import { TabsContent } from '@kandev/ui/tabs';
-import { Button } from '@kandev/ui/button';
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
+import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
+import { TabsContent } from "@kandev/ui/tabs";
+import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
-} from '@kandev/ui/dropdown-menu';
-import { SessionPanel } from '@kandev/ui/pannel-session';
-import { TaskChatPanel } from './task-chat-panel';
-import { TaskChangesPanel } from './task-changes-panel';
-import { FileEditorContent } from './file-editor-content';
-import { FileImageViewer } from './file-image-viewer';
-import { FileBinaryViewer } from './file-binary-viewer';
-import { PassthroughTerminal } from './passthrough-terminal';
-import type { OpenFileTab, FileContentResponse } from '@/lib/types/backend';
-import { useAppStore } from '@/components/state-provider';
-import { SessionTabs, type SessionTab } from '@/components/session-tabs';
-import { approveSessionAction } from '@/app/actions/workspaces';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { requestFileContent, updateFileContent, deleteFile } from '@/lib/ws/workspace-files';
-import { getOpenFileTabs, setOpenFileTabs as saveOpenFileTabs, getActiveTabForSession, setActiveTabForSession } from '@/lib/local-storage';
-import { useSessionGitStatus } from '@/hooks/domains/session/use-session-git-status';
-import { useSessionCommits } from '@/hooks/domains/session/use-session-commits';
-import { generateUnifiedDiff, calculateHash } from '@/lib/utils/file-diff';
-import { getFileCategory } from '@/lib/utils/file-types';
-import { useToast } from '@/components/toast-provider';
+} from "@kandev/ui/dropdown-menu";
+import { SessionPanel } from "@kandev/ui/pannel-session";
+import { TaskChatPanel } from "./task-chat-panel";
+import { TaskChangesPanel } from "./task-changes-panel";
+import { FileEditorContent } from "./file-editor-content";
+import { FileImageViewer } from "./file-image-viewer";
+import { FileBinaryViewer } from "./file-binary-viewer";
+import { PassthroughTerminal } from "./passthrough-terminal";
+import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
+import { useAppStore } from "@/components/state-provider";
+import { SessionTabs, type SessionTab } from "@/components/session-tabs";
+import { approveSessionAction } from "@/app/actions/workspaces";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { requestFileContent } from "@/lib/ws/workspace-files";
+import {
+  setOpenFileTabs as saveOpenFileTabs,
+  getActiveTabForSession,
+  setActiveTabForSession,
+} from "@/lib/local-storage";
+import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { calculateHash } from "@/lib/utils/file-diff";
+import { getFileCategory } from "@/lib/utils/file-types";
+import { useToast } from "@/components/toast-provider";
+import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
 
-import type { SelectedDiff } from './task-layout';
+import type { SelectedDiff } from "./task-layout";
 
 type TaskCenterPanelProps = {
   selectedDiff: SelectedDiff | null;
@@ -44,114 +49,96 @@ type TaskCenterPanelProps = {
 
 function useSessionApprove(activeSessionId: string | null, activeTaskId: string | null) {
   const activeSession = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId] ?? null : null
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
-  const isAgentWorking = activeSession?.state === 'STARTING' || activeSession?.state === 'RUNNING';
+  const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
   const isPassthroughMode = useMemo(() => {
     if (!activeSession?.agent_profile_snapshot) return false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const snapshot = activeSession.agent_profile_snapshot as any;
     return snapshot?.cli_passthrough === true;
   }, [activeSession?.agent_profile_snapshot]);
-  const showApproveButton = !!activeSession?.review_status && activeSession.review_status !== 'approved' && !isAgentWorking;
+  const showApproveButton =
+    !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
   const handleApprove = useCallback(async () => {
     if (!activeSessionId || !activeTaskId) return;
     try {
       const response = await approveSessionAction(activeSessionId);
       if (response?.session) setTaskSession(response.session);
-      if (response?.workflow_step?.events?.on_enter?.some((a: { type: string }) => a.type === 'auto_start_agent')) {
+      if (
+        response?.workflow_step?.events?.on_enter?.some(
+          (a: { type: string }) => a.type === "auto_start_agent",
+        )
+      ) {
         const client = getWebSocketClient();
-        if (client) client.send({ type: 'request', action: 'orchestrator.start', payload: { task_id: activeTaskId, session_id: activeSessionId, workflow_step_id: response.workflow_step.id } });
+        if (client)
+          client.send({
+            type: "request",
+            action: "orchestrator.start",
+            payload: {
+              task_id: activeTaskId,
+              session_id: activeSessionId,
+              workflow_step_id: response.workflow_step.id,
+            },
+          });
       }
-    } catch (error) { console.error('Failed to approve session:', error); }
+    } catch (error) {
+      console.error("Failed to approve session:", error);
+    }
   }, [activeSessionId, activeTaskId, setTaskSession]);
   return { activeSession, isPassthroughMode, showApproveButton, handleApprove };
 }
 
-function useLeftTabState(activeSessionId: string | null, hasChanges: boolean | undefined, onActiveFileChange?: (filePath: string | null) => void) {
+function useLeftTabState(
+  activeSessionId: string | null,
+  hasChanges: boolean | undefined,
+  onActiveFileChange?: (filePath: string | null) => void,
+) {
   const [leftTab, setLeftTab] = useState(() => {
-    if (typeof window !== 'undefined' && activeSessionId) {
-      const savedTab = getActiveTabForSession(activeSessionId, 'chat');
-      if (savedTab === 'chat' || savedTab === 'changes') return savedTab;
+    if (typeof window !== "undefined" && activeSessionId) {
+      const savedTab = getActiveTabForSession(activeSessionId, "chat");
+      if (savedTab === "chat" || savedTab === "changes") return savedTab;
     }
-    return 'chat';
+    return "chat";
   });
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
 
-  useEffect(() => { if (leftTab === 'changes' && !hasChanges) queueMicrotask(() => setLeftTab('chat')); }, [leftTab, hasChanges]);
   useEffect(() => {
-    const handler = () => { if (hasChanges) setLeftTab('changes'); };
-    window.addEventListener('switch-to-changes-tab', handler);
-    return () => window.removeEventListener('switch-to-changes-tab', handler);
+    if (leftTab === "changes" && !hasChanges) queueMicrotask(() => setLeftTab("chat"));
+  }, [leftTab, hasChanges]);
+  useEffect(() => {
+    const handler = () => {
+      if (hasChanges) setLeftTab("changes");
+    };
+    window.addEventListener("switch-to-changes-tab", handler);
+    return () => window.removeEventListener("switch-to-changes-tab", handler);
   }, [hasChanges]);
   useEffect(() => {
-    if (leftTab.startsWith('file:')) onActiveFileChange?.(leftTab.replace('file:', ''));
+    if (leftTab.startsWith("file:")) onActiveFileChange?.(leftTab.replace("file:", ""));
     else onActiveFileChange?.(null);
   }, [leftTab, onActiveFileChange]);
 
-  const handleTabChange = useCallback((tab: string) => {
-    setLeftTab(tab);
-    if (activeSessionId) setActiveTabForSession(activeSessionId, tab);
-  }, [activeSessionId]);
+  const handleTabChange = useCallback(
+    (tab: string) => {
+      setLeftTab(tab);
+      if (activeSessionId) setActiveTabForSession(activeSessionId, tab);
+    },
+    [activeSessionId],
+  );
   const handleRequestChanges = useCallback(() => {
-    setLeftTab('chat');
+    setLeftTab("chat");
     setShowRequestChangesTooltip(true);
     setTimeout(() => setShowRequestChangesTooltip(false), 5000);
   }, []);
-  return { leftTab, setLeftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges };
-}
-
-type FileTabRestorationOptions = {
-  activeSessionId: string | null;
-  leftTab: string;
-  setLeftTab: (tab: string) => void;
-  setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
-};
-
-function useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs }: FileTabRestorationOptions) {
-  const restoredTabsRef = useRef<string | null>(null);
-  const restorationInProgressRef = useRef<boolean>(false);
-  const prevSessionRef = useRef<string | null>(null);
-
-  useEffect(() => { return () => { if (prevSessionRef.current && leftTab) setActiveTabForSession(prevSessionRef.current, leftTab); }; }, [leftTab]);
-  useEffect(() => {
-    if (!activeSessionId) return;
-    if (restoredTabsRef.current !== activeSessionId) {
-      if (prevSessionRef.current && prevSessionRef.current !== activeSessionId) setActiveTabForSession(prevSessionRef.current, leftTab);
-      restoredTabsRef.current = activeSessionId;
-      prevSessionRef.current = activeSessionId;
-      restorationInProgressRef.current = false;
-      setOpenFileTabs([]);
-    } else if (restorationInProgressRef.current || restoredTabsRef.current === activeSessionId) { return; }
-    const savedTabs = getOpenFileTabs(activeSessionId);
-    const savedActiveTab = getActiveTabForSession(activeSessionId, 'chat');
-    if (savedTabs.length === 0) { setLeftTab(savedActiveTab === 'chat' || savedActiveTab === 'changes' ? savedActiveTab : 'chat'); return; }
-    restorationInProgressRef.current = true;
-    const loadTabs = async (retryCount = 0): Promise<void> => {
-      const client = getWebSocketClient();
-      if (!client) { if (retryCount < 5) { setTimeout(() => loadTabs(retryCount + 1), 200); return; } restorationInProgressRef.current = false; return; }
-      if (restoredTabsRef.current !== activeSessionId) { restorationInProgressRef.current = false; return; }
-      const loadedTabs: OpenFileTab[] = [];
-      for (const savedTab of savedTabs) {
-        try { const response = await requestFileContent(client, activeSessionId, savedTab.path); const hash = await calculateHash(response.content); loadedTabs.push({ path: savedTab.path, name: savedTab.name, content: response.content, originalContent: response.content, originalHash: hash, isDirty: false, isBinary: response.is_binary }); } catch { /* skip failed tabs */ }
-      }
-      if (restoredTabsRef.current !== activeSessionId) { restorationInProgressRef.current = false; return; }
-      if (loadedTabs.length > 0) {
-        setOpenFileTabs(loadedTabs);
-        if (savedActiveTab.startsWith('file:')) {
-          const filePath = savedActiveTab.replace('file:', '');
-          if (loadedTabs.some(t => t.path === filePath)) { setTimeout(() => { setLeftTab(savedActiveTab); restorationInProgressRef.current = false; }, 0); }
-          else { setLeftTab('chat'); restorationInProgressRef.current = false; }
-        } else { setLeftTab(savedActiveTab); restorationInProgressRef.current = false; }
-      } else { setLeftTab(savedActiveTab === 'chat' || savedActiveTab === 'changes' ? savedActiveTab : 'chat'); restorationInProgressRef.current = false; }
-    };
-    void loadTabs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- leftTab is intentionally excluded to prevent re-running on tab changes
-  }, [activeSessionId]);
-
-  useEffect(() => { if (!activeSessionId || restorationInProgressRef.current) return; setActiveTabForSession(activeSessionId, leftTab); }, [activeSessionId, leftTab]);
-  return { restorationInProgressRef };
+  return {
+    leftTab,
+    setLeftTab,
+    showRequestChangesTooltip,
+    setShowRequestChangesTooltip,
+    handleTabChange,
+    handleRequestChanges,
+  };
 }
 
 type FileTabOperationsOptions = {
@@ -164,80 +151,116 @@ type FileTabOperationsOptions = {
   leftTab: string;
 };
 
-function useFileTabOperations({ activeSessionId, openFileTabs, setOpenFileTabs, setSavingFiles, setLeftTab, handleTabChange, leftTab }: FileTabOperationsOptions) {
+function useFileTabOperations({
+  activeSessionId,
+  openFileTabs,
+  setOpenFileTabs,
+  setSavingFiles,
+  setLeftTab,
+  handleTabChange,
+  leftTab,
+}: FileTabOperationsOptions) {
   const { toast } = useToast();
 
-  const addFileTab = useCallback((fileTab: OpenFileTab) => {
-    setOpenFileTabs((prev) => {
-      if (prev.some((t) => t.path === fileTab.path)) return prev;
-      const maxTabs = 4;
-      return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
-    });
-    setLeftTab(`file:${fileTab.path}`);
-  }, [setOpenFileTabs, setLeftTab]);
+  const addFileTab = useCallback(
+    (fileTab: OpenFileTab) => {
+      setOpenFileTabs((prev) => {
+        if (prev.some((t) => t.path === fileTab.path)) return prev;
+        const maxTabs = 4;
+        return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
+      });
+      setLeftTab(`file:${fileTab.path}`);
+    },
+    [setOpenFileTabs, setLeftTab],
+  );
 
-  const handleOpenFileFromChat = useCallback(async (filePath: string) => {
-    const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
-    try {
-      const response: FileContentResponse = await requestFileContent(client, activeSessionId, filePath);
-      const fileName = filePath.split('/').pop() || filePath;
-      const hash = await calculateHash(response.content);
-      addFileTab({ path: filePath, name: fileName, content: response.content, originalContent: response.content, originalHash: hash, isDirty: false, isBinary: response.is_binary });
-    } catch (error) { toast({ title: 'Failed to open file', description: error instanceof Error ? error.message : 'Unknown error', variant: 'error' }); }
-  }, [activeSessionId, toast, addFileTab]);
+  const handleOpenFileFromChat = useCallback(
+    async (filePath: string) => {
+      const client = getWebSocketClient();
+      if (!client || !activeSessionId) return;
+      try {
+        const response: FileContentResponse = await requestFileContent(client, activeSessionId, filePath);
+        const fileName = filePath.split("/").pop() || filePath;
+        const hash = await calculateHash(response.content);
+        addFileTab({
+          path: filePath,
+          name: fileName,
+          content: response.content,
+          originalContent: response.content,
+          originalHash: hash,
+          isDirty: false,
+          isBinary: response.is_binary,
+        });
+      } catch (error) {
+        toast({
+          title: "Failed to open file",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "error",
+        });
+      }
+    },
+    [activeSessionId, toast, addFileTab],
+  );
 
-  const handleCloseFileTab = useCallback((path: string) => {
-    setOpenFileTabs((prev) => prev.filter((t) => t.path !== path));
-    if (leftTab === `file:${path}`) handleTabChange('chat');
-  }, [leftTab, handleTabChange, setOpenFileTabs]);
+  const handleCloseFileTab = useCallback(
+    (path: string) => {
+      setOpenFileTabs((prev) => prev.filter((t) => t.path !== path));
+      if (leftTab === `file:${path}`) handleTabChange("chat");
+    },
+    [leftTab, handleTabChange, setOpenFileTabs],
+  );
 
-  const handleFileChange = useCallback((path: string, newContent: string) => {
-    setOpenFileTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, content: newContent, isDirty: newContent !== tab.originalContent } : tab));
-  }, [setOpenFileTabs]);
+  const handleFileChange = useCallback(
+    (path: string, newContent: string) => {
+      setOpenFileTabs((prev) =>
+        prev.map((tab) =>
+          tab.path === path
+            ? { ...tab, content: newContent, isDirty: newContent !== tab.originalContent }
+            : tab,
+        ),
+      );
+    },
+    [setOpenFileTabs],
+  );
 
-  const handleFileSave = useCallback(async (path: string) => {
-    const tab = openFileTabs.find((t) => t.path === path);
-    if (!tab || !tab.isDirty) return;
-    const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
-    setSavingFiles((prev) => new Set(prev).add(path));
-    try {
-      const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
-      const response = await updateFileContent(client, activeSessionId, path, diff, tab.originalHash);
-      if (response.success && response.new_hash) {
-        setOpenFileTabs((prev) => prev.map((t) => t.path === path ? { ...t, originalContent: t.content, originalHash: response.new_hash!, isDirty: false } : t));
-      } else { toast({ title: 'Save failed', description: response.error || 'Failed to save file', variant: 'error' }); }
-    } catch (error) { console.error('Failed to save file:', error); toast({ title: 'Save failed', description: error instanceof Error ? error.message : 'An error occurred while saving the file', variant: 'error' }); }
-    finally { setSavingFiles((prev) => { const next = new Set(prev); next.delete(path); return next; }); }
-  }, [openFileTabs, activeSessionId, toast, setOpenFileTabs, setSavingFiles]);
+  const { handleFileSave, handleFileDelete } = useFileSaveDelete({
+    activeSessionId,
+    openFileTabs,
+    setOpenFileTabs,
+    setSavingFiles,
+    handleCloseFileTab,
+  });
 
-  const handleFileDelete = useCallback(async (path: string) => {
-    const client = getWebSocketClient();
-    if (!client || !activeSessionId) return;
-    try {
-      const response = await deleteFile(client, activeSessionId, path);
-      if (response.success) { handleCloseFileTab(path); }
-      else { toast({ title: 'Delete failed', description: response.error || 'Failed to delete file', variant: 'error' }); }
-    } catch (error) { console.error('Failed to delete file:', error); toast({ title: 'Delete failed', description: error instanceof Error ? error.message : 'An error occurred while deleting the file', variant: 'error' }); }
-  }, [activeSessionId, handleCloseFileTab, toast]);
-
-  return { handleOpenFileFromChat, handleCloseFileTab, handleFileChange, handleFileSave, handleFileDelete, addFileTab };
+  return {
+    handleOpenFileFromChat,
+    handleCloseFileTab,
+    handleFileChange,
+    handleFileSave,
+    handleFileDelete,
+    addFileTab,
+  };
 }
 
-function useCenterPanelTabs(openFileTabs: OpenFileTab[], handleCloseFileTab: (path: string) => void, hasChanges: boolean | undefined) {
+function useCenterPanelTabs(
+  openFileTabs: OpenFileTab[],
+  handleCloseFileTab: (path: string) => void,
+  hasChanges: boolean | undefined,
+) {
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      ...(hasChanges ? [{ id: 'changes', label: 'All changes' }] : []),
-      { id: 'chat', label: 'Chat' },
+      ...(hasChanges ? [{ id: "changes", label: "All changes" }] : []),
+      { id: "chat", label: "Chat" },
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
       id: `file:${tab.path}`,
       label: tab.isDirty ? `${tab.name} *` : tab.name,
       icon: tab.isDirty ? <span className="h-2 w-2 rounded-full bg-yellow-500" /> : undefined,
       closable: true,
-      onClose: (e: React.MouseEvent) => { e.stopPropagation(); handleCloseFileTab(tab.path); },
-      className: 'cursor-pointer group gap-1.5 data-[state=active]:bg-muted',
+      onClose: (e: React.MouseEvent) => {
+        e.stopPropagation();
+        handleCloseFileTab(tab.path);
+      },
+      className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
     return [...staticTabs, ...fileTabs];
   }, [openFileTabs, handleCloseFileTab, hasChanges]);
@@ -248,14 +271,8 @@ function useCenterPanelTabs(openFileTabs: OpenFileTab[], handleCloseFileTab: (pa
   return { tabs, separatorAfterIndex };
 }
 
-export const TaskCenterPanel = memo(function TaskCenterPanel({
-  selectedDiff: externalSelectedDiff,
-  openFileRequest,
-  onDiffHandled,
-  onFileOpenHandled,
-  onActiveFileChange,
-  sessionId = null,
-}: TaskCenterPanelProps) {
+function useCenterPanelState(props: TaskCenterPanelProps) {
+  const { selectedDiff: externalSelectedDiff, openFileRequest, onDiffHandled, onFileOpenHandled, onActiveFileChange } = props;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
@@ -268,36 +285,102 @@ export const TaskCenterPanel = memo(function TaskCenterPanel({
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const { leftTab, setLeftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
+  const { leftTab, setLeftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges } =
+    useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
   useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs });
-  useEffect(() => { if (!activeSessionId) return; saveOpenFileTabs(activeSessionId, openFileTabs.map(({ path, name }) => ({ path, name }))); }, [activeSessionId, openFileTabs]);
-  const { handleOpenFileFromChat, handleCloseFileTab, handleFileChange, handleFileSave, handleFileDelete, addFileTab } = useFileTabOperations({ activeSessionId, openFileTabs, setOpenFileTabs, setSavingFiles, setLeftTab, handleTabChange, leftTab });
-  const { tabs, separatorAfterIndex } = useCenterPanelTabs(openFileTabs, handleCloseFileTab, hasChanges);
+  useEffect(() => {
+    if (!activeSessionId) return;
+    saveOpenFileTabs(activeSessionId, openFileTabs.map(({ path, name }) => ({ path, name })));
+  }, [activeSessionId, openFileTabs]);
+  const fileTabOps = useFileTabOperations({
+    activeSessionId, openFileTabs, setOpenFileTabs, setSavingFiles, setLeftTab, handleTabChange, leftTab,
+  });
+  const { tabs, separatorAfterIndex } = useCenterPanelTabs(openFileTabs, fileTabOps.handleCloseFileTab, hasChanges);
 
   useEffect(() => {
-    if (externalSelectedDiff) { queueMicrotask(() => { setSelectedDiff(externalSelectedDiff); setLeftTab('changes'); onDiffHandled(); }); }
+    if (externalSelectedDiff) {
+      queueMicrotask(() => {
+        setSelectedDiff(externalSelectedDiff);
+        setLeftTab("changes");
+        onDiffHandled();
+      });
+    }
   }, [externalSelectedDiff, onDiffHandled, setLeftTab]);
 
   useEffect(() => {
     if (!openFileRequest) return;
     queueMicrotask(async () => {
-      const hash = openFileRequest.originalHash || await calculateHash(openFileRequest.content);
-      addFileTab({ ...openFileRequest, originalContent: openFileRequest.originalContent || openFileRequest.content, originalHash: hash, isDirty: openFileRequest.isDirty ?? false });
+      const hash = openFileRequest.originalHash || (await calculateHash(openFileRequest.content));
+      fileTabOps.addFileTab({
+        ...openFileRequest,
+        originalContent: openFileRequest.originalContent || openFileRequest.content,
+        originalHash: hash,
+        isDirty: openFileRequest.isDirty ?? false,
+      });
       onFileOpenHandled();
     });
-  }, [openFileRequest, onFileOpenHandled, addFileTab]);
+  }, [openFileRequest, onFileOpenHandled, fileTabOps.addFileTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const approveContent = showApproveButton ? <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} /> : undefined;
+  return {
+    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
+    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
+    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
+    fileTabOps, tabs, separatorAfterIndex,
+  };
+}
+
+export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPanelProps) {
+  const { sessionId = null } = props;
+  const state = useCenterPanelState(props);
+  const {
+    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
+    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
+    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
+    fileTabOps, tabs, separatorAfterIndex,
+  } = state;
+  const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
+
+  const approveContent = showApproveButton ? (
+    <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} />
+  ) : undefined;
 
   return (
     <SessionPanel borderSide="right" margin="right">
-      <SessionTabs tabs={tabs} activeTab={leftTab} onTabChange={handleTabChange} separatorAfterIndex={separatorAfterIndex} className="flex-1 min-h-0 flex flex-col gap-2" rightContent={approveContent}>
+      <SessionTabs
+        tabs={tabs}
+        activeTab={leftTab}
+        onTabChange={handleTabChange}
+        separatorAfterIndex={separatorAfterIndex}
+        className="flex-1 min-h-0 flex flex-col gap-2"
+        rightContent={approveContent}
+      >
         <TabsContent value="changes" className="flex-1 min-h-0">
-          <TaskChangesPanel selectedDiff={selectedDiff} onClearSelected={() => setSelectedDiff(null)} onOpenFile={handleOpenFileFromChat} />
+          <TaskChangesPanel
+            selectedDiff={selectedDiff}
+            onClearSelected={() => setSelectedDiff(null)}
+            onOpenFile={handleOpenFileFromChat}
+          />
         </TabsContent>
-        <ChatTabContent activeTaskId={activeTaskId} isPassthroughMode={isPassthroughMode} activeSessionId={activeSessionId} sessionId={sessionId} showRequestChangesTooltip={showRequestChangesTooltip} onDismissTooltip={() => setShowRequestChangesTooltip(false)} onOpenFile={handleOpenFileFromChat} />
+        <ChatTabContent
+          activeTaskId={activeTaskId}
+          isPassthroughMode={isPassthroughMode}
+          activeSessionId={activeSessionId}
+          sessionId={sessionId}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onDismissTooltip={() => setShowRequestChangesTooltip(false)}
+          onOpenFile={handleOpenFileFromChat}
+        />
         {openFileTabs.map((tab) => (
-          <FileTabContent key={tab.path} tab={tab} activeSession={activeSession} activeSessionId={activeSessionId} isSaving={savingFiles.has(tab.path)} onFileChange={handleFileChange} onFileSave={handleFileSave} onFileDelete={handleFileDelete} />
+          <FileTabContent
+            key={tab.path}
+            tab={tab}
+            activeSession={activeSession}
+            activeSessionId={activeSessionId}
+            isSaving={savingFiles.has(tab.path)}
+            onFileChange={handleFileChange}
+            onFileSave={handleFileSave}
+            onFileDelete={handleFileDelete}
+          />
         ))}
       </SessionTabs>
     </SessionPanel>
@@ -372,7 +455,11 @@ function ChatTabContent({
 }) {
   if (!activeTaskId) {
     return (
-      <TabsContent value="chat" className="flex flex-col min-h-0 flex-1" style={{ minHeight: '200px' }}>
+      <TabsContent
+        value="chat"
+        className="flex flex-col min-h-0 flex-1"
+        style={{ minHeight: "200px" }}
+      >
         <div className="flex items-center justify-center h-full text-muted-foreground">
           No task selected
         </div>
@@ -381,15 +468,23 @@ function ChatTabContent({
   }
   if (isPassthroughMode) {
     return (
-      <TabsContent value="chat" className="flex flex-col min-h-0 flex-1" style={{ minHeight: '200px' }}>
-        <div className="flex-1 min-h-0 h-full" style={{ minHeight: '150px' }}>
+      <TabsContent
+        value="chat"
+        className="flex flex-col min-h-0 flex-1"
+        style={{ minHeight: "200px" }}
+      >
+        <div className="flex-1 min-h-0 h-full" style={{ minHeight: "150px" }}>
           <PassthroughTerminal key={activeSessionId} sessionId={sessionId} mode="agent" />
         </div>
       </TabsContent>
     );
   }
   return (
-    <TabsContent value="chat" className="flex flex-col min-h-0 flex-1" style={{ minHeight: '200px' }}>
+    <TabsContent
+      value="chat"
+      className="flex flex-col min-h-0 flex-1"
+      style={{ minHeight: "200px" }}
+    >
       <TaskChatPanel
         sessionId={sessionId}
         onOpenFile={onOpenFile}
@@ -419,25 +514,25 @@ function FileTabContent({
   onFileDelete: (path: string) => void;
 }) {
   const extCategory = getFileCategory(tab.path);
-  let category: 'image' | 'binary' | 'text' = 'text';
-  if (tab.isBinary) category = extCategory === 'image' ? 'image' : 'binary';
+  let category: "image" | "binary" | "text" = "text";
+  if (tab.isBinary) category = extCategory === "image" ? "image" : "binary";
 
   return (
     <TabsContent value={`file:${tab.path}`} className="flex-1 min-h-0">
-      {category === 'image' && (
+      {category === "image" && (
         <FileImageViewer
           path={tab.path}
           content={tab.content}
           worktreePath={activeSession?.worktree_path ?? undefined}
         />
       )}
-      {category === 'binary' && (
+      {category === "binary" && (
         <FileBinaryViewer
           path={tab.path}
           worktreePath={activeSession?.worktree_path ?? undefined}
         />
       )}
-      {category === 'text' && (
+      {category === "text" && (
         <FileEditorContent
           path={tab.path}
           content={tab.content}

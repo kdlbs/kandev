@@ -290,7 +290,6 @@ func TestRuntimeRegistry_RecoverAll(t *testing.T) {
 	})
 }
 
-
 func TestRuntimeRegistry_ThreadSafety(t *testing.T) {
 	log := newTestRegistryLogger()
 	registry := NewRuntimeRegistry(log)
@@ -349,4 +348,3 @@ func TestRuntimeRegistry_ThreadSafety(t *testing.T) {
 	// If we reach here without a race condition panic, the test passes
 	// The -race flag during testing will detect actual race conditions
 }
-

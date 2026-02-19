@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { TaskSessionState, TaskSession } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { TaskSessionState, TaskSession } from "@/lib/types/http";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -12,7 +12,7 @@ type UseTaskChatSessionReturn = {
 
 export function useTaskChatSession(taskId: string | null): UseTaskChatSessionReturn {
   const sessionsForTask = useAppStore((state) =>
-    taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS : EMPTY_SESSIONS
+    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
 
   // Get the first (most recent) session for this task from the store
@@ -22,7 +22,7 @@ export function useTaskChatSession(taskId: string | null): UseTaskChatSessionRet
 
   const taskSessionId = currentSession?.id ?? null;
   const taskSessionState = currentSession?.state ?? null;
-  const isTaskSessionWorking = taskSessionState === 'STARTING' || taskSessionState === 'RUNNING';
+  const isTaskSessionWorking = taskSessionState === "STARTING" || taskSessionState === "RUNNING";
 
   return {
     taskSessionId,

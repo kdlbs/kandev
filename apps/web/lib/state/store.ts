@@ -1,7 +1,14 @@
-import { createStore } from 'zustand/vanilla';
-import { immer } from 'zustand/middleware/immer';
-import { hydrateState, type HydrationOptions } from './hydration/hydrator';
-import type { Repository, Branch, RepositoryScript, Message, Turn, TaskSession } from '@/lib/types/http';
+import { createStore } from "zustand/vanilla";
+import { immer } from "zustand/middleware/immer";
+import { hydrateState, type HydrationOptions } from "./hydration/hydrator";
+import type {
+  Repository,
+  Branch,
+  RepositoryScript,
+  Message,
+  Turn,
+  TaskSession,
+} from "@/lib/types/http";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -39,7 +46,7 @@ import {
   type PreviewViewMode,
   type PreviewDevicePreset,
   type ConnectionState,
-} from './slices';
+} from "./slices";
 
 // Re-export all types from slices for backwards compatibility
 export type {
@@ -95,88 +102,94 @@ export type {
   DiffState,
   ConnectionState,
   MobileKanbanState,
-} from './slices';
+} from "./slices";
 
 // Combined AppState type
 export type AppState = {
   // Kanban slice
-  kanban: typeof defaultKanbanState['kanban'];
-  kanbanMulti: typeof defaultKanbanState['kanbanMulti'];
-  workflows: typeof defaultKanbanState['workflows'];
-  tasks: typeof defaultKanbanState['tasks'];
+  kanban: (typeof defaultKanbanState)["kanban"];
+  kanbanMulti: (typeof defaultKanbanState)["kanbanMulti"];
+  workflows: (typeof defaultKanbanState)["workflows"];
+  tasks: (typeof defaultKanbanState)["tasks"];
 
   // Workspace slice
-  workspaces: typeof defaultWorkspaceState['workspaces'];
-  repositories: typeof defaultWorkspaceState['repositories'];
-  repositoryBranches: typeof defaultWorkspaceState['repositoryBranches'];
-  repositoryScripts: typeof defaultWorkspaceState['repositoryScripts'];
+  workspaces: (typeof defaultWorkspaceState)["workspaces"];
+  repositories: (typeof defaultWorkspaceState)["repositories"];
+  repositoryBranches: (typeof defaultWorkspaceState)["repositoryBranches"];
+  repositoryScripts: (typeof defaultWorkspaceState)["repositoryScripts"];
 
   // Settings slice
-  executors: typeof defaultSettingsState['executors'];
-  environments: typeof defaultSettingsState['environments'];
-  settingsAgents: typeof defaultSettingsState['settingsAgents'];
-  agentDiscovery: typeof defaultSettingsState['agentDiscovery'];
-  availableAgents: typeof defaultSettingsState['availableAgents'];
-  agentProfiles: typeof defaultSettingsState['agentProfiles'];
-  editors: typeof defaultSettingsState['editors'];
-  prompts: typeof defaultSettingsState['prompts'];
-  notificationProviders: typeof defaultSettingsState['notificationProviders'];
-  settingsData: typeof defaultSettingsState['settingsData'];
-  userSettings: typeof defaultSettingsState['userSettings'];
+  executors: (typeof defaultSettingsState)["executors"];
+  environments: (typeof defaultSettingsState)["environments"];
+  settingsAgents: (typeof defaultSettingsState)["settingsAgents"];
+  agentDiscovery: (typeof defaultSettingsState)["agentDiscovery"];
+  availableAgents: (typeof defaultSettingsState)["availableAgents"];
+  agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
+  editors: (typeof defaultSettingsState)["editors"];
+  prompts: (typeof defaultSettingsState)["prompts"];
+  notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
+  settingsData: (typeof defaultSettingsState)["settingsData"];
+  userSettings: (typeof defaultSettingsState)["userSettings"];
 
   // Session slice
-  messages: typeof defaultSessionState['messages'];
-  turns: typeof defaultSessionState['turns'];
-  taskSessions: typeof defaultSessionState['taskSessions'];
-  taskSessionsByTask: typeof defaultSessionState['taskSessionsByTask'];
-  sessionAgentctl: typeof defaultSessionState['sessionAgentctl'];
-  worktrees: typeof defaultSessionState['worktrees'];
-  sessionWorktreesBySessionId: typeof defaultSessionState['sessionWorktreesBySessionId'];
-  pendingModel: typeof defaultSessionState['pendingModel'];
-  activeModel: typeof defaultSessionState['activeModel'];
-  taskPlans: typeof defaultSessionState['taskPlans'];
-  queue: typeof defaultSessionState['queue'];
+  messages: (typeof defaultSessionState)["messages"];
+  turns: (typeof defaultSessionState)["turns"];
+  taskSessions: (typeof defaultSessionState)["taskSessions"];
+  taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
+  sessionAgentctl: (typeof defaultSessionState)["sessionAgentctl"];
+  worktrees: (typeof defaultSessionState)["worktrees"];
+  sessionWorktreesBySessionId: (typeof defaultSessionState)["sessionWorktreesBySessionId"];
+  pendingModel: (typeof defaultSessionState)["pendingModel"];
+  activeModel: (typeof defaultSessionState)["activeModel"];
+  taskPlans: (typeof defaultSessionState)["taskPlans"];
+  queue: (typeof defaultSessionState)["queue"];
 
   // Session Runtime slice
-  terminal: typeof defaultSessionRuntimeState['terminal'];
-  shell: typeof defaultSessionRuntimeState['shell'];
-  processes: typeof defaultSessionRuntimeState['processes'];
-  gitStatus: typeof defaultSessionRuntimeState['gitStatus'];
-  gitSnapshots: typeof defaultSessionRuntimeState['gitSnapshots'];
-  sessionCommits: typeof defaultSessionRuntimeState['sessionCommits'];
-  contextWindow: typeof defaultSessionRuntimeState['contextWindow'];
-  agents: typeof defaultSessionRuntimeState['agents'];
-  availableCommands: typeof defaultSessionRuntimeState['availableCommands'];
-  userShells: typeof defaultSessionRuntimeState['userShells'];
+  terminal: (typeof defaultSessionRuntimeState)["terminal"];
+  shell: (typeof defaultSessionRuntimeState)["shell"];
+  processes: (typeof defaultSessionRuntimeState)["processes"];
+  gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
+  gitSnapshots: (typeof defaultSessionRuntimeState)["gitSnapshots"];
+  sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
+  contextWindow: (typeof defaultSessionRuntimeState)["contextWindow"];
+  agents: (typeof defaultSessionRuntimeState)["agents"];
+  availableCommands: (typeof defaultSessionRuntimeState)["availableCommands"];
+  userShells: (typeof defaultSessionRuntimeState)["userShells"];
 
   // UI slice
-  previewPanel: typeof defaultUIState['previewPanel'];
-  rightPanel: typeof defaultUIState['rightPanel'];
-  diffs: typeof defaultUIState['diffs'];
-  connection: typeof defaultUIState['connection'];
-  mobileKanban: typeof defaultUIState['mobileKanban'];
-  mobileSession: typeof defaultUIState['mobileSession'];
-  chatInput: typeof defaultUIState['chatInput'];
-  documentPanel: typeof defaultUIState['documentPanel'];
+  previewPanel: (typeof defaultUIState)["previewPanel"];
+  rightPanel: (typeof defaultUIState)["rightPanel"];
+  diffs: (typeof defaultUIState)["diffs"];
+  connection: (typeof defaultUIState)["connection"];
+  mobileKanban: (typeof defaultUIState)["mobileKanban"];
+  mobileSession: (typeof defaultUIState)["mobileSession"];
+  chatInput: (typeof defaultUIState)["chatInput"];
+  documentPanel: (typeof defaultUIState)["documentPanel"];
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
-  setWorkspaces: (workspaces: WorkspaceState['items']) => void;
+  setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState['items']) => void;
-  setWorkflowSnapshot: (workflowId: string, data: import('./slices/kanban/types').WorkflowSnapshotData) => void;
+  setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  setWorkflowSnapshot: (
+    workflowId: string,
+    data: import("./slices/kanban/types").WorkflowSnapshotData,
+  ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
-  updateMultiTask: (workflowId: string, task: import('./slices/kanban/types').KanbanState['tasks'][number]) => void;
+  updateMultiTask: (
+    workflowId: string,
+    task: import("./slices/kanban/types").KanbanState["tasks"][number],
+  ) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
-  setExecutors: (executors: ExecutorsState['items']) => void;
-  setEnvironments: (environments: EnvironmentsState['items']) => void;
-  setSettingsAgents: (agents: SettingsAgentsState['items']) => void;
-  setAgentDiscovery: (agents: AgentDiscoveryState['items']) => void;
-  setAvailableAgents: (agents: AvailableAgentsState['items']) => void;
+  setExecutors: (executors: ExecutorsState["items"]) => void;
+  setEnvironments: (environments: EnvironmentsState["items"]) => void;
+  setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
+  setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
+  setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
-  setAgentProfiles: (profiles: AgentProfilesState['items']) => void;
+  setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (repositoryId: string, branches: Branch[]) => void;
@@ -186,9 +199,9 @@ export type AppState = {
   clearRepositoryScripts: (repositoryId: string) => void;
   invalidateRepositories: (workspaceId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
-  setEditors: (editors: EditorsState['items']) => void;
+  setEditors: (editors: EditorsState["items"]) => void;
   setEditorsLoading: (loading: boolean) => void;
-  setPrompts: (prompts: PromptsState['items']) => void;
+  setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
@@ -197,7 +210,7 @@ export type AppState = {
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (
     sessionId: string,
-    status: { available: boolean; running?: boolean; shell?: string; cwd?: string }
+    status: { available: boolean; running?: boolean; shell?: string; cwd?: string },
   ) => void;
   clearShellOutput: (sessionId: string) => void;
   appendProcessOutput: (processId: string, data: string) => void;
@@ -212,17 +225,23 @@ export type AppState = {
   setPreviewUrl: (sessionId: string, url: string) => void;
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
-  setConnectionStatus: (status: ConnectionState['status'], error?: string | null) => void;
+  setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
-  setMobileSessionPanel: (sessionId: string, panel: import('./slices/ui/types').MobileSessionPanel) => void;
+  setMobileSessionPanel: (
+    sessionId: string,
+    panel: import("./slices/ui/types").MobileSessionPanel,
+  ) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
-  setActiveDocument: (sessionId: string, doc: import('./slices/ui/types').ActiveDocument | null) => void;
+  setActiveDocument: (
+    sessionId: string,
+    doc: import("./slices/ui/types").ActiveDocument | null,
+  ) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   addMessage: (message: Message) => void;
   addTurn: (turn: Turn) => void;
@@ -232,11 +251,11 @@ export type AppState = {
   prependMessages: (
     sessionId: string,
     messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null }
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesMetadata: (
     sessionId: string,
-    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null }
+    meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
@@ -263,21 +282,30 @@ export type AppState = {
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
   // Task plan actions
-  setTaskPlan: (taskId: string, plan: import('@/lib/types/http').TaskPlan | null) => void;
+  setTaskPlan: (taskId: string, plan: import("@/lib/types/http").TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
   // Queue actions
-  setQueueStatus: (sessionId: string, status: import('./slices/session/types').QueueStatus) => void;
+  setQueueStatus: (sessionId: string, status: import("./slices/session/types").QueueStatus) => void;
   setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
   // Available commands actions
-  setAvailableCommands: (sessionId: string, commands: import('./slices/session-runtime/types').AvailableCommand[]) => void;
+  setAvailableCommands: (
+    sessionId: string,
+    commands: import("./slices/session-runtime/types").AvailableCommand[],
+  ) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // User shells actions
-  setUserShells: (sessionId: string, shells: import('./slices/session-runtime/types').UserShellInfo[]) => void;
+  setUserShells: (
+    sessionId: string,
+    shells: import("./slices/session-runtime/types").UserShellInfo[],
+  ) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (sessionId: string, shell: import('./slices/session-runtime/types').UserShellInfo) => void;
+  addUserShell: (
+    sessionId: string,
+    shell: import("./slices/session-runtime/types").UserShellInfo,
+  ) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
 };
 
@@ -356,7 +384,10 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
     editors: { ...defaultState.editors, ...initialState.editors },
     prompts: { ...defaultState.prompts, ...initialState.prompts },
-    notificationProviders: { ...defaultState.notificationProviders, ...initialState.notificationProviders },
+    notificationProviders: {
+      ...defaultState.notificationProviders,
+      ...initialState.notificationProviders,
+    },
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     messages: { ...defaultState.messages, ...initialState.messages },
@@ -365,7 +396,10 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
     worktrees: { ...defaultState.worktrees, ...initialState.worktrees },
-    sessionWorktreesBySessionId: { ...defaultState.sessionWorktreesBySessionId, ...initialState.sessionWorktreesBySessionId },
+    sessionWorktreesBySessionId: {
+      ...defaultState.sessionWorktreesBySessionId,
+      ...initialState.sessionWorktreesBySessionId,
+    },
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
@@ -455,7 +489,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
-    }))
+    })),
   );
 }
 

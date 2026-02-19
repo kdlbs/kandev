@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useAppStore } from '@/components/state-provider';
+import { useAppStore } from "@/components/state-provider";
 
 type PromptPreviewProps = {
   content: string | null;
@@ -11,7 +11,7 @@ export function PromptPreview({ content }: PromptPreviewProps) {
     return <div className="text-xs text-muted-foreground">Custom prompt</div>;
   }
 
-  const truncated = content.length > 2000 ? content.slice(0, 2000) + '...' : content;
+  const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content;
 
   return (
     <div className="space-y-1.5">

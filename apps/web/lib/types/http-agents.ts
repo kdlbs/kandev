@@ -35,8 +35,8 @@ export type Agent = {
   updated_at: string;
 };
 
-export type McpServerType = 'stdio' | 'http' | 'sse' | 'streamable_http';
-export type McpServerMode = 'shared' | 'per_session' | 'auto';
+export type McpServerType = "stdio" | "http" | "sse" | "streamable_http";
+export type McpServerMode = "shared" | "per_session" | "auto";
 
 export type McpServerDef = {
   type?: McpServerType;
@@ -78,7 +78,7 @@ export type ModelEntry = {
   provider: string;
   context_window: number;
   is_default: boolean;
-  source?: 'static' | 'dynamic';
+  source?: "static" | "dynamic";
 };
 
 export type ModelConfig = {
@@ -161,7 +161,7 @@ export type ClarificationRequestMetadata = {
   task_id?: string;
   question: ClarificationQuestion;
   context?: string;
-  status?: 'pending' | 'answered' | 'rejected' | 'expired';
+  status?: "pending" | "answered" | "rejected" | "expired";
   response?: ClarificationAnswer;
 };
 
@@ -184,7 +184,7 @@ export type TaskPlan = {
   task_id: string;
   title: string;
   content: string;
-  created_by: 'agent' | 'user';
+  created_by: "agent" | "user";
   created_at: string;
   updated_at: string;
 };

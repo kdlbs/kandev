@@ -1,29 +1,34 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useTheme } from 'next-themes';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Placeholder from '@tiptap/extension-placeholder';
-import Link from '@tiptap/extension-link';
-import Highlight from '@tiptap/extension-highlight';
-import Underline from '@tiptap/extension-underline';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import { Table } from '@tiptap/extension-table';
-import { TableRow } from '@tiptap/extension-table-row';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { TableHeader } from '@tiptap/extension-table-header';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { Markdown } from 'tiptap-markdown';
-import { common, createLowlight } from 'lowlight';
-import { CommentMark, rehydrateCommentMarks, MIN_COMMENT_TEXT_LENGTH, type CommentForEditor } from './comment-mark';
-import { createPlanSlashExtension, type PlanSlashCommand } from './plan-slash-commands';
-import { PlanSlashMenu } from './plan-slash-menu';
-import { PlanBubbleMenu } from './plan-bubble-menu';
-import { PlanDragHandle } from './plan-drag-handle';
-import type { MenuState } from '@/components/task/chat/tiptap-suggestion';
-import type { Editor } from '@tiptap/core';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "next-themes";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import Link from "@tiptap/extension-link";
+import Highlight from "@tiptap/extension-highlight";
+import Underline from "@tiptap/extension-underline";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { Markdown } from "tiptap-markdown";
+import { common, createLowlight } from "lowlight";
+import {
+  CommentMark,
+  rehydrateCommentMarks,
+  MIN_COMMENT_TEXT_LENGTH,
+  type CommentForEditor,
+} from "./comment-mark";
+import { createPlanSlashExtension, type PlanSlashCommand } from "./plan-slash-commands";
+import { PlanSlashMenu } from "./plan-slash-menu";
+import { PlanBubbleMenu } from "./plan-bubble-menu";
+import { PlanDragHandle } from "./plan-drag-handle";
+import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
+import type { Editor } from "@tiptap/core";
 
 export type { CommentForEditor };
 
@@ -83,7 +88,7 @@ function useCommentShortcut(
     if (!wrapper) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c')) return;
+      if (!((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "c")) return;
       if (!onSelectionChangeRef.current) return;
 
       e.preventDefault();
@@ -94,20 +99,29 @@ function useCommentShortcut(
 
       const { from, to } = ed.state.selection;
       if (from === to) return;
-      const text = ed.state.doc.textBetween(from, to, ' ').trim();
+      const text = ed.state.doc.textBetween(from, to, " ").trim();
       if (text.length < MIN_COMMENT_TEXT_LENGTH) return;
 
       const endCoords = ed.view.coordsAtPos(to);
-      onSelectionChangeRef.current({ text, from, to, position: { x: endCoords.left, y: endCoords.bottom } });
+      onSelectionChangeRef.current({
+        text,
+        from,
+        to,
+        position: { x: endCoords.left, y: endCoords.bottom },
+      });
     };
 
-    wrapper.addEventListener('keydown', handleKeyDown, true);
-    return () => wrapper.removeEventListener('keydown', handleKeyDown, true);
+    wrapper.addEventListener("keydown", handleKeyDown, true);
+    return () => wrapper.removeEventListener("keydown", handleKeyDown, true);
   }, [wrapperRef, editorRef, onSelectionChangeRef]);
 }
 
 const EMPTY_SLASH_STATE: MenuState<PlanSlashCommand> = {
-  isOpen: false, items: [], query: '', clientRect: null, command: null,
+  isOpen: false,
+  items: [],
+  query: "",
+  clientRect: null,
+  command: null,
 };
 
 /** Handle keyboard events for slash menu navigation. */
@@ -119,9 +133,15 @@ function handleSlashKeyDown(
 ): boolean {
   if (!menu.isOpen || !menu.items.length) return false;
   const len = menu.items.length;
-  if (event.key === 'ArrowDown') { setIndex((p) => (p + 1) % len); return true; }
-  if (event.key === 'ArrowUp') { setIndex((p) => (p - 1 + len) % len); return true; }
-  if (event.key === 'Enter') {
+  if (event.key === "ArrowDown") {
+    setIndex((p) => (p + 1) % len);
+    return true;
+  }
+  if (event.key === "ArrowUp") {
+    setIndex((p) => (p - 1 + len) % len);
+    return true;
+  }
+  if (event.key === "Enter") {
     const item = menu.items[indexRef.current];
     if (item && menu.command) menu.command(item);
     return true;
@@ -134,17 +154,24 @@ function useSlashMenu() {
   const [menuState, setMenuState] = useState<MenuState<PlanSlashCommand>>(EMPTY_SLASH_STATE);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
-  useEffect(() => { setSelectedIndex(0); }, [menuState.items]);
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [menuState.items]);
 
   // Current handler — recreated when menuState changes, captures latest state
   const keyDown = useCallback(
-    (event: KeyboardEvent) => handleSlashKeyDown(event, menuState, setSelectedIndex, selectedIndexRef),
+    (event: KeyboardEvent) =>
+      handleSlashKeyDown(event, menuState, setSelectedIndex, selectedIndexRef),
     [menuState],
   );
   // Ref synced via layout effect so it's always current
   const keyDownRef = useRef<(event: KeyboardEvent) => boolean>(keyDown);
-  useLayoutEffect(() => { keyDownRef.current = keyDown; });
-  useLayoutEffect(() => { selectedIndexRef.current = selectedIndex; });
+  useLayoutEffect(() => {
+    keyDownRef.current = keyDown;
+  });
+  useLayoutEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  });
 
   // Stable callback passed to extension — never changes, delegates via ref
   const stableKeyDown = useCallback((event: KeyboardEvent) => keyDownRef.current(event), []);
@@ -162,7 +189,9 @@ function useSlashMenu() {
 /** Comment highlight / badge click handler via event delegation. */
 function useCommentClickHandler(
   wrapperRef: React.RefObject<HTMLDivElement | null>,
-  onCommentClickRef: React.RefObject<((id: string, pos: { x: number; y: number }) => void) | undefined>,
+  onCommentClickRef: React.RefObject<
+    ((id: string, pos: { x: number; y: number }) => void) | undefined
+  >,
 ) {
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -171,9 +200,9 @@ function useCommentClickHandler(
       if (!onCommentClickRef.current) return;
       const target = e.target as HTMLElement;
       // Check badge first, then the mark wrapper (comment-highlight)
-      const badge = target.closest('.comment-badge');
+      const badge = target.closest(".comment-badge");
       if (badge) {
-        const commentId = badge.getAttribute('data-comment-id');
+        const commentId = badge.getAttribute("data-comment-id");
         if (commentId) {
           e.preventDefault();
           e.stopPropagation();
@@ -182,24 +211,29 @@ function useCommentClickHandler(
         return;
       }
       // Clicked on highlighted text — read commentId directly from the mark span
-      const highlight = target.closest('.comment-highlight');
+      const highlight = target.closest(".comment-highlight");
       if (!highlight) return;
-      const commentId = highlight.getAttribute('data-comment-id');
+      const commentId = highlight.getAttribute("data-comment-id");
       if (commentId) {
         e.preventDefault();
         e.stopPropagation();
         onCommentClickRef.current(commentId, { x: e.clientX, y: e.clientY });
       }
     };
-    wrapper.addEventListener('click', handleClick);
-    return () => wrapper.removeEventListener('click', handleClick);
+    wrapper.addEventListener("click", handleClick);
+    return () => wrapper.removeEventListener("click", handleClick);
   }, [wrapperRef, onCommentClickRef]);
 }
 
 export function TipTapPlanEditor({
-  value, onChange, placeholder = 'Start typing...',
-  onSelectionChange, comments = [], onCommentClick,
-  onCommentDeleted, onEditorReady,
+  value,
+  onChange,
+  placeholder = "Start typing...",
+  onSelectionChange,
+  comments = [],
+  onCommentClick,
+  onCommentDeleted,
+  onEditorReady,
 }: TipTapPlanEditorProps) {
   const { resolvedTheme } = useTheme();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -213,11 +247,21 @@ export function TipTapPlanEditor({
 
   const slash = useSlashMenu();
 
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
-  useEffect(() => { onCommentClickRef.current = onCommentClick; }, [onCommentClick]);
-  useEffect(() => { onCommentDeletedRef.current = onCommentDeleted; }, [onCommentDeleted]);
-  useEffect(() => { onEditorReadyRef.current = onEditorReady; }, [onEditorReady]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
+  useEffect(() => {
+    onCommentClickRef.current = onCommentClick;
+  }, [onCommentClick]);
+  useEffect(() => {
+    onCommentDeletedRef.current = onCommentDeleted;
+  }, [onCommentDeleted]);
+  useEffect(() => {
+    onEditorReadyRef.current = onEditorReady;
+  }, [onEditorReady]);
 
   const stableOrphanHandler = useCallback((ids: string[]) => {
     onCommentDeletedRef.current?.(ids);
@@ -231,8 +275,10 @@ export function TipTapPlanEditor({
   /* eslint-enable react-hooks/refs */
 
   const editor = useEditor({
-    immediatelyRender: false, extensions, content: value,
-    editorProps: { attributes: { class: 'tiptap-plan-editor' } },
+    immediatelyRender: false,
+    extensions,
+    content: value,
+    editorProps: { attributes: { class: "tiptap-plan-editor" } },
     onUpdate: ({ editor: ed }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const md = (ed.storage as any).markdown?.getMarkdown?.() as string | undefined;
@@ -244,12 +290,16 @@ export function TipTapPlanEditor({
     },
   });
 
-  useEffect(() => { editorRef.current = editor; }, [editor]);
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
 
   // Re-hydrate comment marks when comments change or editor becomes ready
   useEffect(() => {
     if (!editor || !isReady) return;
-    try { rehydrateCommentMarks(editor, comments); } catch {
+    try {
+      rehydrateCommentMarks(editor, comments);
+    } catch {
       // Silently ignore — editor may be in a transitional state
     }
   }, [comments, editor, isReady]);
@@ -257,12 +307,18 @@ export function TipTapPlanEditor({
   useCommentClickHandler(wrapperRef, onCommentClickRef);
   useCommentShortcut(wrapperRef, editorRef, onSelectionChangeRef);
 
-  const handleBubbleComment = useCallback((sel: TextSelection) => {
-    onSelectionChangeRef.current?.(sel);
-  }, [onSelectionChangeRef]);
+  const handleBubbleComment = useCallback(
+    (sel: TextSelection) => {
+      onSelectionChangeRef.current?.(sel);
+    },
+    [onSelectionChangeRef],
+  );
 
   return (
-    <div ref={wrapperRef} className={`tiptap-plan-wrapper h-full relative ${resolvedTheme === 'dark' ? 'dark' : ''}`}>
+    <div
+      ref={wrapperRef}
+      className={`tiptap-plan-wrapper h-full relative ${resolvedTheme === "dark" ? "dark" : ""}`}
+    >
       <EditorContent editor={editor} className="h-full" />
       {editor && isReady && (
         <>
@@ -270,7 +326,11 @@ export function TipTapPlanEditor({
           <PlanDragHandle editor={editor} />
         </>
       )}
-      <PlanSlashMenu menuState={slash.menuState} selectedIndex={slash.selectedIndex} setSelectedIndex={slash.setSelectedIndex} />
+      <PlanSlashMenu
+        menuState={slash.menuState}
+        selectedIndex={slash.selectedIndex}
+        setSelectedIndex={slash.setSelectedIndex}
+      />
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm bg-background/80">
           Loading editor...

@@ -2,6 +2,13 @@ repos:
   # Backend (Go) hooks
   - repo: local
     hooks:
+      - id: gofmt
+        name: gofmt (backend)
+        entry: bash -c 'gofmt -w "$@"' --
+        language: system
+        files: ^apps/backend/.*\.go$
+        pass_filenames: true
+
       - id: go-tests
         name: Go tests (backend)
         entry: bash -c 'cd apps/backend && go test ./...'
@@ -19,6 +26,13 @@ repos:
   # Web app (TypeScript/React) hooks
   - repo: local
     hooks:
+      - id: prettier-format
+        name: Prettier format (web/cli/packages)
+        entry: bash -c 'cd apps && pnpm exec prettier --write --ignore-unknown "${@/#apps\//}"' --
+        language: system
+        files: ^apps/(web|cli|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|css|scss)$
+        pass_filenames: true
+
       - id: web-lint
         name: Web lint
         entry: bash -c 'cd apps && pnpm --filter @kandev/web lint'

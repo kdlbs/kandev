@@ -1,5 +1,5 @@
-import { SettingsLayoutClient } from '@/components/settings/settings-layout-client';
-import { StateProvider } from '@/components/state-provider';
+import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { StateProvider } from "@/components/state-provider";
 import {
   listAgentDiscovery,
   listAvailableAgents,
@@ -7,34 +7,28 @@ import {
   listEnvironments,
   listExecutors,
   listWorkspaces,
-} from '@/lib/api';
-import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
+} from "@/lib/api";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
-export default function SettingsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <SettingsLayoutServer>{children}</SettingsLayoutServer>
-  );
+export default function SettingsLayout({ children }: { children: React.ReactNode }) {
+  return <SettingsLayoutServer>{children}</SettingsLayoutServer>;
 }
 
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
     const [workspaces, executors, environments, agents, discovery] = await Promise.all([
-      listWorkspaces({ cache: 'no-store' }),
-      listExecutors({ cache: 'no-store' }),
-      listEnvironments({ cache: 'no-store' }),
-      listAgents({ cache: 'no-store' }),
-      listAgentDiscovery({ cache: 'no-store' }),
+      listWorkspaces({ cache: "no-store" }),
+      listExecutors({ cache: "no-store" }),
+      listEnvironments({ cache: "no-store" }),
+      listAgents({ cache: "no-store" }),
+      listAgentDiscovery({ cache: "no-store" }),
     ]);
     let availableAgents = { agents: [] as typeof discovery.agents };
     let availableAgentsLoaded = true;
     try {
       availableAgents = await listAvailableAgents({
-        cache: 'no-store',
+        cache: "no-store",
       });
     } catch {
       availableAgents = { agents: [] as typeof discovery.agents };
@@ -59,7 +53,7 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       agentProfiles: {
         items: agents.agents.flatMap((agent) =>
-          agent.profiles.map((profile) => toAgentProfileOption(agent, profile))
+          agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
         ),
       },
       settingsAgents: {

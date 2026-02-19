@@ -8,10 +8,13 @@
     "build": "pnpm -r run build",
     "build:web": "pnpm --filter @kandev/web build",
     "lint": "pnpm -r run lint",
+    "format": "prettier --write web cli packages --ignore-unknown",
+    "format:check": "prettier --check web cli packages --ignore-unknown",
     "clean": "pnpm -r run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "prettier": "^3.6.2",
     "typescript": "^5"
   },
   "pnpm": {

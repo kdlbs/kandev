@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
-import { useCommentsStore } from '@/lib/state/slices/comments';
-import type { DiffComment } from '@/lib/state/slices/comments';
-import { isDiffComment } from '@/lib/state/slices/comments';
+import { useEffect, useMemo } from "react";
+import { useCommentsStore } from "@/lib/state/slices/comments";
+import type { DiffComment } from "@/lib/state/slices/comments";
+import { isDiffComment } from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: DiffComment[] = [];
 

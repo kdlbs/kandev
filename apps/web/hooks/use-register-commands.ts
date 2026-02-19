@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useId } from 'react';
-import { useCommandRegistry } from '@/lib/commands/command-registry';
-import type { CommandItem } from '@/lib/commands/types';
+import { useEffect, useId } from "react";
+import { useCommandRegistry } from "@/lib/commands/command-registry";
+import type { CommandItem } from "@/lib/commands/types";
 
 /**
  * Register commands that appear in the command panel.

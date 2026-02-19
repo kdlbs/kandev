@@ -10,7 +10,7 @@ import (
 
 // mockDetector is a test detector that returns configurable states
 type mockDetector struct {
-	state           AgentState
+	state            AgentState
 	acceptTransition bool
 }
 

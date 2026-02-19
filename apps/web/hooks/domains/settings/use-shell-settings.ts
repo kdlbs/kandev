@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useAppStore } from '@/components/state-provider';
+import { useAppStore } from "@/components/state-provider";
 
 export function useShellSettings() {
   const preferredShell = useAppStore((state) => state.userSettings.preferredShell);

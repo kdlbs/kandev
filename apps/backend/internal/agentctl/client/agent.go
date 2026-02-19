@@ -342,6 +342,7 @@ func (c *Client) Cancel(ctx context.Context) error {
 	}
 	return nil
 }
+
 // GetAgentStderr returns recent stderr lines from the agent process via the agent WebSocket stream.
 func (c *Client) GetAgentStderr(ctx context.Context) ([]string, error) {
 	resp, err := c.sendStreamRequest(ctx, "agent.stderr", nil)

@@ -1,10 +1,10 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'user.settings.updated': (message) => {
+    "user.settings.updated": (message) => {
       const repositoryIds = Array.from(new Set(message.payload.repository_ids ?? [])).sort();
       store.setState((state) => ({
         ...state,
@@ -18,7 +18,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           preferredShell: message.payload.preferred_shell || null,
           defaultEditorId: message.payload.default_editor_id || null,
           enablePreviewOnClick: message.payload.enable_preview_on_click ?? false,
-          chatSubmitKey: (message.payload.chat_submit_key as 'enter' | 'cmd_enter') ?? 'cmd_enter',
+          chatSubmitKey: (message.payload.chat_submit_key as "enter" | "cmd_enter") ?? "cmd_enter",
           reviewAutoMarkOnScroll: message.payload.review_auto_mark_on_scroll ?? true,
           lspAutoStartLanguages: message.payload.lsp_auto_start_languages ?? [],
           lspAutoInstallLanguages: message.payload.lsp_auto_install_languages ?? [],

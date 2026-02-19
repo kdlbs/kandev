@@ -93,8 +93,8 @@ type LaunchAgentRequest struct {
 	Priority        int
 	Metadata        map[string]interface{}
 	Env             map[string]string
-	ACPSessionID    string // ACP session ID to resume, if available
-	ModelOverride   string // If set, use this model instead of the profile's model
+	ACPSessionID    string            // ACP session ID to resume, if available
+	ModelOverride   string            // If set, use this model instead of the profile's model
 	ExecutorType    string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig  map[string]string // Executor config (docker_host, git_token, etc.)
 
@@ -209,4 +209,3 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 	e.onTaskStateChange = fn
 }
-

@@ -1,63 +1,69 @@
-import { useCallback } from 'react';
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { createFile, deleteFile } from '@/lib/ws/workspace-files';
-import { useToast } from '@/components/toast-provider';
+import { useCallback } from "react";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { createFile, deleteFile } from "@/lib/ws/workspace-files";
+import { useToast } from "@/components/toast-provider";
 
-const ERROR_VARIANT = 'error' as const;
-const UNKNOWN_ERROR = 'An unknown error occurred';
+const ERROR_VARIANT = "error" as const;
+const UNKNOWN_ERROR = "An unknown error occurred";
 
 export function useFileOperations(sessionId: string | null) {
   const { toast } = useToast();
 
-  const handleCreateFile = useCallback(async (path: string): Promise<boolean> => {
-    const client = getWebSocketClient();
-    if (!client || !sessionId) return false;
+  const handleCreateFile = useCallback(
+    async (path: string): Promise<boolean> => {
+      const client = getWebSocketClient();
+      if (!client || !sessionId) return false;
 
-    try {
-      const response = await createFile(client, sessionId, path);
-      if (!response.success) {
+      try {
+        const response = await createFile(client, sessionId, path);
+        if (!response.success) {
+          toast({
+            title: "Failed to create file",
+            description: response.error || UNKNOWN_ERROR,
+            variant: ERROR_VARIANT,
+          });
+          return false;
+        }
+        return true;
+      } catch (error) {
         toast({
-          title: 'Failed to create file',
-          description: response.error || UNKNOWN_ERROR,
+          title: "Failed to create file",
+          description: error instanceof Error ? error.message : UNKNOWN_ERROR,
           variant: ERROR_VARIANT,
         });
         return false;
       }
-      return true;
-    } catch (error) {
-      toast({
-        title: 'Failed to create file',
-        description: error instanceof Error ? error.message : UNKNOWN_ERROR,
-        variant: ERROR_VARIANT,
-      });
-      return false;
-    }
-  }, [sessionId, toast]);
+    },
+    [sessionId, toast],
+  );
 
-  const handleDeleteFile = useCallback(async (path: string): Promise<boolean> => {
-    const client = getWebSocketClient();
-    if (!client || !sessionId) return false;
+  const handleDeleteFile = useCallback(
+    async (path: string): Promise<boolean> => {
+      const client = getWebSocketClient();
+      if (!client || !sessionId) return false;
 
-    try {
-      const response = await deleteFile(client, sessionId, path);
-      if (!response.success) {
+      try {
+        const response = await deleteFile(client, sessionId, path);
+        if (!response.success) {
+          toast({
+            title: "Failed to delete file",
+            description: response.error || UNKNOWN_ERROR,
+            variant: ERROR_VARIANT,
+          });
+          return false;
+        }
+        return true;
+      } catch (error) {
         toast({
-          title: 'Failed to delete file',
-          description: response.error || UNKNOWN_ERROR,
+          title: "Failed to delete file",
+          description: error instanceof Error ? error.message : UNKNOWN_ERROR,
           variant: ERROR_VARIANT,
         });
         return false;
       }
-      return true;
-    } catch (error) {
-      toast({
-        title: 'Failed to delete file',
-        description: error instanceof Error ? error.message : UNKNOWN_ERROR,
-        variant: ERROR_VARIANT,
-      });
-      return false;
-    }
-  }, [sessionId, toast]);
+    },
+    [sessionId, toast],
+  );
 
   return { createFile: handleCreateFile, deleteFile: handleDeleteFile };
 }

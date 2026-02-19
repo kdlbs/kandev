@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { fetchDynamicModels } from '@/lib/api/domains/settings-api';
-import type { ModelEntry, DynamicModelsResponse } from '@/lib/types/http';
+import { useState, useEffect, useCallback } from "react";
+import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
+import type { ModelEntry, DynamicModelsResponse } from "@/lib/types/http";
 
 type UseDynamicModelsState = {
   models: ModelEntry[];
@@ -14,7 +14,7 @@ type UseDynamicModelsState = {
 export function useDynamicModels(
   agentName: string | undefined,
   staticModels: ModelEntry[],
-  supportsDynamicModels: boolean
+  supportsDynamicModels: boolean,
 ): UseDynamicModelsState {
   const [models, setModels] = useState<ModelEntry[]>(staticModels);
   // Start in loading state if dynamic models are supported to avoid UI flash
@@ -49,7 +49,7 @@ export function useDynamicModels(
         setCached(response.cached);
         setCachedAt(response.cached_at ?? null);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch models';
+        const errorMessage = err instanceof Error ? err.message : "Failed to fetch models";
         setError(errorMessage);
         // Fall back to static models on error
         setModels(staticModels);
@@ -57,7 +57,7 @@ export function useDynamicModels(
         setIsLoading(false);
       }
     },
-    [agentName, supportsDynamicModels, staticModels]
+    [agentName, supportsDynamicModels, staticModels],
   );
 
   // Fetch on mount if dynamic models are supported

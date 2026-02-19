@@ -31,4 +31,3 @@ var (
 	// ErrInvalidSession is returned when the session ID is invalid or empty.
 	ErrInvalidSession = errors.New("invalid or empty session ID")
 )
-

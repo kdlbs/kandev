@@ -341,4 +341,3 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 	}
 	return nil
 }
-

@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useRef, useEffect, useState, useCallback } from 'react';
-import { IconTrash, IconGripHorizontal } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { cn } from '@/lib/utils';
-import type { DiffComment } from '@/lib/diff/types';
+import { useRef, useEffect, useState, useCallback } from "react";
+import { IconTrash, IconGripHorizontal } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
+import type { DiffComment } from "@/lib/diff/types";
 
 type CommentViewPopoverProps = {
   comments: DiffComment[];
@@ -15,7 +15,11 @@ type CommentViewPopoverProps = {
 
 type DragState = { startX: number; startY: number; origLeft: number; origTop: number };
 
-function computePopoverInitialPos(position: { x: number; y: number }, width: number, height: number) {
+function computePopoverInitialPos(
+  position: { x: number; y: number },
+  width: number,
+  height: number,
+) {
   let left = position.x;
   let top = position.y;
   if (left + width > window.innerWidth - 16) left = Math.max(16, window.innerWidth - width - 16);
@@ -27,23 +31,31 @@ function useDraggablePos(position: { x: number; y: number }, width: number, heig
   const [pos, setPos] = useState(() => computePopoverInitialPos(position, width, height));
   const dragRef = useRef<DragState | null>(null);
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: pos.left, origTop: pos.top };
-    const onMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      setPos({ left: dragRef.current.origLeft + dx, top: dragRef.current.origTop + dy });
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [pos.left, pos.top]);
+  const onDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: pos.left,
+        origTop: pos.top,
+      };
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        const dx = ev.clientX - dragRef.current.startX;
+        const dy = ev.clientY - dragRef.current.startY;
+        setPos({ left: dragRef.current.origLeft + dx, top: dragRef.current.origTop + dy });
+      };
+      const onUp = () => {
+        dragRef.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [pos.left, pos.top],
+  );
 
   return { pos, onDragStart };
 }
@@ -53,16 +65,24 @@ function usePopoverClose(onClose: () => void, popoverRef: React.RefObject<HTMLDi
     const handleClickOutside = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
     };
-    const timer = setTimeout(() => { document.addEventListener('mousedown', handleClickOutside); }, 100);
-    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handleClickOutside); };
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClickOutside);
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [onClose, popoverRef]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
     };
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [onClose]);
 }
 
@@ -70,7 +90,13 @@ function formatLineRange(start: number, end: number) {
   return start === end ? `L${start}` : `L${start}-${end}`;
 }
 
-function CommentItem({ comment, onDelete }: { comment: DiffComment; onDelete: (id: string) => void }) {
+function CommentItem({
+  comment,
+  onDelete,
+}: {
+  comment: DiffComment;
+  onDelete: (id: string) => void;
+}) {
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-2">
@@ -96,7 +122,12 @@ function CommentItem({ comment, onDelete }: { comment: DiffComment; onDelete: (i
   );
 }
 
-export function CommentViewPopover({ comments, position, onDelete, onClose }: CommentViewPopoverProps) {
+export function CommentViewPopover({
+  comments,
+  position,
+  onDelete,
+  onClose,
+}: CommentViewPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const { pos, onDragStart } = useDraggablePos(position, 350, 200);
   usePopoverClose(onClose, popoverRef);
@@ -105,8 +136,8 @@ export function CommentViewPopover({ comments, position, onDelete, onClose }: Co
     <div
       ref={popoverRef}
       className={cn(
-        'fixed z-50 w-[350px] max-h-[350px] overflow-auto rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl',
-        'animate-in fade-in-0 zoom-in-95 duration-150'
+        "fixed z-50 w-[350px] max-h-[350px] overflow-auto rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
+        "animate-in fade-in-0 zoom-in-95 duration-150",
       )}
       style={{ left: pos.left, top: pos.top }}
     >
@@ -115,7 +146,7 @@ export function CommentViewPopover({ comments, position, onDelete, onClose }: Co
         onMouseDown={onDragStart}
       >
         <span className="text-xs text-muted-foreground">
-          {comments.length} comment{comments.length !== 1 ? 's' : ''}
+          {comments.length} comment{comments.length !== 1 ? "s" : ""}
         </span>
         <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/40" />
       </div>

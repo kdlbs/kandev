@@ -1,10 +1,10 @@
-import type { StateCreator } from 'zustand';
-import type { TaskSession } from '@/lib/types/http';
-import type { SessionSlice, SessionSliceState } from './types';
+import type { StateCreator } from "zustand";
+import type { TaskSession } from "@/lib/types/http";
+import type { SessionSlice, SessionSliceState } from "./types";
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
-  metaBySession: SessionSliceState['messages']['metaBySession'],
+  metaBySession: SessionSliceState["messages"]["metaBySession"],
   sessionId: string,
 ) {
   if (!metaBySession[sessionId]) {
@@ -14,7 +14,7 @@ function ensureMessageMeta(
 
 /** Apply partial metadata updates to the session's message metadata. */
 function applyMessageMeta(
-  metaBySession: SessionSliceState['messages']['metaBySession'],
+  metaBySession: SessionSliceState["messages"]["metaBySession"],
   sessionId: string,
   meta: { hasMore?: boolean; oldestCursor?: string | null; isLoading?: boolean },
 ) {
@@ -72,64 +72,94 @@ type ImmerSet = Parameters<typeof createSessionSlice>[0];
 
 function buildMessageActions(set: ImmerSet) {
   return {
-    setMessages: (sessionId: string, messages: Parameters<SessionSlice['setMessages']>[1], meta?: Parameters<SessionSlice['setMessages']>[2]) =>
+    setMessages: (
+      sessionId: string,
+      messages: Parameters<SessionSlice["setMessages"]>[1],
+      meta?: Parameters<SessionSlice["setMessages"]>[2],
+    ) =>
       set((draft) => {
         draft.messages.bySession[sessionId] = messages;
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),
-    addMessage: (message: Parameters<SessionSlice['addMessage']>[0]) =>
+    addMessage: (message: Parameters<SessionSlice["addMessage"]>[0]) =>
       set((draft) => {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
-        const existingIndex = draft.messages.bySession[sessionId].findIndex((m) => m.id === message.id);
+        const existingIndex = draft.messages.bySession[sessionId].findIndex(
+          (m) => m.id === message.id,
+        );
         if (existingIndex === -1) {
           draft.messages.bySession[sessionId].push(message);
         } else {
           mergeMessageFields(
-            draft.messages.bySession[sessionId][existingIndex] as unknown as Record<string, unknown>,
+            draft.messages.bySession[sessionId][existingIndex] as unknown as Record<
+              string,
+              unknown
+            >,
             message as unknown as Record<string, unknown>,
           );
         }
       }),
-    updateMessage: (message: Parameters<SessionSlice['updateMessage']>[0]) =>
+    updateMessage: (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
       set((draft) => {
         const messages = draft.messages.bySession[message.session_id];
         if (!messages) return;
         const index = messages.findIndex((m) => m.id === message.id);
         if (index === -1) return;
         const merged = { ...messages[index] };
-        mergeMessageFields(merged as unknown as Record<string, unknown>, message as unknown as Record<string, unknown>);
+        mergeMessageFields(
+          merged as unknown as Record<string, unknown>,
+          message as unknown as Record<string, unknown>,
+        );
         messages[index] = merged;
       }),
-    prependMessages: (sessionId: string, messages: Parameters<SessionSlice['prependMessages']>[1], meta?: Parameters<SessionSlice['prependMessages']>[2]) =>
+    prependMessages: (
+      sessionId: string,
+      messages: Parameters<SessionSlice["prependMessages"]>[1],
+      meta?: Parameters<SessionSlice["prependMessages"]>[2],
+    ) =>
       set((draft) => {
         const existing = draft.messages.bySession[sessionId] || [];
         const existingIds = new Set(existing.map((m) => m.id));
-        draft.messages.bySession[sessionId] = [...messages.filter((m) => !existingIds.has(m.id)), ...existing];
+        draft.messages.bySession[sessionId] = [
+          ...messages.filter((m) => !existingIds.has(m.id)),
+          ...existing,
+        ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         draft.messages.metaBySession[sessionId].isLoading = false;
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),
-    setMessagesMetadata: (sessionId: string, meta: Parameters<SessionSlice['setMessagesMetadata']>[1]) =>
-      set((draft) => { applyMessageMeta(draft.messages.metaBySession, sessionId, meta); }),
+    setMessagesMetadata: (
+      sessionId: string,
+      meta: Parameters<SessionSlice["setMessagesMetadata"]>[1],
+    ) =>
+      set((draft) => {
+        applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+      }),
     setMessagesLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => { applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading }); }),
+      set((draft) => {
+        applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
+      }),
   };
 }
 
 function buildTaskPlanActions(set: ImmerSet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice['setTaskPlan']>[1]) =>
+    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) =>
       set((draft) => {
         draft.taskPlans.byTaskId[taskId] = plan;
         draft.taskPlans.loadingByTaskId[taskId] = false;
         draft.taskPlans.loadedByTaskId[taskId] = true;
       }),
     setTaskPlanLoading: (taskId: string, loading: boolean) =>
-      set((draft) => { draft.taskPlans.loadingByTaskId[taskId] = loading; }),
+      set((draft) => {
+        draft.taskPlans.loadingByTaskId[taskId] = loading;
+      }),
     setTaskPlanSaving: (taskId: string, saving: boolean) =>
-      set((draft) => { draft.taskPlans.savingByTaskId[taskId] = saving; }),
+      set((draft) => {
+        draft.taskPlans.savingByTaskId[taskId] = saving;
+      }),
     clearTaskPlan: (taskId: string) =>
       set((draft) => {
         delete draft.taskPlans.byTaskId[taskId];
@@ -142,7 +172,7 @@ function buildTaskPlanActions(set: ImmerSet) {
 
 export const createSessionSlice: StateCreator<
   SessionSlice,
-  [['zustand/immer', never]],
+  [["zustand/immer", never]],
   [],
   SessionSlice
 > = (set) => ({
@@ -162,7 +192,9 @@ export const createSessionSlice: StateCreator<
       if (turn) turn.completed_at = completedAt;
     }),
   setActiveTurn: (sessionId, turnId) =>
-    set((draft) => { draft.turns.activeBySession[sessionId] = turnId; }),
+    set((draft) => {
+      draft.turns.activeBySession[sessionId] = turnId;
+    }),
   setTaskSession: (session) =>
     set((draft) => {
       const existingSession = draft.taskSessions.items[session.id];
@@ -182,24 +214,42 @@ export const createSessionSlice: StateCreator<
       for (const session of sessions) draft.taskSessions.items[session.id] = session;
     }),
   setTaskSessionsLoading: (taskId, loading) =>
-    set((draft) => { draft.taskSessionsByTask.loadingByTaskId[taskId] = loading; }),
+    set((draft) => {
+      draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
+    }),
   setSessionAgentctlStatus: (sessionId, status) =>
-    set((draft) => { draft.sessionAgentctl.itemsBySessionId[sessionId] = status; }),
+    set((draft) => {
+      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+    }),
   setWorktree: (worktree) =>
-    set((draft) => { draft.worktrees.items[worktree.id] = worktree; }),
+    set((draft) => {
+      draft.worktrees.items[worktree.id] = worktree;
+    }),
   setSessionWorktrees: (sessionId, worktreeIds) =>
-    set((draft) => { draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds; }),
+    set((draft) => {
+      draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
+    }),
   setPendingModel: (sessionId, modelId) =>
-    set((draft) => { draft.pendingModel.bySessionId[sessionId] = modelId; }),
+    set((draft) => {
+      draft.pendingModel.bySessionId[sessionId] = modelId;
+    }),
   clearPendingModel: (sessionId) =>
-    set((draft) => { delete draft.pendingModel.bySessionId[sessionId]; }),
+    set((draft) => {
+      delete draft.pendingModel.bySessionId[sessionId];
+    }),
   setActiveModel: (sessionId, modelId) =>
-    set((draft) => { draft.activeModel.bySessionId[sessionId] = modelId; }),
+    set((draft) => {
+      draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
   ...buildTaskPlanActions(set),
   setQueueStatus: (sessionId, status) =>
-    set((draft) => { draft.queue.bySessionId[sessionId] = status; }),
+    set((draft) => {
+      draft.queue.bySessionId[sessionId] = status;
+    }),
   setQueueLoading: (sessionId, loading) =>
-    set((draft) => { draft.queue.isLoading[sessionId] = loading; }),
+    set((draft) => {
+      draft.queue.isLoading[sessionId] = loading;
+    }),
   clearQueueStatus: (sessionId) =>
     set((draft) => {
       delete draft.queue.bySessionId[sessionId];

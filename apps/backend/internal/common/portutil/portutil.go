@@ -35,14 +35,15 @@ func AllocatePort() (int, error) {
 // Multiple occurrences of the same placeholder get the same port.
 //
 // Examples:
-//   Input:  "npm run dev -- --port $PORT"
-//   Output: "npm run dev -- --port 54321", {"PORT": "54321"}
 //
-//   Input:  "vite --port ${PORT}"
-//   Output: "vite --port 54321", {"PORT": "54321"}
+//	Input:  "npm run dev -- --port $PORT"
+//	Output: "npm run dev -- --port 54321", {"PORT": "54321"}
 //
-//   Input:  "npm run dev" (no placeholder)
-//   Output: "npm run dev", {}
+//	Input:  "vite --port ${PORT}"
+//	Output: "vite --port 54321", {"PORT": "54321"}
+//
+//	Input:  "npm run dev" (no placeholder)
+//	Output: "npm run dev", {}
 func TransformCommand(command string) (string, map[string]string, error) {
 	// Find all unique placeholder names
 	uniquePlaceholders := findUniquePlaceholders(command)

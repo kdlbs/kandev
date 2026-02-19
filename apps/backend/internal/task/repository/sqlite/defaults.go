@@ -197,4 +197,3 @@ func (r *Repository) updateDefaultEnvironment(ctx context.Context) error {
 	`), "~/kandev", models.EnvironmentIDLocal)
 	return err
 }
-

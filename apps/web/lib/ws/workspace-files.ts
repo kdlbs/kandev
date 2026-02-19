@@ -1,5 +1,9 @@
-import type { WebSocketClient } from './client';
-import type { FileTreeResponse, FileContentResponse, FileSearchResponse } from '@/lib/types/backend';
+import type { WebSocketClient } from "./client";
+import type {
+  FileTreeResponse,
+  FileContentResponse,
+  FileSearchResponse,
+} from "@/lib/types/backend";
 
 /**
  * Request file tree from the backend
@@ -7,10 +11,10 @@ import type { FileTreeResponse, FileContentResponse, FileSearchResponse } from '
 export async function requestFileTree(
   client: WebSocketClient,
   sessionId: string,
-  path: string = '',
-  depth: number = 1
+  path: string = "",
+  depth: number = 1,
 ): Promise<FileTreeResponse> {
-  return client.request<FileTreeResponse>('workspace.tree.get', {
+  return client.request<FileTreeResponse>("workspace.tree.get", {
     session_id: sessionId,
     path,
     depth,
@@ -23,9 +27,9 @@ export async function requestFileTree(
 export async function requestFileContent(
   client: WebSocketClient,
   sessionId: string,
-  path: string
+  path: string,
 ): Promise<FileContentResponse> {
-  return client.request<FileContentResponse>('workspace.file.get', {
+  return client.request<FileContentResponse>("workspace.file.get", {
     session_id: sessionId,
     path,
   });
@@ -38,9 +42,9 @@ export async function searchWorkspaceFiles(
   client: WebSocketClient,
   sessionId: string,
   query: string,
-  limit: number = 20
+  limit: number = 20,
 ): Promise<FileSearchResponse> {
-  return client.request<FileSearchResponse>('workspace.files.search', {
+  return client.request<FileSearchResponse>("workspace.files.search", {
     session_id: sessionId,
     query,
     limit,
@@ -65,9 +69,9 @@ export async function updateFileContent(
   sessionId: string,
   path: string,
   diff: string,
-  originalHash: string
+  originalHash: string,
 ): Promise<FileUpdateResponse> {
-  return client.request<FileUpdateResponse>('workspace.file.update', {
+  return client.request<FileUpdateResponse>("workspace.file.update", {
     session_id: sessionId,
     path,
     diff,
@@ -90,9 +94,9 @@ export type FileCreateResponse = {
 export async function createFile(
   client: WebSocketClient,
   sessionId: string,
-  path: string
+  path: string,
 ): Promise<FileCreateResponse> {
-  return client.request<FileCreateResponse>('workspace.file.create', {
+  return client.request<FileCreateResponse>("workspace.file.create", {
     session_id: sessionId,
     path,
   });
@@ -113,11 +117,10 @@ export type FileDeleteResponse = {
 export async function deleteFile(
   client: WebSocketClient,
   sessionId: string,
-  path: string
+  path: string,
 ): Promise<FileDeleteResponse> {
-  return client.request<FileDeleteResponse>('workspace.file.delete', {
+  return client.request<FileDeleteResponse>("workspace.file.delete", {
     session_id: sessionId,
     path,
   });
 }
-

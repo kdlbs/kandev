@@ -1,26 +1,26 @@
-'use client';
+"use client";
 
-import { memo, useEffect, useMemo, useState, useCallback } from 'react';
-import { IconX, IconChevronDown, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
-import { TabsContent } from '@kandev/ui/tabs';
-import { Button } from '@kandev/ui/button';
-import { SessionPanel, SessionPanelContent } from '@kandev/ui/pannel-session';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@kandev/ui/tooltip';
+import { memo, useEffect, useMemo, useState, useCallback } from "react";
+import { IconX, IconChevronDown, IconPlayerPlay, IconPlus } from "@tabler/icons-react";
+import { TabsContent } from "@kandev/ui/tabs";
+import { Button } from "@kandev/ui/button";
+import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@kandev/ui/dropdown-menu';
-import { useAppStore } from '@/components/state-provider';
-import { useLayoutStore } from '@/lib/state/layout-store';
+} from "@kandev/ui/dropdown-menu";
+import { useAppStore } from "@/components/state-provider";
+import { useLayoutStore } from "@/lib/state/layout-store";
 // closeDocument kept for mobile/tablet backward compat
-import { getWebSocketClient } from '@/lib/ws/connection';
-import { useTask } from '@/hooks/use-task';
-import { SessionTabs, type SessionTab } from '@/components/session-tabs';
-import { TaskPlanPanel } from '../task-plan-panel';
-import { TaskCreateDialog } from '@/components/task-create-dialog';
-import type { ActiveDocument } from '@/lib/state/slices/ui/types';
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { useTask } from "@/hooks/use-task";
+import { SessionTabs, type SessionTab } from "@/components/session-tabs";
+import { TaskPlanPanel } from "../task-plan-panel";
+import { TaskCreateDialog } from "@/components/task-create-dialog";
+import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 
 type DocumentPanelProps = {
   sessionId: string | null;
@@ -28,7 +28,7 @@ type DocumentPanelProps = {
 
 export const DocumentPanel = memo(function DocumentPanel({ sessionId }: DocumentPanelProps) {
   const activeDocument = useAppStore((state) =>
-    sessionId ? state.documentPanel.activeDocumentBySessionId[sessionId] ?? null : null
+    sessionId ? (state.documentPanel.activeDocumentBySessionId[sessionId] ?? null) : null,
   );
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const closeDocument = useLayoutStore((state) => state.closeDocument);
@@ -48,33 +48,26 @@ export const DocumentPanel = memo(function DocumentPanel({ sessionId }: Document
 
   const tabs: SessionTab[] = useMemo(() => {
     if (!activeDocument) return [];
-    if (activeDocument.type === 'plan') {
-      return [{ id: 'plan', label: 'Plan' }];
+    if (activeDocument.type === "plan") {
+      return [{ id: "plan", label: "Plan" }];
     }
-    return [{ id: 'file', label: activeDocument.name }];
+    return [{ id: "file", label: activeDocument.name }];
   }, [activeDocument]);
 
-  const activeTab = activeDocument?.type === 'plan' ? 'plan' : 'file';
+  const activeTab = activeDocument?.type === "plan" ? "plan" : "file";
 
   if (!activeDocument) {
     return null;
   }
 
-  const isPlan = activeDocument.type === 'plan';
+  const isPlan = activeDocument.type === "plan";
 
   const headerActions = (
     <div className="flex items-center gap-0.5">
-      {isPlan && (
-        <ImplementPlanDropdown sessionId={sessionId} onClose={handleClose} />
-      )}
+      {isPlan && <ImplementPlanDropdown sessionId={sessionId} onClose={handleClose} />}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="cursor-pointer"
-            onClick={handleClose}
-          >
+          <Button variant="ghost" size="icon-sm" className="cursor-pointer" onClick={handleClose}>
             <IconX className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
@@ -88,7 +81,7 @@ export const DocumentPanel = memo(function DocumentPanel({ sessionId }: Document
       <SessionTabs
         tabs={tabs}
         activeTab={activeTab}
-        onTabChange={() => { }}
+        onTabChange={() => {}}
         className="flex-1 min-h-0 flex flex-col gap-2"
         rightContent={headerActions}
       >
@@ -113,9 +106,7 @@ const ImplementPlanDropdown = memo(function ImplementPlanDropdown({
 }) {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const task = useTask(taskId);
-  const plan = useAppStore((state) =>
-    taskId ? state.taskPlans.byTaskId[taskId] ?? null : null
-  );
+  const plan = useAppStore((state) => (taskId ? (state.taskPlans.byTaskId[taskId] ?? null) : null));
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
 
   const handleImplement = useCallback(async () => {
@@ -129,16 +120,16 @@ const ImplementPlanDropdown = memo(function ImplementPlanDropdown({
     // Send the plan as an implementation prompt (not in plan mode)
     try {
       await client.request(
-        'message.add',
+        "message.add",
         {
           task_id: taskId,
           session_id: sessionId,
           content: `Implement the following plan:\n\n${plan.content}`,
         },
-        10000
+        10000,
       );
     } catch (err) {
-      console.error('Failed to send implement plan message:', err);
+      console.error("Failed to send implement plan message:", err);
     }
   }, [taskId, sessionId, plan, onClose]);
 
@@ -177,7 +168,9 @@ const ImplementPlanDropdown = memo(function ImplementPlanDropdown({
               <IconPlus className="h-4 w-4 mr-2 shrink-0 self-start mt-0.5" />
               <div>
                 <div>Implement in a new session</div>
-                <div className="text-[11px] text-muted-foreground font-normal">Starts fresh with a clean context window</div>
+                <div className="text-[11px] text-muted-foreground font-normal">
+                  Starts fresh with a clean context window
+                </div>
               </div>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -194,8 +187,8 @@ const ImplementPlanDropdown = memo(function ImplementPlanDropdown({
         steps={[]}
         taskId={taskId}
         initialValues={{
-          title: task?.title ?? '',
-          description: plan?.content ? `Implement the following plan:\n\n${plan.content}` : '',
+          title: task?.title ?? "",
+          description: plan?.content ? `Implement the following plan:\n\n${plan.content}` : "",
         }}
       />
     </>
@@ -207,12 +200,8 @@ const DocumentPlanContent = memo(function DocumentPlanContent() {
   return <TaskPlanPanel taskId={activeTaskId} visible />;
 });
 
-const DocumentFileContent = memo(function DocumentFileContent({
-  doc,
-}: {
-  doc: ActiveDocument;
-}) {
-  if (doc.type === 'plan') return null;
+const DocumentFileContent = memo(function DocumentFileContent({ doc }: { doc: ActiveDocument }) {
+  if (doc.type === "plan") return null;
 
   return (
     <SessionPanelContent>

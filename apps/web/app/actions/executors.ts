@@ -1,16 +1,16 @@
-'use server';
+"use server";
 
-import { getBackendConfig } from '@/lib/config';
-import type { Executor, ListExecutorsResponse } from '@/lib/types/http';
+import { getBackendConfig } from "@/lib/config";
+import type { Executor, ListExecutorsResponse } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
-    cache: 'no-store',
+    cache: "no-store",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(options?.headers ?? {}),
     },
   });
@@ -42,21 +42,21 @@ export async function createExecutorAction(payload: {
   config?: Record<string, string>;
 }): Promise<Executor> {
   return fetchJson<Executor>(`${apiBaseUrl}/api/v1/executors`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function updateExecutorAction(
   id: string,
-  payload: Partial<Pick<Executor, 'name' | 'type' | 'status' | 'config'>>
+  payload: Partial<Pick<Executor, "name" | "type" | "status" | "config">>,
 ): Promise<Executor> {
   return fetchJson<Executor>(`${apiBaseUrl}/api/v1/executors/${id}`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteExecutorAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/executors/${id}`, { method: 'DELETE' });
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/executors/${id}`, { method: "DELETE" });
 }

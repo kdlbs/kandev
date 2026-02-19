@@ -1,5 +1,5 @@
-import { fetchJson, type ApiRequestOptions } from '../client';
-import { getBackendConfig } from '@/lib/config';
+import { fetchJson, type ApiRequestOptions } from "../client";
+import { getBackendConfig } from "@/lib/config";
 import type {
   WorkflowSnapshot,
   ListWorkflowsResponse,
@@ -7,13 +7,13 @@ import type {
   CreateTaskResponse,
   Task,
   MoveTaskResponse,
-} from '@/lib/types/http';
+} from "@/lib/types/http";
 
 // Workflow operations
 export async function listWorkflows(workspaceId: string, options?: ApiRequestOptions) {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = new URL(`${baseUrl}/api/v1/workflows`);
-  url.searchParams.set('workspace_id', workspaceId);
+  url.searchParams.set("workspace_id", workspaceId);
   return fetchJson<ListWorkflowsResponse>(url.toString(), options);
 }
 
@@ -37,18 +37,18 @@ export async function createTask(
       name?: string;
       default_branch?: string;
     }>;
-    state?: Task['state'];
+    state?: Task["state"];
     start_agent?: boolean;
     prepare_session?: boolean;
     agent_profile_id?: string;
     executor_id?: string;
     plan_mode?: boolean;
   },
-  options?: ApiRequestOptions
+  options?: ApiRequestOptions,
 ) {
-  return fetchJson<CreateTaskResponse>('/api/v1/tasks', {
+  return fetchJson<CreateTaskResponse>("/api/v1/tasks", {
     ...options,
-    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
@@ -58,35 +58,35 @@ export async function updateTask(
     title?: string;
     description?: string;
     position?: number;
-    state?: Task['state'];
+    state?: Task["state"];
     repositories?: Array<{
       repository_id: string;
       base_branch?: string;
     }>;
   },
-  options?: ApiRequestOptions
+  options?: ApiRequestOptions,
 ) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, {
     ...options,
-    init: { method: 'PATCH', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
 export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`/api/v1/tasks/${taskId}`, {
     ...options,
-    init: { method: 'DELETE', ...(options?.init ?? {}) },
+    init: { method: "DELETE", ...(options?.init ?? {}) },
   });
 }
 
 export async function moveTask(
   taskId: string,
   payload: { workflow_id: string; workflow_step_id: string; position: number },
-  options?: ApiRequestOptions
+  options?: ApiRequestOptions,
 ) {
   return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {
     ...options,
-    init: { method: 'POST', body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
 }
 
@@ -97,20 +97,20 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
 export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`/api/v1/tasks/${taskId}/archive`, {
     ...options,
-    init: { method: 'POST', ...(options?.init ?? {}) },
+    init: { method: "POST", ...(options?.init ?? {}) },
   });
 }
 
 export async function listTasksByWorkspace(
   workspaceId: string,
   params: { page?: number; pageSize?: number; query?: string; includeArchived?: boolean } = {},
-  options?: ApiRequestOptions
+  options?: ApiRequestOptions,
 ) {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = new URL(`${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
-  if (params.page) url.searchParams.set('page', String(params.page));
-  if (params.pageSize) url.searchParams.set('page_size', String(params.pageSize));
-  if (params.query) url.searchParams.set('query', params.query);
-  if (params.includeArchived) url.searchParams.set('include_archived', 'true');
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.pageSize) url.searchParams.set("page_size", String(params.pageSize));
+  if (params.query) url.searchParams.set("query", params.query);
+  if (params.includeArchived) url.searchParams.set("include_archived", "true");
   return fetchJson<ListTasksResponse>(url.toString(), options);
 }

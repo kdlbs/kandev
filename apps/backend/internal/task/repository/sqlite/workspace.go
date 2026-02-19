@@ -157,4 +157,3 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 	}
 	return result, rows.Err()
 }
-

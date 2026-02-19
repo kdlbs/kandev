@@ -196,11 +196,11 @@ type Item struct {
 	Content FlexibleContent `json:"content,omitempty"`
 
 	// For mcpToolCall type
-	Server       string          `json:"server,omitempty"`
-	Tool         string          `json:"tool,omitempty"`
-	Arguments    json.RawMessage `json:"arguments,omitempty"`
-	Result       json.RawMessage `json:"result,omitempty"`
-	ToolError    string          `json:"error,omitempty"` // Named ToolError to avoid conflict with Error type
+	Server    string          `json:"server,omitempty"`
+	Tool      string          `json:"tool,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	ToolError string          `json:"error,omitempty"` // Named ToolError to avoid conflict with Error type
 }
 
 // ContentPart represents a content part in a Codex item.
@@ -358,7 +358,7 @@ type ErrorParams struct {
 // TokenCountParams for token_count notification
 // This is emitted by Codex after each turn to report token usage.
 type TokenCountParams struct {
-	Info       *TokenUsageInfo   `json:"info,omitempty"`
+	Info       *TokenUsageInfo    `json:"info,omitempty"`
 	RateLimits *RateLimitSnapshot `json:"rateLimits,omitempty"`
 }
 
@@ -381,9 +381,9 @@ type TokenUsage struct {
 // ThreadTokenUsageUpdatedParams for thread/tokenUsage/updated notification.
 // This is emitted by Codex after each turn completes with token usage info.
 type ThreadTokenUsageUpdatedParams struct {
-	ThreadID   string              `json:"threadId"`
-	TurnID     string              `json:"turnId"`
-	TokenUsage *ThreadTokenUsage   `json:"tokenUsage"`
+	ThreadID   string            `json:"threadId"`
+	TurnID     string            `json:"turnId"`
+	TokenUsage *ThreadTokenUsage `json:"tokenUsage"`
 }
 
 // ThreadTokenUsage contains the token usage summary for a thread.
@@ -403,9 +403,9 @@ type RateLimitSnapshot struct {
 
 // RateLimitWindow contains rate limit window information.
 type RateLimitWindow struct {
-	UsedPercent       int32  `json:"usedPercent"`
+	UsedPercent        int32  `json:"usedPercent"`
 	WindowDurationMins *int64 `json:"windowDurationMins,omitempty"`
-	ResetsAt          *int64 `json:"resetsAt,omitempty"`
+	ResetsAt           *int64 `json:"resetsAt,omitempty"`
 }
 
 // CreditsSnapshot contains credits information (placeholder for future use).

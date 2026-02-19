@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import type { Turn } from '@/lib/types/http';
+import { useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
+import type { Turn } from "@/lib/types/http";
 
 /**
  * Format duration in seconds to a human-readable string.
@@ -8,7 +8,7 @@ import type { Turn } from '@/lib/types/http';
  * @returns Formatted string like "1m 23s" or "1h 2m 3s"
  */
 function formatDuration(seconds: number): string {
-  if (seconds < 0) return '0s';
+  if (seconds < 0) return "0s";
 
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -30,16 +30,18 @@ function formatDuration(seconds: number): string {
  * @returns The last completed turn with its duration and model
  */
 export function useSessionTurn(sessionId: string | null) {
-  const turns = useAppStore((state) => sessionId ? state.turns.bySession[sessionId] : undefined);
-  const activeTurnId = useAppStore((state) => sessionId ? state.turns.activeBySession[sessionId] : null);
-  const session = useAppStore((state) => sessionId ? state.taskSessions.items[sessionId] : null);
+  const turns = useAppStore((state) => (sessionId ? state.turns.bySession[sessionId] : undefined));
+  const activeTurnId = useAppStore((state) =>
+    sessionId ? state.turns.activeBySession[sessionId] : null,
+  );
+  const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
 
   // Get model from session's agent_profile_snapshot
   const sessionModel = useMemo(() => {
     if (!session?.agent_profile_snapshot) return null;
     const snapshot = session.agent_profile_snapshot as Record<string, unknown>;
     const model = snapshot.model;
-    return typeof model === 'string' ? model : null;
+    return typeof model === "string" ? model : null;
   }, [session?.agent_profile_snapshot]);
 
   // Find the last completed turn (most recent by completed_at)
@@ -83,4 +85,3 @@ export function useSessionTurn(sessionId: string | null) {
     sessionModel,
   };
 }
-

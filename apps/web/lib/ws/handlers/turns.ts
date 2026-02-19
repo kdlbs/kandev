@@ -1,10 +1,10 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'session.turn.started': (message) => {
+    "session.turn.started": (message) => {
       const payload = message.payload;
       if (!payload.session_id) {
         return;
@@ -22,16 +22,18 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       // Track this as the active turn for the session
       store.getState().setActiveTurn(payload.session_id, payload.id);
     },
-    'session.turn.completed': (message) => {
+    "session.turn.completed": (message) => {
       const payload = message.payload;
       if (!payload.session_id || !payload.id) {
         return;
       }
-      store.getState().completeTurn(
-        payload.session_id,
-        payload.id,
-        payload.completed_at || new Date().toISOString()
-      );
+      store
+        .getState()
+        .completeTurn(
+          payload.session_id,
+          payload.id,
+          payload.completed_at || new Date().toISOString(),
+        );
       // Clear the active turn when it completes
       store.getState().setActiveTurn(payload.session_id, null);
 
@@ -41,10 +43,10 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (messages) {
         for (const msg of messages) {
           const meta = msg.metadata as Record<string, unknown> | undefined;
-          if (meta?.status === 'running' && meta?.tool_call_id) {
+          if (meta?.status === "running" && meta?.tool_call_id) {
             store.getState().updateMessage({
               ...msg,
-              metadata: { ...meta, status: 'complete' },
+              metadata: { ...meta, status: "complete" },
             });
           }
         }
@@ -52,4 +54,3 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
     },
   };
 }
-

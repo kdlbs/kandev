@@ -11,13 +11,13 @@ import (
 	"time"
 )
 
-
 // OS name constants used for runtime.GOOS comparisons.
 const (
 	osDarwin  = "darwin"
 	osLinux   = "linux"
 	osWindows = "windows"
 )
+
 type SystemProvider struct {
 	assets systemAssets
 }

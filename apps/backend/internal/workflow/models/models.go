@@ -67,7 +67,7 @@ type OnExitAction struct {
 type StepEvents struct {
 	OnEnter        []OnEnterAction        `json:"on_enter,omitempty"`
 	OnTurnStart    []OnTurnStartAction    `json:"on_turn_start,omitempty"`
-	OnTurnComplete []OnTurnCompleteAction  `json:"on_turn_complete,omitempty"`
+	OnTurnComplete []OnTurnCompleteAction `json:"on_turn_complete,omitempty"`
 	OnExit         []OnExitAction         `json:"on_exit,omitempty"`
 }
 

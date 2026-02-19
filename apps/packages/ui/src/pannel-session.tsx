@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
-import { forwardRef, useRef, useEffect, useCallback } from 'react';
-import { cn } from './lib/utils';
+import type { ReactNode } from "react";
+import { forwardRef, useRef, useEffect, useCallback } from "react";
+import { cn } from "./lib/utils";
 
-type BorderSide = 'none' | 'left' | 'right';
-type MarginSide = 'none' | 'right' | 'top';
+type BorderSide = "none" | "left" | "right";
+type MarginSide = "none" | "right" | "top";
 
 interface SessionPanelProps {
   children: ReactNode;
@@ -20,20 +20,20 @@ interface SessionPanelContentProps {
 
 export function SessionPanel({
   children,
-  borderSide = 'none',
-  margin = 'none',
+  borderSide = "none",
+  margin = "none",
   className,
 }: SessionPanelProps) {
   return (
     <div
       className={cn(
         // Base styles - always applied
-        'session-panel-wrapper h-full min-h-0 bg-card flex flex-col rounded-sm border border-border/50 p-2',
+        "session-panel-wrapper h-full min-h-0 bg-card flex flex-col rounded-sm border border-border/50 p-2",
         // Margins
-        margin === 'right' && 'mr-[5px]',
-        margin === 'top' && 'mt-[5px]',
+        margin === "right" && "mr-[5px]",
+        margin === "top" && "mt-[5px]",
         // Custom classes
-        className
+        className,
       )}
     >
       {children}
@@ -55,10 +55,10 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
     const setRefs = useCallback(
       (node: HTMLDivElement | null) => {
         internalRef.current = node;
-        if (typeof ref === 'function') ref(node);
+        if (typeof ref === "function") ref(node);
         else if (ref) ref.current = node;
       },
-      [ref]
+      [ref],
     );
 
     // Save scrollTop on every scroll event so it's always up-to-date
@@ -72,8 +72,8 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
         }
       };
 
-      el.addEventListener('scroll', onScroll);
-      return () => el.removeEventListener('scroll', onScroll);
+      el.addEventListener("scroll", onScroll);
+      return () => el.removeEventListener("scroll", onScroll);
     }, []);
 
     // Detect hide/show via ResizeObserver and restore scroll position
@@ -105,17 +105,19 @@ export const SessionPanelContent = forwardRef<HTMLDivElement, SessionPanelConten
     }, []);
 
     return (
-      <div className={cn('session-panel-content-wrapper flex-1 min-h-0 rounded-lg h-full shadow-inner overflow-hidden', wrapperClassName)}>
+      <div
+        className={cn(
+          "session-panel-content-wrapper flex-1 min-h-0 rounded-lg h-full shadow-inner overflow-hidden",
+          wrapperClassName,
+        )}
+      >
         <div
           ref={setRefs}
-          className={cn(
-            'h-full overflow-y-auto overflow-x-hidden p-2',
-            className
-          )}
+          className={cn("h-full overflow-y-auto overflow-x-hidden p-2", className)}
         >
           {children}
         </div>
       </div>
     );
-  }
+  },
 );

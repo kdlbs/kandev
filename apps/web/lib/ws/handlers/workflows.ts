@@ -1,10 +1,10 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'workflow.created': (message) => {
+    "workflow.created": (message) => {
       store.setState((state) => {
         if (state.workspaces.activeId !== message.payload.workspace_id) {
           return state;
@@ -29,22 +29,24 @@ export function registerWorkflowsHandlers(store: StoreApi<AppState>): WsHandlers
         };
       });
     },
-    'workflow.updated': (message) => {
+    "workflow.updated": (message) => {
       store.setState((state) => ({
         ...state,
         workflows: {
           ...state.workflows,
           items: state.workflows.items.map((item) =>
-            item.id === message.payload.id ? { ...item, name: message.payload.name } : item
+            item.id === message.payload.id ? { ...item, name: message.payload.name } : item,
           ),
         },
       }));
     },
-    'workflow.deleted': (message) => {
+    "workflow.deleted": (message) => {
       store.setState((state) => {
         const items = state.workflows.items.filter((item) => item.id !== message.payload.id);
         const nextActiveId =
-          state.workflows.activeId === message.payload.id ? items[0]?.id ?? null : state.workflows.activeId;
+          state.workflows.activeId === message.payload.id
+            ? (items[0]?.id ?? null)
+            : state.workflows.activeId;
         return {
           ...state,
           workflows: {

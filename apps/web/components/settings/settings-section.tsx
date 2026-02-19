@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode } from "react";
 
 type SettingsSectionProps = {
   icon?: ReactNode;
@@ -8,7 +8,13 @@ type SettingsSectionProps = {
   children: ReactNode;
 };
 
-export function SettingsSection({ icon, title, description, action, children }: SettingsSectionProps) {
+export function SettingsSection({
+  icon,
+  title,
+  description,
+  action,
+  children,
+}: SettingsSectionProps) {
   return (
     <section className="space-y-4">
       <div className="flex items-start justify-between">
@@ -17,9 +23,7 @@ export function SettingsSection({ icon, title, description, action, children }: 
             {icon}
             {title}
           </h3>
-          {description && (
-            <p className="text-sm text-muted-foreground mt-1">{description}</p>
-          )}
+          {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
         </div>
         {action && <div>{action}</div>}
       </div>

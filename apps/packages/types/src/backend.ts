@@ -1,27 +1,27 @@
 export type BackendMessageType =
-  | 'kanban.update'
-  | 'task.created'
-  | 'task.updated'
-  | 'task.deleted'
-  | 'task.state_changed'
-  | 'agent.updated'
-  | 'terminal.output'
-  | 'diff.update'
-  | 'system.error'
-  | 'workspace.created'
-  | 'workspace.updated'
-  | 'workspace.deleted'
-  | 'board.created'
-  | 'board.updated'
-  | 'board.deleted'
-  | 'column.created'
-  | 'column.updated'
-  | 'column.deleted'
-  | 'task_session.waiting_for_input';
+  | "kanban.update"
+  | "task.created"
+  | "task.updated"
+  | "task.deleted"
+  | "task.state_changed"
+  | "agent.updated"
+  | "terminal.output"
+  | "diff.update"
+  | "system.error"
+  | "workspace.created"
+  | "workspace.updated"
+  | "workspace.deleted"
+  | "board.created"
+  | "board.updated"
+  | "board.deleted"
+  | "column.created"
+  | "column.updated"
+  | "column.deleted"
+  | "task_session.waiting_for_input";
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
-  type: 'request' | 'response' | 'notification' | 'error';
+  type: "request" | "response" | "notification" | "error";
   action: T;
   payload: P;
   timestamp?: string;
@@ -53,21 +53,21 @@ export type TaskEventPayload = {
 
 export type AgentUpdatePayload = {
   agentId: string;
-  status: 'idle' | 'running' | 'error';
+  status: "idle" | "running" | "error";
   message?: string;
 };
 
 export type TerminalOutputPayload = {
   terminalId: string;
   data: string;
-  stream?: 'stdout' | 'stderr';
+  stream?: "stdout" | "stderr";
 };
 
 export type DiffUpdatePayload = {
   taskId: string;
   files: Array<{
     path: string;
-    status: 'A' | 'M' | 'D';
+    status: "A" | "M" | "D";
     plus: number;
     minus: number;
   }>;
@@ -115,26 +115,26 @@ export type ColumnPayload = {
 };
 
 export type BackendMessageMap = {
-  'kanban.update': BackendMessage<'kanban.update', KanbanUpdatePayload>;
-  'task.created': BackendMessage<'task.created', TaskEventPayload>;
-  'task.updated': BackendMessage<'task.updated', TaskEventPayload>;
-  'task.deleted': BackendMessage<'task.deleted', TaskEventPayload>;
-  'task.state_changed': BackendMessage<'task.state_changed', TaskEventPayload>;
-  'agent.updated': BackendMessage<'agent.updated', AgentUpdatePayload>;
-  'terminal.output': BackendMessage<'terminal.output', TerminalOutputPayload>;
-  'diff.update': BackendMessage<'diff.update', DiffUpdatePayload>;
-  'system.error': BackendMessage<'system.error', SystemErrorPayload>;
-  'workspace.created': BackendMessage<'workspace.created', WorkspacePayload>;
-  'workspace.updated': BackendMessage<'workspace.updated', WorkspacePayload>;
-  'workspace.deleted': BackendMessage<'workspace.deleted', WorkspacePayload>;
-  'board.created': BackendMessage<'board.created', BoardPayload>;
-  'board.updated': BackendMessage<'board.updated', BoardPayload>;
-  'board.deleted': BackendMessage<'board.deleted', BoardPayload>;
-  'column.created': BackendMessage<'column.created', ColumnPayload>;
-  'column.updated': BackendMessage<'column.updated', ColumnPayload>;
-  'column.deleted': BackendMessage<'column.deleted', ColumnPayload>;
-  'task_session.waiting_for_input': BackendMessage<
-    'task_session.waiting_for_input',
+  "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
+  "task.created": BackendMessage<"task.created", TaskEventPayload>;
+  "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
+  "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
+  "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+  "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
+  "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
+  "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
+  "system.error": BackendMessage<"system.error", SystemErrorPayload>;
+  "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
+  "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
+  "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+  "board.created": BackendMessage<"board.created", BoardPayload>;
+  "board.updated": BackendMessage<"board.updated", BoardPayload>;
+  "board.deleted": BackendMessage<"board.deleted", BoardPayload>;
+  "column.created": BackendMessage<"column.created", ColumnPayload>;
+  "column.updated": BackendMessage<"column.updated", ColumnPayload>;
+  "column.deleted": BackendMessage<"column.deleted", ColumnPayload>;
+  "task_session.waiting_for_input": BackendMessage<
+    "task_session.waiting_for_input",
     TaskSessionWaitingForInputPayload
   >;
 };

@@ -213,4 +213,3 @@ func (l *Logger) Zap() *zap.Logger {
 func (l *Logger) Sugar() *zap.SugaredLogger {
 	return l.sugar
 }
-

@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
-import { useAppStore } from '@/components/state-provider';
-import { listAgents, listEnvironments, listExecutors } from '@/lib/api';
-import { toAgentProfileOption } from '@/lib/state/slices/settings/types';
+import { useEffect } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { listAgents, listEnvironments, listExecutors } from "@/lib/api";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export function useSettingsData(enabled = true) {
   const executors = useAppStore((state) => state.executors.items);
@@ -18,7 +18,7 @@ export function useSettingsData(enabled = true) {
     if (!enabled) return;
     if (settingsData.executorsLoaded) return;
     if (executors.length === 0) {
-      listExecutors({ cache: 'no-store' })
+      listExecutors({ cache: "no-store" })
         .then((response) => setExecutors(response.executors))
         .catch(() => setExecutors([]))
         .finally(() => setSettingsData({ executorsLoaded: true }));
@@ -31,26 +31,32 @@ export function useSettingsData(enabled = true) {
     if (!enabled) return;
     if (settingsData.environmentsLoaded) return;
     if (environments.length === 0) {
-      listEnvironments({ cache: 'no-store' })
+      listEnvironments({ cache: "no-store" })
         .then((response) => setEnvironments(response.environments))
         .catch(() => setEnvironments([]))
         .finally(() => setSettingsData({ environmentsLoaded: true }));
     } else {
       setSettingsData({ environmentsLoaded: true });
     }
-  }, [enabled, environments.length, setEnvironments, setSettingsData, settingsData.environmentsLoaded]);
+  }, [
+    enabled,
+    environments.length,
+    setEnvironments,
+    setSettingsData,
+    settingsData.environmentsLoaded,
+  ]);
 
   useEffect(() => {
     if (!enabled) return;
     if (settingsData.agentsLoaded) return;
     if (settingsAgents.length === 0) {
-      listAgents({ cache: 'no-store' })
+      listAgents({ cache: "no-store" })
         .then((response) => {
           setSettingsAgents(response.agents);
           setAgentProfiles(
             response.agents.flatMap((agent) =>
-              agent.profiles.map((profile) => toAgentProfileOption(agent, profile))
-            )
+              agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
+            ),
           );
         })
         .catch(() => {

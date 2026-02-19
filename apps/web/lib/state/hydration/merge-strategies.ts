@@ -1,4 +1,4 @@
-import type { Draft } from 'immer';
+import type { Draft } from "immer";
 
 /**
  * Merge strategies for different state shapes
@@ -8,7 +8,10 @@ import type { Draft } from 'immer';
  * Deep merge for nested objects - overwrites at leaf level only
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function deepMerge<T extends Record<string, any>>(target: Draft<T>, source: Partial<T>): void {
+export function deepMerge<T extends Record<string, any>>(
+  target: Draft<T>,
+  source: Partial<T>,
+): void {
   for (const key in source) {
     const sourceValue = source[key];
     if (sourceValue === undefined) continue;
@@ -19,10 +22,10 @@ export function deepMerge<T extends Record<string, any>>(target: Draft<T>, sourc
     // If both are plain objects, recurse
     if (
       targetValue &&
-      typeof targetValue === 'object' &&
+      typeof targetValue === "object" &&
       !Array.isArray(targetValue) &&
       sourceValue &&
-      typeof sourceValue === 'object' &&
+      typeof sourceValue === "object" &&
       !Array.isArray(sourceValue)
     ) {
       deepMerge(targetValue, sourceValue);
@@ -43,7 +46,7 @@ export function mergeSessionMap<T>(
   target: Draft<Record<string, T>>,
   source: Record<string, T> | undefined,
   activeSessionId: string | null,
-  forceMergeSessionId?: string | null
+  forceMergeSessionId?: string | null,
 ): void {
   if (!source) return;
 
@@ -77,7 +80,7 @@ export function mergeArray<T>(target: Draft<T[]>, source: T[] | undefined): void
  */
 export function mergeWithTimestamp<T extends { updatedAt?: string }>(
   target: Draft<T>,
-  source: T | undefined
+  source: T | undefined,
 ): void {
   if (!source) return;
 
@@ -96,7 +99,7 @@ export function mergeWithTimestamp<T extends { updatedAt?: string }>(
  */
 export function mergeLoadingState(
   target: Draft<{ loading: boolean; loaded: boolean }>,
-  source: { loading?: boolean; loaded?: boolean } | undefined
+  source: { loading?: boolean; loaded?: boolean } | undefined,
 ): void {
   if (!source) return;
 

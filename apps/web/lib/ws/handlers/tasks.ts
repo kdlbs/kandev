@@ -1,11 +1,11 @@
-import type { StoreApi } from 'zustand';
-import type { AppState } from '@/lib/state/store';
-import type { WsHandlers } from '@/lib/ws/handlers/types';
-import type { KanbanState } from '@/lib/state/slices/kanban/types';
-import { cleanupTaskStorage } from '@/lib/local-storage';
-import { useContextFilesStore } from '@/lib/state/context-files-store';
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { cleanupTaskStorage } from "@/lib/local-storage";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
 
-type KanbanTask = KanbanState['tasks'][number];
+type KanbanTask = KanbanState["tasks"][number];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
@@ -75,7 +75,10 @@ function upsertTaskInBothKanbans(state: AppState, wfId: string, payload: any): A
 function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string): AppState {
   let next = state;
   if (state.kanban.workflowId === wfId) {
-    next = { ...next, kanban: { ...next.kanban, tasks: next.kanban.tasks.filter((t) => t.id !== taskId) } };
+    next = {
+      ...next,
+      kanban: { ...next.kanban, tasks: next.kanban.tasks.filter((t) => t.id !== taskId) },
+    };
   }
   const snapshot = state.kanbanMulti.snapshots[wfId];
   if (snapshot) {
@@ -95,10 +98,12 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    'task.created': (message) => {
-      store.setState((state) => upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload));
+    "task.created": (message) => {
+      store.setState((state) =>
+        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+      );
     },
-    'task.updated': (message) => {
+    "task.updated": (message) => {
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
         const taskId = message.payload.task_id;
@@ -110,12 +115,14 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         return upsertTaskInBothKanbans(state, wfId, message.payload);
       });
     },
-    'task.deleted': (message) => {
+    "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
       const wfId = message.payload.workflow_id;
 
       const currentState = store.getState();
-      const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map((s) => s.id);
+      const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
+        (s) => s.id,
+      );
       const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
       if (task?.primarySessionId && !sessionIds.includes(task.primarySessionId)) {
         sessionIds.push(task.primarySessionId);
@@ -134,8 +141,10 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         return next;
       });
     },
-    'task.state_changed': (message) => {
-      store.setState((state) => upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload));
+    "task.state_changed": (message) => {
+      store.setState((state) =>
+        upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+      );
     },
   };
 }

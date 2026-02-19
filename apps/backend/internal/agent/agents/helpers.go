@@ -126,4 +126,3 @@ func execAndParse(ctx context.Context, timeout time.Duration, parse func(string)
 
 	return parse(stdout.String())
 }
-

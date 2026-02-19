@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import { memo, useCallback } from 'react';
-import { SessionMobileTopBar } from './session-mobile-top-bar';
-import { SessionMobileBottomNav } from './session-mobile-bottom-nav';
-import { SessionTaskSwitcherSheet } from './session-task-switcher-sheet';
-import { TaskChatPanel } from '../task-chat-panel';
-import { TaskPlanPanel } from '../task-plan-panel';
-import { TaskChangesPanel } from '../task-changes-panel';
-import { TaskFilesPanel } from '../task-files-panel';
-import { ShellTerminal } from '../shell-terminal';
-import { PassthroughTerminal } from '../passthrough-terminal';
-import { SessionPanelContent } from '@kandev/ui/pannel-session';
-import { useSessionLayoutState } from '@/hooks/use-session-layout-state';
+import { memo, useCallback } from "react";
+import { SessionMobileTopBar } from "./session-mobile-top-bar";
+import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
+import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
+import { TaskChatPanel } from "../task-chat-panel";
+import { TaskPlanPanel } from "../task-plan-panel";
+import { TaskChangesPanel } from "../task-changes-panel";
+import { TaskFilesPanel } from "../task-files-panel";
+import { ShellTerminal } from "../shell-terminal";
+import { PassthroughTerminal } from "../passthrough-terminal";
+import { SessionPanelContent } from "@kandev/ui/pannel-session";
+import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
@@ -22,7 +22,13 @@ type SessionMobileLayoutProps = {
   taskTitle?: string;
 };
 
-function MobileChatPanelContent({ activeTaskId, isPassthroughMode, effectiveSessionId, sessionId, onOpenFile }: {
+function MobileChatPanelContent({
+  activeTaskId,
+  isPassthroughMode,
+  effectiveSessionId,
+  sessionId,
+  onOpenFile,
+}: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
@@ -39,7 +45,11 @@ function MobileChatPanelContent({ activeTaskId, isPassthroughMode, effectiveSess
   if (activeTaskId) {
     return <TaskChatPanel sessionId={sessionId} onOpenFile={onOpenFile} />;
   }
-  return <div className="flex-1 flex items-center justify-center text-muted-foreground">No task selected</div>;
+  return (
+    <div className="flex-1 flex items-center justify-center text-muted-foreground">
+      No task selected
+    </div>
+  );
 }
 
 type MobilePanelAreaProps = {
@@ -58,9 +68,18 @@ type MobilePanelAreaProps = {
 };
 
 function MobilePanelArea({
-  currentMobilePanel, activeTaskId, isPassthroughMode, effectiveSessionId, sessionId,
-  selectedDiff, handleOpenFileFromChat, handleClearSelectedDiff,
-  handleSelectDiffAndSwitchPanel, handleOpenFile, topNavHeight, bottomNavHeight,
+  currentMobilePanel,
+  activeTaskId,
+  isPassthroughMode,
+  effectiveSessionId,
+  sessionId,
+  selectedDiff,
+  handleOpenFileFromChat,
+  handleClearSelectedDiff,
+  handleSelectDiffAndSwitchPanel,
+  handleOpenFile,
+  topNavHeight,
+  bottomNavHeight,
 }: MobilePanelAreaProps) {
   return (
     <div
@@ -68,30 +87,43 @@ function MobilePanelArea({
       style={{
         paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
         paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
-        height: '100dvh',
+        height: "100dvh",
       }}
     >
-      {currentMobilePanel === 'chat' && (
+      {currentMobilePanel === "chat" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
-          <MobileChatPanelContent activeTaskId={activeTaskId} isPassthroughMode={isPassthroughMode} effectiveSessionId={effectiveSessionId} sessionId={sessionId} onOpenFile={handleOpenFileFromChat} />
+          <MobileChatPanelContent
+            activeTaskId={activeTaskId}
+            isPassthroughMode={isPassthroughMode}
+            effectiveSessionId={effectiveSessionId}
+            sessionId={sessionId}
+            onOpenFile={handleOpenFileFromChat}
+          />
         </div>
       )}
-      {currentMobilePanel === 'plan' && (
+      {currentMobilePanel === "plan" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
           <TaskPlanPanel taskId={activeTaskId} visible={true} />
         </div>
       )}
-      {currentMobilePanel === 'changes' && (
+      {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
-          <TaskChangesPanel selectedDiff={selectedDiff} onClearSelected={handleClearSelectedDiff} onOpenFile={handleOpenFileFromChat} />
+          <TaskChangesPanel
+            selectedDiff={selectedDiff}
+            onClearSelected={handleClearSelectedDiff}
+            onOpenFile={handleOpenFileFromChat}
+          />
         </div>
       )}
-      {currentMobilePanel === 'files' && (
+      {currentMobilePanel === "files" && (
         <div className="flex-1 min-h-0 flex flex-col">
-          <TaskFilesPanel onSelectDiff={handleSelectDiffAndSwitchPanel} onOpenFile={handleOpenFile} />
+          <TaskFilesPanel
+            onSelectDiff={handleSelectDiffAndSwitchPanel}
+            onOpenFile={handleOpenFile}
+          />
         </div>
       )}
-      {currentMobilePanel === 'terminal' && (
+      {currentMobilePanel === "terminal" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
           <SessionPanelContent className="p-0 flex-1 min-h-0">
             <ShellTerminal key={effectiveSessionId} sessionId={effectiveSessionId ?? undefined} />
@@ -130,31 +162,40 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
   } = useSessionLayoutState({ sessionId });
 
   // Mobile-specific handlers that also switch panels
-  const handleSelectDiffAndSwitchPanel = useCallback((path: string, content?: string) => {
-    handleSelectDiff(path, content);
-    handlePanelChange('changes');
-  }, [handleSelectDiff, handlePanelChange]);
+  const handleSelectDiffAndSwitchPanel = useCallback(
+    (path: string, content?: string) => {
+      handleSelectDiff(path, content);
+      handlePanelChange("changes");
+    },
+    [handleSelectDiff, handlePanelChange],
+  );
 
-  const handleOpenFileFromChat = useCallback((path: string) => {
-    handleSelectDiff(path);
-    handlePanelChange('changes');
-  }, [handleSelectDiff, handlePanelChange]);
+  const handleOpenFileFromChat = useCallback(
+    (path: string) => {
+      handleSelectDiff(path);
+      handlePanelChange("changes");
+    },
+    [handleSelectDiff, handlePanelChange],
+  );
 
-  const handleOpenFile = useCallback((file: { path: string }) => {
-    handleSelectDiff(file.path);
-    handlePanelChange('changes');
-  }, [handleSelectDiff, handlePanelChange]);
+  const handleOpenFile = useCallback(
+    (file: { path: string }) => {
+      handleSelectDiff(file.path);
+      handlePanelChange("changes");
+    },
+    [handleSelectDiff, handlePanelChange],
+  );
 
   // Top nav height (~56px) + bottom nav height (~52px)
-  const topNavHeight = '3.5rem';
-  const bottomNavHeight = '3.25rem';
+  const topNavHeight = "3.5rem";
+  const bottomNavHeight = "3.25rem";
 
   return (
     <div className="h-dvh relative bg-background">
       {/* Fixed Top Bar */}
       <div
         className="fixed top-0 left-0 right-0 z-40 bg-background border-b border-border"
-        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <SessionMobileTopBar
           taskTitle={taskTitle}

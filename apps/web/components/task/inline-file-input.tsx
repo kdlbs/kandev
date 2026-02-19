@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useRef, useEffect, useCallback } from 'react';
-import { Input } from '@kandev/ui/input';
-import { FileIcon } from '@/components/ui/file-icon';
+import { useRef, useEffect, useCallback } from "react";
+import { Input } from "@kandev/ui/input";
+import { FileIcon } from "@/components/ui/file-icon";
 
 type InlineFileInputProps = {
   depth: number;
@@ -20,15 +20,15 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
+      if (e.key === "Enter") {
         const value = inputRef.current?.value.trim();
         if (value) onSubmit(value);
         else onCancel();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         onCancel();
       }
     },
-    [onSubmit, onCancel]
+    [onSubmit, onCancel],
   );
 
   const handleBlur = useCallback(() => {
@@ -42,7 +42,12 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
       className="flex items-center gap-1 px-2 py-0.5"
       style={{ paddingLeft: `${depth * 12 + 8 + 20}px` }}
     >
-      <FileIcon fileName="file" filePath="" className="flex-shrink-0" style={{ width: '14px', height: '14px', opacity: 0.7 }} />
+      <FileIcon
+        fileName="file"
+        filePath=""
+        className="flex-shrink-0"
+        style={{ width: "14px", height: "14px", opacity: 0.7 }}
+      />
       <Input
         ref={inputRef}
         type="text"

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { IconPlus, IconTrash, IconGripHorizontal } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Textarea } from '@kandev/ui/textarea';
-import { cn } from '@/lib/utils';
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { IconPlus, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type SelectionPosition = {
   x: number;
@@ -52,45 +52,88 @@ function useDrag() {
   const startPos = useRef({ x: 0, y: 0 });
   const startOffset = useRef({ dx: 0, dy: 0 });
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    startPos.current = { x: e.clientX, y: e.clientY };
-    startOffset.current = { ...offset };
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      startPos.current = { x: e.clientX, y: e.clientY };
+      startOffset.current = { ...offset };
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragging.current) return;
-      setOffset({
-        dx: startOffset.current.dx + ev.clientX - startPos.current.x,
-        dy: startOffset.current.dy + ev.clientY - startPos.current.y,
-      });
-    };
-    const onMouseUp = () => {
-      dragging.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [offset]);
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!dragging.current) return;
+        setOffset({
+          dx: startOffset.current.dx + ev.clientX - startPos.current.x,
+          dy: startOffset.current.dy + ev.clientY - startPos.current.y,
+        });
+      };
+      const onMouseUp = () => {
+        dragging.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [offset],
+  );
 
   return { offset, onMouseDown };
 }
 
-function usePopoverDismiss(onClose: () => void, popoverRef: React.RefObject<HTMLDivElement | null>) {
+function usePopoverDismiss(
+  onClose: () => void,
+  popoverRef: React.RefObject<HTMLDivElement | null>,
+) {
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) onClose();
     };
-    const timer = setTimeout(() => { document.addEventListener('mousedown', handleClickOutside); }, 100);
-    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handleClickOutside); };
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClickOutside);
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [onClose, popoverRef]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+}
+
+function usePopoverComposer(
+  comment: string,
+  selectedText: string,
+  onAdd: (comment: string, selectedText: string) => void,
+  onClose: () => void,
+) {
+  const handleSubmit = useCallback(() => {
+    if (!comment.trim()) return;
+    onAdd(comment.trim(), selectedText);
+    onClose();
+  }, [comment, onAdd, selectedText, onClose]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit],
+  );
+
+  return {
+    handleSubmit,
+    handleKeyDown,
+    isDisabled: !comment.trim(),
+    previewText: selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText,
+  };
 }
 
 export function PlanSelectionPopover({
@@ -101,26 +144,21 @@ export function PlanSelectionPopover({
   editingComment,
   onDelete,
 }: PlanSelectionPopoverProps) {
-  const [comment, setComment] = useState(editingComment || '');
+  const [comment, setComment] = useState(editingComment || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const { offset, onMouseDown } = useDrag();
 
-  useEffect(() => { textareaRef.current?.focus(); }, []);
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
   usePopoverDismiss(onClose, popoverRef);
-
-  const handleSubmit = useCallback(() => {
-    if (!comment.trim()) return;
-    onAdd(comment.trim(), selectedText);
-    onClose();
-  }, [comment, onAdd, selectedText, onClose]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSubmit(); }
-  }, [handleSubmit]);
-
-  const isDisabled = !comment.trim();
-  const previewText = selectedText.length > 80 ? selectedText.slice(0, 80).trim() + '\u2026' : selectedText;
+  const { handleSubmit, handleKeyDown, isDisabled, previewText } = usePopoverComposer(
+    comment,
+    selectedText,
+    onAdd,
+    onClose,
+  );
   const { left, top } = computePopoverPosition(position);
 
   // Portal to document.body to escape dockview's CSS transform containing block
@@ -128,8 +166,8 @@ export function PlanSelectionPopover({
     <div
       ref={popoverRef}
       className={cn(
-        'fixed z-50 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl',
-        'animate-in fade-in-0 zoom-in-95 duration-150'
+        "fixed z-50 rounded-xl border border-border/50 bg-popover/95 backdrop-blur-sm shadow-xl",
+        "animate-in fade-in-0 zoom-in-95 duration-150",
       )}
       style={{
         width: POPOVER_WIDTH,
@@ -165,7 +203,7 @@ export function PlanSelectionPopover({
         <div className="mt-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground/70">
-              ⌘+Enter to {editingComment ? 'update' : 'add'}
+              ⌘+Enter to {editingComment ? "update" : "add"}
             </span>
             {editingComment && onDelete && (
               <Button
@@ -188,7 +226,7 @@ export function PlanSelectionPopover({
             className="h-7 gap-1 text-xs cursor-pointer"
           >
             <IconPlus className="h-3 w-3" />
-            {editingComment ? 'Update' : 'Add'}
+            {editingComment ? "Update" : "Add"}
           </Button>
         </div>
       </div>

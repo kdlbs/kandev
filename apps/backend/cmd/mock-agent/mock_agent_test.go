@@ -55,11 +55,11 @@ func TestParseModelFromArgs(t *testing.T) {
 
 func TestDelayRange(t *testing.T) {
 	tests := []struct {
-		model      string
-		wantMinLo  int
-		wantMinHi  int
-		wantMaxLo  int
-		wantMaxHi  int
+		model     string
+		wantMinLo int
+		wantMinHi int
+		wantMaxLo int
+		wantMaxHi int
 	}{
 		{"mock-fast", 10, 10, 50, 50},
 		{"mock-slow", 500, 500, 3000, 3000},

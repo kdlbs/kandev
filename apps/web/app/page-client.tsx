@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 
-import { KanbanWithPreview } from '@/components/kanban-with-preview';
-import { OnboardingDialog } from '@/components/onboarding-dialog';
-import { getLocalStorage, setLocalStorage } from '@/lib/local-storage';
-import { STORAGE_KEYS } from '@/lib/settings/constants';
+import { KanbanWithPreview } from "@/components/kanban-with-preview";
+import { OnboardingDialog } from "@/components/onboarding-dialog";
+import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 type PageClientProps = {
   initialTaskId?: string;
@@ -14,7 +14,7 @@ type PageClientProps = {
 
 export function PageClient({ initialTaskId, initialSessionId }: PageClientProps) {
   const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (typeof window === 'undefined') return false;
+    if (typeof window === "undefined") return false;
     const completed = getLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, false);
     return !completed;
   });
@@ -29,7 +29,11 @@ export function PageClient({ initialTaskId, initialSessionId }: PageClientProps)
   return (
     <>
       <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />
-      <KanbanWithPreview key={boardKey} initialTaskId={initialTaskId} initialSessionId={initialSessionId} />
+      <KanbanWithPreview
+        key={boardKey}
+        initialTaskId={initialTaskId}
+        initialSessionId={initialSessionId}
+      />
     </>
   );
 }

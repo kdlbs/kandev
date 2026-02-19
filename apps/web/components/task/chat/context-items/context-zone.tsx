@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import type { ReactNode } from 'react';
-import type { ContextItem } from '@/lib/types/context';
-import { ContextItemRenderer } from './context-item-renderer';
+import type { ReactNode } from "react";
+import type { ContextItem } from "@/lib/types/context";
+import { ContextItemRenderer } from "./context-item-renderer";
 
 type ContextZoneProps = {
   items: ContextItem[];

@@ -1,6 +1,6 @@
-import type { StateCreator } from 'zustand';
-import { setLocalStorage } from '@/lib/local-storage';
-import type { ActiveDocument, UISlice, UISliceState } from './types';
+import type { StateCreator } from "zustand";
+import { setLocalStorage } from "@/lib/local-storage";
+import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 export const defaultUIState: UISliceState = {
   previewPanel: {
@@ -13,17 +13,17 @@ export const defaultUIState: UISliceState = {
   },
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
-  connection: { status: 'disconnected', error: null },
+  connection: { status: "disconnected", error: null },
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
 };
 
-export const createUISlice: StateCreator<UISlice, [['zustand/immer', never]], [], UISlice> = (
+export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _get
+  _get,
 ) => ({
   ...defaultUIState,
   setPreviewOpen: (sessionId, open) =>

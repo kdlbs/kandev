@@ -26,32 +26,32 @@ type (
 	MessageOptions   = copilot.MessageOptions
 	Data             = copilot.Data
 	// Permission types
-	PermissionHandler        = copilot.PermissionHandler
-	PermissionRequest        = copilot.PermissionRequest
-	PermissionInvocation     = copilot.PermissionInvocation
-	PermissionRequestResult  = copilot.PermissionRequestResult
+	PermissionHandler       = copilot.PermissionHandler
+	PermissionRequest       = copilot.PermissionRequest
+	PermissionInvocation    = copilot.PermissionInvocation
+	PermissionRequestResult = copilot.PermissionRequestResult
 	// MCP types
 	MCPServerConfig = copilot.MCPServerConfig
 )
 
 // Re-export event type constants
 const (
-	EventTypeSessionStart          = copilot.SessionStart
-	EventTypeSessionResume         = copilot.SessionResume
-	EventTypeSessionIdle           = copilot.SessionIdle
-	EventTypeSessionError          = copilot.SessionError
-	EventTypeSessionUsageInfo      = copilot.SessionUsageInfo
-	EventTypeAssistantMessage      = copilot.AssistantMessage
-	EventTypeAssistantMessageDelta = copilot.AssistantMessageDelta
-	EventTypeAssistantReasoning    = copilot.AssistantReasoning
+	EventTypeSessionStart            = copilot.SessionStart
+	EventTypeSessionResume           = copilot.SessionResume
+	EventTypeSessionIdle             = copilot.SessionIdle
+	EventTypeSessionError            = copilot.SessionError
+	EventTypeSessionUsageInfo        = copilot.SessionUsageInfo
+	EventTypeAssistantMessage        = copilot.AssistantMessage
+	EventTypeAssistantMessageDelta   = copilot.AssistantMessageDelta
+	EventTypeAssistantReasoning      = copilot.AssistantReasoning
 	EventTypeAssistantReasoningDelta = copilot.AssistantReasoningDelta
-	EventTypeAssistantTurnStart    = copilot.AssistantTurnStart
-	EventTypeAssistantTurnEnd      = copilot.AssistantTurnEnd
-	EventTypeAssistantUsage        = copilot.AssistantUsage
-	EventTypeToolStart             = copilot.ToolExecutionStart
-	EventTypeToolComplete          = copilot.ToolExecutionComplete
-	EventTypeToolProgress          = copilot.ToolExecutionProgress
-	EventTypeAbort                 = copilot.Abort
+	EventTypeAssistantTurnStart      = copilot.AssistantTurnStart
+	EventTypeAssistantTurnEnd        = copilot.AssistantTurnEnd
+	EventTypeAssistantUsage          = copilot.AssistantUsage
+	EventTypeToolStart               = copilot.ToolExecutionStart
+	EventTypeToolComplete            = copilot.ToolExecutionComplete
+	EventTypeToolProgress            = copilot.ToolExecutionProgress
+	EventTypeAbort                   = copilot.Abort
 )
 
 // Client wraps the Copilot SDK client with additional functionality.
@@ -65,9 +65,9 @@ type Client struct {
 	model  string
 
 	// Event handler
-	eventHandler   func(SessionEvent)
-	unsubscribe    func()
-	handlerMu      sync.RWMutex
+	eventHandler func(SessionEvent)
+	unsubscribe  func()
+	handlerMu    sync.RWMutex
 
 	// Permission handler
 	permissionHandler PermissionHandler

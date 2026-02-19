@@ -1,5 +1,5 @@
-import type { LayoutColumn, LayoutGroup } from './types';
-import { LAYOUT_SIDEBAR_RATIO } from './constants';
+import type { LayoutColumn, LayoutGroup } from "./types";
+import { LAYOUT_SIDEBAR_RATIO } from "./constants";
 
 /**
  * Get the effective pinned width for a column,
@@ -85,7 +85,8 @@ function computeFlexWidths(
       explicitUsed += w;
     }
     const flexSpace = Math.max(0, remainingSpace - explicitUsed);
-    const perFlex = bucket.flexIndices.length > 0 ? Math.floor(flexSpace / bucket.flexIndices.length) : 0;
+    const perFlex =
+      bucket.flexIndices.length > 0 ? Math.floor(flexSpace / bucket.flexIndices.length) : 0;
     for (const i of bucket.flexIndices) {
       widths[i] = perFlex;
     }
@@ -93,7 +94,8 @@ function computeFlexWidths(
   }
 
   // All non-pinned are flex → equal split
-  const perFlex = bucket.flexIndices.length > 0 ? Math.floor(remainingSpace / bucket.flexIndices.length) : 0;
+  const perFlex =
+    bucket.flexIndices.length > 0 ? Math.floor(remainingSpace / bucket.flexIndices.length) : 0;
   for (const i of bucket.flexIndices) {
     widths[i] = perFlex;
   }

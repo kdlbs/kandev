@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState } from "react";
 
-const STORAGE_KEY = 'kanban-swimlane-collapse';
+const STORAGE_KEY = "kanban-swimlane-collapse";
 
 function loadCollapseState(): Record<string, boolean> {
   try {
@@ -24,7 +24,7 @@ export function useSwimlaneCollapse() {
 
   const isCollapsed = useCallback(
     (workflowId: string) => collapsed[workflowId] ?? false,
-    [collapsed]
+    [collapsed],
   );
 
   const toggleCollapse = useCallback((workflowId: string) => {

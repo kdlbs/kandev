@@ -111,4 +111,3 @@ func (p *FileProvider) Reload() error {
 
 	return p.load()
 }
-

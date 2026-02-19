@@ -413,4 +413,3 @@ func (h *GitHandlers) getAgentCtlClient(sessionID string) (*client.Client, error
 
 	return c, nil
 }
-

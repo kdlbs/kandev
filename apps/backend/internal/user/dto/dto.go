@@ -14,17 +14,17 @@ type UserDTO struct {
 }
 
 type UserSettingsDTO struct {
-	UserID                 string   `json:"user_id"`
-	WorkspaceID            string   `json:"workspace_id"`
-	KanbanViewMode         string   `json:"kanban_view_mode"`
-	WorkflowFilterID       string   `json:"workflow_filter_id"`
-	RepositoryIDs          []string `json:"repository_ids"`
-	InitialSetupComplete   bool     `json:"initial_setup_complete"`
-	PreferredShell         string   `json:"preferred_shell"`
-	DefaultEditorID        string   `json:"default_editor_id"`
-	EnablePreviewOnClick   bool     `json:"enable_preview_on_click"`
-	ChatSubmitKey           string   `json:"chat_submit_key"`
-	ReviewAutoMarkOnScroll  bool     `json:"review_auto_mark_on_scroll"`
+	UserID                  string                            `json:"user_id"`
+	WorkspaceID             string                            `json:"workspace_id"`
+	KanbanViewMode          string                            `json:"kanban_view_mode"`
+	WorkflowFilterID        string                            `json:"workflow_filter_id"`
+	RepositoryIDs           []string                          `json:"repository_ids"`
+	InitialSetupComplete    bool                              `json:"initial_setup_complete"`
+	PreferredShell          string                            `json:"preferred_shell"`
+	DefaultEditorID         string                            `json:"default_editor_id"`
+	EnablePreviewOnClick    bool                              `json:"enable_preview_on_click"`
+	ChatSubmitKey           string                            `json:"chat_submit_key"`
+	ReviewAutoMarkOnScroll  bool                              `json:"review_auto_mark_on_scroll"`
 	LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
@@ -48,16 +48,16 @@ type ShellOption struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID            *string   `json:"workspace_id,omitempty"`
-	KanbanViewMode         *string   `json:"kanban_view_mode,omitempty"`
-	WorkflowFilterID       *string   `json:"workflow_filter_id,omitempty"`
-	RepositoryIDs          *[]string `json:"repository_ids,omitempty"`
-	InitialSetupComplete   *bool     `json:"initial_setup_complete,omitempty"`
-	PreferredShell         *string   `json:"preferred_shell,omitempty"`
-	DefaultEditorID        *string   `json:"default_editor_id,omitempty"`
-	EnablePreviewOnClick   *bool     `json:"enable_preview_on_click,omitempty"`
-	ChatSubmitKey          *string   `json:"chat_submit_key,omitempty"`
-	ReviewAutoMarkOnScroll  *bool     `json:"review_auto_mark_on_scroll,omitempty"`
+	WorkspaceID             *string                            `json:"workspace_id,omitempty"`
+	KanbanViewMode          *string                            `json:"kanban_view_mode,omitempty"`
+	WorkflowFilterID        *string                            `json:"workflow_filter_id,omitempty"`
+	RepositoryIDs           *[]string                          `json:"repository_ids,omitempty"`
+	InitialSetupComplete    *bool                              `json:"initial_setup_complete,omitempty"`
+	PreferredShell          *string                            `json:"preferred_shell,omitempty"`
+	DefaultEditorID         *string                            `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick    *bool                              `json:"enable_preview_on_click,omitempty"`
+	ChatSubmitKey           *string                            `json:"chat_submit_key,omitempty"`
+	ReviewAutoMarkOnScroll  *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	LspAutoStartLanguages   *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs        *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
@@ -75,16 +75,16 @@ func FromUser(user *models.User) UserDTO {
 
 func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	return UserSettingsDTO{
-		UserID:                 settings.UserID,
-		WorkspaceID:            settings.WorkspaceID,
-		KanbanViewMode:         settings.KanbanViewMode,
-		WorkflowFilterID:       settings.WorkflowFilterID,
-		RepositoryIDs:          settings.RepositoryIDs,
-		InitialSetupComplete:   settings.InitialSetupComplete,
-		PreferredShell:         settings.PreferredShell,
-		DefaultEditorID:        settings.DefaultEditorID,
-		EnablePreviewOnClick:   settings.EnablePreviewOnClick,
-		ChatSubmitKey:          settings.ChatSubmitKey,
+		UserID:                  settings.UserID,
+		WorkspaceID:             settings.WorkspaceID,
+		KanbanViewMode:          settings.KanbanViewMode,
+		WorkflowFilterID:        settings.WorkflowFilterID,
+		RepositoryIDs:           settings.RepositoryIDs,
+		InitialSetupComplete:    settings.InitialSetupComplete,
+		PreferredShell:          settings.PreferredShell,
+		DefaultEditorID:         settings.DefaultEditorID,
+		EnablePreviewOnClick:    settings.EnablePreviewOnClick,
+		ChatSubmitKey:           settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:  settings.ReviewAutoMarkOnScroll,
 		LspAutoStartLanguages:   settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages: settings.LspAutoInstallLanguages,

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -13,8 +13,8 @@ import (
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle       *lifecycle.Manager
-	logger          *logger.Logger
+	lifecycle *lifecycle.Manager
+	logger    *logger.Logger
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers

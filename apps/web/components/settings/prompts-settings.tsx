@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { IconEdit, IconTrash, IconLock } from '@tabler/icons-react';
-import { Button } from '@kandev/ui/button';
-import { Badge } from '@kandev/ui/badge';
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { IconEdit, IconTrash, IconLock } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -11,19 +11,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@kandev/ui/dialog';
-import { Input } from '@kandev/ui/input';
-import { Textarea } from '@kandev/ui/textarea';
-import { SettingsPageTemplate } from '@/components/settings/settings-page-template';
-import { useCustomPrompts } from '@/hooks/domains/settings/use-custom-prompts';
-import { useAppStore } from '@/components/state-provider';
-import { createPrompt, deletePrompt, updatePrompt } from '@/lib/api';
-import { useRequest } from '@/lib/http/use-request';
-import type { CustomPrompt } from '@/lib/types/http';
+} from "@kandev/ui/dialog";
+import { Input } from "@kandev/ui/input";
+import { Textarea } from "@kandev/ui/textarea";
+import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { useAppStore } from "@/components/state-provider";
+import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
+import { useRequest } from "@/lib/http/use-request";
+import type { CustomPrompt } from "@/lib/types/http";
 
 const defaultFormState = {
-  name: '',
-  content: '',
+  name: "",
+  content: "",
 };
 
 type PromptFormState = typeof defaultFormState;
@@ -37,7 +37,14 @@ type PromptCreateFormProps = {
   isBusy: boolean;
 };
 
-function PromptCreateForm({ formState, onFormChange, onSubmit, onCancel, isValid, isBusy }: PromptCreateFormProps) {
+function PromptCreateForm({
+  formState,
+  onFormChange,
+  onSubmit,
+  onCancel,
+  isValid,
+  isBusy,
+}: PromptCreateFormProps) {
   return (
     <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
       <div className="text-sm font-medium text-foreground">Add prompt</div>
@@ -95,7 +102,7 @@ function PromptListItem({
   showCreate,
 }: PromptListItemProps) {
   const getPromptPreview = (content: string) => {
-    return content.split(/\r?\n/)[0] ?? '';
+    return content.split(/\r?\n/)[0] ?? "";
   };
 
   return (
@@ -255,9 +262,9 @@ function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: Delete
         <DialogHeader>
           <DialogTitle>Delete prompt</DialogTitle>
           <DialogDescription>
-            This will permanently remove{' '}
+            This will permanently remove{" "}
             <span className="font-medium text-foreground">
-              {deleteTarget ? `@${deleteTarget.name}` : 'this prompt'}
+              {deleteTarget ? `@${deleteTarget.name}` : "this prompt"}
             </span>
             . This action cannot be undone.
           </DialogDescription>
@@ -284,61 +291,152 @@ function usePromptsState() {
   const [formState, setFormState] = useState(defaultFormState);
   const editingRef = useRef<HTMLDivElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomPrompt | null>(null);
-  return { promptsLoaded, prompts, setPrompts, editingId, setEditingId, showCreate, setShowCreate, formState, setFormState, editingRef, deleteTarget, setDeleteTarget };
+  return {
+    promptsLoaded,
+    prompts,
+    setPrompts,
+    editingId,
+    setEditingId,
+    showCreate,
+    setShowCreate,
+    formState,
+    setFormState,
+    editingRef,
+    deleteTarget,
+    setDeleteTarget,
+  };
 }
 
 function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
-  const { prompts, setPrompts, editingId, setEditingId, setShowCreate, setFormState, setDeleteTarget, deleteTarget, formState } = state;
+  const {
+    prompts,
+    setPrompts,
+    editingId,
+    setEditingId,
+    setShowCreate,
+    setFormState,
+    setDeleteTarget,
+    deleteTarget,
+    formState,
+  } = state;
 
   const resetForm = useCallback(() => {
-    setEditingId(null); setShowCreate(false); setFormState(defaultFormState);
+    setEditingId(null);
+    setShowCreate(false);
+    setFormState(defaultFormState);
   }, [setEditingId, setShowCreate, setFormState]);
 
-  const applyPrompts = useCallback((next: CustomPrompt[]) => {
-    setPrompts([...next].sort((a, b) => a.name.localeCompare(b.name)));
-  }, [setPrompts]);
+  const applyPrompts = useCallback(
+    (next: CustomPrompt[]) => {
+      setPrompts([...next].sort((a, b) => a.name.localeCompare(b.name)));
+    },
+    [setPrompts],
+  );
 
-  const isValid = useMemo(() => Boolean(formState.name.trim() && formState.content.trim()), [formState]);
+  const isValid = useMemo(
+    () => Boolean(formState.name.trim() && formState.content.trim()),
+    [formState],
+  );
 
   const createRequest = useRequest(async (s: typeof defaultFormState) => {
-    const prompt = await createPrompt({ name: s.name.trim(), content: s.content.trim() }, { cache: 'no-store' });
+    const prompt = await createPrompt(
+      { name: s.name.trim(), content: s.content.trim() },
+      { cache: "no-store" },
+    );
     applyPrompts([...prompts, prompt]);
     resetForm();
   });
 
   const updateRequest = useRequest(async (id: string, s: typeof defaultFormState) => {
-    const updated = await updatePrompt(id, { name: s.name.trim(), content: s.content.trim() }, { cache: 'no-store' });
+    const updated = await updatePrompt(
+      id,
+      { name: s.name.trim(), content: s.content.trim() },
+      { cache: "no-store" },
+    );
     applyPrompts(prompts.map((p: CustomPrompt) => (p.id === id ? updated : p)));
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
-    await deletePrompt(id, { cache: 'no-store' });
+    await deletePrompt(id, { cache: "no-store" });
     applyPrompts(prompts.filter((p: CustomPrompt) => p.id !== id));
     if (editingId === id) resetForm();
   });
 
   const isBusy = createRequest.isLoading || updateRequest.isLoading || deleteRequest.isLoading;
-  const handleCreate = () => { if (!isValid || isBusy) return; createRequest.run(formState).catch(() => undefined); };
-  const handleUpdate = () => { if (!isValid || isBusy || !editingId) return; updateRequest.run(editingId, formState).catch(() => undefined); };
-  const startEditing = (prompt: CustomPrompt) => { setEditingId(prompt.id); setShowCreate(false); setFormState({ name: prompt.name, content: prompt.content }); };
-  const startCreate = () => { setEditingId(null); setShowCreate(true); setFormState(defaultFormState); };
-  const openDeleteDialog = (prompt: CustomPrompt) => { setDeleteTarget(prompt); };
-  const closeDeleteDialog = () => { setDeleteTarget(null); };
-  const confirmDelete = () => { if (!deleteTarget) return; deleteRequest.run(deleteTarget.id).catch(() => undefined); closeDeleteDialog(); };
+  const handleCreate = () => {
+    if (!isValid || isBusy) return;
+    createRequest.run(formState).catch(() => undefined);
+  };
+  const handleUpdate = () => {
+    if (!isValid || isBusy || !editingId) return;
+    updateRequest.run(editingId, formState).catch(() => undefined);
+  };
+  const startEditing = (prompt: CustomPrompt) => {
+    setEditingId(prompt.id);
+    setShowCreate(false);
+    setFormState({ name: prompt.name, content: prompt.content });
+  };
+  const startCreate = () => {
+    setEditingId(null);
+    setShowCreate(true);
+    setFormState(defaultFormState);
+  };
+  const openDeleteDialog = (prompt: CustomPrompt) => {
+    setDeleteTarget(prompt);
+  };
+  const closeDeleteDialog = () => {
+    setDeleteTarget(null);
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteRequest.run(deleteTarget.id).catch(() => undefined);
+    closeDeleteDialog();
+  };
 
-  return { resetForm, isValid, isBusy, handleCreate, handleUpdate, startEditing, startCreate, openDeleteDialog, closeDeleteDialog, confirmDelete };
+  return {
+    resetForm,
+    isValid,
+    isBusy,
+    handleCreate,
+    handleUpdate,
+    startEditing,
+    startCreate,
+    openDeleteDialog,
+    closeDeleteDialog,
+    confirmDelete,
+  };
 }
 
 export function PromptsSettings() {
   const state = usePromptsState();
-  const { editingId, showCreate, formState, setFormState, editingRef, deleteTarget, promptsLoaded, prompts } = state;
-  const { isValid, isBusy, handleCreate, handleUpdate, startEditing, startCreate, openDeleteDialog, closeDeleteDialog, confirmDelete, resetForm } = usePromptsActions(state);
+  const {
+    editingId,
+    showCreate,
+    formState,
+    setFormState,
+    editingRef,
+    deleteTarget,
+    promptsLoaded,
+    prompts,
+  } = state;
+  const {
+    isValid,
+    isBusy,
+    handleCreate,
+    handleUpdate,
+    startEditing,
+    startCreate,
+    openDeleteDialog,
+    closeDeleteDialog,
+    confirmDelete,
+    resetForm,
+  } = usePromptsActions(state);
   const isEditing = Boolean(editingId);
 
   useEffect(() => {
     if (!editingId) return;
-    editingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    editingRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [editingId, editingRef]);
 
   return (

@@ -1,14 +1,14 @@
 export type TaskState =
-  | 'CREATED'
-  | 'SCHEDULING'
-  | 'TODO'
-  | 'IN_PROGRESS'
-  | 'REVIEW'
-  | 'BLOCKED'
-  | 'WAITING_FOR_INPUT'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED';
+  | "CREATED"
+  | "SCHEDULING"
+  | "TODO"
+  | "IN_PROGRESS"
+  | "REVIEW"
+  | "BLOCKED"
+  | "WAITING_FOR_INPUT"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
 
 export type Board = {
   id: string;

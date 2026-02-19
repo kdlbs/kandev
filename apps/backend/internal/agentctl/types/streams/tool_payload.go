@@ -58,18 +58,18 @@ type NormalizedPayload struct {
 
 // --- Getters for NormalizedPayload ---
 
-func (p *NormalizedPayload) Kind() ToolKind                  { return p.kind }
-func (p *NormalizedPayload) ReadFile() *ReadFilePayload      { return p.readFile }
-func (p *NormalizedPayload) ModifyFile() *ModifyFilePayload  { return p.modifyFile }
-func (p *NormalizedPayload) ShellExec() *ShellExecPayload    { return p.shellExec }
-func (p *NormalizedPayload) CodeSearch() *CodeSearchPayload  { return p.codeSearch }
-func (p *NormalizedPayload) HttpRequest() *HttpRequestPayload { return p.httpRequest }
-func (p *NormalizedPayload) Generic() *GenericPayload        { return p.generic }
-func (p *NormalizedPayload) CreateTask() *CreateTaskPayload  { return p.createTask }
+func (p *NormalizedPayload) Kind() ToolKind                     { return p.kind }
+func (p *NormalizedPayload) ReadFile() *ReadFilePayload         { return p.readFile }
+func (p *NormalizedPayload) ModifyFile() *ModifyFilePayload     { return p.modifyFile }
+func (p *NormalizedPayload) ShellExec() *ShellExecPayload       { return p.shellExec }
+func (p *NormalizedPayload) CodeSearch() *CodeSearchPayload     { return p.codeSearch }
+func (p *NormalizedPayload) HttpRequest() *HttpRequestPayload   { return p.httpRequest }
+func (p *NormalizedPayload) Generic() *GenericPayload           { return p.generic }
+func (p *NormalizedPayload) CreateTask() *CreateTaskPayload     { return p.createTask }
 func (p *NormalizedPayload) SubagentTask() *SubagentTaskPayload { return p.subagentTask }
-func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload      { return p.showPlan }
-func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload { return p.manageTodos }
-func (p *NormalizedPayload) Misc() *MiscPayload              { return p.misc }
+func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload         { return p.showPlan }
+func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload   { return p.manageTodos }
+func (p *NormalizedPayload) Misc() *MiscPayload                 { return p.misc }
 
 // MarshalJSON implements custom JSON marshaling for NormalizedPayload.
 func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
