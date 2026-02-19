@@ -93,6 +93,10 @@ type Adapter struct {
 	// Turn completion signaling
 	turnCompleteCh chan turnCompleteResult
 
+	// lastRawData holds the raw JSON of the current notification being processed.
+	// Set in handleNotification before dispatch; used by sendUpdate for OTel tracing.
+	lastRawData json.RawMessage
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -204,6 +208,8 @@ func (a *Adapter) RequiresProcessKill() bool {
 // sendUpdate safely sends an event to the updates channel.
 func (a *Adapter) sendUpdate(update AgentEvent) {
 	shared.LogNormalizedEvent(shared.ProtocolCodex, a.agentID, &update)
+	shared.TraceProtocolEvent(context.Background(), shared.ProtocolCodex, a.agentID,
+		update.Type, a.lastRawData, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -213,7 +219,8 @@ func (a *Adapter) sendUpdate(update AgentEvent) {
 
 // handleNotification processes Codex notifications and emits AgentEvents.
 func (a *Adapter) handleNotification(method string, params json.RawMessage) {
-	// Log raw event for debugging
+	// Store raw data for tracing and log for debugging
+	a.lastRawData = params
 	shared.LogRawEvent(shared.ProtocolCodex, a.agentID, method, params)
 
 	a.mu.RLock()

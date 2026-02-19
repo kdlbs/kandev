@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -76,6 +77,11 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+
+	// OTel tracing: active prompt span context.
+	// Notification spans become children of the prompt span for visual grouping.
+	promptTraceCtx context.Context
+	promptTraceMu  sync.RWMutex
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -141,6 +147,9 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
 
 	// Perform ACP handshake - this exchanges capabilities with the agent
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "initialize")
+	defer span.End()
+
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientInfo: &acp.Implementation{
@@ -149,6 +158,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		},
 	})
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("ACP initialize handshake failed: %w", err)
 	}
 
@@ -162,6 +172,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+
+	span.SetAttributes(
+		attribute.String("agent_name", a.agentInfo.Name),
+		attribute.String("agent_version", a.agentInfo.Version),
+		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
+	)
+
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
@@ -184,21 +201,30 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
+	defer span.End()
+
 	resp, err := a.acpConn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(mcpServers),
 	})
 	if err != nil {
+		span.RecordError(err)
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
 	a.sessionID = string(resp.SessionId)
+	span.SetAttributes(attribute.String("session_id", a.sessionID))
 	a.logger.Info("created new session", zap.String("session_id", a.sessionID))
+
+	// Emit initial session mode if the agent returned mode state
+	if resp.Modes != nil {
+		a.emitInitialModeState(resp.Modes)
+	}
 
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
-	select {
-	case a.updatesCh <- AgentEvent{
+	a.sendUpdate(AgentEvent{
 		Type:          streams.EventTypeSessionStatus,
 		SessionID:     a.sessionID,
 		SessionStatus: streams.SessionStatusNew,
@@ -206,10 +232,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 			"session_status": streams.SessionStatusNew,
 			"init":           true,
 		},
-	}:
-	default:
-		a.logger.Warn("updates channel full, could not emit session_status event")
-	}
+	})
 
 	return a.sessionID, nil
 }
@@ -258,20 +281,31 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
-	_, err := a.acpConn.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionId: acp.SessionId(sessionID),
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
+	defer span.End()
+
+	resp, err := a.acpConn.LoadSession(ctx, acp.LoadSessionRequest{
+		SessionId:  acp.SessionId(sessionID),
+		Cwd:        a.cfg.WorkDir,
+		McpServers: []acp.McpServer{}, // MCPs configured via CLI args; empty satisfies the required field
 	})
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("failed to load session: %w", err)
 	}
 
 	a.sessionID = sessionID
+	span.SetAttributes(attribute.String("session_id", a.sessionID))
 	a.logger.Info("loaded session", zap.String("session_id", a.sessionID))
+
+	// Emit initial session mode if the agent returned mode state
+	if resp.Modes != nil {
+		a.emitInitialModeState(resp.Modes)
+	}
 
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
-	select {
-	case a.updatesCh <- AgentEvent{
+	a.sendUpdate(AgentEvent{
 		Type:          streams.EventTypeSessionStatus,
 		SessionID:     a.sessionID,
 		SessionStatus: streams.SessionStatusResumed,
@@ -279,10 +313,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 			"session_status": streams.SessionStatusResumed,
 			"init":           true,
 		},
-	}:
-	default:
-		a.logger.Warn("updates channel full, could not emit session_status event")
-	}
+	})
 
 	return nil
 }
@@ -322,31 +353,46 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		}
 	}
 
+	// Start prompt span — notification spans become children via getPromptTraceCtx()
+	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
+	promptSpan.SetAttributes(
+		attribute.Int("prompt_length", len(finalMessage)),
+		attribute.Int("image_count", len(attachments)),
+	)
+	a.setPromptTraceCtx(promptCtx)
+
 	a.logger.Info("sending prompt",
 		zap.String("session_id", sessionID),
 		zap.Int("content_blocks", len(contentBlocks)),
 		zap.Int("image_attachments", len(attachments)))
 
-	_, err := conn.Prompt(ctx, acp.PromptRequest{
+	resp, err := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: acp.SessionId(sessionID),
 		Prompt:    contentBlocks,
 	})
+
+	// Clear prompt context and end span regardless of outcome
+	a.clearPromptTraceCtx()
 	if err != nil {
+		promptSpan.RecordError(err)
+		promptSpan.End()
 		return err
 	}
 
-	// Emit complete event via the stream.
+	stopReason := string(resp.StopReason)
+	promptSpan.SetAttributes(attribute.String("stop_reason", stopReason))
+	promptSpan.End()
+
+	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
-	// All adapters now emit complete events, eliminating the need for ReportsStatusViaStream flag.
-	a.logger.Debug("emitting complete event after prompt", zap.String("session_id", sessionID))
-	select {
-	case a.updatesCh <- AgentEvent{
+	a.logger.Debug("emitting complete event after prompt",
+		zap.String("session_id", sessionID),
+		zap.String("stop_reason", stopReason))
+	a.sendUpdate(AgentEvent{
 		Type:      streams.EventTypeComplete,
 		SessionID: sessionID,
-	}:
-	default:
-		a.logger.Warn("updates channel full, could not emit complete event")
-	}
+		Data:      map[string]any{"stop_reason": stopReason},
+	})
 
 	return nil
 }
@@ -361,6 +407,7 @@ func (a *Adapter) SetPendingContext(context string) {
 }
 
 // Cancel cancels the current operation.
+// Per ACP spec, the client must immediately mark non-finished tool calls as cancelled.
 func (a *Adapter) Cancel(ctx context.Context) error {
 	a.mu.RLock()
 	conn := a.acpConn
@@ -371,11 +418,44 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 		return fmt.Errorf("adapter not initialized")
 	}
 
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "cancel")
+	defer span.End()
+	span.SetAttributes(attribute.String("session_id", sessionID))
+
 	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
 
-	return conn.Cancel(ctx, acp.CancelNotification{
+	// Mark all active tool calls as cancelled before sending cancel to agent.
+	a.cancelActiveToolCalls(sessionID)
+
+	err := conn.Cancel(ctx, acp.CancelNotification{
 		SessionId: acp.SessionId(sessionID),
 	})
+	if err != nil {
+		span.RecordError(err)
+	}
+	return err
+}
+
+// cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
+// and clears the activeToolCalls map.
+func (a *Adapter) cancelActiveToolCalls(sessionID string) {
+	a.mu.Lock()
+	toolCalls := a.activeToolCalls
+	a.activeToolCalls = make(map[string]*streams.NormalizedPayload)
+	a.mu.Unlock()
+
+	for toolCallID, normalized := range toolCalls {
+		a.logger.Debug("cancelling active tool call",
+			zap.String("session_id", sessionID),
+			zap.String("tool_call_id", toolCallID))
+		a.sendUpdate(AgentEvent{
+			Type:              streams.EventTypeToolUpdate,
+			SessionID:         sessionID,
+			ToolCallID:        toolCallID,
+			ToolStatus:        "cancelled",
+			NormalizedPayload: normalized,
+		})
+	}
 }
 
 // Updates returns the channel for agent events.
@@ -404,6 +484,21 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 	a.permissionHandler = handler
 }
 
+// sendUpdate safely sends an event to the updates channel.
+// It checks the closed flag under read-lock to prevent panics on closed channels.
+func (a *Adapter) sendUpdate(event AgentEvent) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.closed {
+		return
+	}
+	select {
+	case a.updatesCh <- event:
+	default:
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
+}
+
 // Close releases resources held by the adapter.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
@@ -430,6 +525,31 @@ func (a *Adapter) RequiresProcessKill() bool {
 	return false
 }
 
+// getPromptTraceCtx returns the current prompt span context for child-span linking.
+// Returns context.Background() if no prompt is active.
+func (a *Adapter) getPromptTraceCtx() context.Context {
+	a.promptTraceMu.RLock()
+	defer a.promptTraceMu.RUnlock()
+	if a.promptTraceCtx != nil {
+		return a.promptTraceCtx
+	}
+	return context.Background()
+}
+
+// setPromptTraceCtx stores the prompt span context.
+func (a *Adapter) setPromptTraceCtx(ctx context.Context) {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = ctx
+}
+
+// clearPromptTraceCtx clears the prompt span context.
+func (a *Adapter) clearPromptTraceCtx() {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = nil
+}
+
 // GetACPConnection returns the underlying ACP connection for advanced usage.
 func (a *Adapter) GetACPConnection() *acp.ClientSideConnection {
 	a.mu.RLock()
@@ -439,19 +559,24 @@ func (a *Adapter) GetACPConnection() *acp.ClientSideConnection {
 
 // handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
 func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+	// Marshal once for both debug logging and tracing
+	rawData, _ := json.Marshal(n)
+
 	// Log raw event for debugging
-	if rawData, err := json.Marshal(n); err == nil {
+	if len(rawData) > 0 {
 		shared.LogRawEvent(shared.ProtocolACP, a.agentID, "session_notification", rawData)
 	}
 
 	event := a.convertNotification(n)
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
-		select {
-		case a.updatesCh <- *event:
-		default:
-			a.logger.Warn("updates channel full, dropping notification")
-		}
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			event.Type, rawData, event)
+		a.sendUpdate(*event)
+	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
+		a.logger.Warn("unhandled ACP session notification",
+			zap.String("session_id", string(n.SessionId)),
+			zap.String("update_json", string(updateJSON)))
 	}
 }
 
@@ -462,17 +587,12 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 
 	switch {
 	case u.AgentMessageChunk != nil:
-		if u.AgentMessageChunk.Content.Text != nil {
-			return &AgentEvent{
-				Type:      streams.EventTypeMessageChunk,
-				SessionID: sessionID,
-				Text:      u.AgentMessageChunk.Content.Text.Text,
-			}
-		}
+		return a.convertMessageChunk(sessionID, u.AgentMessageChunk.Content, "assistant")
+
+	case u.UserMessageChunk != nil:
+		return a.convertMessageChunk(sessionID, u.UserMessageChunk.Content, "user")
 
 	case u.AgentThoughtChunk != nil:
-		// Agent thinking/reasoning - map to the reasoning type
-		// Note: Only models with extended thinking (e.g., Opus 4.5) send agent_thought_chunk
 		if u.AgentThoughtChunk.Content.Text != nil {
 			return &AgentEvent{
 				Type:          streams.EventTypeReasoning,
@@ -503,21 +623,155 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		}
 
 	case u.AvailableCommandsUpdate != nil:
-		commands := make([]streams.AvailableCommand, len(u.AvailableCommandsUpdate.AvailableCommands))
-		for i, cmd := range u.AvailableCommandsUpdate.AvailableCommands {
-			commands[i] = streams.AvailableCommand{
-				Name:        cmd.Name,
-				Description: cmd.Description,
-			}
-		}
+		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
+
+	case u.CurrentModeUpdate != nil:
 		return &AgentEvent{
-			Type:              streams.EventTypeAvailableCommands,
-			SessionID:         sessionID,
-			AvailableCommands: commands,
+			Type:          streams.EventTypeSessionMode,
+			SessionID:     sessionID,
+			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
 		}
 	}
 
 	return nil
+}
+
+// convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.
+// For text-only messages, sets the Text field for backward compatibility.
+// For non-text content, populates ContentBlocks.
+func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock, role string) *AgentEvent {
+	event := &AgentEvent{
+		Type:      streams.EventTypeMessageChunk,
+		SessionID: sessionID,
+	}
+
+	// Only set Role for user messages (assistant is the default)
+	if role == "user" {
+		event.Role = role
+	}
+
+	// Text content goes directly into the Text field for backward compatibility
+	if content.Text != nil {
+		event.Text = content.Text.Text
+		return event
+	}
+
+	// Non-text content uses the shared converter
+	cb := a.convertContentBlockToStreams(content)
+	if cb == nil {
+		return nil
+	}
+	event.ContentBlocks = []streams.ContentBlock{*cb}
+	return event
+}
+
+// convertAvailableCommands converts an ACP AvailableCommandsUpdate to an AgentEvent,
+// including input hints when available.
+func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.SessionAvailableCommandsUpdate) *AgentEvent {
+	commands := make([]streams.AvailableCommand, len(update.AvailableCommands))
+	for i, cmd := range update.AvailableCommands {
+		ac := streams.AvailableCommand{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+		}
+		if cmd.Input != nil && cmd.Input.UnstructuredCommandInput != nil {
+			ac.InputHint = cmd.Input.UnstructuredCommandInput.Hint
+		}
+		commands[i] = ac
+	}
+	return &AgentEvent{
+		Type:              streams.EventTypeAvailableCommands,
+		SessionID:         sessionID,
+		AvailableCommands: commands,
+	}
+}
+
+// emitInitialModeState emits a session_mode event from the session response's Modes field.
+// Called after session/new and session/load to provide the initial mode state.
+func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
+	a.sendUpdate(AgentEvent{
+		Type:          streams.EventTypeSessionMode,
+		SessionID:     a.sessionID,
+		CurrentModeID: string(modes.CurrentModeId),
+	})
+}
+
+// derefStr safely dereferences a string pointer, returning empty string if nil.
+func derefStr(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+// convertToolCallContents converts ACP ToolCallContent items to our protocol-agnostic type.
+func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []streams.ToolCallContentItem {
+	if len(contents) == 0 {
+		return nil
+	}
+	items := make([]streams.ToolCallContentItem, 0, len(contents))
+	for _, c := range contents {
+		switch {
+		case c.Diff != nil:
+			items = append(items, streams.ToolCallContentItem{
+				Type:    "diff",
+				Path:    c.Diff.Path,
+				OldText: c.Diff.OldText,
+				NewText: c.Diff.NewText,
+			})
+		case c.Content != nil:
+			cb := a.convertContentBlockToStreams(c.Content.Content)
+			if cb != nil {
+				items = append(items, streams.ToolCallContentItem{
+					Type:    "content",
+					Content: cb,
+				})
+			}
+		case c.Terminal != nil:
+			items = append(items, streams.ToolCallContentItem{
+				Type:       "terminal",
+				TerminalID: c.Terminal.TerminalId,
+			})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+// convertContentBlockToStreams converts an ACP ContentBlock to a streams.ContentBlock.
+func (a *Adapter) convertContentBlockToStreams(cb acp.ContentBlock) *streams.ContentBlock {
+	switch {
+	case cb.Text != nil:
+		return &streams.ContentBlock{Type: "text", Text: cb.Text.Text}
+	case cb.Image != nil:
+		return &streams.ContentBlock{Type: "image", Data: cb.Image.Data, MimeType: cb.Image.MimeType, URI: derefStr(cb.Image.Uri)}
+	case cb.Audio != nil:
+		return &streams.ContentBlock{Type: "audio", Data: cb.Audio.Data, MimeType: cb.Audio.MimeType}
+	case cb.ResourceLink != nil:
+		return &streams.ContentBlock{
+			Type: "resource_link", URI: cb.ResourceLink.Uri, Name: cb.ResourceLink.Name,
+			MimeType: derefStr(cb.ResourceLink.MimeType), Title: derefStr(cb.ResourceLink.Title),
+			Description: derefStr(cb.ResourceLink.Description), Size: cb.ResourceLink.Size,
+		}
+	case cb.Resource != nil:
+		block := &streams.ContentBlock{Type: "resource"}
+		res := cb.Resource.Resource
+		switch {
+		case res.TextResourceContents != nil:
+			block.URI = res.TextResourceContents.Uri
+			block.Text = res.TextResourceContents.Text
+			block.MimeType = derefStr(res.TextResourceContents.MimeType)
+		case res.BlobResourceContents != nil:
+			block.URI = res.BlobResourceContents.Uri
+			block.Data = res.BlobResourceContents.Blob
+			block.MimeType = derefStr(res.BlobResourceContents.MimeType)
+		}
+		return block
+	default:
+		return nil
+	}
 }
 
 // convertToolCallUpdate converts a ToolCall notification to an AgentEvent.
@@ -559,7 +813,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 
 	status := string(tc.Status)
 	if status == "" {
-		status = "running"
+		status = "in_progress"
 	}
 
 	return &AgentEvent{
@@ -570,6 +824,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		ToolTitle:         tc.Title,
 		ToolStatus:        status,
 		NormalizedPayload: normalizedPayload,
+		ToolCallContents:  a.convertToolCallContents(tc.Content),
 	}
 }
 
@@ -611,6 +866,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		ToolCallID:        toolCallID,
 		ToolStatus:        status,
 		NormalizedPayload: normalizedPayload,
+		ToolCallContents:  a.convertToolCallContents(tcu.Content),
 	}
 }
 
@@ -620,8 +876,14 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
 	a.mu.RLock()
 	handler := a.permissionHandler
-	sessionID := a.sessionID
+	fallbackSessionID := a.sessionID
 	a.mu.RUnlock()
+
+	// Prefer session ID from the request; fall back to adapter-level session ID
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = fallbackSessionID
+	}
 
 	// Emit a tool_call event so a message is created in the database.
 	// This is needed because permission requests bypass the normal ToolCall notification flow.
@@ -636,13 +898,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	}
 
 	// Emit the tool_call event
-	select {
-	case a.updatesCh <- toolCallEvent:
-		a.logger.Debug("emitted tool_call event for permission request",
-			zap.String("tool_call_id", req.ToolCallID))
-	default:
-		a.logger.Warn("updates channel full, could not emit tool_call event for permission")
-	}
+	a.sendUpdate(toolCallEvent)
+	a.logger.Debug("emitted tool_call event for permission request",
+		zap.String("tool_call_id", req.ToolCallID))
 
 	if handler == nil {
 		// Auto-approve if no handler

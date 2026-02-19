@@ -99,6 +99,10 @@ type Adapter struct {
 	// Used to filter out user messages from being processed as agent output
 	messageRoles map[string]string
 
+	// lastRawData holds the raw JSON of the current event being processed.
+	// Set in handleSDKEvent before dispatch; used by sendUpdate for OTel tracing.
+	lastRawData json.RawMessage
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -539,6 +543,8 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	}
 
 	shared.LogNormalizedEvent(shared.ProtocolOpenCode, a.agentID, &event)
+	shared.TraceProtocolEvent(context.Background(), shared.ProtocolOpenCode, a.agentID,
+		event.Type, a.lastRawData, &event)
 	select {
 	case a.updatesCh <- event:
 	default:
@@ -549,7 +555,8 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 
 // handleSDKEvent processes events from the OpenCode SSE stream
 func (a *Adapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
-	// Log raw event for debugging
+	// Store raw data for tracing and log for debugging
+	a.lastRawData = event.Properties
 	shared.LogRawEvent(shared.ProtocolOpenCode, a.agentID, event.Type, event.Properties)
 
 	a.mu.RLock()

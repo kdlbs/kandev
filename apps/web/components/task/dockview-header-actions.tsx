@@ -305,6 +305,22 @@ function RightTopGroupActions() {
   );
 }
 
+function SessionModeBadge() {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const modeId = useAppStore((state) => {
+    if (!activeSessionId) return null;
+    return state.sessionMode.bySessionId[activeSessionId] ?? null;
+  });
+
+  if (!modeId) return null;
+
+  return (
+    <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+      {modeId}
+    </span>
+  );
+}
+
 function CenterRightActions() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const repository = useAppStore((state) => {
@@ -337,18 +353,21 @@ function CenterRightActions() {
     }
   }, [addBrowserPanel, hasDevScript, activeSessionId, upsertProcessStatus, setActiveProcess]);
 
-  if (!hasDevScript) return null;
-
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      className="h-6 w-6 p-0 cursor-pointer"
-      onClick={handleStartBrowser}
-      title="Open browser preview"
-    >
-      <IconDeviceDesktop className="h-3.5 w-3.5" />
-    </Button>
+    <div className="flex items-center gap-1">
+      <SessionModeBadge />
+      {hasDevScript && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 cursor-pointer"
+          onClick={handleStartBrowser}
+          title="Open browser preview"
+        >
+          <IconDeviceDesktop className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }
 

@@ -107,6 +107,11 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 		if event.Error != "" {
 			errorMsg = event.Error
 		}
+	} else if event.Data != nil {
+		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
+		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
+			stopReason = sr
+		}
 	}
 	select {
 	case execution.promptDoneCh <- PromptCompletionSignal{

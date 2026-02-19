@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -53,6 +54,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case "available_commands":
 		s.handleAvailableCommandsEvent(ctx, payload)
+
+	case "session_mode":
+		s.handleSessionModeEvent(ctx, payload)
 
 	case "permission_cancelled":
 		s.handlePermissionCancelledEvent(ctx, payload)
@@ -419,6 +423,23 @@ func (s *Service) handleAvailableCommandsEvent(ctx context.Context, payload *lif
 	}
 	subject := events.BuildAvailableCommandsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AvailableCommandsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModeEvent broadcasts session_mode events to the WebSocket for the frontend.
+func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || s.eventBus == nil || payload.Data.CurrentModeID == "" {
+		return
+	}
+	eventPayload := lifecycle.SessionModeEventPayload{
+		TaskID:        payload.TaskID,
+		SessionID:     sessionID,
+		AgentID:       payload.AgentID,
+		CurrentModeID: payload.Data.CurrentModeID,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionModeSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))
 }
 
 // handlePermissionCancelledEvent marks the pending permission message as expired.

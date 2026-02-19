@@ -78,6 +78,10 @@ type CopilotAdapter struct {
 	// (to avoid double-accumulating from both delta and full message events)
 	receivedDeltas bool
 
+	// lastRawData holds the raw JSON of the current event being processed.
+	// Set in handleEvent before dispatch; used by sendUpdate for OTel tracing.
+	lastRawData json.RawMessage
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -484,6 +488,8 @@ func (a *CopilotAdapter) Close() error {
 // sendUpdate safely sends an event to the updates channel.
 func (a *CopilotAdapter) sendUpdate(update AgentEvent) {
 	shared.LogNormalizedEvent(shared.ProtocolCopilot, a.cfg.AgentID, &update)
+	shared.TraceProtocolEvent(context.Background(), shared.ProtocolCopilot, a.cfg.AgentID,
+		update.Type, a.lastRawData, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -493,9 +499,10 @@ func (a *CopilotAdapter) sendUpdate(update AgentEvent) {
 
 // handleEvent processes events from the Copilot SDK client.
 func (a *CopilotAdapter) handleEvent(evt copilot.SessionEvent) {
-	// Log raw event for debugging
-	if rawData, err := json.Marshal(evt); err == nil {
-		shared.LogRawEvent(shared.ProtocolCopilot, a.cfg.AgentID, string(evt.Type), rawData)
+	// Marshal once for debug logging and tracing
+	a.lastRawData, _ = json.Marshal(evt)
+	if len(a.lastRawData) > 0 {
+		shared.LogRawEvent(shared.ProtocolCopilot, a.cfg.AgentID, string(evt.Type), a.lastRawData)
 	}
 
 	a.mu.RLock()

@@ -2,10 +2,12 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -124,9 +126,9 @@ func (sm *SessionManager) createOrLoadSession(
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
 		if err != nil {
-			// If session/load fails with "Method not found" or "LoadSession capability is false",
-			// fall back to creating a new session. This handles agents that don't support session/load.
-			if strings.Contains(err.Error(), "Method not found") ||
+			// If session/load fails because the agent doesn't support it, fall back to session/new.
+			// Check for: JSON-RPC -32601 (Method not found) or our own capability check string.
+			if isMethodNotFoundErr(err) ||
 				strings.Contains(err.Error(), "LoadSession capability is false") {
 				sm.logger.Warn("agent does not support session loading, falling back to session/new",
 					zap.String("agent_type", agentConfig.ID()),
@@ -519,4 +521,13 @@ func (sm *SessionManager) SendPrompt(
 
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
 	return sm.waitForPromptDone(ctx, execution)
+}
+
+// isMethodNotFoundErr checks if an error wraps a JSON-RPC "Method not found" error (-32601).
+func isMethodNotFoundErr(err error) bool {
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		return reqErr.Code == -32601
+	}
+	return false
 }

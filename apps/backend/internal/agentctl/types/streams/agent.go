@@ -39,6 +39,9 @@ const (
 
 	// EventTypeAvailableCommands indicates available slash commands from the agent.
 	EventTypeAvailableCommands = "available_commands"
+
+	// EventTypeSessionMode indicates the agent's session mode has changed.
+	EventTypeSessionMode = "session_mode"
 )
 
 // Session status constants for EventTypeSessionStatus events.
@@ -161,6 +164,26 @@ type AgentEvent struct {
 
 	// AvailableCommands contains the slash commands available from the agent.
 	AvailableCommands []AvailableCommand `json:"available_commands,omitempty"`
+
+	// --- Multimodal content fields ---
+
+	// ContentBlocks contains multimodal content (images, audio, resource links, etc.).
+	// Text-only messages still use the Text field for backward compatibility.
+	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
+
+	// Role distinguishes user vs assistant messages (e.g., during session/load replay).
+	// Values: "user", "assistant". Empty defaults to "assistant".
+	Role string `json:"role,omitempty"`
+
+	// --- Tool call content fields (for "tool_call" and "tool_update" types) ---
+
+	// ToolCallContents contains rich content produced by a tool call (diffs, text, terminals).
+	ToolCallContents []ToolCallContentItem `json:"tool_call_contents,omitempty"`
+
+	// --- Session mode fields (for "session_mode" type) ---
+
+	// CurrentModeID is the active session mode identifier (e.g., "code", "ask", "architect").
+	CurrentModeID string `json:"current_mode_id,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -182,4 +205,56 @@ type AvailableCommand struct {
 
 	// Description is a human-readable description of the command.
 	Description string `json:"description,omitempty"`
+
+	// InputHint is a hint displayed when the command expects additional input.
+	InputHint string `json:"input_hint,omitempty"`
+}
+
+// ContentBlock represents a multimodal content block from the agent.
+// Supports text, image, audio, resource_link, and resource types.
+type ContentBlock struct {
+	// Type identifies the content block type: "text", "image", "audio", "resource_link", "resource".
+	Type string `json:"type"`
+
+	// Text contains text content (for "text" type).
+	Text string `json:"text,omitempty"`
+
+	// Data contains base64-encoded binary data (for "image" and "audio" types).
+	Data string `json:"data,omitempty"`
+
+	// MimeType identifies the media type (for "image", "audio", "resource_link" types).
+	MimeType string `json:"mime_type,omitempty"`
+
+	// URI is the resource location (for "image", "resource_link" types).
+	URI string `json:"uri,omitempty"`
+
+	// Name identifies the resource (for "resource_link" type).
+	Name string `json:"name,omitempty"`
+
+	// Title is a human-readable title (for "resource_link" type).
+	Title string `json:"title,omitempty"`
+
+	// Description provides additional context (for "resource_link" type).
+	Description string `json:"description,omitempty"`
+
+	// Size is the resource size in bytes (for "resource_link" type).
+	Size *int `json:"size,omitempty"`
+}
+
+// ToolCallContentItem represents a content item produced by a tool call.
+// This is a discriminated union: exactly one of Content, Diff, or Terminal fields will be set.
+type ToolCallContentItem struct {
+	// Type identifies the variant: "content", "diff", or "terminal".
+	Type string `json:"type"`
+
+	// Content is a standard content block (text, image, resource). Set when Type is "content".
+	Content *ContentBlock `json:"content,omitempty"`
+
+	// Diff fields are set when Type is "diff".
+	Path    string  `json:"path,omitempty"`
+	OldText *string `json:"old_text,omitempty"` // nil for new files
+	NewText string  `json:"new_text,omitempty"`
+
+	// TerminalID is set when Type is "terminal".
+	TerminalID string `json:"terminal_id,omitempty"`
 }

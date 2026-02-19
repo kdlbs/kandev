@@ -122,7 +122,8 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 	}
 
 	// Create agentctl client pointing to the instance port
-	client := agentctl.NewClient(r.host, resp.Port, r.logger)
+	client := agentctl.NewClient(r.host, resp.Port, r.logger,
+		agentctl.WithExecutionID(req.InstanceID))
 
 	// Extract runtime-specific values from metadata
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)

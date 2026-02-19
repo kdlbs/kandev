@@ -48,22 +48,12 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		return fmt.Errorf("failed to cancel agent: %w", err)
 	}
 
-	// Clear streaming state after cancel to ensure clean state for next prompt
-	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""
-	execution.currentThinkingID = ""
-	execution.messageMu.Unlock()
+	// Don't clear buffers or mark ready here.
+	// The agent will respond to the original prompt with StopReason=cancelled,
+	// which triggers handleCompleteEvent() to properly flush buffers and mark state.
+	// Clearing here would race with in-flight notifications and lose content.
 
-	// Mark as ready for follow-up prompts after successful cancel
-	if err := m.MarkReady(executionID); err != nil {
-		m.logger.Warn("failed to mark execution as ready after cancel",
-			zap.String("execution_id", executionID),
-			zap.Error(err))
-	}
-
-	m.logger.Info("agent turn cancelled successfully",
+	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
 	return nil

@@ -152,6 +152,7 @@ const (
 	ActionSessionTurnStarted       = "session.turn.started"
 	ActionSessionTurnCompleted     = "session.turn.completed"
 	ActionSessionAvailableCommands = "session.available_commands"
+	ActionSessionModeChanged       = "session.mode_changed"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"
