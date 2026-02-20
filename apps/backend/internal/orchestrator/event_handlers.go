@@ -31,13 +31,13 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return
 	}
-	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.ACPSessionID)
+	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.ACPSessionID, "")
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
-// This is called both from handleACPSessionCreated (for ACP-based agents) and from
-// handleAgentStreamEvent (for stream-based agents like Claude Code).
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID string) {
+// This is called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
+// The optional lastMessageUUID is persisted alongside the token for --resume-session-at support.
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load task session for resume token storage",
@@ -62,6 +62,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 		Status:           "ready",
 		Resumable:        resumable,
 		ResumeToken:      acpSessionID,
+		LastMessageUUID:  lastMessageUUID,
 		AgentExecutionID: session.AgentExecutionID,
 		ContainerID:      session.ContainerID,
 	}
@@ -82,5 +83,6 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 	s.logger.Debug("stored resume token for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
-		zap.String("resume_token", acpSessionID))
+		zap.String("resume_token", acpSessionID),
+		zap.String("last_message_uuid", lastMessageUUID))
 }

@@ -246,8 +246,8 @@ func TestContentBlock_Types(t *testing.T) {
 				if block.ToolUseID != "tool123" {
 					t.Errorf("ToolUseID = %q, want %q", block.ToolUseID, "tool123")
 				}
-				if block.Content != "output" {
-					t.Errorf("Content = %q, want %q", block.Content, "output")
+				if block.GetContentString() != "output" {
+					t.Errorf("Content = %q, want %q", block.GetContentString(), "output")
 				}
 			},
 		},
@@ -436,5 +436,249 @@ func TestIncomingControlResponse_JSONParsing(t *testing.T) {
 	}
 	if errorResp.Error != "Something went wrong" {
 		t.Errorf("Error = %q, want %q", errorResp.Error, "Something went wrong")
+	}
+}
+
+func TestCLIMessage_IsReplay_IsSynthetic(t *testing.T) {
+	tests := []struct {
+		name          string
+		json          string
+		wantReplay    bool
+		wantSynthetic bool
+	}{
+		{
+			name:          "replay user message",
+			json:          `{"type":"user","uuid":"abc","session_id":"sess-1","isReplay":true,"message":{"role":"user","content":"hello"}}`,
+			wantReplay:    true,
+			wantSynthetic: false,
+		},
+		{
+			name:          "synthetic user message",
+			json:          `{"type":"user","uuid":"abc","session_id":"sess-1","isSynthetic":true,"message":{"role":"user","content":"checkpoint"}}`,
+			wantReplay:    false,
+			wantSynthetic: true,
+		},
+		{
+			name:          "replay and synthetic",
+			json:          `{"type":"user","uuid":"abc","isReplay":true,"isSynthetic":true,"message":{"role":"user","content":"old"}}`,
+			wantReplay:    true,
+			wantSynthetic: true,
+		},
+		{
+			name:          "neither replay nor synthetic",
+			json:          `{"type":"user","uuid":"abc","message":{"role":"user","content":"hello"}}`,
+			wantReplay:    false,
+			wantSynthetic: false,
+		},
+		{
+			name:          "assistant message has no replay fields",
+			json:          `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`,
+			wantReplay:    false,
+			wantSynthetic: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var msg CLIMessage
+			if err := json.Unmarshal([]byte(tt.json), &msg); err != nil {
+				t.Fatalf("failed to parse: %v", err)
+			}
+			if msg.IsReplay != tt.wantReplay {
+				t.Errorf("IsReplay = %v, want %v", msg.IsReplay, tt.wantReplay)
+			}
+			if msg.IsSynthetic != tt.wantSynthetic {
+				t.Errorf("IsSynthetic = %v, want %v", msg.IsSynthetic, tt.wantSynthetic)
+			}
+		})
+	}
+}
+
+func TestHookConfig_ToMap(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     HookConfig
+		wantKeys   []string
+		absentKeys []string
+	}{
+		{
+			name:       "empty config",
+			config:     HookConfig{},
+			wantKeys:   nil,
+			absentKeys: []string{"PreToolUse", "Stop"},
+		},
+		{
+			name: "PreToolUse only",
+			config: HookConfig{
+				PreToolUse: []HookEntry{
+					{Matcher: `^Bash$`, HookCallbackIDs: []string{"tool_approval"}},
+				},
+			},
+			wantKeys:   []string{"PreToolUse"},
+			absentKeys: []string{"Stop"},
+		},
+		{
+			name: "Stop only",
+			config: HookConfig{
+				Stop: []HookEntry{
+					{HookCallbackIDs: []string{"stop_git_check"}},
+				},
+			},
+			wantKeys:   []string{"Stop"},
+			absentKeys: []string{"PreToolUse"},
+		},
+		{
+			name: "both hooks",
+			config: HookConfig{
+				PreToolUse: []HookEntry{
+					{Matcher: `^Bash$`, HookCallbackIDs: []string{"tool_approval"}},
+				},
+				Stop: []HookEntry{
+					{HookCallbackIDs: []string{"stop_git_check"}},
+				},
+			},
+			wantKeys: []string{"PreToolUse", "Stop"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.ToMap()
+			for _, key := range tt.wantKeys {
+				if _, ok := result[key]; !ok {
+					t.Errorf("ToMap() missing key %q", key)
+				}
+			}
+			for _, key := range tt.absentKeys {
+				if _, ok := result[key]; ok {
+					t.Errorf("ToMap() should not have key %q", key)
+				}
+			}
+		})
+	}
+}
+
+func TestHookConfig_ToMap_PreservesEntries(t *testing.T) {
+	cfg := HookConfig{
+		PreToolUse: []HookEntry{
+			{Matcher: `^Bash$`, HookCallbackIDs: []string{"tool_approval"}},
+			{Matcher: `^Edit$`, HookCallbackIDs: []string{"auto_approve"}},
+		},
+	}
+	result := cfg.ToMap()
+	entries, ok := result["PreToolUse"].([]HookEntry)
+	if !ok {
+		t.Fatal("PreToolUse is not []HookEntry")
+	}
+	if len(entries) != 2 {
+		t.Errorf("PreToolUse has %d entries, want 2", len(entries))
+	}
+	if entries[0].Matcher != `^Bash$` {
+		t.Errorf("entries[0].Matcher = %q, want %q", entries[0].Matcher, `^Bash$`)
+	}
+	if entries[1].HookCallbackIDs[0] != "auto_approve" {
+		t.Errorf("entries[1].HookCallbackIDs[0] = %q, want %q", entries[1].HookCallbackIDs[0], "auto_approve")
+	}
+}
+
+func TestContentBlock_GetContentString(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want string
+	}{
+		{
+			name: "string content",
+			json: `{"type":"tool_result","tool_use_id":"t1","content":"hello world"}`,
+			want: "hello world",
+		},
+		{
+			name: "array of text blocks",
+			json: `{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"line 1"},{"type":"text","text":"line 2"}]}`,
+			want: "line 1\nline 2",
+		},
+		{
+			name: "single text block array",
+			json: `{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"only line"}]}`,
+			want: "only line",
+		},
+		{
+			name: "empty content",
+			json: `{"type":"tool_result","tool_use_id":"t1"}`,
+			want: "",
+		},
+		{
+			name: "empty string content",
+			json: `{"type":"tool_result","tool_use_id":"t1","content":""}`,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var block ContentBlock
+			if err := json.Unmarshal([]byte(tt.json), &block); err != nil {
+				t.Fatalf("failed to parse: %v", err)
+			}
+			got := block.GetContentString()
+			if got != tt.want {
+				t.Errorf("GetContentString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCLIMessage_RateLimitEventType(t *testing.T) {
+	// Claude Code sends "rate_limit_event", not "rate_limit"
+	jsonStr := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"},"session_id":"sess-1"}`
+	var msg CLIMessage
+	if err := json.Unmarshal([]byte(jsonStr), &msg); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	if msg.Type != MessageTypeRateLimit {
+		t.Errorf("Type = %q, want %q (MessageTypeRateLimit)", msg.Type, MessageTypeRateLimit)
+	}
+}
+
+func TestCLIMessage_TotalCostUSD(t *testing.T) {
+	// Claude Code sends "total_cost_usd", not "cost_usd"
+	jsonStr := `{"type":"result","total_cost_usd":0.123,"session_id":"sess-1"}`
+	var msg CLIMessage
+	if err := json.Unmarshal([]byte(jsonStr), &msg); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	if msg.CostUSD != 0.123 {
+		t.Errorf("CostUSD = %f, want %f", msg.CostUSD, 0.123)
+	}
+}
+
+func TestCLIMessage_ToolUseResult(t *testing.T) {
+	// Sub-agent task result with rich metadata
+	jsonStr := `{
+		"type":"user",
+		"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"}]},
+		"tool_use_result":{"status":"completed","agentId":"abc","totalDurationMs":1500,"totalTokens":4000,"totalToolUseCount":2},
+		"session_id":"sess-1"
+	}`
+	var msg CLIMessage
+	if err := json.Unmarshal([]byte(jsonStr), &msg); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	if len(msg.ToolUseResult) == 0 {
+		t.Fatal("ToolUseResult is empty")
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(msg.ToolUseResult, &result); err != nil {
+		t.Fatalf("failed to parse ToolUseResult: %v", err)
+	}
+	if result["status"] != "completed" {
+		t.Errorf("status = %v, want %q", result["status"], "completed")
+	}
+	if result["agentId"] != "abc" {
+		t.Errorf("agentId = %v, want %q", result["agentId"], "abc")
+	}
+	if result["totalDurationMs"].(float64) != 1500 {
+		t.Errorf("totalDurationMs = %v, want %v", result["totalDurationMs"], 1500)
 	}
 }

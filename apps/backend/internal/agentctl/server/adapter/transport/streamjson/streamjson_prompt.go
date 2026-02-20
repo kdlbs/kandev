@@ -58,6 +58,12 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		promptSpan.End()
 	}()
 
+	// Trace the outgoing user message payload
+	a.traceOutgoingSend("prompt", &claudecode.UserMessage{
+		Type:    claudecode.MessageTypeUser,
+		Message: claudecode.UserMessageBody{Role: "user", Content: finalMessage},
+	})
+
 	a.logger.Info("sending prompt",
 		zap.String("session_id", sessionID),
 		zap.String("operation_id", operationID),
@@ -191,11 +197,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	a.logger.Info("cancelling operation")
 
 	// Send interrupt control request
-	return client.SendControlRequest(&claudecode.SDKControlRequest{
+	req := &claudecode.SDKControlRequest{
 		Type:      claudecode.MessageTypeControlRequest,
 		RequestID: uuid.New().String(),
 		Request: claudecode.SDKControlRequestBody{
 			Subtype: claudecode.SubtypeInterrupt,
 		},
-	})
+	}
+	a.traceOutgoingControl("interrupt", req)
+	return client.SendControlRequest(req)
 }

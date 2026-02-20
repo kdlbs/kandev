@@ -143,6 +143,15 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	a.streamingTextSentThisTurn = false
 	a.mu.Unlock()
 
+	// Commit pending assistant UUID as last message UUID
+	a.mu.Lock()
+	if a.pendingAssistantUUID != "" {
+		a.lastMessageUUID = a.pendingAssistantUUID
+		a.pendingAssistantUUID = ""
+	}
+	lastMsgUUID := a.lastMessageUUID
+	a.mu.Unlock()
+
 	// Build error message from errors array if available
 	errorMsg := a.extractResultErrorMsg(msg)
 
@@ -158,12 +167,16 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	if len(msg.Errors) > 0 {
 		completeData["errors"] = msg.Errors
 	}
+	if lastMsgUUID != "" {
+		completeData["last_message_uuid"] = lastMsgUUID
+	}
 	a.sendUpdate(AgentEvent{
-		Type:        streams.EventTypeComplete,
-		SessionID:   sessionID,
-		OperationID: operationID,
-		Error:       errorMsg,
-		Data:        completeData,
+		Type:            streams.EventTypeComplete,
+		SessionID:       sessionID,
+		OperationID:     operationID,
+		Error:           errorMsg,
+		Data:            completeData,
+		LastMessageUUID: lastMsgUUID,
 	})
 
 	// Signal completion

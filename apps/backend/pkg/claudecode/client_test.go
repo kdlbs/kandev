@@ -363,3 +363,82 @@ func TestClient_HandleControlResponse_UnknownRequest(t *testing.T) {
 
 	// Test passes if no panic occurs - the unknown response is just logged and ignored
 }
+
+func TestClient_HandleControlCancelRequest(t *testing.T) {
+	input := `{"type":"control_cancel_request","request_id":"cancel-req-123"}` + "\n"
+
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(input), newTestLogger())
+
+	var receivedID string
+	var mu sync.Mutex
+
+	client.SetCancelHandler(func(requestID string) {
+		mu.Lock()
+		receivedID = requestID
+		mu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if receivedID != "cancel-req-123" {
+		t.Errorf("cancel handler received ID = %q, want %q", receivedID, "cancel-req-123")
+	}
+}
+
+func TestClient_HandleControlCancelRequest_NoHandler(t *testing.T) {
+	// Without a cancel handler, the cancel request should be logged and ignored
+	input := `{"type":"control_cancel_request","request_id":"cancel-req-456"}` + "\n"
+
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(input), newTestLogger())
+
+	// Don't register a cancel handler
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	// Test passes if no panic occurs
+}
+
+func TestClient_HandleControlCancelRequest_NotForwardedAsMessage(t *testing.T) {
+	// control_cancel_request should be handled by the cancel handler,
+	// not forwarded to the message handler
+	input := `{"type":"control_cancel_request","request_id":"cancel-req-789"}` + "\n"
+
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(input), newTestLogger())
+
+	var messageCount int
+	var mu sync.Mutex
+
+	client.SetCancelHandler(func(requestID string) {})
+	client.SetMessageHandler(func(msg *CLIMessage) {
+		mu.Lock()
+		messageCount++
+		mu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if messageCount != 0 {
+		t.Errorf("message handler received %d messages, want 0", messageCount)
+	}
+}

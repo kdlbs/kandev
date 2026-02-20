@@ -100,10 +100,13 @@ type DiscoveryCapabilities struct {
 
 // CommandOptions are passed to BuildCommand.
 type CommandOptions struct {
-	Model            string
-	SessionID        string // for --resume flag
-	AutoApprove      bool
-	PermissionValues map[string]bool // e.g. {"allow_indexing": true}
+	Model               string
+	SessionID           string // for --resume flag
+	ResumeAtMessageUUID string // for --resume-session-at flag (truncate conversation)
+	AutoApprove         bool
+	PermissionPolicy    string          // "autonomous", "supervised", "plan"
+	PermissionValues    map[string]bool // e.g. {"allow_indexing": true}
+	AgentType           string          // for --agent flag (e.g. "task" for subagent)
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.

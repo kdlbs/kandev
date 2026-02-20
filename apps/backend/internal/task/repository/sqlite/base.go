@@ -80,7 +80,17 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureDefaultExecutorsAndEnvironments(); err != nil {
 		return err
 	}
+	if err := r.runMigrations(); err != nil {
+		return err
+	}
 	return r.ensureWorkspaceIndexes()
+}
+
+// runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
+func (r *Repository) runMigrations() error {
+	// Add last_message_uuid column to executors_running (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
+	return nil
 }
 
 func (r *Repository) initCoreSchema() error {

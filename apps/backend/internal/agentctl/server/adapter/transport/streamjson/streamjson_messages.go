@@ -1,28 +1,37 @@
 package streamjson
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/pkg/claudecode"
 	"go.uber.org/zap"
 )
 
-// handleSystemMessage processes system init messages.
-// Note: System messages are session initialization, NOT turn completion.
-// Turn completion is signaled by result messages.
+// handleSystemMessage processes system messages.
+// Subtypes:
+//   - "init" (or empty): Session initialization with slash commands and status
+//   - "task_started": Sub-agent task lifecycle event — logged and skipped
+//
+// Note: Turn completion is signaled by result messages, not system messages.
 func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
+	// Skip non-init system messages (e.g. task_started for sub-agent lifecycle)
+	if msg.Subtype != "" && msg.Subtype != "init" {
+		a.logger.Debug("skipping system message with subtype",
+			zap.String("subtype", msg.Subtype),
+			zap.String("session_id", msg.SessionID))
+		return
+	}
+
 	a.logger.Info("received system message",
 		zap.String("session_id", msg.SessionID),
 		zap.String("status", msg.SessionStatus),
 		zap.Int("slash_commands_count", len(msg.SlashCommands)))
 
-	// Update session ID if provided
+	// Note: session ID is updated centrally in handleMessage() for all message types.
 	a.mu.Lock()
-	if msg.SessionID != "" {
-		a.sessionID = msg.SessionID
-	}
 	alreadySent := a.sessionStatusSent
 	a.sessionStatusSent = true
 	a.mu.Unlock()
@@ -159,6 +168,13 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 		return
 	}
 
+	// Track assistant message UUID (committed on result)
+	if msg.UUID != "" {
+		a.mu.Lock()
+		a.pendingAssistantUUID = msg.UUID
+		a.mu.Unlock()
+	}
+
 	// Extract parent tool use ID for subagent nesting
 	parentToolUseID := msg.ParentToolUseID
 
@@ -215,35 +231,64 @@ func (a *Adapter) handleAssistantMessage(msg *claudecode.CLIMessage, sessionID, 
 	}
 }
 
-// handleUserMessage processes user messages containing tool results or slash command output.
+// handleRateLimitMessage processes rate limit notifications from the Anthropic API.
+func (a *Adapter) handleRateLimitMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
+	message := "Rate limited by API"
+	if len(msg.RateLimitInfo) > 0 {
+		message = string(msg.RateLimitInfo)
+	}
+
+	a.logger.Warn("rate limit event received",
+		zap.String("session_id", sessionID),
+		zap.String("message", message))
+
+	a.sendUpdate(AgentEvent{
+		Type:             streams.EventTypeRateLimit,
+		SessionID:        sessionID,
+		OperationID:      operationID,
+		RateLimitMessage: message,
+	})
+}
+
+// handleUserMessage processes user messages containing tool results.
 // Claude Code sends tool results back as user messages with tool_result content blocks.
-// For slash commands, content may be a plain string wrapped in <local-command-stdout> tags.
+//
+// User message variants (from Claude Code CLI):
+//   - isReplay=true: Historical context echoed on resume — drop entirely
+//   - String content: Echoed user prompt or slash command output — skip
+//     (slash command output is delivered via the result message instead)
+//   - Content blocks with tool_result: Tool results — process normally
 func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
 	if msg.Message == nil {
 		return
 	}
 
-	// Check if content is a string (slash command output)
+	// Clear pending assistant UUID — a new user message means any previous
+	// assistant message's UUID should not be committed on the next result.
+	// User messages are immediately safe to reference for resume.
+	a.mu.Lock()
+	a.pendingAssistantUUID = ""
+	if msg.UUID != "" {
+		a.lastMessageUUID = msg.UUID
+	}
+	a.mu.Unlock()
+
+	// Skip replay messages — historical context echoed on resume.
+	// UUID tracking above still fires for --resume-session-at support.
+	if msg.IsReplay {
+		a.logger.Debug("skipping replay user message",
+			zap.String("session_id", sessionID),
+			zap.String("uuid", msg.UUID))
+		return
+	}
+
+	// Skip string-content user messages (echoed prompts).
+	// Slash command output also arrives here but is always isReplay=true (handled above).
+	// The output is delivered via the result message instead.
 	if contentStr := msg.Message.GetContentString(); contentStr != "" {
-		// Extract text from <local-command-stdout> tags if present
-		text := contentStr
-		if strings.HasPrefix(text, "<local-command-stdout>") && strings.HasSuffix(text, "</local-command-stdout>") {
-			text = strings.TrimPrefix(text, "<local-command-stdout>")
-			text = strings.TrimSuffix(text, "</local-command-stdout>")
-		}
-
-		if text != "" {
-			a.logger.Info("received user message with string content (slash command output)",
-				zap.String("session_id", sessionID),
-				zap.Int("content_length", len(text)))
-
-			a.sendUpdate(AgentEvent{
-				Type:        streams.EventTypeMessageChunk,
-				SessionID:   sessionID,
-				OperationID: operationID,
-				Text:        text,
-			})
-		}
+		a.logger.Debug("skipping echoed user message",
+			zap.String("session_id", sessionID),
+			zap.Int("content_length", len(contentStr)))
 		return
 	}
 
@@ -261,8 +306,14 @@ func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, opera
 		a.mu.Unlock()
 
 		// Enrich payload with result content
-		if payload != nil && block.Content != "" {
-			a.normalizer.NormalizeToolResult(payload, block.Content)
+		contentStr := block.GetContentString()
+		if payload != nil && contentStr != "" {
+			a.normalizer.NormalizeToolResult(payload, contentStr)
+		}
+
+		// Enrich payload with structured tool_use_result metadata
+		if payload != nil && len(msg.ToolUseResult) > 0 {
+			a.enrichFromToolUseResult(payload, msg.ToolUseResult)
 		}
 
 		// If there's an error, set the error flag on the payload
@@ -287,5 +338,79 @@ func (a *Adapter) handleUserMessage(msg *claudecode.CLIMessage, sessionID, opera
 			ToolStatus:        status,
 			NormalizedPayload: payload,
 		})
+	}
+}
+
+// enrichFromToolUseResult populates payload-specific result fields from the
+// top-level tool_use_result JSON on user messages.
+//
+// Supported formats:
+//   - TodoWrite: {oldTodos, newTodos} → populates ManageTodos items from newTodos
+//   - Task (sub-agent): {status, agentId, totalDurationMs, totalTokens, totalToolUseCount}
+func (a *Adapter) enrichFromToolUseResult(payload *streams.NormalizedPayload, raw json.RawMessage) {
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return
+	}
+
+	switch payload.Kind() {
+	case streams.ToolKindManageTodos:
+		a.enrichTodoResult(payload, data)
+	case streams.ToolKindSubagentTask:
+		a.enrichSubagentResult(payload, data)
+	}
+}
+
+// enrichTodoResult populates ManageTodos items from the newTodos array in tool_use_result.
+func (a *Adapter) enrichTodoResult(payload *streams.NormalizedPayload, data map[string]any) {
+	if payload.ManageTodos() == nil {
+		return
+	}
+	newTodos, ok := data["newTodos"].([]any)
+	if !ok || len(newTodos) == 0 {
+		return
+	}
+	items := make([]streams.TodoItem, 0, len(newTodos))
+	for _, item := range newTodos {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		desc := shared.GetString(itemMap, "content")
+		if desc == "" {
+			desc = shared.GetString(itemMap, "description")
+		}
+		items = append(items, streams.TodoItem{
+			ID:          shared.GetString(itemMap, "id"),
+			Description: desc,
+			Status:      shared.GetString(itemMap, "status"),
+			ActiveForm:  shared.GetString(itemMap, "activeForm"),
+		})
+	}
+	if len(items) > 0 {
+		payload.ManageTodos().Items = items
+	}
+}
+
+// enrichSubagentResult populates SubagentTask result fields from tool_use_result.
+func (a *Adapter) enrichSubagentResult(payload *streams.NormalizedPayload, data map[string]any) {
+	if payload.SubagentTask() == nil {
+		return
+	}
+	st := payload.SubagentTask()
+	if v := shared.GetString(data, "status"); v != "" {
+		st.Status = v
+	}
+	if v := shared.GetString(data, "agentId"); v != "" {
+		st.AgentID = v
+	}
+	if v, ok := data["totalDurationMs"].(float64); ok {
+		st.DurationMs = int64(v)
+	}
+	if v, ok := data["totalTokens"].(float64); ok {
+		st.TotalTokens = int64(v)
+	}
+	if v, ok := data["totalToolUseCount"].(float64); ok {
+		st.ToolUseCount = int(v)
 	}
 }

@@ -78,23 +78,39 @@ func (a *ClaudeCode) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *ClaudeCode) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.29",
+	b := Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.50",
 		"-p", "--output-format=stream-json", "--input-format=stream-json",
 		"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
-		"--setting-sources=user,project", "--verbose").
+		"--setting-sources=user,project", "--verbose",
+		"--include-partial-messages", "--replay-user-messages").
 		Model(NewParam("--model", "{model}"), opts.Model).
 		Resume(NewParam("--resume"), opts.SessionID, false).
-		Settings(claudeCodePermSettings, opts.PermissionValues).
-		Build()
+		ResumeAt(NewParam("--resume-session-at"), opts.ResumeAtMessageUUID)
+
+	// When using supervised/plan mode with hooks, bypass the built-in permission
+	// system so hooks handle access control instead
+	switch opts.PermissionPolicy {
+	case "supervised", "plan":
+		b = b.Flag("--permission-mode", "bypassPermissions")
+	default:
+		b = b.Settings(claudeCodePermSettings, opts.PermissionValues)
+	}
+
+	if opts.AgentType != "" {
+		b = b.Flag("--agent", opts.AgentType)
+	}
+
+	return b.Build()
 }
 
 func (a *ClaudeCode) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd: Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.29",
+		Cmd: Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.50",
 			"-p", "--output-format=stream-json", "--input-format=stream-json",
 			"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
-			"--setting-sources=user,project", "--verbose").Build(),
+			"--setting-sources=user,project", "--verbose",
+			"--include-partial-messages", "--replay-user-messages").Build(),
 		WorkingDir:     "{workspace}",
 		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
 		Env:            map[string]string{},
@@ -121,6 +137,10 @@ var claudeCodePermSettings = map[string]PermissionSetting{
 	"dangerously_skip_permissions": {
 		Supported: true, Default: true, Label: "Skip Permissions", Description: "Bypass all permission checks (dangerous but fast for trusted tasks)",
 		ApplyMethod: "cli_flag", CLIFlag: "--dangerously-skip-permissions",
+	},
+	"permission_policy": {
+		Supported: true, Default: false, Label: "Permission Policy", Description: "Control permission mode: autonomous (default), supervised (approve writes), plan (approve plan exit)",
+		ApplyMethod: "custom",
 	},
 }
 

@@ -227,6 +227,8 @@ func (n *Normalizer) normalizeCreateTask(args map[string]any) *streams.Normalize
 }
 
 // normalizeManageTodos converts stream-json TaskUpdate/TaskList/TodoWrite tool data.
+// TodoWrite uses {"todos": [{content, status, activeForm}]} while
+// TaskUpdate uses {"items": [{id, description, status}]}.
 func (n *Normalizer) normalizeManageTodos(toolName string, args map[string]any) *streams.NormalizedPayload {
 	operation := "update"
 	switch toolName {
@@ -236,21 +238,31 @@ func (n *Normalizer) normalizeManageTodos(toolName string, args map[string]any) 
 		operation = "write"
 	}
 
-	// Extract items if present
-	var items []streams.TodoItem
-	if rawItems, ok := args["items"].([]any); ok {
-		for _, item := range rawItems {
-			if itemMap, ok := item.(map[string]any); ok {
-				items = append(items, streams.TodoItem{
-					ID:          shared.GetString(itemMap, "id"),
-					Description: shared.GetString(itemMap, "description"),
-					Status:      shared.GetString(itemMap, "status"),
-				})
-			}
-		}
+	// Try "todos" first (TodoWrite format), then "items" (TaskUpdate format)
+	rawItems, ok := args["todos"].([]any)
+	if !ok {
+		rawItems, _ = args["items"].([]any)
 	}
 
-	// Use factory function
+	var items []streams.TodoItem
+	for _, item := range rawItems {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		// TodoWrite uses "content" for the description text
+		desc := shared.GetString(itemMap, "description")
+		if desc == "" {
+			desc = shared.GetString(itemMap, "content")
+		}
+		items = append(items, streams.TodoItem{
+			ID:          shared.GetString(itemMap, "id"),
+			Description: desc,
+			Status:      shared.GetString(itemMap, "status"),
+			ActiveForm:  shared.GetString(itemMap, "activeForm"),
+		})
+	}
+
 	return streams.NewManageTodos(operation, items)
 }
 

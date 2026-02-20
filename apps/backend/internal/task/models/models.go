@@ -363,6 +363,7 @@ type ExecutorRunning struct {
 	Status           string     `json:"status"`
 	Resumable        bool       `json:"resumable"`
 	ResumeToken      string     `json:"resume_token,omitempty"`
+	LastMessageUUID  string     `json:"last_message_uuid,omitempty"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	ContainerID      string     `json:"container_id,omitempty"`
 	AgentctlURL      string     `json:"agentctl_url,omitempty"`

@@ -97,6 +97,10 @@ type Adapter struct {
 	// and reset to false at the start of each prompt.
 	streamingTextSentThisTurn bool
 
+	// Message UUID tracking for --resume-session-at support
+	lastMessageUUID      string // Latest committed message UUID (safe to resume from)
+	pendingAssistantUUID string // UUID from assistant message, committed on result
+
 	// lastRawData holds the raw JSON of the current message being processed.
 	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
@@ -263,6 +267,20 @@ func (a *Adapter) handleMessage(msg *claudecode.CLIMessage) {
 		shared.LogRawEvent(shared.ProtocolStreamJSON, a.agentID, msg.Type, a.lastRawData)
 	}
 
+	// Update session ID from any message type.
+	// Claude Code can change session_id mid-conversation (e.g. on compact).
+	if msg.SessionID != "" {
+		a.mu.Lock()
+		if a.sessionID != msg.SessionID {
+			a.logger.Info("session ID updated",
+				zap.String("old", a.sessionID),
+				zap.String("new", msg.SessionID),
+				zap.String("message_type", msg.Type))
+			a.sessionID = msg.SessionID
+		}
+		a.mu.Unlock()
+	}
+
 	a.mu.RLock()
 	sessionID := a.sessionID
 	operationID := a.operationID
@@ -280,6 +298,9 @@ func (a *Adapter) handleMessage(msg *claudecode.CLIMessage) {
 
 	case claudecode.MessageTypeResult:
 		a.handleResultMessage(msg, sessionID, operationID)
+
+	case claudecode.MessageTypeRateLimit:
+		a.handleRateLimitMessage(msg, sessionID, operationID)
 
 	default:
 		a.logger.Debug("unhandled message type", zap.String("type", msg.Type))

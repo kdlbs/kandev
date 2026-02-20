@@ -245,6 +245,13 @@ type SubagentTaskPayload struct {
 	Description  string `json:"description"`
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type"`
+
+	// Result fields (populated from tool_use_result on completion)
+	Status       string `json:"status,omitempty"`
+	AgentID      string `json:"agent_id,omitempty"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	TotalTokens  int64  `json:"total_tokens,omitempty"`
+	ToolUseCount int    `json:"tool_use_count,omitempty"`
 }
 
 // ShowPlanPayload contains normalized data for plan display operations.
@@ -260,10 +267,12 @@ type ManageTodosPayload struct {
 }
 
 // TodoItem represents a single todo item.
+// Claude Code's TodoWrite uses "content" for the description and includes "activeForm".
 type TodoItem struct {
 	ID          string `json:"id,omitempty"`
 	Description string `json:"description"`
 	Status      string `json:"status,omitempty"`
+	ActiveForm  string `json:"active_form,omitempty"`
 }
 
 // MiscPayload is for miscellaneous operations that don't fit other categories.

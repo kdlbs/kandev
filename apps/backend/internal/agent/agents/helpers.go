@@ -42,6 +42,17 @@ func (b *CmdBuilder) Resume(flag Param, sessionID string, nativeResume bool) *Cm
 	return b
 }
 
+// ResumeAt appends a --resume-session-at flag with the message UUID.
+// Skipped when uuid is empty or flag is empty.
+func (b *CmdBuilder) ResumeAt(flag Param, uuid string) *CmdBuilder {
+	if uuid == "" || flag.IsEmpty() {
+		return b
+	}
+	b.args = append(b.args, flag.args...)
+	b.args = append(b.args, uuid)
+	return b
+}
+
 // Permissions appends per-tool permission flags when not auto-approving.
 // Each tool gets: flag tool:ask-user (e.g. --permission launch-process:ask-user).
 func (b *CmdBuilder) Permissions(flag string, tools []string, opts CommandOptions) *CmdBuilder {

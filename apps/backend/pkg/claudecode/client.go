@@ -18,6 +18,9 @@ import (
 // It receives the request ID and control request, and should call SendControlResponse.
 type RequestHandler func(requestID string, req *ControlRequest)
 
+// CancelHandler handles control_cancel_request messages that cancel a pending request.
+type CancelHandler func(requestID string)
+
 // MessageHandler handles streaming messages from Claude Code CLI.
 type MessageHandler func(msg *CLIMessage)
 
@@ -35,6 +38,7 @@ type Client struct {
 
 	// Handlers for incoming messages
 	requestHandler RequestHandler
+	cancelHandler  CancelHandler
 	messageHandler MessageHandler
 
 	// Pending control requests (requests we sent, waiting for responses)
@@ -62,6 +66,13 @@ func (c *Client) SetRequestHandler(handler RequestHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.requestHandler = handler
+}
+
+// SetCancelHandler sets the handler for control_cancel_request messages.
+func (c *Client) SetCancelHandler(handler CancelHandler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cancelHandler = handler
 }
 
 // SetMessageHandler sets the handler for streaming messages.
@@ -94,7 +105,8 @@ func (c *Client) Stop() {
 
 // Initialize sends the initialize control request to Claude Code CLI and waits for the response.
 // This must be called in streaming mode (input-format=stream-json) to get slash commands.
-func (c *Client) Initialize(ctx context.Context, timeout time.Duration) (*InitializeResponseData, error) {
+// hooks is optional — pass nil for no hooks.
+func (c *Client) Initialize(ctx context.Context, timeout time.Duration, hooks map[string]any) (*InitializeResponseData, error) {
 	requestID := uuid.New().String()
 
 	// Create pending request channel
@@ -118,7 +130,7 @@ func (c *Client) Initialize(ctx context.Context, timeout time.Duration) (*Initia
 		RequestID: requestID,
 		Request: SDKControlRequestBody{
 			Subtype: SubtypeInitialize,
-			Hooks:   nil, // We don't use SDK hooks
+			Hooks:   hooks,
 		},
 	}
 
@@ -236,6 +248,21 @@ func (c *Client) handleLine(line []byte) {
 	// Handle control requests (from Claude to us, e.g., permission requests)
 	if msg.Type == MessageTypeControlRequest && msg.Request != nil {
 		c.handleControlRequest(msg.RequestID, msg.Request)
+		return
+	}
+
+	// Handle control_cancel_request (cancels a pending permission/hook request)
+	if msg.Type == MessageTypeControlCancelRequest && msg.RequestID != "" {
+		c.mu.RLock()
+		handler := c.cancelHandler
+		c.mu.RUnlock()
+
+		if handler != nil {
+			handler(msg.RequestID)
+		} else {
+			c.logger.Warn("received control_cancel_request but no cancel handler registered",
+				zap.String("request_id", msg.RequestID))
+		}
 		return
 	}
 

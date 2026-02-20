@@ -42,6 +42,9 @@ const (
 
 	// EventTypeSessionMode indicates the agent's session mode has changed.
 	EventTypeSessionMode = "session_mode"
+
+	// EventTypeRateLimit indicates the agent is being rate-limited by the API.
+	EventTypeRateLimit = "rate_limit"
 )
 
 // Session status constants for EventTypeSessionStatus events.
@@ -179,6 +182,14 @@ type AgentEvent struct {
 
 	// ToolCallContents contains rich content produced by a tool call (diffs, text, terminals).
 	ToolCallContents []ToolCallContentItem `json:"tool_call_contents,omitempty"`
+
+	// --- Rate limit fields (for "rate_limit" type) ---
+
+	// RateLimitMessage contains a human-readable rate limit message from the API.
+	RateLimitMessage string `json:"rate_limit_message,omitempty"`
+
+	// LastMessageUUID is the UUID of the last committed message, used for --resume-session-at.
+	LastMessageUUID string `json:"last_message_uuid,omitempty"`
 
 	// --- Session mode fields (for "session_mode" type) ---
 

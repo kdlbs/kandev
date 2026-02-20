@@ -102,7 +102,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.Data.ACPSessionID)
+		s.storeResumeToken(ctx, taskID, sessionID, payload.Data.ACPSessionID, "")
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -404,6 +404,19 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		zap.String("session_id", payload.SessionID),
 		zap.Int("text_length", len(payload.Data.Text)),
 		zap.Bool("has_text", payload.Data.Text != ""))
+
+	// Update resume token with latest ACP session ID and message UUID on every turn.
+	// This ensures the token stays current after session compaction.
+	if payload.SessionID != "" && payload.Data.ACPSessionID != "" {
+		var lastMsgUUID string
+		if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+			if uuid, ok := data["last_message_uuid"].(string); ok {
+				lastMsgUUID = uuid
+			}
+		}
+		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.Data.ACPSessionID, lastMsgUUID)
+	}
+
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID)

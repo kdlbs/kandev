@@ -155,10 +155,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			id = excluded.id,
 			task_id = excluded.task_id,
@@ -167,6 +167,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			status = excluded.status,
 			resumable = excluded.resumable,
 			resume_token = excluded.resume_token,
+			last_message_uuid = excluded.last_message_uuid,
 			agent_execution_id = excluded.agent_execution_id,
 			container_id = excluded.container_id,
 			agentctl_url = excluded.agentctl_url,
@@ -187,6 +188,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.Status,
 		dialect.BoolToInt(running.Resumable),
 		running.ResumeToken,
+		running.LastMessageUUID,
 		running.AgentExecutionID,
 		running.ContainerID,
 		running.AgentctlURL,
@@ -206,7 +208,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			agent_execution_id, container_id, agentctl_url, agentctl_port,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port,
 			worktree_id, worktree_path, worktree_branch, created_at, updated_at
 		FROM executors_running
 		ORDER BY updated_at DESC
@@ -228,6 +230,7 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 			&running.Status,
 			&running.Resumable,
 			&running.ResumeToken,
+			&running.LastMessageUUID,
 			&running.AgentExecutionID,
 			&running.ContainerID,
 			&running.AgentctlURL,
@@ -258,7 +261,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-		       agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
 		       created_at, updated_at
 		FROM executors_running
@@ -272,6 +275,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.Status,
 		&resumable,
 		&running.ResumeToken,
+		&running.LastMessageUUID,
 		&running.AgentExecutionID,
 		&running.ContainerID,
 		&running.AgentctlURL,

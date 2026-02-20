@@ -16,8 +16,13 @@ const (
 	MessageTypeControlRequest = "control_request"
 	// MessageTypeControlResponse is a response to a control request
 	MessageTypeControlResponse = "control_response"
+	// MessageTypeControlCancelRequest cancels a pending control request (e.g., permission dialog)
+	MessageTypeControlCancelRequest = "control_cancel_request"
 	// MessageTypeUser is a user message (prompt)
 	MessageTypeUser = "user"
+	// MessageTypeRateLimit is emitted when the Anthropic API rate-limits the agent.
+	// Claude Code uses "rate_limit_event" as the message type.
+	MessageTypeRateLimit = "rate_limit_event"
 )
 
 // Control request subtypes
@@ -48,6 +53,9 @@ type CLIMessage struct {
 	// Type is the message type (system, assistant, result, control_request, control_response, etc.)
 	Type string `json:"type"`
 
+	// UUID is a unique identifier for this message, used for --resume-session-at
+	UUID string `json:"uuid,omitempty"`
+
 	// For control_request messages (from Claude to us)
 	RequestID string          `json:"request_id,omitempty"`
 	Request   *ControlRequest `json:"request,omitempty"`
@@ -70,7 +78,7 @@ type CLIMessage struct {
 	// Result can be either a string (error message) or an object (ResultData)
 	Result            json.RawMessage            `json:"result,omitempty"`
 	Subtype           string                     `json:"subtype,omitempty"`
-	CostUSD           float64                    `json:"cost_usd,omitempty"`
+	CostUSD           float64                    `json:"total_cost_usd,omitempty"`
 	DurationMS        int64                      `json:"duration_ms,omitempty"`
 	DurationAPIMS     int64                      `json:"duration_api_ms,omitempty"`
 	IsError           bool                       `json:"is_error,omitempty"`
@@ -79,6 +87,20 @@ type CLIMessage struct {
 	TotalInputTokens  int64                      `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens int64                      `json:"total_output_tokens,omitempty"`
 	ModelUsage        map[string]ModelUsageStats `json:"model_usage,omitempty"`
+
+	// For rate_limit messages
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
+
+	// For user messages: replay/synthetic flags.
+	// IsReplay is true when the message is historical context echoed on resume.
+	// IsSynthetic is true for Claude-generated internal messages (checkpoint, injected context).
+	IsReplay    bool `json:"isReplay,omitempty"`
+	IsSynthetic bool `json:"isSynthetic,omitempty"`
+
+	// For user messages: rich metadata about tool execution results.
+	// Contains structured data like {stdout, stderr} for Bash, {oldTodos, newTodos} for TodoWrite,
+	// or {status, agentId, totalDurationMs, totalTokens, totalToolUseCount} for Task (sub-agent).
+	ToolUseResult json.RawMessage `json:"tool_use_result,omitempty"`
 
 	// Raw message for parsing content blocks
 	RawContent json.RawMessage `json:"-"`
@@ -136,10 +158,44 @@ type ContentBlock struct {
 	Name  string         `json:"name,omitempty"`
 	Input map[string]any `json:"input,omitempty"`
 
-	// For tool_result blocks
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	// For tool_result blocks.
+	// Content can be a string or an array of text blocks (sub-agent results use arrays).
+	// Use GetContentString() to get the text regardless of format.
+	ToolUseID  string          `json:"tool_use_id,omitempty"`
+	RawContent json.RawMessage `json:"content,omitempty"`
+	IsError    bool            `json:"is_error,omitempty"`
+}
+
+// GetContentString returns tool_result content as a string.
+// If content is a plain string, returns it directly.
+// If content is an array of text blocks [{type, text}], concatenates all text values.
+func (b *ContentBlock) GetContentString() string {
+	if len(b.RawContent) == 0 {
+		return ""
+	}
+
+	// Try as plain string first
+	var s string
+	if err := json.Unmarshal(b.RawContent, &s); err == nil {
+		return s
+	}
+
+	// Try as array of text blocks
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(b.RawContent, &blocks); err == nil {
+		var result string
+		for i, block := range blocks {
+			if i > 0 {
+				result += "\n"
+			}
+			result += block.Text
+		}
+		return result
+	}
+
+	return ""
 }
 
 // Usage contains token usage information.
@@ -196,9 +252,10 @@ type ControlRequest struct {
 	Subtype string `json:"subtype"`
 
 	// For can_use_tool requests
-	ToolName  string         `json:"tool_name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
+	ToolName     string         `json:"tool_name,omitempty"`
+	Input        map[string]any `json:"input,omitempty"`
+	ToolUseID    string         `json:"tool_use_id,omitempty"`
+	BlockedPaths string         `json:"blocked_paths,omitempty"`
 
 	// For hook_callback requests
 	CallbackID string         `json:"callback_id,omitempty"`
@@ -260,8 +317,9 @@ type ControlResponse struct {
 	// Subtype is the response type (success, error)
 	Subtype string `json:"subtype"`
 
-	// For success responses
-	Result *PermissionResult `json:"result,omitempty"`
+	// For success responses — holds a *PermissionResult for can_use_tool,
+	// or a map[string]any for hook callbacks (hookSpecificOutput, decision/reason).
+	Result any `json:"result,omitempty"`
 
 	// For error responses
 	Error string `json:"error,omitempty"`
@@ -303,6 +361,30 @@ type SDKControlRequestBody struct {
 
 	// For set_permission_mode requests
 	Mode string `json:"mode,omitempty"`
+}
+
+// HookConfig defines hook configuration passed during initialize.
+type HookConfig struct {
+	PreToolUse []HookEntry `json:"PreToolUse,omitempty"`
+	Stop       []HookEntry `json:"Stop,omitempty"`
+}
+
+// HookEntry defines a single hook entry with a matcher pattern and callback IDs.
+type HookEntry struct {
+	Matcher         string   `json:"matcher,omitempty"`
+	HookCallbackIDs []string `json:"hookCallbackIds"`
+}
+
+// ToMap converts HookConfig to map[string]any for use in SDKControlRequestBody.Hooks.
+func (h *HookConfig) ToMap() map[string]any {
+	result := make(map[string]any)
+	if len(h.PreToolUse) > 0 {
+		result["PreToolUse"] = h.PreToolUse
+	}
+	if len(h.Stop) > 0 {
+		result["Stop"] = h.Stop
+	}
+	return result
 }
 
 // UserMessage is sent to provide a prompt to Claude Code.

@@ -100,6 +100,41 @@ func TraceProtocolRequest(
 	return ctx, span
 }
 
+// TraceControlMessage creates a span for a control-plane protocol message.
+// Used for control_request, control_response, and control_cancel_request messages
+// that bypass the regular sendUpdate() tracing path.
+func TraceControlMessage(
+	ctx context.Context,
+	protocol, agentID string,
+	direction string,
+	eventType string,
+	rawData json.RawMessage,
+) {
+	tracer := Tracer()
+	spanName := protocol + ".control." + eventType
+
+	kind := trace.SpanKindInternal
+	if direction == "send" {
+		kind = trace.SpanKindClient
+	}
+
+	_, span := tracer.Start(ctx, spanName, trace.WithSpanKind(kind))
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("protocol", protocol),
+		attribute.String("agent_id", agentID),
+		attribute.String("direction", direction),
+		attribute.String("event_type", eventType),
+	)
+
+	if len(rawData) > 0 {
+		span.AddEvent("payload", trace.WithAttributes(
+			attribute.String("data", truncate(string(rawData), maxAttrValueLen)),
+		))
+	}
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

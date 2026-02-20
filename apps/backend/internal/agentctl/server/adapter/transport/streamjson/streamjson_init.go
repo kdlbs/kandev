@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/pkg/claudecode"
 	"go.uber.org/zap"
@@ -81,6 +82,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// Create Claude Code client
 	a.client = claudecode.NewClient(a.stdin, a.stdout, a.logger)
 	a.client.SetRequestHandler(a.handleControlRequest)
+	a.client.SetCancelHandler(a.handleControlCancel)
 	a.client.SetMessageHandler(a.handleMessage)
 
 	// Start reading from stdout with the adapter's context
@@ -101,9 +103,19 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		Version: "unknown",
 	}
 
+	// Build hooks based on permission policy
+	hooks := a.buildHooks()
+
 	// Send initialize control request to get slash commands
 	// This is required for streaming mode (input-format=stream-json)
-	initResp, err := a.client.Initialize(ctx, 60*time.Second)
+	initCtx, initSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolStreamJSON, a.agentID, "initialize")
+	a.traceOutgoingSendCtx(initCtx, "initialize", map[string]any{
+		"type":    claudecode.MessageTypeControlRequest,
+		"request": map[string]any{"subtype": claudecode.SubtypeInitialize, "hooks": hooks},
+	})
+	initResp, err := a.client.Initialize(ctx, 60*time.Second, hooks)
+	initSpan.End()
+
 	if err != nil {
 		a.logger.Warn("failed to initialize (continuing anyway)", zap.Error(err))
 	} else if initResp != nil && len(initResp.Commands) > 0 {
@@ -126,6 +138,52 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("stream-json adapter initialized")
 
 	return nil
+}
+
+// buildHooks constructs hook configuration based on the permission policy.
+// Returns nil for autonomous mode (no hooks).
+func (a *Adapter) buildHooks() map[string]any {
+	policy := a.cfg.PermissionPolicy
+	if policy == "" || policy == "autonomous" {
+		return nil
+	}
+
+	cfg := &claudecode.HookConfig{}
+
+	switch policy {
+	case "supervised":
+		// Match write/dangerous tools — everything except read-only tools.
+		// Non-matching tools (Glob, Grep, Read, Task, TodoWrite, etc.) are
+		// implicitly auto-approved by Claude Code when no hook matches.
+		cfg.PreToolUse = []claudecode.HookEntry{
+			{
+				Matcher:         `^(?!(Glob|Grep|NotebookRead|Read|Task|TodoWrite)$).*`,
+				HookCallbackIDs: []string{"tool_approval"},
+			},
+		}
+	case "plan":
+		// Only ExitPlanMode requires approval — all other tools run freely during planning.
+		// The auto_approve callback explicitly approves so Claude doesn't fall through.
+		cfg.PreToolUse = []claudecode.HookEntry{
+			{
+				Matcher:         `^ExitPlanMode$`,
+				HookCallbackIDs: []string{"tool_approval"},
+			},
+			{
+				Matcher:         `^(?!ExitPlanMode$).*`,
+				HookCallbackIDs: []string{"auto_approve"},
+			},
+		}
+	}
+
+	// Always register a Stop hook to check for uncommitted changes
+	cfg.Stop = []claudecode.HookEntry{
+		{
+			HookCallbackIDs: []string{"stop_git_check"},
+		},
+	}
+
+	return cfg.ToMap()
 }
 
 // GetAgentInfo returns information about the connected agent.

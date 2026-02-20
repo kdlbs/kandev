@@ -1,5 +1,10 @@
 package shared
 
+import "time"
+
+// DefaultPermissionTimeout is the default timeout for permission requests (5 minutes).
+const DefaultPermissionTimeout = 5 * time.Minute
+
 // Config holds configuration for creating transport adapters.
 // This is passed to transport adapters by the factory.
 type Config struct {
@@ -13,6 +18,14 @@ type Config struct {
 	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
 	// Defaults to "on-request" if empty.
 	ApprovalPolicy string
+
+	// PermissionPolicy controls the permission mode: "autonomous", "supervised", "plan".
+	// Used to determine hook registration and --permission-mode flag.
+	PermissionPolicy string
+
+	// PermissionTimeout is the maximum time to wait for a permission response.
+	// After timeout, the request is auto-denied with interrupt. Defaults to DefaultPermissionTimeout.
+	PermissionTimeout time.Duration
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
@@ -33,6 +46,14 @@ type Config struct {
 
 	// Protocol-specific configuration
 	Extra map[string]string
+}
+
+// GetPermissionTimeout returns the configured permission timeout or the default.
+func (c *Config) GetPermissionTimeout() time.Duration {
+	if c.PermissionTimeout > 0 {
+		return c.PermissionTimeout
+	}
+	return DefaultPermissionTimeout
 }
 
 // McpServerConfig holds configuration for an MCP server.
