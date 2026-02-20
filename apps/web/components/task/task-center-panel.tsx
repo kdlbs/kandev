@@ -179,7 +179,11 @@ function useFileTabOperations({
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
       try {
-        const response: FileContentResponse = await requestFileContent(client, activeSessionId, filePath);
+        const response: FileContentResponse = await requestFileContent(
+          client,
+          activeSessionId,
+          filePath,
+        );
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
         addFileTab({
@@ -272,7 +276,13 @@ function useCenterPanelTabs(
 }
 
 function useCenterPanelState(props: TaskCenterPanelProps) {
-  const { selectedDiff: externalSelectedDiff, openFileRequest, onDiffHandled, onFileOpenHandled, onActiveFileChange } = props;
+  const {
+    selectedDiff: externalSelectedDiff,
+    openFileRequest,
+    onDiffHandled,
+    onFileOpenHandled,
+    onActiveFileChange,
+  } = props;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
@@ -281,21 +291,43 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     const hasUncommittedChanges = gitStatus?.files && Object.keys(gitStatus.files).length > 0;
     return (hasUncommittedChanges || (commits && commits.length > 0)) as boolean;
   }, [gitStatus, commits]);
-  const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(activeSessionId, activeTaskId);
+  const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(
+    activeSessionId,
+    activeTaskId,
+  );
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
-  const { leftTab, setLeftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges } =
-    useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
+  const {
+    leftTab,
+    setLeftTab,
+    showRequestChangesTooltip,
+    setShowRequestChangesTooltip,
+    handleTabChange,
+    handleRequestChanges,
+  } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
   useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs });
   useEffect(() => {
     if (!activeSessionId) return;
-    saveOpenFileTabs(activeSessionId, openFileTabs.map(({ path, name }) => ({ path, name })));
+    saveOpenFileTabs(
+      activeSessionId,
+      openFileTabs.map(({ path, name }) => ({ path, name })),
+    );
   }, [activeSessionId, openFileTabs]);
   const fileTabOps = useFileTabOperations({
-    activeSessionId, openFileTabs, setOpenFileTabs, setSavingFiles, setLeftTab, handleTabChange, leftTab,
+    activeSessionId,
+    openFileTabs,
+    setOpenFileTabs,
+    setSavingFiles,
+    setLeftTab,
+    handleTabChange,
+    leftTab,
   });
-  const { tabs, separatorAfterIndex } = useCenterPanelTabs(openFileTabs, fileTabOps.handleCloseFileTab, hasChanges);
+  const { tabs, separatorAfterIndex } = useCenterPanelTabs(
+    openFileTabs,
+    fileTabOps.handleCloseFileTab,
+    hasChanges,
+  );
 
   useEffect(() => {
     if (externalSelectedDiff) {
@@ -322,10 +354,24 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   }, [openFileRequest, onFileOpenHandled, fileTabOps.addFileTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
-    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
-    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
-    fileTabOps, tabs, separatorAfterIndex,
+    activeTaskId,
+    activeSessionId,
+    activeSession,
+    isPassthroughMode,
+    showApproveButton,
+    handleApprove,
+    openFileTabs,
+    savingFiles,
+    selectedDiff,
+    setSelectedDiff,
+    leftTab,
+    showRequestChangesTooltip,
+    setShowRequestChangesTooltip,
+    handleTabChange,
+    handleRequestChanges,
+    fileTabOps,
+    tabs,
+    separatorAfterIndex,
   };
 }
 
@@ -333,10 +379,24 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
   const { sessionId = null } = props;
   const state = useCenterPanelState(props);
   const {
-    activeTaskId, activeSessionId, activeSession, isPassthroughMode, showApproveButton, handleApprove,
-    openFileTabs, savingFiles, selectedDiff, setSelectedDiff,
-    leftTab, showRequestChangesTooltip, setShowRequestChangesTooltip, handleTabChange, handleRequestChanges,
-    fileTabOps, tabs, separatorAfterIndex,
+    activeTaskId,
+    activeSessionId,
+    activeSession,
+    isPassthroughMode,
+    showApproveButton,
+    handleApprove,
+    openFileTabs,
+    savingFiles,
+    selectedDiff,
+    setSelectedDiff,
+    leftTab,
+    showRequestChangesTooltip,
+    setShowRequestChangesTooltip,
+    handleTabChange,
+    handleRequestChanges,
+    fileTabOps,
+    tabs,
+    separatorAfterIndex,
   } = state;
   const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
 

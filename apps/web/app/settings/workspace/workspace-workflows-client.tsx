@@ -323,44 +323,48 @@ function WorkflowList({
   );
 }
 
+function WorkflowDialogs({ page }: { page: ReturnType<typeof useWorkspaceWorkflowsPage> }) {
+  return (
+    <>
+      <WorkflowExportDialog
+        open={page.isExportDialogOpen}
+        onOpenChange={page.setIsExportDialogOpen}
+        title="Export Workflows"
+        json={page.exportJson}
+      />
+      <ImportWorkflowsDialog
+        open={page.isImportDialogOpen}
+        onOpenChange={page.setIsImportDialogOpen}
+        importJson={page.importJson}
+        onImportJsonChange={page.setImportJson}
+        onFileUpload={page.handleFileUpload}
+        fileInputRef={page.fileInputRef}
+        onImport={page.handleImport}
+        importLoading={page.importLoading}
+      />
+      <CreateWorkflowDialog
+        open={page.isAddWorkflowDialogOpen}
+        onOpenChange={page.setIsAddWorkflowDialogOpen}
+        workflowName={page.newWorkflowName}
+        onWorkflowNameChange={page.setNewWorkflowName}
+        selectedTemplateId={page.selectedTemplateId}
+        onSelectedTemplateChange={page.setSelectedTemplateId}
+        workflowTemplates={page.workflowTemplates}
+        onCreate={page.handleCreateWorkflow}
+      />
+    </>
+  );
+}
+
 export function WorkspaceWorkflowsClient({
   workspace,
   workflows,
   workflowTemplates,
 }: WorkspaceWorkflowsClientProps) {
   const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
-  const {
-    router,
-    workflowItems,
-    isWorkflowDirty,
-    isExportDialogOpen,
-    setIsExportDialogOpen,
-    exportJson,
-    isImportDialogOpen,
-    setIsImportDialogOpen,
-    importJson,
-    setImportJson,
-    importLoading,
-    fileInputRef,
-    handleExportAll,
-    handleFileUpload,
-    handleImport,
-    isAddWorkflowDialogOpen,
-    setIsAddWorkflowDialogOpen,
-    newWorkflowName,
-    setNewWorkflowName,
-    selectedTemplateId,
-    setSelectedTemplateId,
-    handleOpenAddWorkflowDialog,
-    handleCreateWorkflow,
-    handleUpdateWorkflow,
-    handleDeleteWorkflow,
-    handleWorkflowCreated,
-    handleSaveWorkflow,
-    templateStepsById,
-  } = page;
 
-  if (!workspace) return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
+  if (!workspace)
+    return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspace")} />;
 
   return (
     <div className="space-y-8">
@@ -380,48 +384,23 @@ export function WorkspaceWorkflowsClient({
         description="Create autonomous pipelines with automated transitions or manual workflows where you move tasks yourself"
         action={
           <WorkflowSectionActions
-            onExport={handleExportAll}
-            onImport={() => setIsImportDialogOpen(true)}
-            onAdd={handleOpenAddWorkflowDialog}
+            onExport={page.handleExportAll}
+            onImport={() => page.setIsImportDialogOpen(true)}
+            onAdd={page.handleOpenAddWorkflowDialog}
           />
         }
       >
         <WorkflowList
-          workflowItems={workflowItems}
-          templateStepsById={templateStepsById}
-          isWorkflowDirty={isWorkflowDirty}
-          onUpdate={handleUpdateWorkflow}
-          onDelete={handleDeleteWorkflow}
-          onSave={handleSaveWorkflow}
-          onCreated={handleWorkflowCreated}
+          workflowItems={page.workflowItems}
+          templateStepsById={page.templateStepsById}
+          isWorkflowDirty={page.isWorkflowDirty}
+          onUpdate={page.handleUpdateWorkflow}
+          onDelete={page.handleDeleteWorkflow}
+          onSave={page.handleSaveWorkflow}
+          onCreated={page.handleWorkflowCreated}
         />
       </SettingsSection>
-      <WorkflowExportDialog
-        open={isExportDialogOpen}
-        onOpenChange={setIsExportDialogOpen}
-        title="Export Workflows"
-        json={exportJson}
-      />
-      <ImportWorkflowsDialog
-        open={isImportDialogOpen}
-        onOpenChange={setIsImportDialogOpen}
-        importJson={importJson}
-        onImportJsonChange={setImportJson}
-        onFileUpload={handleFileUpload}
-        fileInputRef={fileInputRef}
-        onImport={handleImport}
-        importLoading={importLoading}
-      />
-      <CreateWorkflowDialog
-        open={isAddWorkflowDialogOpen}
-        onOpenChange={setIsAddWorkflowDialogOpen}
-        workflowName={newWorkflowName}
-        onWorkflowNameChange={setNewWorkflowName}
-        selectedTemplateId={selectedTemplateId}
-        onSelectedTemplateChange={setSelectedTemplateId}
-        workflowTemplates={workflowTemplates}
-        onCreate={handleCreateWorkflow}
-      />
+      <WorkflowDialogs page={page} />
     </div>
   );
 }
@@ -479,36 +458,35 @@ function useWorkspaceWorkflowsPage(
     () => new Map(workflowTemplates.map((t) => [t.id, t.default_steps ?? []])),
     [workflowTemplates],
   );
-  return (
-    {
-      router,
-      workflowItems,
-      isWorkflowDirty,
-      isExportDialogOpen,
-      setIsExportDialogOpen,
-      exportJson,
-      isImportDialogOpen,
-      setIsImportDialogOpen,
-      importJson,
-      setImportJson,
-      importLoading,
-      fileInputRef,
-      handleExportAll,
-      handleFileUpload,
-      handleImport,
-      isAddWorkflowDialogOpen,
-      setIsAddWorkflowDialogOpen,
-      newWorkflowName,
-      setNewWorkflowName,
-      selectedTemplateId,
-      setSelectedTemplateId,
-      handleOpenAddWorkflowDialog,
-      handleCreateWorkflow,
-      handleUpdateWorkflow,
-      handleDeleteWorkflow,
-      handleWorkflowCreated,
-      handleSaveWorkflow,
-      templateStepsById,
-    }
-  );
+  return {
+    router,
+    workflowItems,
+    isWorkflowDirty,
+    isExportDialogOpen,
+    setIsExportDialogOpen,
+    exportJson,
+    isImportDialogOpen,
+    setIsImportDialogOpen,
+    importJson,
+    setImportJson,
+    importLoading,
+    fileInputRef,
+    handleExportAll,
+    handleFileUpload,
+    handleImport,
+    isAddWorkflowDialogOpen,
+    setIsAddWorkflowDialogOpen,
+    newWorkflowName,
+    setNewWorkflowName,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    handleOpenAddWorkflowDialog,
+    handleCreateWorkflow,
+    handleUpdateWorkflow,
+    handleDeleteWorkflow,
+    handleWorkflowCreated,
+    handleSaveWorkflow,
+    workflowTemplates,
+    templateStepsById,
+  };
 }

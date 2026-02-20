@@ -36,6 +36,11 @@ export type BackendMessageType =
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
+  | "executor.profile.created"
+  | "executor.profile.updated"
+  | "executor.profile.deleted"
+  | "executor.prepare.progress"
+  | "executor.prepare.completed"
   | "environment.created"
   | "environment.updated"
   | "environment.deleted"
@@ -47,6 +52,9 @@ export type BackendMessageType =
   | "session.shell.output"
   | "session.process.output"
   | "session.process.status"
+  | "secrets.created"
+  | "secrets.updated"
+  | "secrets.deleted"
   | "message.queue.status_changed";
 
 export type BackendMessage<T extends BackendMessageType, P> = {
@@ -58,6 +66,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
 };
 
 import type { AvailableAgent, SavedLayout, StepEvents, TaskState } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 
 export type KanbanUpdatePayload = {
@@ -251,6 +260,41 @@ export type ExecutorPayload = {
   updated_at?: string;
 };
 
+export type ExecutorProfilePayload = {
+  id: string;
+  executor_id: string;
+  name: string;
+  is_default: boolean;
+  config?: Record<string, string>;
+  setup_script: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type PrepareProgressPayload = {
+  task_id: string;
+  session_id: string;
+  execution_id: string;
+  step_name: string;
+  step_index: number;
+  total_steps: number;
+  status: string;
+  output?: string;
+  error?: string;
+  timestamp: string;
+};
+
+export type PrepareCompletedPayload = {
+  task_id: string;
+  session_id: string;
+  execution_id: string;
+  success: boolean;
+  error_message?: string;
+  duration_ms: number;
+  workspace_path?: string;
+  timestamp: string;
+};
+
 export type EnvironmentPayload = {
   id: string;
   name: string;
@@ -421,6 +465,14 @@ export type BackendMessageMap = {
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
+  "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;
+  "executor.profile.updated": BackendMessage<"executor.profile.updated", ExecutorProfilePayload>;
+  "executor.profile.deleted": BackendMessage<"executor.profile.deleted", { id: string }>;
+  "executor.prepare.progress": BackendMessage<"executor.prepare.progress", PrepareProgressPayload>;
+  "executor.prepare.completed": BackendMessage<
+    "executor.prepare.completed",
+    PrepareCompletedPayload
+  >;
   "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
   "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
   "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;
@@ -435,6 +487,9 @@ export type BackendMessageMap = {
   "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
   "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
   "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
+  "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
+  "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;
+  "secrets.deleted": BackendMessage<"secrets.deleted", { id: string }>;
   "message.queue.status_changed": BackendMessage<
     "message.queue.status_changed",
     QueueStatusChangedPayload

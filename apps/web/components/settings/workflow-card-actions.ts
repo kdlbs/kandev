@@ -45,9 +45,14 @@ type RemoveStepParams = {
 };
 
 async function removeWorkflowStep({
-  stepId, workflowSteps,
-  refreshWorkflowSteps, setStepToDelete, setStepTaskCount,
-  setTargetStepForMigration, setStepDeleteOpen, toast,
+  stepId,
+  workflowSteps,
+  refreshWorkflowSteps,
+  setStepToDelete,
+  setStepTaskCount,
+  setTargetStepForMigration,
+  setStepDeleteOpen,
+  toast,
 }: RemoveStepParams) {
   try {
     const { task_count } = await getStepTaskCount(stepId);
@@ -71,6 +76,46 @@ async function removeWorkflowStep({
 }
 
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
+
+function addLocalStep(
+  workflow: Workflow,
+  setWorkflowSteps: WorkflowStepActionsParams["setWorkflowSteps"],
+) {
+  setWorkflowSteps((prev) => [
+    ...prev,
+    {
+      id: `temp-step-${generateUUID()}`,
+      workflow_id: workflow.id,
+      ...NEW_STEP_DEFAULTS,
+      position: prev.length,
+      allow_manual_move: true,
+      created_at: "",
+      updated_at: "",
+    },
+  ]);
+}
+
+async function addRemoteStep(
+  workflow: Workflow,
+  stepCount: number,
+  refreshWorkflowSteps: () => Promise<void>,
+  toast: WorkflowStepActionsParams["toast"],
+) {
+  try {
+    await createWorkflowStepAction({
+      workflow_id: workflow.id,
+      ...NEW_STEP_DEFAULTS,
+      position: stepCount,
+    });
+    await refreshWorkflowSteps();
+  } catch (error) {
+    toast({
+      title: "Failed to add workflow step",
+      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+      variant: "error",
+    });
+  }
+}
 
 export function useWorkflowStepActions({
   workflow,
@@ -103,25 +148,10 @@ export function useWorkflowStepActions({
 
   const handleAddWorkflowStep = async () => {
     if (isNewWorkflow) {
-      setWorkflowSteps((prev) => [
-        ...prev,
-        { id: `temp-step-${generateUUID()}`, workflow_id: workflow.id, ...NEW_STEP_DEFAULTS,
-          position: prev.length, allow_manual_move: true, created_at: "", updated_at: "" },
-      ]);
+      addLocalStep(workflow, setWorkflowSteps);
       return;
     }
-    try {
-      await createWorkflowStepAction({
-        workflow_id: workflow.id, ...NEW_STEP_DEFAULTS, position: workflowSteps.length,
-      });
-      await refreshWorkflowSteps();
-    } catch (error) {
-      toast({
-        title: "Failed to add workflow step",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
+    await addRemoteStep(workflow, workflowSteps.length, refreshWorkflowSteps, toast);
   };
 
   const handleRemoveWorkflowStep = async (stepId: string) => {
@@ -132,18 +162,20 @@ export function useWorkflowStepActions({
       return;
     }
     await removeWorkflowStep({
-      stepId, workflowSteps, refreshWorkflowSteps,
-      setStepToDelete, setStepTaskCount,
-      setTargetStepForMigration, setStepDeleteOpen, toast,
+      stepId,
+      workflowSteps,
+      refreshWorkflowSteps,
+      setStepToDelete,
+      setStepTaskCount,
+      setTargetStepForMigration,
+      setStepDeleteOpen,
+      toast,
     });
   };
 
   const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
-    if (isNewWorkflow) {
-      setWorkflowSteps(reorderedSteps);
-      return;
-    }
     setWorkflowSteps(reorderedSteps);
+    if (isNewWorkflow) return;
     try {
       await reorderWorkflowStepsAction(
         workflow.id,

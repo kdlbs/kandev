@@ -208,8 +208,14 @@ function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: Onboar
 
 export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   const [step, setStep] = useState(0);
-  const { availableAgents, agentSettings, setAgentSettings, templates, loadingAgents, loadingTemplates } =
-    useOnboardingResources(open);
+  const {
+    availableAgents,
+    agentSettings,
+    setAgentSettings,
+    templates,
+    loadingAgents,
+    loadingTemplates,
+  } = useOnboardingResources(open);
 
   const saveAgentSettings = useCallback(async () => {
     await Promise.all(

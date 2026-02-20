@@ -186,7 +186,9 @@ function useClarificationHandlers({
       });
       if (result === "ok") onResolved();
       else if (result === RESULT_EXPIRED) {
-        alert("This question has timed out. The agent has already moved on. Please refresh the page.");
+        alert(
+          "This question has timed out. The agent has already moved on. Please refresh the page.",
+        );
         onResolved();
       }
     } catch (error) {

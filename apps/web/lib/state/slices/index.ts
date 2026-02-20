@@ -45,6 +45,7 @@ export type {
   AgentProfilesState,
   EditorsState,
   PromptsState,
+  SecretsState,
   NotificationProvidersState,
   SettingsDataState,
   UserSettingsState,
@@ -87,6 +88,9 @@ export type {
   AvailableCommandsState,
   UserShellInfo,
   UserShellsState,
+  PrepareStepInfo,
+  SessionPrepareState,
+  PrepareProgressState,
 } from "./session-runtime/types";
 export type {
   PreviewStage,

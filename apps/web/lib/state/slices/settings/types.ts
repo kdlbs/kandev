@@ -10,6 +10,7 @@ import type {
   NotificationProvider,
   SavedLayout,
 } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -72,6 +73,12 @@ export type PromptsState = {
   loading: boolean;
 };
 
+export type SecretsState = {
+  items: SecretListItem[];
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type NotificationProvidersState = {
   items: NotificationProvider[];
   events: string[];
@@ -113,6 +120,7 @@ export type SettingsSliceState = {
   agentProfiles: AgentProfilesState;
   editors: EditorsState;
   prompts: PromptsState;
+  secrets: SecretsState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
   userSettings: UserSettingsState;
@@ -130,6 +138,11 @@ export type SettingsSliceActions = {
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
+  setSecrets: (items: SecretsState["items"]) => void;
+  setSecretsLoading: (loading: boolean) => void;
+  addSecret: (item: SecretListItem) => void;
+  updateSecret: (item: SecretListItem) => void;
+  removeSecret: (id: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;

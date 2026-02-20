@@ -7,15 +7,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// StandaloneRuntime implements Runtime for standalone agentctl execution.
+// StandaloneExecutor implements Runtime for standalone agentctl execution.
 // In this mode, a single agentctl control server manages multiple agent instances.
-type StandaloneRuntime struct {
+type StandaloneExecutor struct {
 	ctl               *agentctl.ControlClient
 	host              string
 	port              int
@@ -23,9 +23,9 @@ type StandaloneRuntime struct {
 	interactiveRunner *process.InteractiveRunner
 }
 
-// NewStandaloneRuntime creates a new standalone runtime.
-func NewStandaloneRuntime(ctl *agentctl.ControlClient, host string, port int, log *logger.Logger) *StandaloneRuntime {
-	return &StandaloneRuntime{
+// NewStandaloneExecutor creates a new standalone runtime.
+func NewStandaloneExecutor(ctl *agentctl.ControlClient, host string, port int, log *logger.Logger) *StandaloneExecutor {
+	return &StandaloneExecutor{
 		ctl:    ctl,
 		host:   host,
 		port:   port,
@@ -33,15 +33,15 @@ func NewStandaloneRuntime(ctl *agentctl.ControlClient, host string, port int, lo
 	}
 }
 
-func (r *StandaloneRuntime) Name() runtime.Name {
-	return runtime.NameStandalone
+func (r *StandaloneExecutor) Name() executor.Name {
+	return executor.NameStandalone
 }
 
-func (r *StandaloneRuntime) HealthCheck(ctx context.Context) error {
+func (r *StandaloneExecutor) HealthCheck(ctx context.Context) error {
 	return r.ctl.Health(ctx)
 }
 
-func (r *StandaloneRuntime) waitForReady(ctx context.Context) error {
+func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {
 	if err := r.ctl.Health(ctx); err == nil {
 		return nil
 	}
@@ -68,7 +68,7 @@ func (r *StandaloneRuntime) waitForReady(ctx context.Context) error {
 	}
 }
 
-func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error) {
+func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	if err := r.waitForReady(ctx); err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 		zap.Int("port", resp.Port),
 		zap.String("workspace", req.WorkspacePath))
 
-	return &RuntimeInstance{
+	return &ExecutorInstance{
 		InstanceID:           req.InstanceID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
@@ -157,7 +157,7 @@ func (r *StandaloneRuntime) CreateInstance(ctx context.Context, req *RuntimeCrea
 	}, nil
 }
 
-func (r *StandaloneRuntime) StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error {
+func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance.StandaloneInstanceID == "" {
 		return nil // No standalone instance to stop
 	}
@@ -169,18 +169,18 @@ func (r *StandaloneRuntime) StopInstance(ctx context.Context, instance *RuntimeI
 	return nil
 }
 
-func (r *StandaloneRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error) {
+func (r *StandaloneExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
 	// Standalone instances are not persisted - they are transient processes
 	// managed by agentctl. Session resume will restart them as needed.
 	return nil, nil
 }
 
 // SetInteractiveRunner sets the interactive runner for passthrough mode.
-func (r *StandaloneRuntime) SetInteractiveRunner(runner *process.InteractiveRunner) {
+func (r *StandaloneExecutor) SetInteractiveRunner(runner *process.InteractiveRunner) {
 	r.interactiveRunner = runner
 }
 
 // GetInteractiveRunner returns the interactive runner for passthrough mode.
-func (r *StandaloneRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+func (r *StandaloneExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return r.interactiveRunner
 }

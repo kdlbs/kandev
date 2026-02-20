@@ -1,11 +1,11 @@
-// Package runtime defines the agent runtime types shared across lifecycle and policy logic.
-package runtime
+// Package executor defines the agent executor types shared across lifecycle and policy logic.
+package executor
 
 import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Name identifies the execution runtime.
+// Name identifies the execution backend.
 type Name string
 
 const (
@@ -16,8 +16,8 @@ const (
 	NameRemoteDocker Name = "remote_docker"
 )
 
-// ExecutorTypeToRuntime maps an ExecutorType to its corresponding runtime Name.
-func ExecutorTypeToRuntime(execType models.ExecutorType) Name {
+// ExecutorTypeToBackend maps an ExecutorType to its corresponding executor Name.
+func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 	switch execType {
 	case models.ExecutorTypeLocal:
 		return NameStandalone

@@ -147,7 +147,13 @@ function useMentionItems(sessionId: string | null) {
             lastFileSearchRef.current = { query: cacheKey, results: files };
           }
           for (const filePath of files) {
-            allItems.push({ id: filePath, kind: "file", label: filePath, description: "File", onSelect: () => {} });
+            allItems.push({
+              id: filePath,
+              kind: "file",
+              label: filePath,
+              description: "File",
+              onSelect: () => {},
+            });
           }
         }
       } catch {
@@ -231,16 +237,28 @@ function useSuggestionConfigs({
 
 function useMenuHandlers() {
   const [mentionMenu, setMentionMenu] = useState<MenuState<MentionItem>>({
-    isOpen: false, items: [], query: "", clientRect: null, command: null,
+    isOpen: false,
+    items: [],
+    query: "",
+    clientRect: null,
+    command: null,
   });
   const [slashMenu, setSlashMenu] = useState<MenuState<SlashCommand>>({
-    isOpen: false, items: [], query: "", clientRect: null, command: null,
+    isOpen: false,
+    items: [],
+    query: "",
+    clientRect: null,
+    command: null,
   });
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
 
-  useEffect(() => { void Promise.resolve().then(() => setMentionSelectedIndex(0)); }, [mentionMenu.items]);
-  useEffect(() => { void Promise.resolve().then(() => setSlashSelectedIndex(0)); }, [slashMenu.items]);
+  useEffect(() => {
+    void Promise.resolve().then(() => setMentionSelectedIndex(0));
+  }, [mentionMenu.items]);
+  useEffect(() => {
+    void Promise.resolve().then(() => setSlashSelectedIndex(0));
+  }, [slashMenu.items]);
 
   const mentionSelectedIndexRef = useRef(mentionSelectedIndex);
   const slashSelectedIndexRef = useRef(slashSelectedIndex);
@@ -274,7 +292,9 @@ function useMenuHandlers() {
   });
 
   const handleMentionSelect = useCallback(
-    (item: MentionItem) => { mentionMenu.command?.(item); },
+    (item: MentionItem) => {
+      mentionMenu.command?.(item);
+    },
     [mentionMenu],
   );
   const handleMentionClose = useCallback(
@@ -282,7 +302,9 @@ function useMenuHandlers() {
     [],
   );
   const handleSlashSelect = useCallback(
-    (cmd: SlashCommand) => { slashMenu.command?.(cmd); },
+    (cmd: SlashCommand) => {
+      slashMenu.command?.(cmd);
+    },
     [slashMenu],
   );
   const handleSlashClose = useCallback(
@@ -291,12 +313,20 @@ function useMenuHandlers() {
   );
 
   return {
-    mentionMenu, setMentionMenu, slashMenu, setSlashMenu,
-    mentionSelectedIndex, setMentionSelectedIndex,
-    slashSelectedIndex, setSlashSelectedIndex,
-    onMentionKeyDown, onSlashKeyDown,
-    handleMentionSelect, handleMentionClose,
-    handleSlashSelect, handleSlashClose,
+    mentionMenu,
+    setMentionMenu,
+    slashMenu,
+    setSlashMenu,
+    mentionSelectedIndex,
+    setMentionSelectedIndex,
+    slashSelectedIndex,
+    setSlashSelectedIndex,
+    onMentionKeyDown,
+    onSlashKeyDown,
+    handleMentionSelect,
+    handleMentionClose,
+    handleSlashSelect,
+    handleSlashClose,
   };
 }
 
@@ -322,12 +352,20 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   ref,
 ) {
   const {
-    mentionMenu, setMentionMenu, slashMenu, setSlashMenu,
-    mentionSelectedIndex, setMentionSelectedIndex,
-    slashSelectedIndex, setSlashSelectedIndex,
-    onMentionKeyDown, onSlashKeyDown,
-    handleMentionSelect, handleMentionClose,
-    handleSlashSelect, handleSlashClose,
+    mentionMenu,
+    setMentionMenu,
+    slashMenu,
+    setSlashMenu,
+    mentionSelectedIndex,
+    setMentionSelectedIndex,
+    slashSelectedIndex,
+    setSlashSelectedIndex,
+    onMentionKeyDown,
+    onSlashKeyDown,
+    handleMentionSelect,
+    handleMentionClose,
+    handleSlashSelect,
+    handleSlashClose,
   } = useMenuHandlers();
 
   const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
@@ -340,9 +378,21 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   });
 
   const editor = useTipTapEditor({
-    value, onChange, onSubmit, placeholder, disabled, className,
-    planModeEnabled, submitKey, onFocus, onBlur, sessionId, onImagePaste,
-    mentionSuggestion, slashSuggestion, ref,
+    value,
+    onChange,
+    onSubmit,
+    placeholder,
+    disabled,
+    className,
+    planModeEnabled,
+    submitKey,
+    onFocus,
+    onBlur,
+    sessionId,
+    onImagePaste,
+    mentionSuggestion,
+    slashSuggestion,
+    ref,
   });
 
   return (

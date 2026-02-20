@@ -1,13 +1,13 @@
 package mcpconfig
 
-import "github.com/kandev/kandev/internal/agent/runtime"
+import "github.com/kandev/kandev/internal/agent/executor"
 
 // DefaultPolicyForRuntime returns the baseline MCP policy for a runtime.
 // We only enable local runtimes today; non-local runtimes default to deny-all
 // until we add explicit executor policies for their networks.
-func DefaultPolicyForRuntime(runtimeName runtime.Name) Policy {
+func DefaultPolicyForRuntime(runtimeName executor.Name) Policy {
 	switch runtimeName {
-	case runtime.NameLocal, runtime.NameStandalone, runtime.NameDocker:
+	case executor.NameLocal, executor.NameStandalone, executor.NameDocker:
 		return Policy{
 			AllowStdio:          true,
 			AllowHTTP:           true,

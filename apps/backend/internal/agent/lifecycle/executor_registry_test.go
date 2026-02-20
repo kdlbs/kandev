@@ -6,33 +6,33 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// MockRuntime implements Runtime interface for testing
-type MockRuntime struct {
-	name             runtime.Name
+// MockExecutor implements Runtime interface for testing
+type MockExecutor struct {
+	name             executor.Name
 	healthCheckErr   error
-	recoverInstances []*RuntimeInstance
+	recoverInstances []*ExecutorInstance
 	recoverErr       error
 }
 
-func (m *MockRuntime) Name() runtime.Name { return m.name }
-func (m *MockRuntime) HealthCheck(ctx context.Context) error {
+func (m *MockExecutor) Name() executor.Name { return m.name }
+func (m *MockExecutor) HealthCheck(ctx context.Context) error {
 	return m.healthCheckErr
 }
-func (m *MockRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error) {
+func (m *MockExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	return nil, nil
 }
-func (m *MockRuntime) StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error {
+func (m *MockExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	return nil
 }
-func (m *MockRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error) {
+func (m *MockExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
 	return m.recoverInstances, m.recoverErr
 }
-func (m *MockRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+func (m *MockExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }
 
@@ -41,66 +41,66 @@ func newTestRegistryLogger() *logger.Logger {
 	return log
 }
 
-func TestNewRuntimeRegistry(t *testing.T) {
+func TestNewExecutorRegistry(t *testing.T) {
 	log := newTestRegistryLogger()
-	registry := NewRuntimeRegistry(log)
+	registry := NewExecutorRegistry(log)
 
 	if registry == nil {
 		t.Fatal("expected non-nil registry")
 	} else {
-		if registry.runtimes == nil {
+		if registry.backends == nil {
 			t.Error("expected runtimes map to be initialized")
 		}
-		if len(registry.runtimes) != 0 {
-			t.Errorf("expected empty runtimes map, got %d entries", len(registry.runtimes))
+		if len(registry.backends) != 0 {
+			t.Errorf("expected empty runtimes map, got %d entries", len(registry.backends))
 		}
 	}
 }
 
-func TestRuntimeRegistry_Register(t *testing.T) {
+func TestExecutorRegistry_Register(t *testing.T) {
 	t.Run("register new runtime", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		mockRT := &MockRuntime{name: runtime.NameDocker}
+		mockRT := &MockExecutor{name: executor.NameDocker}
 		registry.Register(mockRT)
 
-		if len(registry.runtimes) != 1 {
-			t.Errorf("expected 1 runtime, got %d", len(registry.runtimes))
+		if len(registry.backends) != 1 {
+			t.Errorf("expected 1 runtime, got %d", len(registry.backends))
 		}
-		if registry.runtimes[runtime.NameDocker] != mockRT {
+		if registry.backends[executor.NameDocker] != mockRT {
 			t.Error("expected registered runtime to match")
 		}
 	})
 
 	t.Run("replace existing runtime", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		mockRT1 := &MockRuntime{name: runtime.NameDocker, healthCheckErr: errors.New("error1")}
-		mockRT2 := &MockRuntime{name: runtime.NameDocker, healthCheckErr: errors.New("error2")}
+		mockRT1 := &MockExecutor{name: executor.NameDocker, healthCheckErr: errors.New("error1")}
+		mockRT2 := &MockExecutor{name: executor.NameDocker, healthCheckErr: errors.New("error2")}
 
 		registry.Register(mockRT1)
 		registry.Register(mockRT2)
 
-		if len(registry.runtimes) != 1 {
-			t.Errorf("expected 1 runtime after replacement, got %d", len(registry.runtimes))
+		if len(registry.backends) != 1 {
+			t.Errorf("expected 1 runtime after replacement, got %d", len(registry.backends))
 		}
-		if registry.runtimes[runtime.NameDocker] != mockRT2 {
+		if registry.backends[executor.NameDocker] != mockRT2 {
 			t.Error("expected runtime to be replaced with new one")
 		}
 	})
 }
 
-func TestRuntimeRegistry_GetRuntime(t *testing.T) {
+func TestExecutorRegistry_GetRuntime(t *testing.T) {
 	t.Run("get existing runtime", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		mockRT := &MockRuntime{name: runtime.NameDocker}
+		mockRT := &MockExecutor{name: executor.NameDocker}
 		registry.Register(mockRT)
 
-		rt, err := registry.GetRuntime(runtime.NameDocker)
+		rt, err := registry.GetBackend(executor.NameDocker)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -109,24 +109,24 @@ func TestRuntimeRegistry_GetRuntime(t *testing.T) {
 		}
 	})
 
-	t.Run("get non-existent runtime returns ErrRuntimeNotFound", func(t *testing.T) {
+	t.Run("get non-existent runtime returns ErrExecutorNotFound", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		_, err := registry.GetRuntime(runtime.NameDocker)
+		_, err := registry.GetBackend(executor.NameDocker)
 		if err == nil {
 			t.Error("expected error for non-existent runtime")
 		}
-		if !errors.Is(err, ErrRuntimeNotFound) {
-			t.Errorf("expected ErrRuntimeNotFound, got: %v", err)
+		if !errors.Is(err, ErrExecutorNotFound) {
+			t.Errorf("expected ErrExecutorNotFound, got: %v", err)
 		}
 	})
 }
 
-func TestRuntimeRegistry_List(t *testing.T) {
+func TestExecutorRegistry_List(t *testing.T) {
 	t.Run("list empty registry", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
 		names := registry.List()
 		if len(names) != 0 {
@@ -136,11 +136,11 @@ func TestRuntimeRegistry_List(t *testing.T) {
 
 	t.Run("list with multiple runtimes", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		registry.Register(&MockRuntime{name: runtime.NameDocker})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone})
-		registry.Register(&MockRuntime{name: runtime.NameLocal})
+		registry.Register(&MockExecutor{name: executor.NameDocker})
+		registry.Register(&MockExecutor{name: executor.NameStandalone})
+		registry.Register(&MockExecutor{name: executor.NameLocal})
 
 		names := registry.List()
 		if len(names) != 3 {
@@ -148,61 +148,61 @@ func TestRuntimeRegistry_List(t *testing.T) {
 		}
 
 		// Check all names are present (order is not guaranteed)
-		nameMap := make(map[runtime.Name]bool)
+		nameMap := make(map[executor.Name]bool)
 		for _, n := range names {
 			nameMap[n] = true
 		}
-		if !nameMap[runtime.NameDocker] || !nameMap[runtime.NameStandalone] || !nameMap[runtime.NameLocal] {
+		if !nameMap[executor.NameDocker] || !nameMap[executor.NameStandalone] || !nameMap[executor.NameLocal] {
 			t.Error("expected all registered runtime names to be present")
 		}
 	})
 }
 
-func TestRuntimeRegistry_HealthCheckAll(t *testing.T) {
+func TestExecutorRegistry_HealthCheckAll(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("health check with all healthy runtimes", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		registry.Register(&MockRuntime{name: runtime.NameDocker, healthCheckErr: nil})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone, healthCheckErr: nil})
+		registry.Register(&MockExecutor{name: executor.NameDocker, healthCheckErr: nil})
+		registry.Register(&MockExecutor{name: executor.NameStandalone, healthCheckErr: nil})
 
 		results := registry.HealthCheckAll(ctx)
 		if len(results) != 2 {
 			t.Errorf("expected 2 results, got %d", len(results))
 		}
-		if results[runtime.NameDocker] != nil {
-			t.Errorf("expected nil error for docker, got: %v", results[runtime.NameDocker])
+		if results[executor.NameDocker] != nil {
+			t.Errorf("expected nil error for docker, got: %v", results[executor.NameDocker])
 		}
-		if results[runtime.NameStandalone] != nil {
-			t.Errorf("expected nil error for standalone, got: %v", results[runtime.NameStandalone])
+		if results[executor.NameStandalone] != nil {
+			t.Errorf("expected nil error for standalone, got: %v", results[executor.NameStandalone])
 		}
 	})
 
 	t.Run("health check with some failing runtimes", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
 		dockerErr := errors.New("docker unavailable")
-		registry.Register(&MockRuntime{name: runtime.NameDocker, healthCheckErr: dockerErr})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone, healthCheckErr: nil})
+		registry.Register(&MockExecutor{name: executor.NameDocker, healthCheckErr: dockerErr})
+		registry.Register(&MockExecutor{name: executor.NameStandalone, healthCheckErr: nil})
 
 		results := registry.HealthCheckAll(ctx)
 		if len(results) != 2 {
 			t.Errorf("expected 2 results, got %d", len(results))
 		}
-		if results[runtime.NameDocker] != dockerErr {
-			t.Errorf("expected docker error, got: %v", results[runtime.NameDocker])
+		if results[executor.NameDocker] != dockerErr {
+			t.Errorf("expected docker error, got: %v", results[executor.NameDocker])
 		}
-		if results[runtime.NameStandalone] != nil {
-			t.Errorf("expected nil error for standalone, got: %v", results[runtime.NameStandalone])
+		if results[executor.NameStandalone] != nil {
+			t.Errorf("expected nil error for standalone, got: %v", results[executor.NameStandalone])
 		}
 	})
 
 	t.Run("health check with empty registry", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
 		results := registry.HealthCheckAll(ctx)
 		if len(results) != 0 {
@@ -211,15 +211,15 @@ func TestRuntimeRegistry_HealthCheckAll(t *testing.T) {
 	})
 }
 
-func TestRuntimeRegistry_RecoverAll(t *testing.T) {
+func TestExecutorRegistry_RecoverAll(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("recovery with no instances", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		registry.Register(&MockRuntime{name: runtime.NameDocker, recoverInstances: nil})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone, recoverInstances: []*RuntimeInstance{}})
+		registry.Register(&MockExecutor{name: executor.NameDocker, recoverInstances: nil})
+		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: []*ExecutorInstance{}})
 
 		instances, err := registry.RecoverAll(ctx)
 		if err != nil {
@@ -232,18 +232,18 @@ func TestRuntimeRegistry_RecoverAll(t *testing.T) {
 
 	t.Run("recovery with instances from multiple runtimes", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
-		dockerInstances := []*RuntimeInstance{
+		dockerInstances := []*ExecutorInstance{
 			{InstanceID: "docker-1", RuntimeName: "docker"},
 			{InstanceID: "docker-2", RuntimeName: "docker"},
 		}
-		standaloneInstances := []*RuntimeInstance{
+		standaloneInstances := []*ExecutorInstance{
 			{InstanceID: "standalone-1", RuntimeName: "standalone"},
 		}
 
-		registry.Register(&MockRuntime{name: runtime.NameDocker, recoverInstances: dockerInstances})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone, recoverInstances: standaloneInstances})
+		registry.Register(&MockExecutor{name: executor.NameDocker, recoverInstances: dockerInstances})
+		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: standaloneInstances})
 
 		instances, err := registry.RecoverAll(ctx)
 		if err != nil {
@@ -256,15 +256,15 @@ func TestRuntimeRegistry_RecoverAll(t *testing.T) {
 
 	t.Run("recovery with errors continues and returns last error", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
 		recoverErr := errors.New("recovery failed")
-		standaloneInstances := []*RuntimeInstance{
+		standaloneInstances := []*ExecutorInstance{
 			{InstanceID: "standalone-1", RuntimeName: "standalone"},
 		}
 
-		registry.Register(&MockRuntime{name: runtime.NameDocker, recoverErr: recoverErr})
-		registry.Register(&MockRuntime{name: runtime.NameStandalone, recoverInstances: standaloneInstances})
+		registry.Register(&MockExecutor{name: executor.NameDocker, recoverErr: recoverErr})
+		registry.Register(&MockExecutor{name: executor.NameStandalone, recoverInstances: standaloneInstances})
 
 		instances, err := registry.RecoverAll(ctx)
 		// Should still get instances from successful runtimes
@@ -278,7 +278,7 @@ func TestRuntimeRegistry_RecoverAll(t *testing.T) {
 
 	t.Run("recovery from empty registry", func(t *testing.T) {
 		log := newTestRegistryLogger()
-		registry := NewRuntimeRegistry(log)
+		registry := NewExecutorRegistry(log)
 
 		instances, err := registry.RecoverAll(ctx)
 		if err != nil {
@@ -290,9 +290,9 @@ func TestRuntimeRegistry_RecoverAll(t *testing.T) {
 	})
 }
 
-func TestRuntimeRegistry_ThreadSafety(t *testing.T) {
+func TestExecutorRegistry_ThreadSafety(t *testing.T) {
 	log := newTestRegistryLogger()
-	registry := NewRuntimeRegistry(log)
+	registry := NewExecutorRegistry(log)
 	ctx := context.Background()
 
 	const numGoroutines = 50
@@ -306,8 +306,8 @@ func TestRuntimeRegistry_ThreadSafety(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < numOperations; j++ {
-				name := runtime.Name("test-runtime")
-				registry.Register(&MockRuntime{name: name})
+				name := executor.Name("test-runtime")
+				registry.Register(&MockExecutor{name: name})
 			}
 		}(i)
 	}
@@ -317,7 +317,7 @@ func TestRuntimeRegistry_ThreadSafety(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < numOperations; j++ {
-				_, _ = registry.GetRuntime(runtime.Name("test-runtime"))
+				_, _ = registry.GetBackend(executor.Name("test-runtime"))
 			}
 		}(i)
 	}

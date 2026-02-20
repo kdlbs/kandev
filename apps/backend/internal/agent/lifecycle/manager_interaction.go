@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -92,7 +92,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 	}
 
 	// Stop the agent execution via the runtime that created it
-	m.stopAgentViaRuntime(ctx, executionID, execution, force)
+	m.stopAgentViaBackend(ctx, executionID, execution, force)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -390,12 +390,12 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 	return m.RespondToPermission(execution.ID, pendingID, optionID, cancelled)
 }
 
-// stopAgentViaRuntime stops the agent execution via the runtime that created it.
-func (m *Manager) stopAgentViaRuntime(ctx context.Context, executionID string, execution *AgentExecution, force bool) {
-	if execution.RuntimeName == "" || m.runtimeRegistry == nil {
+// stopAgentViaBackend stops the agent execution via the runtime that created it.
+func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, force bool) {
+	if execution.RuntimeName == "" || m.executorRegistry == nil {
 		return
 	}
-	rt, err := m.runtimeRegistry.GetRuntime(runtime.Name(execution.RuntimeName))
+	rt, err := m.executorRegistry.GetBackend(executor.Name(execution.RuntimeName))
 	if err != nil {
 		m.logger.Warn("failed to get runtime for stopping execution",
 			zap.String("execution_id", executionID),
@@ -404,7 +404,7 @@ func (m *Manager) stopAgentViaRuntime(ctx context.Context, executionID string, e
 		return
 	}
 	m.stopPassthroughProcess(ctx, executionID, execution, rt)
-	runtimeInstance := &RuntimeInstance{
+	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
 		ContainerID:          execution.ContainerID,
@@ -419,7 +419,7 @@ func (m *Manager) stopAgentViaRuntime(ctx context.Context, executionID string, e
 }
 
 // stopPassthroughProcess stops the passthrough interactive process if one is running.
-func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string, execution *AgentExecution, rt Runtime) {
+func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string, execution *AgentExecution, rt ExecutorBackend) {
 	if execution.PassthroughProcessID == "" {
 		return
 	}

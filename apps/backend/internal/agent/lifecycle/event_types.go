@@ -40,6 +40,42 @@ type ACPSessionCreatedPayload struct {
 	ACPSessionID    string `json:"acp_session_id"`
 }
 
+// PrepareProgressEventPayload is the payload for environment preparation progress events.
+type PrepareProgressEventPayload struct {
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	ExecutionID string `json:"execution_id"`
+	StepName    string `json:"step_name"`
+	StepIndex   int    `json:"step_index"`
+	TotalSteps  int    `json:"total_steps"`
+	Status      string `json:"status"`
+	Output      string `json:"output,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p PrepareProgressEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// PrepareCompletedEventPayload is the payload when environment preparation finishes.
+type PrepareCompletedEventPayload struct {
+	TaskID        string `json:"task_id"`
+	SessionID     string `json:"session_id"`
+	ExecutionID   string `json:"execution_id"`
+	Success       bool   `json:"success"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+	DurationMs    int64  `json:"duration_ms"`
+	WorkspacePath string `json:"workspace_path,omitempty"`
+	Timestamp     string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p PrepareCompletedEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
 	Type          string      `json:"type"`

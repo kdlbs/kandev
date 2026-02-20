@@ -155,7 +155,14 @@ function useDiffViewerAnnotations({
         enableAcceptReject,
         fileDiffMetadata,
       }),
-    [comments, editingCommentId, showCommentForm, selectedLines, enableAcceptReject, fileDiffMetadata],
+    [
+      comments,
+      editingCommentId,
+      showCommentForm,
+      selectedLines,
+      enableAcceptReject,
+      fileDiffMetadata,
+    ],
   );
 
   useEffect(() => {

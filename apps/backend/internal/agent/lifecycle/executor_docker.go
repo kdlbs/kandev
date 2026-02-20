@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/docker"
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -25,27 +25,27 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 	return ""
 }
 
-// DockerRuntime implements Runtime for Docker-based agent execution.
-type DockerRuntime struct {
+// DockerExecutor implements Runtime for Docker-based agent execution.
+type DockerExecutor struct {
 	containerMgr *ContainerManager
 	docker       *docker.Client
 	logger       *logger.Logger
 }
 
-// NewDockerRuntime creates a new Docker runtime.
-func NewDockerRuntime(dockerClient *docker.Client, log *logger.Logger) *DockerRuntime {
-	return &DockerRuntime{
+// NewDockerExecutor creates a new Docker runtime.
+func NewDockerExecutor(dockerClient *docker.Client, log *logger.Logger) *DockerExecutor {
+	return &DockerExecutor{
 		containerMgr: NewContainerManager(dockerClient, "", log),
 		docker:       dockerClient,
 		logger:       log.WithFields(zap.String("runtime", "docker")),
 	}
 }
 
-func (r *DockerRuntime) Name() runtime.Name {
-	return runtime.NameDocker
+func (r *DockerExecutor) Name() executor.Name {
+	return executor.NameDocker
 }
 
-func (r *DockerRuntime) HealthCheck(ctx context.Context) error {
+func (r *DockerExecutor) HealthCheck(ctx context.Context) error {
 	// Check Docker is reachable by listing containers
 	_, err := r.docker.ListContainers(ctx, map[string]string{})
 	if err != nil {
@@ -54,13 +54,13 @@ func (r *DockerRuntime) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error) {
+func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
 	// Extract runtime-specific values from metadata
 	mainRepoGitDir := getMetadataString(req.Metadata, MetadataKeyMainRepoGitDir)
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
 	worktreeBranch := getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 
-	// Convert RuntimeCreateRequest to ContainerConfig
+	// Convert ExecutorCreateRequest to ContainerConfig
 	containerCfg := ContainerConfig{
 		AgentConfig:    req.AgentConfig,
 		WorkspacePath:  req.WorkspacePath,
@@ -94,7 +94,7 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 		zap.String("container_id", containerID),
 		zap.String("container_ip", containerIP))
 
-	return &RuntimeInstance{
+	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
 		TaskID:        req.TaskID,
 		SessionID:     req.SessionID,
@@ -107,7 +107,7 @@ func (r *DockerRuntime) CreateInstance(ctx context.Context, req *RuntimeCreateRe
 	}, nil
 }
 
-func (r *DockerRuntime) StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error {
+func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance.ContainerID == "" {
 		return nil // No container to stop
 	}
@@ -126,7 +126,7 @@ func (r *DockerRuntime) StopInstance(ctx context.Context, instance *RuntimeInsta
 	return nil
 }
 
-func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error) {
+func (r *DockerExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
 	// Find containers with kandev.managed label
 	containers, err := r.docker.ListContainers(ctx, map[string]string{
 		"kandev.managed": "true",
@@ -135,7 +135,7 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	var recovered []*RuntimeInstance
+	var recovered []*ExecutorInstance
 	for _, ctr := range containers {
 		// Only recover running containers
 		if ctr.State != "running" {
@@ -189,7 +189,7 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 			agentctl.WithExecutionID(instanceID),
 			agentctl.WithSessionID(sessionID))
 
-		recovered = append(recovered, &RuntimeInstance{
+		recovered = append(recovered, &ExecutorInstance{
 			InstanceID:    instanceID,
 			TaskID:        taskID,
 			SessionID:     sessionID,
@@ -213,6 +213,6 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 
 // GetInteractiveRunner returns nil for Docker runtime.
 // Passthrough mode is not supported in Docker-based execution.
-func (r *DockerRuntime) GetInteractiveRunner() *process.InteractiveRunner {
+func (r *DockerExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }

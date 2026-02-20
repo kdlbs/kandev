@@ -16,12 +16,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
-import type {
-  Agent,
-  ModelConfig,
-  PermissionSetting,
-  PassthroughConfig,
-} from "@/lib/types/http";
+import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 

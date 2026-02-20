@@ -105,6 +105,9 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 	if err := r.ensureDefaultExecutors(ctx); err != nil {
 		return err
 	}
+	if err := r.ensureDefaultExecutorProfiles(ctx); err != nil {
+		return err
+	}
 	return r.ensureDefaultEnvironment(ctx)
 }
 
@@ -152,6 +155,28 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`), executor.id, executor.name, executor.execType, executor.status, dialect.BoolToInt(executor.isSystem), dialect.BoolToInt(executor.resumable), string(configJSON), now, now); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) ensureDefaultExecutorProfiles(ctx context.Context) error {
+	for _, executorID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree, models.ExecutorIDLocalDocker} {
+		var profileCount int
+		if err := r.db.QueryRowContext(ctx, r.db.Rebind(
+			"SELECT COUNT(1) FROM executor_profiles WHERE executor_id = ?",
+		), executorID).Scan(&profileCount); err != nil {
+			return err
+		}
+		if profileCount == 0 {
+			now := time.Now().UTC()
+			id := uuid.New().String()
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+				INSERT INTO executor_profiles (id, executor_id, name, is_default, config, setup_script, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`), id, executorID, "Default", 1, "{}", "", now, now); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

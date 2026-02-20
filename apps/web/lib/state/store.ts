@@ -32,6 +32,7 @@ import {
   type AgentProfilesState,
   type EditorsState,
   type PromptsState,
+  type SecretsState,
   type NotificationProvidersState,
   type SettingsDataState,
   type UserSettingsState,
@@ -68,6 +69,7 @@ export type {
   AgentProfilesState,
   EditorsState,
   PromptsState,
+  SecretsState,
   NotificationProvidersState,
   SettingsDataState,
   UserSettingsState,
@@ -127,6 +129,7 @@ export type AppState = {
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
+  secrets: (typeof defaultSettingsState)["secrets"];
   notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
   settingsData: (typeof defaultSettingsState)["settingsData"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
@@ -156,6 +159,7 @@ export type AppState = {
   availableCommands: (typeof defaultSessionRuntimeState)["availableCommands"];
   sessionMode: (typeof defaultSessionRuntimeState)["sessionMode"];
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
+  prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -204,6 +208,11 @@ export type AppState = {
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
+  setSecrets: (items: SecretsState["items"]) => void;
+  setSecretsLoading: (loading: boolean) => void;
+  addSecret: (item: import("@/lib/types/http-secrets").SecretListItem) => void;
+  updateSecret: (item: import("@/lib/types/http-secrets").SecretListItem) => void;
+  removeSecret: (id: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
@@ -331,6 +340,7 @@ const defaultState = {
   agentProfiles: defaultSettingsState.agentProfiles,
   editors: defaultSettingsState.editors,
   prompts: defaultSettingsState.prompts,
+  secrets: defaultSettingsState.secrets,
   notificationProviders: defaultSettingsState.notificationProviders,
   settingsData: defaultSettingsState.settingsData,
   userSettings: defaultSettingsState.userSettings,
@@ -356,6 +366,7 @@ const defaultState = {
   availableCommands: defaultSessionRuntimeState.availableCommands,
   sessionMode: defaultSessionRuntimeState.sessionMode,
   userShells: defaultSessionRuntimeState.userShells,
+  prepareProgress: defaultSessionRuntimeState.prepareProgress,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -388,6 +399,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
     editors: { ...defaultState.editors, ...initialState.editors },
     prompts: { ...defaultState.prompts, ...initialState.prompts },
+    secrets: { ...defaultState.secrets, ...initialState.secrets },
     notificationProviders: {
       ...defaultState.notificationProviders,
       ...initialState.notificationProviders,
@@ -418,6 +430,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
     userShells: { ...defaultState.userShells, ...initialState.userShells },
+    prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
@@ -464,6 +477,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       agentProfiles: merged.agentProfiles,
       editors: merged.editors,
       prompts: merged.prompts,
+      secrets: merged.secrets,
       notificationProviders: merged.notificationProviders,
       settingsData: merged.settingsData,
       userSettings: merged.userSettings,
@@ -485,6 +499,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       agents: merged.agents,
       sessionMode: merged.sessionMode,
       userShells: merged.userShells,
+      prepareProgress: merged.prepareProgress,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

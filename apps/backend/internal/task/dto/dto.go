@@ -72,6 +72,22 @@ type ExecutorDTO struct {
 	UpdatedAt time.Time             `json:"updated_at"`
 }
 
+type ExecutorProfileDTO struct {
+	ID          string            `json:"id"`
+	ExecutorID  string            `json:"executor_id"`
+	Name        string            `json:"name"`
+	IsDefault   bool              `json:"is_default"`
+	Config      map[string]string `json:"config,omitempty"`
+	SetupScript string            `json:"setup_script"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+type ListExecutorProfilesResponse struct {
+	Profiles []ExecutorProfileDTO `json:"profiles"`
+	Total    int                  `json:"total"`
+}
+
 type EnvironmentDTO struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
@@ -335,6 +351,19 @@ func FromExecutor(executor *models.Executor) ExecutorDTO {
 		Config:    executor.Config,
 		CreatedAt: executor.CreatedAt,
 		UpdatedAt: executor.UpdatedAt,
+	}
+}
+
+func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
+	return ExecutorProfileDTO{
+		ID:          profile.ID,
+		ExecutorID:  profile.ExecutorID,
+		Name:        profile.Name,
+		IsDefault:   profile.IsDefault,
+		Config:      profile.Config,
+		SetupScript: profile.SetupScript,
+		CreatedAt:   profile.CreatedAt,
+		UpdatedAt:   profile.UpdatedAt,
 	}
 }
 

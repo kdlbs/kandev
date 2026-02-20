@@ -471,6 +471,24 @@ func (m *mockRepository) CountTasksByWorkflowStep(ctx context.Context, stepID st
 	return 0, nil
 }
 
+// Executor profile operations
+func (m *mockRepository) CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
 // Close operation
 func (m *mockRepository) Close() error { return nil }
 

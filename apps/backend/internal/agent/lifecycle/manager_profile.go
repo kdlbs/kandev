@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
-	"github.com/kandev/kandev/internal/agent/runtime"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -114,7 +114,7 @@ func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID str
 	}
 
 	// Get default runtime for MCP policy (used before execution exists)
-	defaultRT, _ := m.getDefaultRuntime()
+	defaultRT, _ := m.getDefaultExecutorBackend()
 	policy := mcpconfig.DefaultPolicyForRuntime(runtimeName(defaultRT))
 	executorID := ""
 
@@ -137,9 +137,9 @@ func (m *Manager) resolveMcpServersWithParams(ctx context.Context, profileID str
 	return mcpconfig.ToACPServers(resolved), nil
 }
 
-func runtimeName(rt Runtime) runtime.Name {
+func runtimeName(rt ExecutorBackend) executor.Name {
 	if rt == nil {
-		return runtime.NameUnknown
+		return executor.NameUnknown
 	}
 	return rt.Name()
 }

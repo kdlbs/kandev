@@ -550,7 +550,8 @@ export function WorkspaceRepositoriesClient({
     handleConfirmLocalRepository,
   } = state;
 
-  if (!workspace) return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
+  if (!workspace)
+    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
 
   return (
     <div className="space-y-8">

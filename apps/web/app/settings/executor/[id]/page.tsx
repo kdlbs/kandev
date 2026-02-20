@@ -20,6 +20,7 @@ import {
 import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
+import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 import type { Executor } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
@@ -410,7 +411,9 @@ function useExecutorEditHandlers({
       setDraft(updated);
       setSavedExecutor(updated);
       setExecutors(
-        executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item)),
+        executors.map((item: Executor) =>
+          item.id === updated.id ? { ...item, ...updated } : item,
+        ),
       );
     } finally {
       setIsSaving(false);
@@ -495,6 +498,7 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         isSystem={isSystem}
         onNameChange={(value) => setDraft({ ...draft, name: value })}
       />
+      <ExecutorProfilesCard executorId={executor.id} profiles={draft.profiles ?? []} />
       {isDockerType && <DockerConfigCard draft={draft} onDraftChange={setDraft} />}
       <McpPolicyCard
         mcpPolicy={draft.config?.mcp_policy ?? ""}

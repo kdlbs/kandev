@@ -378,6 +378,18 @@ type ExecutorRunning struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
+// ExecutorProfile represents a named configuration preset for an executor.
+type ExecutorProfile struct {
+	ID          string            `json:"id"`
+	ExecutorID  string            `json:"executor_id"`
+	Name        string            `json:"name"`
+	IsDefault   bool              `json:"is_default"`
+	Config      map[string]string `json:"config,omitempty"`
+	SetupScript string            `json:"setup_script,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
 // EnvironmentKind represents the runtime type for environments.
 type EnvironmentKind string
 

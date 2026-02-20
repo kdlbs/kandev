@@ -53,99 +53,67 @@ type UseTipTapEditorOptions = {
   ref: React.ForwardedRef<TipTapInputHandle>;
 };
 
-export function useTipTapEditor({
-  value,
-  onChange,
-  onSubmit,
-  placeholder,
-  disabled,
-  className,
-  planModeEnabled,
-  submitKey,
-  onFocus,
-  onBlur,
-  sessionId,
-  onImagePaste,
-  mentionSuggestion,
-  slashSuggestion,
-  ref,
-}: UseTipTapEditorOptions) {
-  const onSubmitRef = useRef(onSubmit);
-  const submitKeyRef = useRef(submitKey);
-  const disabledRef = useRef(disabled);
-  const onChangeRef = useRef(onChange);
-  const onImagePasteRef = useRef(onImagePaste);
-  const sessionIdRef = useRef(sessionId);
+function useTipTapRefs(opts: UseTipTapEditorOptions) {
+  const onSubmitRef = useRef(opts.onSubmit);
+  const submitKeyRef = useRef(opts.submitKey);
+  const disabledRef = useRef(opts.disabled);
+  const onChangeRef = useRef(opts.onChange);
+  const onImagePasteRef = useRef(opts.onImagePaste);
+  const sessionIdRef = useRef(opts.sessionId);
   useLayoutEffect(() => {
-    onSubmitRef.current = onSubmit;
-    submitKeyRef.current = submitKey;
-    disabledRef.current = disabled;
-    onChangeRef.current = onChange;
-    onImagePasteRef.current = onImagePaste;
-    sessionIdRef.current = sessionId;
+    onSubmitRef.current = opts.onSubmit;
+    submitKeyRef.current = opts.submitKey;
+    disabledRef.current = opts.disabled;
+    onChangeRef.current = opts.onChange;
+    onImagePasteRef.current = opts.onImagePaste;
+    sessionIdRef.current = opts.sessionId;
   });
-  const SubmitKeymap = useSubmitKeymap(disabledRef, submitKeyRef, onSubmitRef);
+  return { onSubmitRef, submitKeyRef, disabledRef, onChangeRef, onImagePasteRef, sessionIdRef };
+}
+
+export function useTipTapEditor(opts: UseTipTapEditorOptions) {
+  const { value, onChange, placeholder, disabled, className, planModeEnabled, onFocus, onBlur, sessionId, mentionSuggestion, slashSuggestion, ref } = opts;
+  const refs = useTipTapRefs(opts);
+  const SubmitKeymap = useSubmitKeymap(refs.disabledRef, refs.submitKeyRef, refs.onSubmitRef);
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      Document,
-      Paragraph,
-      Text,
-      HardBreak,
-      History,
-      Code,
+      Document, Paragraph, Text, HardBreak, History, Code,
       CodeBlockLowlight.extend({
-        addNodeView() {
-          return ReactNodeViewRenderer(CodeBlockView);
-        },
+        addNodeView() { return ReactNodeViewRenderer(CodeBlockView); },
       }).configure({ lowlight: lowlightInstance }),
       Placeholder.configure({ placeholder }),
-      ContextMention.configure({
-        suggestions: [mentionSuggestion, slashSuggestion],
-      }),
+      ContextMention.configure({ suggestions: [mentionSuggestion, slashSuggestion] }),
       SubmitKeymap,
     ],
     editorProps: {
       attributes: {
         class: cn(
           "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
-          "text-sm leading-relaxed",
-          "placeholder:text-muted-foreground",
-          "focus:outline-none",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          planModeEnabled && "border-primary/40",
-          className,
+          "text-sm leading-relaxed", "placeholder:text-muted-foreground",
+          "focus:outline-none", "disabled:cursor-not-allowed disabled:opacity-50",
+          planModeEnabled && "border-primary/40", className,
         ),
       },
-      handlePaste: (view, event) => {
-        return handleEditorPaste(view, event, onImagePasteRef);
-      },
+      handlePaste: (view, event) => handleEditorPaste(view, event, refs.onImagePasteRef),
       handleDOMEvents: {
-        focus: () => {
-          onFocus?.();
-          return false;
-        },
-        blur: () => {
-          onBlur?.();
-          return false;
-        },
+        focus: () => { onFocus?.(); return false; },
+        blur: () => { onBlur?.(); return false; },
       },
     },
     onUpdate: ({ editor: e }) => {
-      if (isSyncingRef.current) return;
-      if (!initialSyncDoneRef.current) return;
+      if (isSyncingRef.current || !initialSyncDoneRef.current) return;
       const text = getMarkdownText(e);
-      onChangeRef.current(text);
-      const sid = sessionIdRef.current;
+      refs.onChangeRef.current(text);
+      const sid = refs.sessionIdRef.current;
       if (sid) setChatDraftContent(sid, e.getJSON());
     },
     editable: !disabled,
   });
-  useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef });
+  useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef: refs.onChangeRef });
   useEditorImperativeHandle(ref, editor, onChange, isSyncingRef);
-
   return editor;
 }
 

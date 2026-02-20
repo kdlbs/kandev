@@ -151,67 +151,73 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
 type SheetNavOptions = {
   workspaceId: string | null;
   store: ReturnType<typeof useAppStoreApi>;
-  loadTaskSessionsForTask: (taskId: string) => Promise<Array<{ id: string; updated_at?: string | null }>>;
+  loadTaskSessionsForTask: (
+    taskId: string,
+  ) => Promise<Array<{ id: string; updated_at?: string | null }>>;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
   updateUrl: (sessionId: string) => void;
   onOpenChange: (open: boolean) => void;
 };
 
-function useWorkspaceAndTaskCreatedActions({
-  workspaceId,
-  store,
-  loadTaskSessionsForTask,
-  setActiveSession,
-  setActiveTask,
-  updateUrl,
-  onOpenChange,
-}: SheetNavOptions) {
+async function switchWorkspace(
+  newWorkspaceId: string,
+  opts: SheetNavOptions,
+) {
+  const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, onOpenChange } = opts;
+  store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
+  try {
+    const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: "no-store" });
+    const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
+    const firstWorkflow = newWorkspaceWorkflows[0];
+    if (!firstWorkflow) {
+      store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+      return;
+    }
+    const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
+    store.setState((state) => ({
+      ...state,
+      workflows: {
+        ...state.workflows,
+        items: [
+          ...state.workflows.items.filter(
+            (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
+          ),
+          ...newWorkspaceWorkflows.map((w) => ({
+            id: w.id, workspaceId: w.workspace_id, name: w.name,
+          })),
+        ],
+        activeId: firstWorkflow.id,
+      },
+      kanban: mapSnapshotToKanban(snapshot, firstWorkflow.id),
+    }));
+    const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
+    if (mostRecentTask) {
+      const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
+      const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
+      if (mostRecentSession) {
+        setActiveSession(mostRecentTask.id, mostRecentSession.id);
+        updateUrl(mostRecentSession.id);
+      } else {
+        setActiveTask(mostRecentTask.id);
+      }
+    }
+    onOpenChange(false);
+  } catch (error) {
+    console.error("Failed to switch workspace:", error);
+    store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+  }
+}
+
+function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
+  const { workspaceId, store, setActiveSession, setActiveTask, updateUrl, onOpenChange } = opts;
+
   const handleWorkspaceChange = useCallback(
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
-      store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
-      try {
-        const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: "no-store" });
-        const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
-        const firstWorkflow = newWorkspaceWorkflows[0];
-        if (!firstWorkflow) {
-          store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
-          return;
-        }
-        const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
-        store.setState((state) => ({
-          ...state,
-          workflows: {
-            ...state.workflows,
-            items: [
-              ...state.workflows.items.filter(
-                (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
-              ),
-              ...newWorkspaceWorkflows.map((w) => ({ id: w.id, workspaceId: w.workspace_id, name: w.name })),
-            ],
-            activeId: firstWorkflow.id,
-          },
-          kanban: mapSnapshotToKanban(snapshot, firstWorkflow.id),
-        }));
-        const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
-        if (mostRecentTask) {
-          const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
-          const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
-          if (mostRecentSession) {
-            setActiveSession(mostRecentTask.id, mostRecentSession.id);
-            updateUrl(mostRecentSession.id);
-          } else {
-            setActiveTask(mostRecentTask.id);
-          }
-        }
-        onOpenChange(false);
-      } catch (error) {
-        console.error("Failed to switch workspace:", error);
-        store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
-      }
+      await switchWorkspace(newWorkspaceId, opts);
     },
-    [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, onOpenChange],
+    [workspaceId, opts],
   );
 
   const handleTaskCreated = useCallback(
@@ -232,8 +238,12 @@ function useWorkspaceAndTaskCreatedActions({
           ...state,
           kanban: {
             ...state.kanban,
-            tasks: state.kanban.tasks.some((item: KanbanState["tasks"][number]) => item.id === task.id)
-              ? state.kanban.tasks.map((item: KanbanState["tasks"][number]) => item.id === task.id ? nextTask : item)
+            tasks: state.kanban.tasks.some(
+              (item: KanbanState["tasks"][number]) => item.id === task.id,
+            )
+              ? state.kanban.tasks.map((item: KanbanState["tasks"][number]) =>
+                  item.id === task.id ? nextTask : item,
+                )
               : [...state.kanban.tasks, nextTask],
           },
         };

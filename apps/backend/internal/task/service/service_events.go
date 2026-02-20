@@ -144,6 +144,23 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
 }
 
+func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType string, profile *models.ExecutorProfile) {
+	if s.eventBus == nil || profile == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"id":           profile.ID,
+		"executor_id":  profile.ExecutorID,
+		"name":         profile.Name,
+		"is_default":   profile.IsDefault,
+		"config":       profile.Config,
+		"setup_script": profile.SetupScript,
+		"created_at":   profile.CreatedAt.Format(time.RFC3339),
+		"updated_at":   profile.UpdatedAt.Format(time.RFC3339),
+	}
+	s.publishEventToBus(ctx, eventType, "executor_profile", profile.ID, data)
+}
+
 func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string, environment *models.Environment) {
 	if s.eventBus == nil || environment == nil {
 		return

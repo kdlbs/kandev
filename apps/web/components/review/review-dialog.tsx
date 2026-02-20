@@ -103,6 +103,80 @@ function computeCommentCounts(
   return counts;
 }
 
+type ReviewDialogHandlerOptions = {
+  allFiles: ReviewFile[];
+  fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
+  markReviewed: (path: string, hash: string) => void;
+  markUnreviewed: (path: string) => void;
+  onSendComments: ReviewDialogProps["onSendComments"];
+  onOpenChange: ReviewDialogProps["onOpenChange"];
+  sessionId: string;
+};
+
+function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
+  const { allFiles, fileRefs, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId } = opts;
+  const { discard } = useGitOperations(sessionId);
+  const { toast } = useToast();
+
+  const handleToggleSplitView = useCallback((split: boolean) => {
+    const mode = split ? "split" : "unified";
+    localStorage.setItem("diff-view-mode", mode);
+    window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
+  }, []);
+
+  const handleSelectFile = useCallback(
+    (path: string, setSelectedFile: (p: string) => void) => {
+      setSelectedFile(path);
+      const ref = fileRefs.get(path);
+      if (ref?.current) ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    [fileRefs],
+  );
+
+  const handleToggleReviewed = useCallback(
+    (path: string, reviewed: boolean) => {
+      if (reviewed) {
+        const file = allFiles.find((f) => f.path === path);
+        markReviewed(path, file ? hashDiff(file.diff) : "");
+      } else markUnreviewed(path);
+    },
+    [allFiles, markReviewed, markUnreviewed],
+  );
+
+  const handleSendComments = useCallback(
+    (comments: DiffComment[]) => {
+      onSendComments(comments);
+      onOpenChange(false);
+    },
+    [onSendComments, onOpenChange],
+  );
+
+  const handleDiscard = useCallback(
+    async (path: string) => {
+      try {
+        const result = await discard([path]);
+        if (result.success)
+          toast({ title: "Changes discarded", description: path, variant: "success" });
+        else
+          toast({
+            title: "Discard failed",
+            description: result.error || "An error occurred",
+            variant: "error",
+          });
+      } catch (e) {
+        toast({
+          title: "Discard failed",
+          description: e instanceof Error ? e.message : "An error occurred",
+          variant: "error",
+        });
+      }
+    },
+    [discard, toast],
+  );
+
+  return { handleToggleSplitView, handleSelectFile, handleToggleReviewed, handleSendComments, handleDiscard };
+}
+
 function useReviewDialogState(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, onSendComments, gitStatusFiles, cumulativeDiff } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -119,16 +193,23 @@ function useReviewDialogState(props: ReviewDialogProps) {
     return getStorePendingComments().filter(isDiffComment);
   }, [getStorePendingComments]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
-  const { discard } = useGitOperations(sessionId);
-  const { toast } = useToast();
 
   const allFiles = useMemo<ReviewFile[]>(
     () => buildAllFiles(gitStatusFiles, cumulativeDiff),
     [gitStatusFiles, cumulativeDiff],
   );
-  const { reviewedFiles, staleFiles } = useMemo(() => computeReviewSets(allFiles, reviews), [allFiles, reviews]);
-  const commentCountByFile = useMemo(() => computeCommentCounts(byId, sessionCommentIds), [byId, sessionCommentIds]);
-  const totalCommentCount = useMemo(() => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0), [commentCountByFile]);
+  const { reviewedFiles, staleFiles } = useMemo(
+    () => computeReviewSets(allFiles, reviews),
+    [allFiles, reviews],
+  );
+  const commentCountByFile = useMemo(
+    () => computeCommentCounts(byId, sessionCommentIds),
+    [byId, sessionCommentIds],
+  );
+  const totalCommentCount = useMemo(
+    () => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0),
+    [commentCountByFile],
+  );
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
     for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>());
@@ -142,42 +223,33 @@ function useReviewDialogState(props: ReviewDialogProps) {
     prevCountRef.current = allFiles.length;
   }, [open, allFiles.length, onOpenChange]);
 
-  const handleToggleSplitView = useCallback((split: boolean) => {
-    setSplitView(split);
-    const mode = split ? "split" : "unified";
-    localStorage.setItem("diff-view-mode", mode);
-    window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
-  }, []);
+  const handlers = useReviewDialogHandlers({
+    allFiles, fileRefs, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId,
+  });
 
-  const handleSelectFile = useCallback((path: string) => {
-    setSelectedFile(path);
-    const ref = fileRefs.get(path);
-    if (ref?.current) ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [fileRefs]);
-
-  const handleToggleReviewed = useCallback((path: string, reviewed: boolean) => {
-    if (reviewed) {
-      const file = allFiles.find((f) => f.path === path);
-      markReviewed(path, file ? hashDiff(file.diff) : "");
-    } else markUnreviewed(path);
-  }, [allFiles, markReviewed, markUnreviewed]);
-
-  const handleSendComments = useCallback((comments: DiffComment[]) => {
-    onSendComments(comments);
-    onOpenChange(false);
-  }, [onSendComments, onOpenChange]);
-
-  const handleDiscard = useCallback(async (path: string) => {
-    try {
-      const result = await discard([path]);
-      if (result.success) toast({ title: "Changes discarded", description: path, variant: "success" });
-      else toast({ title: "Discard failed", description: result.error || "An error occurred", variant: "error" });
-    } catch (e) {
-      toast({ title: "Discard failed", description: e instanceof Error ? e.message : "An error occurred", variant: "error" });
-    }
-  }, [discard, toast]);
-
-  return { selectedFile, splitView, wordWrap, setWordWrap, autoMarkOnScroll, allFiles, reviewedFiles, staleFiles, commentCountByFile, totalCommentCount, fileRefs, getPendingComments, markCommentsSent, handleToggleSplitView, handleSelectFile, handleToggleReviewed, handleSendComments, handleDiscard };
+  return {
+    selectedFile,
+    splitView,
+    wordWrap,
+    setWordWrap,
+    autoMarkOnScroll,
+    allFiles,
+    reviewedFiles,
+    staleFiles,
+    commentCountByFile,
+    totalCommentCount,
+    fileRefs,
+    getPendingComments,
+    markCommentsSent,
+    handleToggleSplitView: (split: boolean) => {
+      setSplitView(split);
+      handlers.handleToggleSplitView(split);
+    },
+    handleSelectFile: (path: string) => handlers.handleSelectFile(path, setSelectedFile),
+    handleToggleReviewed: handlers.handleToggleReviewed,
+    handleSendComments: handlers.handleSendComments,
+    handleDiscard: handlers.handleDiscard,
+  };
 }
 
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useState, useCallback, useEffect } from "react";
+import { memo, useMemo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -20,6 +20,11 @@ import {
   ActionButtonsSection,
   ReviewProgressBar,
 } from "./changes-panel-timeline";
+import {
+  useChangesGitHandlers,
+  useChangesStageHandlers,
+  useChangesDialogHandlers,
+} from "./changes-panel-hooks";
 
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string) => void;
@@ -103,222 +108,6 @@ function getLastTimelineSection(hasCommits: boolean, hasStaged: boolean): string
   return "unstaged";
 }
 
-function useChangesGitHandlers(
-  gitOps: ReturnType<typeof useGitOperations>,
-  toast: ReturnType<typeof useToast>["toast"],
-  baseBranch: string | undefined,
-) {
-  const handleGitOperation = useCallback(
-    async (
-      operation: () => Promise<{ success: boolean; output: string; error?: string }>,
-      operationName: string,
-    ) => {
-      try {
-        const result = await operation();
-        const variant = result.success ? "success" : "error";
-        const title = result.success ? `${operationName} successful` : `${operationName} failed`;
-        const description = result.success
-          ? result.output.slice(0, 200) || `${operationName} completed`
-          : result.error || "An error occurred";
-        toast({ title, description, variant });
-      } catch (e) {
-        toast({
-          title: `${operationName} failed`,
-          description: e instanceof Error ? e.message : "An unexpected error occurred",
-          variant: "error",
-        });
-      }
-    },
-    [toast],
-  );
-
-  const handlePull = useCallback(() => {
-    handleGitOperation(() => gitOps.pull(), "Pull");
-  }, [handleGitOperation, gitOps]);
-  const handleRebase = useCallback(() => {
-    const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    handleGitOperation(() => gitOps.rebase(targetBranch), "Rebase");
-  }, [handleGitOperation, gitOps, baseBranch]);
-  const handlePush = useCallback(() => {
-    handleGitOperation(() => gitOps.push(), "Push");
-  }, [handleGitOperation, gitOps]);
-
-  return { handleGitOperation, handlePull, handleRebase, handlePush };
-}
-
-function useChangesStageHandlers(
-  gitOps: ReturnType<typeof useGitOperations>,
-  changedFiles: unknown[],
-) {
-  const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (pendingStageFiles.size > 0) setPendingStageFiles(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [changedFiles]);
-
-  const handleStageAll = useCallback(async () => {
-    try {
-      await gitOps.stage();
-    } catch {
-      /* handled by gitOps */
-    }
-  }, [gitOps]);
-  const handleStage = useCallback(
-    async (path: string) => {
-      setPendingStageFiles((prev) => new Set(prev).add(path));
-      try {
-        await gitOps.stage([path]);
-      } catch {
-        setPendingStageFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
-    },
-    [gitOps],
-  );
-  const handleUnstage = useCallback(
-    async (path: string) => {
-      setPendingStageFiles((prev) => new Set(prev).add(path));
-      try {
-        await gitOps.unstage([path]);
-      } catch {
-        setPendingStageFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
-    },
-    [gitOps],
-  );
-
-  return { pendingStageFiles, handleStageAll, handleStage, handleUnstage };
-}
-
-function useChangesDiscardCommitHandlers(
-  gitOps: ReturnType<typeof useGitOperations>,
-  toast: ReturnType<typeof useToast>["toast"],
-  handleGitOperation: (
-    op: () => Promise<{ success: boolean; output: string; error?: string }>,
-    name: string,
-  ) => Promise<void>,
-) {
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
-  const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-
-  const handleDiscardClick = useCallback((filePath: string) => {
-    setFileToDiscard(filePath);
-    setShowDiscardDialog(true);
-  }, []);
-  const handleDiscardConfirm = useCallback(async () => {
-    if (!fileToDiscard) return;
-    try {
-      const result = await gitOps.discard([fileToDiscard]);
-      if (!result.success)
-        toast({
-          title: "Failed to discard changes",
-          description: result.error || "An unknown error occurred",
-          variant: "error",
-        });
-    } catch (error) {
-      toast({
-        title: "Failed to discard changes",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "error",
-      });
-    } finally {
-      setShowDiscardDialog(false);
-      setFileToDiscard(null);
-    }
-  }, [fileToDiscard, gitOps, toast]);
-
-  const handleOpenCommitDialog = useCallback(() => {
-    setCommitMessage("");
-    setCommitDialogOpen(true);
-  }, []);
-  const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    setCommitDialogOpen(false);
-    await handleGitOperation(() => gitOps.commit(commitMessage.trim(), false), "Commit");
-    setCommitMessage("");
-  }, [commitMessage, handleGitOperation, gitOps]);
-
-  return {
-    showDiscardDialog,
-    setShowDiscardDialog,
-    fileToDiscard,
-    commitDialogOpen,
-    setCommitDialogOpen,
-    commitMessage,
-    setCommitMessage,
-    handleDiscardClick,
-    handleDiscardConfirm,
-    handleOpenCommitDialog,
-    handleCommit,
-  };
-}
-
-function useChangesPRHandlers(
-  gitOps: ReturnType<typeof useGitOperations>,
-  toast: ReturnType<typeof useToast>["toast"],
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
-) {
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prTitle, setPrTitle] = useState("");
-  const [prBody, setPrBody] = useState("");
-  const [prDraft, setPrDraft] = useState(true);
-
-  const handleOpenPRDialog = useCallback(() => {
-    setPrTitle(taskTitle || "");
-    setPrBody("");
-    setPrDialogOpen(true);
-  }, [taskTitle]);
-  const handleCreatePR = useCallback(async () => {
-    if (!prTitle.trim()) return;
-    setPrDialogOpen(false);
-    try {
-      const result = await gitOps.createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
-      if (result.success) {
-        toast({
-          title: prDraft ? "Draft PR created" : "PR created",
-          description: result.pr_url || "PR created successfully",
-          variant: "success",
-        });
-        if (result.pr_url) window.open(result.pr_url, "_blank");
-      } else {
-        toast({ title: "Create PR failed", description: result.error || "An error occurred", variant: "error" });
-      }
-    } catch (e) {
-      toast({ title: "Create PR failed", description: e instanceof Error ? e.message : "An error occurred", variant: "error" });
-    }
-    setPrTitle("");
-    setPrBody("");
-  }, [prTitle, prBody, baseBranch, prDraft, gitOps, toast]);
-
-  return { prDialogOpen, setPrDialogOpen, prTitle, setPrTitle, prBody, setPrBody, prDraft, setPrDraft, handleOpenPRDialog, handleCreatePR };
-}
-
-function useChangesDialogHandlers(
-  gitOps: ReturnType<typeof useGitOperations>,
-  toast: ReturnType<typeof useToast>["toast"],
-  handleGitOperation: (
-    op: () => Promise<{ success: boolean; output: string; error?: string }>,
-    name: string,
-  ) => Promise<void>,
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
-) {
-  const discardCommit = useChangesDiscardCommitHandlers(gitOps, toast, handleGitOperation);
-  const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch);
-  return { ...discardCommit, ...pr };
-}
-
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
   return baseBranch ? baseBranch.replace(/^origin\//, "") : "main";
 }
@@ -398,67 +187,142 @@ type ChangesPanelBodyProps = {
   baseBranch: string | undefined;
 };
 
-function ChangesPanelBody({
-  hasAnything, hasUnstaged, hasStaged, hasCommits, unstagedFiles, stagedFiles, commits,
-  pendingStageFiles, lastTimelineSection, reviewedCount, totalFileCount, aheadCount,
-  isLoading, dialogs, onOpenDiffFile, onEditFile, onOpenCommitDetail, onOpenReview,
-  onStageAll, onStage, onUnstage, onPush, stagedFileCount, stagedAdditions, stagedDeletions,
-  displayBranch, baseBranch,
-}: ChangesPanelBodyProps) {
+function ChangesPanelDialogsSection({
+  dialogs,
+  isLoading,
+  stagedFileCount,
+  stagedAdditions,
+  stagedDeletions,
+  displayBranch,
+  baseBranch,
+}: Pick<
+  ChangesPanelBodyProps,
+  "dialogs" | "isLoading" | "stagedFileCount" | "stagedAdditions" | "stagedDeletions" | "displayBranch" | "baseBranch"
+>) {
+  return (
+    <>
+      <DiscardDialog
+        open={dialogs.showDiscardDialog}
+        onOpenChange={dialogs.setShowDiscardDialog}
+        fileToDiscard={dialogs.fileToDiscard}
+        onConfirm={dialogs.handleDiscardConfirm}
+      />
+      <CommitDialog
+        open={dialogs.commitDialogOpen}
+        onOpenChange={dialogs.setCommitDialogOpen}
+        commitMessage={dialogs.commitMessage}
+        onCommitMessageChange={dialogs.setCommitMessage}
+        onCommit={dialogs.handleCommit}
+        isLoading={isLoading}
+        stagedFileCount={stagedFileCount}
+        stagedAdditions={stagedAdditions}
+        stagedDeletions={stagedDeletions}
+      />
+      <PRDialog
+        open={dialogs.prDialogOpen}
+        onOpenChange={dialogs.setPrDialogOpen}
+        prTitle={dialogs.prTitle}
+        onPrTitleChange={dialogs.setPrTitle}
+        prBody={dialogs.prBody}
+        onPrBodyChange={dialogs.setPrBody}
+        prDraft={dialogs.prDraft}
+        onPrDraftChange={dialogs.setPrDraft}
+        onCreatePR={dialogs.handleCreatePR}
+        isLoading={isLoading}
+        displayBranch={displayBranch}
+        baseBranch={baseBranch}
+      />
+    </>
+  );
+}
+
+function ChangesPanelTimeline(
+  props: Pick<
+    ChangesPanelBodyProps,
+    | "hasAnything" | "hasUnstaged" | "hasStaged" | "hasCommits"
+    | "unstagedFiles" | "stagedFiles" | "commits" | "pendingStageFiles"
+    | "lastTimelineSection" | "aheadCount" | "isLoading" | "dialogs"
+    | "onOpenDiffFile" | "onEditFile" | "onOpenCommitDetail"
+    | "onStageAll" | "onStage" | "onUnstage" | "onPush"
+  >,
+) {
+  if (!props.hasAnything) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+        Your changed files will appear here
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col">
+      {props.hasUnstaged && (
+        <FileListSection
+          variant="unstaged"
+          files={props.unstagedFiles}
+          pendingStageFiles={props.pendingStageFiles}
+          isLast={props.lastTimelineSection === "unstaged"}
+          actionLabel="Stage all"
+          onAction={props.onStageAll}
+          onOpenDiff={props.onOpenDiffFile}
+          onEditFile={props.onEditFile}
+          onStage={props.onStage}
+          onUnstage={props.onUnstage}
+          onDiscard={props.dialogs.handleDiscardClick}
+        />
+      )}
+      {props.hasStaged && (
+        <FileListSection
+          variant="staged"
+          files={props.stagedFiles}
+          pendingStageFiles={props.pendingStageFiles}
+          isLast={props.lastTimelineSection === "staged"}
+          actionLabel="Commit"
+          onAction={props.dialogs.handleOpenCommitDialog}
+          onOpenDiff={props.onOpenDiffFile}
+          onEditFile={props.onEditFile}
+          onStage={props.onStage}
+          onUnstage={props.onUnstage}
+          onDiscard={props.dialogs.handleDiscardClick}
+        />
+      )}
+      {props.hasCommits && (
+        <CommitsSection
+          commits={props.commits}
+          isLast={!props.hasCommits}
+          onOpenCommitDetail={props.onOpenCommitDetail}
+        />
+      )}
+      {props.hasCommits && (
+        <ActionButtonsSection
+          onOpenPRDialog={props.dialogs.handleOpenPRDialog}
+          onPush={props.onPush}
+          isLoading={props.isLoading}
+          aheadCount={props.aheadCount}
+        />
+      )}
+    </div>
+  );
+}
+
+function ChangesPanelBody(props: ChangesPanelBodyProps) {
   return (
     <PanelBody className="flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-        {!hasAnything && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-            Your changed files will appear here
-          </div>
-        )}
-        {hasAnything && (
-          <div className="flex flex-col">
-            {hasUnstaged && (
-              <FileListSection
-                variant="unstaged" files={unstagedFiles} pendingStageFiles={pendingStageFiles}
-                isLast={lastTimelineSection === "unstaged"} actionLabel="Stage all"
-                onAction={onStageAll} onOpenDiff={onOpenDiffFile} onEditFile={onEditFile}
-                onStage={onStage} onUnstage={onUnstage} onDiscard={dialogs.handleDiscardClick}
-              />
-            )}
-            {hasStaged && (
-              <FileListSection
-                variant="staged" files={stagedFiles} pendingStageFiles={pendingStageFiles}
-                isLast={lastTimelineSection === "staged"} actionLabel="Commit"
-                onAction={dialogs.handleOpenCommitDialog} onOpenDiff={onOpenDiffFile}
-                onEditFile={onEditFile} onStage={onStage} onUnstage={onUnstage}
-                onDiscard={dialogs.handleDiscardClick}
-              />
-            )}
-            {hasCommits && (
-              <CommitsSection commits={commits} isLast={!hasCommits} onOpenCommitDetail={onOpenCommitDetail} />
-            )}
-            {hasCommits && (
-              <ActionButtonsSection onOpenPRDialog={dialogs.handleOpenPRDialog} onPush={onPush} isLoading={isLoading} aheadCount={aheadCount} />
-            )}
-          </div>
-        )}
+        <ChangesPanelTimeline {...props} />
       </div>
-      <ReviewProgressBar reviewedCount={reviewedCount} totalFileCount={totalFileCount} onOpenReview={onOpenReview} />
-      <DiscardDialog
-        open={dialogs.showDiscardDialog} onOpenChange={dialogs.setShowDiscardDialog}
-        fileToDiscard={dialogs.fileToDiscard} onConfirm={dialogs.handleDiscardConfirm}
+      <ReviewProgressBar
+        reviewedCount={props.reviewedCount}
+        totalFileCount={props.totalFileCount}
+        onOpenReview={props.onOpenReview}
       />
-      <CommitDialog
-        open={dialogs.commitDialogOpen} onOpenChange={dialogs.setCommitDialogOpen}
-        commitMessage={dialogs.commitMessage} onCommitMessageChange={dialogs.setCommitMessage}
-        onCommit={dialogs.handleCommit} isLoading={isLoading}
-        stagedFileCount={stagedFileCount} stagedAdditions={stagedAdditions} stagedDeletions={stagedDeletions}
-      />
-      <PRDialog
-        open={dialogs.prDialogOpen} onOpenChange={dialogs.setPrDialogOpen}
-        prTitle={dialogs.prTitle} onPrTitleChange={dialogs.setPrTitle}
-        prBody={dialogs.prBody} onPrBodyChange={dialogs.setPrBody}
-        prDraft={dialogs.prDraft} onPrDraftChange={dialogs.setPrDraft}
-        onCreatePR={dialogs.handleCreatePR} isLoading={isLoading}
-        displayBranch={displayBranch} baseBranch={baseBranch}
+      <ChangesPanelDialogsSection
+        dialogs={props.dialogs}
+        isLoading={props.isLoading}
+        stagedFileCount={props.stagedFileCount}
+        stagedAdditions={props.stagedAdditions}
+        stagedDeletions={props.stagedDeletions}
+        displayBranch={props.displayBranch}
+        baseBranch={props.baseBranch}
       />
     </PanelBody>
   );
@@ -496,9 +360,22 @@ const ChangesPanel = memo(function ChangesPanel({
     [gitStatus, stagedFiles],
   );
 
-  const { handleGitOperation, handlePull, handleRebase, handlePush } = useChangesGitHandlers(gitOps, toast, baseBranch);
-  const { pendingStageFiles, handleStageAll, handleStage, handleUnstage } = useChangesStageHandlers(gitOps, changedFiles);
-  const dialogs = useChangesDialogHandlers(gitOps, toast, handleGitOperation, taskTitle, baseBranch);
+  const { handleGitOperation, handlePull, handleRebase, handlePush } = useChangesGitHandlers(
+    gitOps,
+    toast,
+    baseBranch,
+  );
+  const { pendingStageFiles, handleStageAll, handleStage, handleUnstage } = useChangesStageHandlers(
+    gitOps,
+    changedFiles,
+  );
+  const dialogs = useChangesDialogHandlers(
+    gitOps,
+    toast,
+    handleGitOperation,
+    taskTitle,
+    baseBranch,
+  );
 
   const hasUnstaged = unstagedFiles.length > 0;
   const hasStaged = stagedFiles.length > 0;
@@ -512,23 +389,45 @@ const ChangesPanel = memo(function ChangesPanel({
   return (
     <PanelRoot>
       <ChangesPanelHeader
-        hasChanges={hasChanges} hasCommits={hasCommits} displayBranch={displayBranch}
-        baseBranchDisplay={baseBranchDisplay} behindCount={behindCount}
-        isLoading={gitOps.isLoading} onOpenDiffAll={onOpenDiffAll} onOpenReview={onOpenReview}
-        onPull={handlePull} onRebase={handleRebase}
+        hasChanges={hasChanges}
+        hasCommits={hasCommits}
+        displayBranch={displayBranch}
+        baseBranchDisplay={baseBranchDisplay}
+        behindCount={behindCount}
+        isLoading={gitOps.isLoading}
+        onOpenDiffAll={onOpenDiffAll}
+        onOpenReview={onOpenReview}
+        onPull={handlePull}
+        onRebase={handleRebase}
       />
       <ChangesPanelBody
-        hasAnything={hasAnything} hasUnstaged={hasUnstaged} hasStaged={hasStaged}
-        hasCommits={hasCommits} unstagedFiles={unstagedFiles} stagedFiles={stagedFiles}
-        commits={commits} pendingStageFiles={pendingStageFiles}
-        lastTimelineSection={lastTimelineSection} reviewedCount={reviewedCount}
-        totalFileCount={totalFileCount} aheadCount={aheadCount} isLoading={gitOps.isLoading}
-        dialogs={dialogs} onOpenDiffFile={onOpenDiffFile} onEditFile={onEditFile}
-        onOpenCommitDetail={onOpenCommitDetail} onOpenReview={onOpenReview}
-        onStageAll={handleStageAll} onStage={handleStage} onUnstage={handleUnstage}
-        onPush={handlePush} stagedFileCount={stagedFileCount}
-        stagedAdditions={stagedAdditions} stagedDeletions={stagedDeletions}
-        displayBranch={displayBranch} baseBranch={baseBranch}
+        hasAnything={hasAnything}
+        hasUnstaged={hasUnstaged}
+        hasStaged={hasStaged}
+        hasCommits={hasCommits}
+        unstagedFiles={unstagedFiles}
+        stagedFiles={stagedFiles}
+        commits={commits}
+        pendingStageFiles={pendingStageFiles}
+        lastTimelineSection={lastTimelineSection}
+        reviewedCount={reviewedCount}
+        totalFileCount={totalFileCount}
+        aheadCount={aheadCount}
+        isLoading={gitOps.isLoading}
+        dialogs={dialogs}
+        onOpenDiffFile={onOpenDiffFile}
+        onEditFile={onEditFile}
+        onOpenCommitDetail={onOpenCommitDetail}
+        onOpenReview={onOpenReview}
+        onStageAll={handleStageAll}
+        onStage={handleStage}
+        onUnstage={handleUnstage}
+        onPush={handlePush}
+        stagedFileCount={stagedFileCount}
+        stagedAdditions={stagedAdditions}
+        stagedDeletions={stagedDeletions}
+        displayBranch={displayBranch}
+        baseBranch={baseBranch}
       />
     </PanelRoot>
   );

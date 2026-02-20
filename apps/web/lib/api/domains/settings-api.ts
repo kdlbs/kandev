@@ -7,6 +7,8 @@ import type {
   AgentProfileMcpConfig,
   ListEnvironmentsResponse,
   ListExecutorsResponse,
+  ListExecutorProfilesResponse,
+  ExecutorProfile,
   NotificationProvidersResponse,
   NotificationProvider,
   EditorsResponse,
@@ -50,6 +52,61 @@ export async function updateUserSettings(
 // Executors
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {
   return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
+}
+
+// Executor profiles
+export async function listExecutorProfiles(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<ListExecutorProfilesResponse> {
+  return fetchJson<ListExecutorProfilesResponse>(
+    `/api/v1/executors/${executorId}/profiles`,
+    options,
+  );
+}
+
+export async function createExecutorProfile(
+  executorId: string,
+  payload: {
+    name: string;
+    is_default?: boolean;
+    config?: Record<string, string>;
+    setup_script?: string;
+  },
+  options?: ApiRequestOptions,
+): Promise<ExecutorProfile> {
+  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateExecutorProfile(
+  executorId: string,
+  profileId: string,
+  payload: {
+    name?: string;
+    is_default?: boolean;
+    config?: Record<string, string>;
+    setup_script?: string;
+  },
+  options?: ApiRequestOptions,
+): Promise<ExecutorProfile> {
+  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteExecutorProfile(
+  executorId: string,
+  profileId: string,
+  options?: ApiRequestOptions,
+): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
 }
 
 // Environments

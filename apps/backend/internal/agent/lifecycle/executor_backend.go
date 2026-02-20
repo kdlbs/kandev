@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -15,9 +15,9 @@ import (
 // Runtime abstracts the agent execution environment (Docker, Standalone, K8s, SSH, etc.)
 // Each runtime is responsible for creating and managing agentctl instances.
 // Agent subprocess launching is handled separately via agentctl client methods.
-type Runtime interface {
+type ExecutorBackend interface {
 	// Name returns the runtime identifier (e.g., "docker", "standalone", "k8s")
-	Name() runtime.Name
+	Name() executor.Name
 
 	// HealthCheck verifies the runtime is available and operational
 	HealthCheck(ctx context.Context) error
@@ -25,14 +25,14 @@ type Runtime interface {
 	// CreateInstance creates a new agentctl instance for a task.
 	// This starts the agentctl process/container with workspace access (shell, git, files).
 	// Agent subprocess is NOT started - use agentctl.Client.ConfigureAgent() + Start().
-	CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error)
+	CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error)
 
 	// StopInstance stops an agentctl instance.
-	StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error
+	StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error
 
 	// RecoverInstances discovers and recovers instances that were running before a restart.
 	// Returns recovered instances that can be re-tracked by the manager.
-	RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error)
+	RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error)
 
 	// GetInteractiveRunner returns the interactive runner for passthrough mode.
 	// May return nil if the runtime doesn't support passthrough mode.
@@ -55,8 +55,8 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 )
 
-// RuntimeCreateRequest contains parameters for creating an agentctl instance.
-type RuntimeCreateRequest struct {
+// ExecutorCreateRequest contains parameters for creating an agentctl instance.
+type ExecutorCreateRequest struct {
 	InstanceID     string
 	TaskID         string
 	SessionID      string
@@ -69,9 +69,9 @@ type RuntimeCreateRequest struct {
 	AgentConfig    agents.Agent // Agent type info needed by runtimes
 }
 
-// RuntimeInstance represents an agentctl instance created by a runtime.
+// ExecutorInstance represents an agentctl instance created by a runtime.
 // This is returned by the runtime and contains enough info to build an AgentExecution.
-type RuntimeInstance struct {
+type ExecutorInstance struct {
 	// Core identifiers
 	InstanceID string
 	TaskID     string
@@ -94,8 +94,8 @@ type RuntimeInstance struct {
 	Metadata      map[string]interface{}
 }
 
-// ToAgentExecution converts a RuntimeInstance to an AgentExecution.
-func (ri *RuntimeInstance) ToAgentExecution(req *RuntimeCreateRequest) *AgentExecution {
+// ToAgentExecution converts a ExecutorInstance to an AgentExecution.
+func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
 	metadata := req.Metadata
 	if metadata == nil {
 		metadata = make(map[string]interface{})

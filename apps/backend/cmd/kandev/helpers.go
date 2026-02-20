@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/secrets"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -260,6 +261,7 @@ type routeParams struct {
 	editorCtrl              *editorcontroller.Controller
 	promptCtrl              *promptcontroller.Controller
 	msgCreator              *messageCreatorAdapter
+	secretsSvc              *secrets.Service
 	log                     *logger.Logger
 }
 
@@ -285,6 +287,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
 	taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
@@ -324,6 +327,11 @@ func registerSecondaryRoutes(
 
 	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	if p.secretsSvc != nil {
+		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
+		p.log.Debug("Registered Secrets handlers (HTTP + WebSocket)")
+	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 }

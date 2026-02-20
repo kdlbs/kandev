@@ -60,7 +60,11 @@ function useInputHandle(
   );
 }
 
-function getInputPlaceholder(placeholder: string | undefined, isAgentBusy: boolean, hasAgentCommands: boolean): string {
+function getInputPlaceholder(
+  placeholder: string | undefined,
+  isAgentBusy: boolean,
+  hasAgentCommands: boolean,
+): string {
   if (placeholder) return placeholder;
   if (isAgentBusy) return "Queue more instructions...";
   if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
@@ -87,21 +91,58 @@ function computeDerivedState(params: {
 }) {
   const isDisabled = params.isStarting || params.isSending || params.isFailed;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
-  const hasPendingComments = !!(params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0);
-  const hasQueuedMessage = !!(params.isQueued && params.queuedMessage && params.onCancelQueue && params.updateQueueContent);
+  const hasPendingComments = !!(
+    params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
+  );
+  const hasQueuedMessage = !!(
+    params.isQueued &&
+    params.queuedMessage &&
+    params.onCancelQueue &&
+    params.updateQueueContent
+  );
   const hasTodos = params.todoItems.length > 0;
-  const hasContextZone = hasQueuedMessage || hasTodos || params.allItemsLength > 0 || hasClarification;
+  const hasContextZone =
+    hasQueuedMessage || hasTodos || params.allItemsLength > 0 || hasClarification;
   const showFocusHint = !params.isInputFocused && !hasClarification && !hasPendingComments;
-  const inputPlaceholder = getInputPlaceholder(params.placeholder, params.isAgentBusy, params.hasAgentCommands);
-  return { isDisabled, hasClarification, hasPendingComments, hasQueuedMessage, hasTodos, hasContextZone, showFocusHint, inputPlaceholder };
+  const inputPlaceholder = getInputPlaceholder(
+    params.placeholder,
+    params.isAgentBusy,
+    params.hasAgentCommands,
+  );
+  return {
+    isDisabled,
+    hasClarification,
+    hasPendingComments,
+    hasQueuedMessage,
+    hasTodos,
+    hasContextZone,
+    showFocusHint,
+    inputPlaceholder,
+  };
 }
 
 export function useChatInputContainer(params: UseChatInputContainerParams) {
   const {
-    ref, sessionId, isSending, isStarting, isFailed, isAgentBusy, hasAgentCommands,
-    isQueued, placeholder, contextItems, pendingClarification, onClarificationResolved,
-    pendingCommentsByFile, queuedMessage, onCancelQueue, updateQueueContent,
-    todoItems, showRequestChangesTooltip, onRequestChangesTooltipDismiss, onSubmit,
+    ref,
+    sessionId,
+    isSending,
+    isStarting,
+    isFailed,
+    isAgentBusy,
+    hasAgentCommands,
+    isQueued,
+    placeholder,
+    contextItems,
+    pendingClarification,
+    onClarificationResolved,
+    pendingCommentsByFile,
+    queuedMessage,
+    onCancelQueue,
+    updateQueueContent,
+    todoItems,
+    showRequestChangesTooltip,
+    onRequestChangesTooltipDismiss,
+    onSubmit,
   } = params;
 
   const [isInputFocused, setIsInputFocused] = useState(false);
@@ -113,8 +154,13 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   );
   const { value, inputRef, handleImagePaste, handleChange, handleSubmit, allItems } =
     useChatInputState({
-      sessionId, isSending, contextItems, pendingCommentsByFile,
-      showRequestChangesTooltip, onRequestChangesTooltipDismiss, onSubmit,
+      sessionId,
+      isSending,
+      contextItems,
+      pendingCommentsByFile,
+      showRequestChangesTooltip,
+      onRequestChangesTooltipDismiss,
+      onSubmit,
     });
 
   useInputHandle(ref, inputRef);
@@ -124,7 +170,9 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   }, [showRequestChangesTooltip, inputRef]);
 
   const handleAgentCommand = useCallback(
-    (commandName: string) => { onSubmit(`/${commandName}`); },
+    (commandName: string) => {
+      onSubmit(`/${commandName}`);
+    },
     [onSubmit],
   );
   const handleSubmitWithReset = useCallback(
@@ -133,18 +181,41 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   );
 
   const derived = computeDerivedState({
-    isStarting, isSending, isFailed, pendingClarification, onClarificationResolved,
-    pendingCommentsByFile, isQueued, queuedMessage, onCancelQueue, updateQueueContent,
-    todoItems, allItemsLength: allItems.length, isInputFocused, placeholder, isAgentBusy, hasAgentCommands,
+    isStarting,
+    isSending,
+    isFailed,
+    pendingClarification,
+    onClarificationResolved,
+    pendingCommentsByFile,
+    isQueued,
+    queuedMessage,
+    onCancelQueue,
+    updateQueueContent,
+    todoItems,
+    allItemsLength: allItems.length,
+    isInputFocused,
+    placeholder,
+    isAgentBusy,
+    hasAgentCommands,
   });
 
   return {
-    isInputFocused, setIsInputFocused,
-    showNewSessionDialog, setShowNewSessionDialog,
-    contextPopoverOpen, setContextPopoverOpen,
-    height, containerRef, resizeHandleProps,
-    value, inputRef, handleImagePaste, handleChange,
-    handleSubmitWithReset, handleAgentCommand, allItems,
+    isInputFocused,
+    setIsInputFocused,
+    showNewSessionDialog,
+    setShowNewSessionDialog,
+    contextPopoverOpen,
+    setContextPopoverOpen,
+    height,
+    containerRef,
+    resizeHandleProps,
+    value,
+    inputRef,
+    handleImagePaste,
+    handleChange,
+    handleSubmitWithReset,
+    handleAgentCommand,
+    allItems,
     ...derived,
   };
 }

@@ -106,10 +106,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
             Browser
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => addVscodePanel()}
-            className="cursor-pointer text-xs"
-          >
+          <DropdownMenuItem onClick={() => addVscodePanel()} className="cursor-pointer text-xs">
             <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
             VS Code
           </DropdownMenuItem>

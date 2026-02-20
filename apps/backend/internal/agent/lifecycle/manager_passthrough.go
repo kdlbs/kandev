@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -564,10 +564,10 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 // GetInteractiveRunner returns the interactive runner for passthrough mode.
 // Returns nil if the runtime is not available or doesn't support passthrough.
 func (m *Manager) GetInteractiveRunner() *process.InteractiveRunner {
-	if m.runtimeRegistry == nil {
+	if m.executorRegistry == nil {
 		return nil
 	}
-	standaloneRT, err := m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
+	standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone)
 	if err != nil {
 		return nil
 	}

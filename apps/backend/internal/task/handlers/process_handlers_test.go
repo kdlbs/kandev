@@ -389,6 +389,24 @@ func (m *mockRepository) CountTasksByWorkflowStep(ctx context.Context, stepID st
 	return 0, nil
 }
 
+// Executor profile operations
+func (m *mockRepository) CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
 func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript) *service.Service {
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error",
@@ -424,7 +442,7 @@ func getExecutionStore(t *testing.T, mgr *lifecycle.Manager) *lifecycle.Executio
 func newLifecycleManager(t *testing.T, log *logger.Logger) *lifecycle.Manager {
 	t.Helper()
 	reg := registry.NewRegistry(log)
-	return lifecycle.NewManager(reg, nil, nil, nil, nil, nil, nil, lifecycle.RuntimeFallbackWarn, log)
+	return lifecycle.NewManager(reg, nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackWarn, log)
 }
 
 func newAgentctlClient(t *testing.T, serverURL string, log *logger.Logger) *agentctlclient.Client {
@@ -548,12 +566,12 @@ func TestStopProcessRejectsDifferentSession(t *testing.T) {
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)
-	exec := (&lifecycle.RuntimeInstance{
+	exec := (&lifecycle.ExecutorInstance{
 		InstanceID: "exec-1",
 		TaskID:     "task-1",
 		SessionID:  "session-a",
 		Client:     client,
-	}).ToAgentExecution(&lifecycle.RuntimeCreateRequest{
+	}).ToAgentExecution(&lifecycle.ExecutorCreateRequest{
 		InstanceID:     "exec-1",
 		TaskID:         "task-1",
 		SessionID:      "session-a",
@@ -607,12 +625,12 @@ func TestStopProcessAgentctlUnavailable(t *testing.T) {
 	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)
-	exec := (&lifecycle.RuntimeInstance{
+	exec := (&lifecycle.ExecutorInstance{
 		InstanceID: "exec-1",
 		TaskID:     "task-1",
 		SessionID:  "session-a",
 		Client:     client,
-	}).ToAgentExecution(&lifecycle.RuntimeCreateRequest{
+	}).ToAgentExecution(&lifecycle.ExecutorCreateRequest{
 		InstanceID:     "exec-1",
 		TaskID:         "task-1",
 		SessionID:      "session-a",

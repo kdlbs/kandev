@@ -153,6 +153,18 @@ func (r *Repository) initInfraSchema() error {
 		updated_at TIMESTAMP NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS executor_profiles (
+		id TEXT PRIMARY KEY,
+		executor_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		is_default INTEGER NOT NULL DEFAULT 0,
+		config TEXT DEFAULT '{}',
+		setup_script TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (executor_id) REFERENCES executors(id)
+	);
+
 	CREATE TABLE IF NOT EXISTS environments (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,

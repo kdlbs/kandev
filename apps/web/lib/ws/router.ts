@@ -11,6 +11,8 @@ import { registerNotificationsHandlers } from "@/lib/ws/handlers/notifications";
 import { registerDiffsHandlers } from "@/lib/ws/handlers/diffs";
 import { registerEnvironmentsHandlers } from "@/lib/ws/handlers/environments";
 import { registerExecutorsHandlers } from "@/lib/ws/handlers/executors";
+import { registerExecutorProfileHandlers } from "@/lib/ws/handlers/executor-profiles";
+import { registerExecutorPrepareHandlers } from "@/lib/ws/handlers/executor-prepare";
 import { registerGitStatusHandlers } from "@/lib/ws/handlers/git-status";
 import { registerKanbanHandlers } from "@/lib/ws/handlers/kanban";
 import { registerSystemEventsHandlers } from "@/lib/ws/handlers/system-events";
@@ -18,6 +20,7 @@ import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 import { registerTaskPlansHandlers } from "@/lib/ws/handlers/task-plans";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
+import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 
@@ -30,6 +33,8 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
 
     ...registerWorkspacesHandlers(store),
     ...registerExecutorsHandlers(store),
+    ...registerExecutorProfileHandlers(store),
+    ...registerExecutorPrepareHandlers(store),
     ...registerEnvironmentsHandlers(store),
     ...registerAgentsHandlers(store),
     ...registerTaskSessionHandlers(store),
@@ -40,6 +45,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerDiffsHandlers(store),
     ...registerMessagesHandlers(store),
     ...registerNotificationsHandlers(store),
+    ...registerSecretsHandlers(store),
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
     ...registerTurnsHandlers(store),

@@ -5,34 +5,34 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// getRuntimeForExecutorType returns the appropriate runtime for the given executor type.
-// If the executor type is empty or the runtime is not available, behavior depends on runtimeFallbackPolicy.
-func (m *Manager) getRuntimeForExecutorType(executorType string) (Runtime, error) {
-	if m.runtimeRegistry == nil {
+// getExecutorBackend returns the appropriate runtime for the given executor type.
+// If the executor type is empty or the runtime is not available, behavior depends on executorFallbackPolicy.
+func (m *Manager) getExecutorBackend(executorType string) (ExecutorBackend, error) {
+	if m.executorRegistry == nil {
 		return nil, fmt.Errorf("no runtime registry configured")
 	}
 
 	if executorType != "" {
-		runtimeName := runtime.ExecutorTypeToRuntime(models.ExecutorType(executorType))
-		rt, err := m.runtimeRegistry.GetRuntime(runtimeName)
+		runtimeName := executor.ExecutorTypeToBackend(models.ExecutorType(executorType))
+		rt, err := m.executorRegistry.GetBackend(runtimeName)
 		if err == nil {
 			return rt, nil
 		}
 
 		// Handle fallback based on policy
-		switch m.runtimeFallbackPolicy {
-		case RuntimeFallbackDeny:
+		switch m.executorFallbackPolicy {
+		case ExecutorFallbackDeny:
 			return nil, fmt.Errorf("runtime %s not available and fallback is denied: %w", runtimeName, err)
-		case RuntimeFallbackWarn:
+		case ExecutorFallbackWarn:
 			m.logger.Warn("requested runtime not available, falling back to default",
 				zap.String("executor_type", executorType),
 				zap.String("runtime", string(runtimeName)),
 				zap.Error(err))
-		case RuntimeFallbackAllow:
+		case ExecutorFallbackAllow:
 			m.logger.Debug("requested runtime not available, falling back to default",
 				zap.String("executor_type", executorType),
 				zap.String("runtime", string(runtimeName)))
@@ -45,14 +45,14 @@ func (m *Manager) getRuntimeForExecutorType(executorType string) (Runtime, error
 		}
 	}
 
-	return m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
+	return m.executorRegistry.GetBackend(executor.NameStandalone)
 }
 
-// getDefaultRuntime returns the default runtime (standalone).
+// getDefaultExecutorBackend returns the default runtime (standalone).
 // This is used when no executor type is specified.
-func (m *Manager) getDefaultRuntime() (Runtime, error) {
-	if m.runtimeRegistry == nil {
+func (m *Manager) getDefaultExecutorBackend() (ExecutorBackend, error) {
+	if m.executorRegistry == nil {
 		return nil, fmt.Errorf("no runtime registry configured")
 	}
-	return m.runtimeRegistry.GetRuntime(runtime.NameStandalone)
+	return m.executorRegistry.GetBackend(executor.NameStandalone)
 }

@@ -16,10 +16,7 @@ export type VscodeStatus = {
  * Returns the status including the proxy URL.
  * Start is non-blocking — the caller should poll getVscodeStatus() until running/error.
  */
-export async function startVscode(
-  sessionId: string,
-  theme?: string,
-): Promise<VscodeStatus> {
+export async function startVscode(sessionId: string, theme?: string): Promise<VscodeStatus> {
   const client = getWebSocketClient();
   if (!client) {
     throw new Error("WebSocket client not available");
@@ -83,9 +80,7 @@ export async function openFileInVscode(
 /**
  * Get VS Code server status for a session.
  */
-export async function getVscodeStatus(
-  sessionId: string,
-): Promise<VscodeStatus> {
+export async function getVscodeStatus(sessionId: string): Promise<VscodeStatus> {
   const client = getWebSocketClient();
   if (!client) {
     return { status: "stopped" };

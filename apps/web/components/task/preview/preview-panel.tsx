@@ -263,10 +263,21 @@ type PreviewToolbarProps = {
 };
 
 function PreviewToolbar({
-  sessionId, previewUrlDraft, previewUrl, previewView, detectedUrl,
-  isStopping, isWaitingForUrl, showLoadingSpinner, stopLabel,
-  setPreviewUrlDraft, setPreviewView, setRefreshKey,
-  handleUrlSubmit, handleOpenInTab, handleStopClick,
+  sessionId,
+  previewUrlDraft,
+  previewUrl,
+  previewView,
+  detectedUrl,
+  isStopping,
+  isWaitingForUrl,
+  showLoadingSpinner,
+  stopLabel,
+  setPreviewUrlDraft,
+  setPreviewView,
+  setRefreshKey,
+  handleUrlSubmit,
+  handleOpenInTab,
+  handleStopClick,
 }: PreviewToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -274,22 +285,52 @@ function PreviewToolbar({
         value={previewUrlDraft}
         onChange={(event) => setPreviewUrlDraft(sessionId, event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter") { event.preventDefault(); handleUrlSubmit(); }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            handleUrlSubmit();
+          }
         }}
         placeholder={detectedUrl || "http://localhost:3000"}
         className="h-6 flex-1 min-w-[240px]"
       />
-      <Button size="sm" variant="outline" onClick={handleOpenInTab} disabled={!previewUrl} className="cursor-pointer" title="Open in browser tab">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleOpenInTab}
+        disabled={!previewUrl}
+        className="cursor-pointer"
+        title="Open in browser tab"
+      >
         <IconExternalLink className="h-4 w-4" />
       </Button>
-      <Button size="sm" variant="outline" onClick={() => setRefreshKey((v) => v + 1)} disabled={!previewUrl} className="cursor-pointer" title="Refresh preview">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setRefreshKey((v) => v + 1)}
+        disabled={!previewUrl}
+        className="cursor-pointer"
+        title="Refresh preview"
+      >
         <IconRefresh className="h-4 w-4" />
       </Button>
-      <Button size="sm" variant="outline" onClick={handleStopClick} disabled={isStopping} className="cursor-pointer">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleStopClick}
+        disabled={isStopping}
+        className="cursor-pointer"
+      >
         {stopLabel}
       </Button>
-      <Button size="sm" variant={previewView === "output" ? "default" : "outline"} className="cursor-pointer" onClick={() => setPreviewView(sessionId, previewView === "output" ? "preview" : "output")}>
-        {isWaitingForUrl && showLoadingSpinner && <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />}
+      <Button
+        size="sm"
+        variant={previewView === "output" ? "default" : "outline"}
+        className="cursor-pointer"
+        onClick={() => setPreviewView(sessionId, previewView === "output" ? "preview" : "output")}
+      >
+        {isWaitingForUrl && showLoadingSpinner && (
+          <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
+        )}
         {previewView === "output" ? "Preview" : "Logs"}
       </Button>
     </div>
@@ -337,26 +378,17 @@ function usePreviewPanelState(sessionId: string | null, hasDevScript: boolean) {
   };
 }
 
+function PreviewPlaceholder({ message }: { message: string }) {
+  return (
+    <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
+      {message}
+    </div>
+  );
+}
+
 export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
-  const {
-    previewUrl,
-    previewUrlDraft,
-    setPreviewUrl,
-    setPreviewUrlDraft,
-    setPreviewOpen,
-    setPreviewStage,
-    setPreviewView,
-    clearProcessOutput,
-    appStoreApi,
-    previewView,
-    devProcessId,
-    devProcess,
-    devOutput,
-    isStopping,
-    handleStop,
-    detectedUrl,
-    isRunning,
-  } = usePreviewPanelState(sessionId, hasDevScript);
+  const panelState = usePreviewPanelState(sessionId, hasDevScript);
+  const { previewUrl, previewUrlDraft, setPreviewUrl, setPreviewUrlDraft, setPreviewOpen, setPreviewStage, setPreviewView, clearProcessOutput, appStoreApi, previewView, devProcessId, devProcess, devOutput, isStopping, handleStop, detectedUrl, isRunning } = panelState;
 
   const [refreshKey, setRefreshKey] = useState(0);
   const isWaitingForUrl = isRunning && previewView === "output" && !previewUrl;
@@ -370,22 +402,14 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     clearProcessOutput, handleStop, previewUrl, previewUrlDraft, devProcessId,
   });
 
-  if (!sessionId) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
-        Select a session to enable preview.
-      </div>
-    );
-  }
-  if (!hasDevScript) {
-    return (
-      <div className="h-full w-full flex items-center justify-center text-muted-foreground mr-[5px]">
-        Configure a dev script to use preview.
-      </div>
-    );
-  }
+  if (!sessionId) return <PreviewPlaceholder message="Select a session to enable preview." />;
+  if (!hasDevScript) return <PreviewPlaceholder message="Configure a dev script to use preview." />;
 
-  const stopLabel = resolveStopLabel(isStopping, devProcess?.status === "failed", devProcess?.status === "exited");
+  const stopLabel = resolveStopLabel(
+    isStopping,
+    devProcess?.status === "failed",
+    devProcess?.status === "exited",
+  );
 
   return (
     <SessionPanel margin="right">
@@ -407,7 +431,9 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
           handleOpenInTab={handleOpenInTab}
           handleStopClick={handleStopClick}
         />
-        <SessionPanelContent className={previewView === "output" || (showIframe && previewUrl) ? "p-0" : ""}>
+        <SessionPanelContent
+          className={previewView === "output" || (showIframe && previewUrl) ? "p-0" : ""}
+        >
           <PreviewContent
             previewView={previewView}
             previewUrl={previewUrl}

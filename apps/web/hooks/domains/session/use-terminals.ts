@@ -299,7 +299,14 @@ function useTerminalActions({
     [sessionId, removeTerminal],
   );
 
-  return { isStoppingDev, addTerminal, removeTerminal, handleCloseDevTab, handleRunCommand, handleCloseTab };
+  return {
+    isStoppingDev,
+    addTerminal,
+    removeTerminal,
+    handleCloseDevTab,
+    handleRunCommand,
+    handleCloseTab,
+  };
 }
 
 export function useTerminals({
@@ -336,17 +343,23 @@ export function useTerminals({
 
   useTabRestoration(sessionId, terminals, activeTab, tabRestoredRef, setRightPanelActiveTab);
 
-  const { isStoppingDev, addTerminal, removeTerminal, handleCloseDevTab, handleRunCommand, handleCloseTab } =
-    useTerminalActions({
-      sessionId,
-      activeTab,
-      terminals,
-      devProcessId,
-      setTerminals,
-      setRightPanelActiveTab,
-      setPreviewOpen,
-      setPreviewStage,
-    });
+  const {
+    isStoppingDev,
+    addTerminal,
+    removeTerminal,
+    handleCloseDevTab,
+    handleRunCommand,
+    handleCloseTab,
+  } = useTerminalActions({
+    sessionId,
+    activeTab,
+    terminals,
+    devProcessId,
+    setTerminals,
+    setRightPanelActiveTab,
+    setPreviewOpen,
+    setPreviewStage,
+  });
 
   const savedTabFromStorage = useMemo(() => {
     if (!sessionId) return null;

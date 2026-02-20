@@ -49,8 +49,13 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     activeSessionId,
     changedFiles,
   );
-  const { showDiscardDialog, setShowDiscardDialog, fileToDiscard, handleDiscardClick, handleDiscardConfirm } =
-    useDiscardDialog(activeSessionId);
+  const {
+    showDiscardDialog,
+    setShowDiscardDialog,
+    fileToDiscard,
+    handleDiscardClick,
+    handleDiscardConfirm,
+  } = useDiscardDialog(activeSessionId);
 
   const tabs: SessionTab[] = [
     {

@@ -9,6 +9,7 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -26,6 +27,7 @@ type Repositories struct {
 	Editor        editorstore.Repository
 	Prompts       promptstore.Repository
 	Workflow      *workflowrepository.Repository
+	Secrets       secrets.SecretStore
 }
 
 type Services struct {

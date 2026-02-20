@@ -41,6 +41,9 @@ import (
 	// Orchestrator
 	"github.com/kandev/kandev/internal/orchestrator"
 
+	// Secrets
+	"github.com/kandev/kandev/internal/secrets"
+
 	// Database
 	"github.com/kandev/kandev/internal/db"
 )
@@ -253,7 +256,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry, repos.Secrets)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -403,6 +406,7 @@ func buildHTTPServer(
 		editorCtrl:              editorcontroller.NewController(services.Editor),
 		promptCtrl:              promptcontroller.NewController(services.Prompts),
 		msgCreator:              msgCreator,
+		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		log:                     log,
 	})
 

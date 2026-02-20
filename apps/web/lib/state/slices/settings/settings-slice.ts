@@ -10,6 +10,7 @@ export const defaultSettingsState: SettingsSliceState = {
   agentProfiles: { items: [], version: 0 },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
+  secrets: { items: [], loaded: false, loading: false },
   notificationProviders: {
     items: [],
     events: [],
@@ -91,6 +92,28 @@ export const createSettingsSlice: StateCreator<
   setPromptsLoading: (loading) =>
     set((draft) => {
       draft.prompts.loading = loading;
+    }),
+  setSecrets: (items) =>
+    set((draft) => {
+      draft.secrets.items = items;
+      draft.secrets.loaded = true;
+    }),
+  setSecretsLoading: (loading) =>
+    set((draft) => {
+      draft.secrets.loading = loading;
+    }),
+  addSecret: (item) =>
+    set((draft) => {
+      draft.secrets.items = [...draft.secrets.items.filter((s) => s.id !== item.id), item];
+    }),
+  updateSecret: (item) =>
+    set((draft) => {
+      const idx = draft.secrets.items.findIndex((s) => s.id === item.id);
+      if (idx >= 0) draft.secrets.items[idx] = { ...draft.secrets.items[idx], ...item };
+    }),
+  removeSecret: (id) =>
+    set((draft) => {
+      draft.secrets.items = draft.secrets.items.filter((s) => s.id !== id);
     }),
   setNotificationProviders: (state) =>
     set((draft) => {

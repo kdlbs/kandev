@@ -397,18 +397,31 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
     addChangesPanel: (groupId?: string) => {
       const { api, rightTopGroupId } = get();
       if (!api) return;
-      addSimplePanel(api, groupId ?? rightTopGroupId, { id: "changes", component: "changes", title: "Changes" });
+      addSimplePanel(api, groupId ?? rightTopGroupId, {
+        id: "changes",
+        component: "changes",
+        title: "Changes",
+      });
     },
     addFilesPanel: (groupId?: string) => {
       const { api, rightTopGroupId } = get();
       if (!api) return;
-      addSimplePanel(api, groupId ?? rightTopGroupId, { id: "files", component: "files", title: "Files" });
+      addSimplePanel(api, groupId ?? rightTopGroupId, {
+        id: "files",
+        component: "files",
+        title: "Files",
+      });
     },
     addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       if (path) set({ selectedDiff: { path, content } });
-      addSimplePanel(api, groupId ?? centerGroupId, { id: "diff-viewer", component: "diff-viewer", title: "Diff Viewer", params: { kind: "all" } });
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: "diff-viewer",
+        component: "diff-viewer",
+        title: "Diff Viewer",
+        params: { kind: "all" },
+      });
     },
     addFileDiffPanel: (path: string, content?: string, groupId?: string) => {
       const { api, centerGroupId } = get();
@@ -423,7 +436,12 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
     addCommitDetailPanel: (sha: string, groupId?: string) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      addSimplePanel(api, groupId ?? centerGroupId, { id: `commit:${sha}`, component: "commit-detail", title: sha.slice(0, 7), params: { commitSha: sha } });
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: `commit:${sha}`,
+        component: "commit-detail",
+        title: sha.slice(0, 7),
+        params: { commitSha: sha },
+      });
     },
     addFileEditorPanel: (path: string, name: string, quiet?: boolean) => {
       const { api, centerGroupId } = get();
@@ -444,7 +462,12 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
       const { api, centerGroupId } = get();
       if (!api) return;
       const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
-      addSimplePanel(api, groupId ?? centerGroupId, { id: browserId, component: "browser", title: "Browser", params: { url: url ?? "" } });
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: browserId,
+        component: "browser",
+        title: "Browser",
+        params: { url: url ?? "" },
+      });
     },
   };
 }
@@ -491,7 +514,12 @@ function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
       const { api, rightBottomGroupId } = get();
       if (!api) return;
       const id = terminalId ?? `terminal-${Date.now()}`;
-      addSimplePanel(api, groupId ?? rightBottomGroupId, { id, component: "terminal", title: "Terminal", params: { terminalId: id } });
+      addSimplePanel(api, groupId ?? rightBottomGroupId, {
+        id,
+        component: "terminal",
+        title: "Terminal",
+        params: { terminalId: id },
+      });
     },
   };
 }

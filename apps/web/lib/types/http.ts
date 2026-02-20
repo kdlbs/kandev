@@ -471,8 +471,25 @@ export type Executor = {
   status: string;
   is_system: boolean;
   config?: Record<string, string>;
+  profiles?: ExecutorProfile[];
   created_at: string;
   updated_at: string;
+};
+
+export type ExecutorProfile = {
+  id: string;
+  executor_id: string;
+  name: string;
+  is_default: boolean;
+  config?: Record<string, string>;
+  setup_script: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ListExecutorProfilesResponse = {
+  profiles: ExecutorProfile[];
+  total: number;
 };
 
 export type Environment = {

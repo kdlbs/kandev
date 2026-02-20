@@ -59,7 +59,10 @@ const EDITOR_OPTIONS = {
 
 type EditorState = ReturnType<typeof useMonacoEditorComments>;
 
-function buildCommentZones(state: EditorState, addZone: (line: number, height: number, node: React.ReactNode) => void) {
+function buildCommentZones(
+  state: EditorState,
+  addZone: (line: number, height: number, node: React.ReactNode) => void,
+) {
   for (const comment of state.comments) {
     const isEditing = state.editingCommentId === comment.id;
     const node = isEditing ? (
@@ -91,47 +94,41 @@ function buildCommentZones(state: EditorState, addZone: (line: number, height: n
       <div className="px-2 py-1" data-comment-zone>
         <CommentForm
           onSubmit={(c) => state.handleCommentSubmitRef.current(c)}
-          onCancel={() => { state.setFormZoneRange(null); state.clearGutterSelection(); }}
+          onCancel={() => {
+            state.setFormZoneRange(null);
+            state.clearGutterSelection();
+          }}
         />
       </div>,
     );
   }
 }
 
-export function MonacoCodeEditor({
-  path,
-  content,
-  originalContent,
-  isDirty,
-  hasRemoteUpdate = false,
-  vcsDiff,
-  isSaving,
-  sessionId,
-  worktreePath,
-  enableComments = false,
-  onChange,
-  onSave,
-  onReloadFromAgent,
-  onDelete,
-}: MonacoCodeEditorProps) {
-  const { resolvedTheme } = useTheme();
+function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
+  const { path, content, originalContent, isDirty, vcsDiff, sessionId, worktreePath, enableComments = false, onChange, onSave } = props;
   const contentRef = useRef(content);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
-
   const state = useMonacoEditorComments({ path, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef });
   const lsp = useMonacoEditorLsp({ sessionId, worktreePath, language, path, contentRef, editorRef: state.editorRef });
-  const { diffStats } = useMonacoDiffDecorations({ originalContent, isDirty, showDiffIndicators: state.showDiffIndicators, vcsDiff, editorReady: state.editorInstance, contentRef, editorRef: state.editorRef, diffDecorationsRef: state.diffDecorationsRef });
-
+  const { diffStats } = useMonacoDiffDecorations({
+    originalContent, isDirty, showDiffIndicators: state.showDiffIndicators, vcsDiff,
+    editorReady: state.editorInstance, contentRef, editorRef: state.editorRef, diffDecorationsRef: state.diffDecorationsRef,
+  });
   useEffect(() => { contentRef.current = content; }, [content]);
-
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],
     (addZone) => buildCommentZones(state, addZone),
   );
-
   const options = { ...EDITOR_OPTIONS, wordWrap: state.wrapEnabled ? ("on" as const) : ("off" as const) };
+  return { contentRef, wrapperRef, language, state, lsp, diffStats, options };
+}
+
+export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+  const { path, content, isDirty, hasRemoteUpdate = false, vcsDiff, isSaving, sessionId, worktreePath, enableComments = false, onSave, onReloadFromAgent, onDelete } = props;
+  const { resolvedTheme } = useTheme();
+  const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
@@ -168,7 +165,11 @@ export function MonacoCodeEditor({
           onMount={state.handleEditorDidMount}
           keepCurrentModel
           options={options}
-          loading={<div className="flex h-full items-center justify-center text-muted-foreground text-sm">Loading editor...</div>}
+          loading={
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+              Loading editor...
+            </div>
+          }
         />
         {state.floatingButtonPos && !state.formZoneRange && (
           <Button

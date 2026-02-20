@@ -210,7 +210,9 @@ async function moveTaskAcrossSwimlaneSteps({
   } catch (error) {
     const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
     if (currentSnapshot) {
-      store.getState().setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
+      store
+        .getState()
+        .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
     }
     const message = error instanceof Error ? error.message : "Failed to move task";
     onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
