@@ -92,6 +92,16 @@ func TestTraceProtocolEvent(t *testing.T) {
 	})
 }
 
+func TestTracer_ReturnsSameNoopInstance(t *testing.T) {
+	// When debug mode is off (default), Tracer() should return the same cached
+	// noop tracer instance to avoid garbage on every call.
+	t1 := Tracer()
+	t2 := Tracer()
+	if t1 != t2 {
+		t.Error("expected Tracer() to return the same noop tracer instance when debug mode is off")
+	}
+}
+
 func TestTraceProtocolRequest(t *testing.T) {
 	t.Run("returns non-nil context and span", func(t *testing.T) {
 		ctx := context.Background()

@@ -195,16 +195,17 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	conn := a.acpConn
+	a.mu.Unlock()
 
-	if a.acpConn == nil {
+	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
 
-	resp, err := a.acpConn.NewSession(ctx, acp.NewSessionRequest{
+	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(mcpServers),
 	})
@@ -213,9 +214,13 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
+	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
-	span.SetAttributes(attribute.String("session_id", a.sessionID))
-	a.logger.Info("created new session", zap.String("session_id", a.sessionID))
+	sessionID := a.sessionID
+	a.mu.Unlock()
+
+	span.SetAttributes(attribute.String("session_id", sessionID))
+	a.logger.Info("created new session", zap.String("session_id", sessionID))
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
@@ -226,7 +231,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	// This eliminates the need for ReportsStatusViaStream flag.
 	a.sendUpdate(AgentEvent{
 		Type:          streams.EventTypeSessionStatus,
-		SessionID:     a.sessionID,
+		SessionID:     sessionID,
 		SessionStatus: streams.SessionStatusNew,
 		Data: map[string]any{
 			"session_status": streams.SessionStatusNew,
@@ -234,7 +239,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		},
 	})
 
-	return a.sessionID, nil
+	return sessionID, nil
 }
 
 func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
@@ -270,21 +275,23 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 // Returns an error if the agent does not support session loading (LoadSession capability).
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	conn := a.acpConn
+	supportsLoad := a.capabilities.LoadSession
+	a.mu.Unlock()
 
-	if a.acpConn == nil {
+	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
 
 	// Check if the agent supports session loading
-	if !a.capabilities.LoadSession {
+	if !supportsLoad {
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
 	defer span.End()
 
-	resp, err := a.acpConn.LoadSession(ctx, acp.LoadSessionRequest{
+	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
 		McpServers: []acp.McpServer{}, // MCPs configured via CLI args; empty satisfies the required field
@@ -294,9 +301,12 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("failed to load session: %w", err)
 	}
 
+	a.mu.Lock()
 	a.sessionID = sessionID
-	span.SetAttributes(attribute.String("session_id", a.sessionID))
-	a.logger.Info("loaded session", zap.String("session_id", a.sessionID))
+	a.mu.Unlock()
+
+	span.SetAttributes(attribute.String("session_id", sessionID))
+	a.logger.Info("loaded session", zap.String("session_id", sessionID))
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
@@ -307,7 +317,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	// This eliminates the need for ReportsStatusViaStream flag.
 	a.sendUpdate(AgentEvent{
 		Type:          streams.EventTypeSessionStatus,
-		SessionID:     a.sessionID,
+		SessionID:     sessionID,
 		SessionStatus: streams.SessionStatusResumed,
 		Data: map[string]any{
 			"session_status": streams.SessionStatusResumed,
@@ -366,22 +376,25 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		zap.Int("content_blocks", len(contentBlocks)),
 		zap.Int("image_attachments", len(attachments)))
 
-	resp, err := conn.Prompt(ctx, acp.PromptRequest{
+	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: acp.SessionId(sessionID),
 		Prompt:    contentBlocks,
 	})
 
 	// Clear prompt context and end span regardless of outcome
 	a.clearPromptTraceCtx()
+	stopReason := ""
 	if err != nil {
 		promptSpan.RecordError(err)
-		promptSpan.End()
+	} else {
+		stopReason = string(resp.StopReason)
+		promptSpan.SetAttributes(attribute.String("stop_reason", stopReason))
+	}
+	promptSpan.End()
+
+	if err != nil {
 		return err
 	}
-
-	stopReason := string(resp.StopReason)
-	promptSpan.SetAttributes(attribute.String("stop_reason", stopReason))
-	promptSpan.End()
 
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).

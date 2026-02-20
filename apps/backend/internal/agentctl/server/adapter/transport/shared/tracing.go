@@ -16,12 +16,15 @@ const (
 	maxAttrValueLen = 8192 // 8KB truncation for span event payloads
 )
 
+// noopTracer is a cached no-op tracer to avoid allocating a new one on every call.
+var noopTracer = noop.NewTracerProvider().Tracer(tracerName)
+
 // Tracer returns the package-level tracer for agent protocol tracing.
 // Requires KANDEV_DEBUG_AGENT_MESSAGES=true in addition to the OTel endpoint.
 // Returns a no-op tracer when debug mode is off.
 func Tracer() trace.Tracer {
 	if !debugMode {
-		return noop.NewTracerProvider().Tracer(tracerName)
+		return noopTracer
 	}
 	return tracing.Tracer(tracerName)
 }

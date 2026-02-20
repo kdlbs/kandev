@@ -32,6 +32,26 @@ func TestEndpointHost(t *testing.T) {
 			input:    "",
 			expected: "",
 		},
+		{
+			name:     "strips trailing slash from http URL",
+			input:    "http://localhost:4318/",
+			expected: "localhost:4318",
+		},
+		{
+			name:     "strips trailing slash from https URL",
+			input:    "https://otel.example.com:4318/",
+			expected: "otel.example.com:4318",
+		},
+		{
+			name:     "strips trailing slash without scheme",
+			input:    "localhost:4318/",
+			expected: "localhost:4318",
+		},
+		{
+			name:     "strips multiple trailing slashes",
+			input:    "http://localhost:4318///",
+			expected: "localhost:4318",
+		},
 	}
 
 	for _, tt := range tests {

@@ -3,6 +3,7 @@ package acp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,11 +272,20 @@ func (c *Client) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 }
 
 // resolvePath resolves a file path, making relative paths relative to the workspace root.
-func (c *Client) resolvePath(reqPath string) string {
+// It validates that the resolved path stays within the workspace root to prevent path traversal.
+func (c *Client) resolvePath(reqPath string) (string, error) {
+	var resolved string
 	if filepath.IsAbs(reqPath) {
-		return filepath.Clean(reqPath)
+		resolved = filepath.Clean(reqPath)
+	} else {
+		resolved = filepath.Join(c.workspaceRoot, reqPath)
 	}
-	return filepath.Join(c.workspaceRoot, reqPath)
+	// Ensure the resolved path is within the workspace root to prevent path traversal
+	root := filepath.Clean(c.workspaceRoot) + string(filepath.Separator)
+	if resolved != filepath.Clean(c.workspaceRoot) && !strings.HasPrefix(resolved, root) {
+		return "", fmt.Errorf("path %q resolves outside workspace root %q", reqPath, c.workspaceRoot)
+	}
+	return resolved, nil
 }
 
 // ReadTextFile reads a text file
@@ -286,9 +296,12 @@ func (c *Client) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (a
 
 	c.logger.Debug("reading file", zap.String("path", p.Path))
 
-	filePath := c.resolvePath(p.Path)
+	filePath, err := c.resolvePath(p.Path)
+	if err != nil {
+		span.RecordError(err)
+		return acp.ReadTextFileResponse{}, err
+	}
 
-	// Read the file
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		span.RecordError(err)
@@ -329,7 +342,11 @@ func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) 
 
 	c.logger.Debug("writing file", zap.String("path", p.Path))
 
-	filePath := c.resolvePath(p.Path)
+	filePath, err := c.resolvePath(p.Path)
+	if err != nil {
+		span.RecordError(err)
+		return acp.WriteTextFileResponse{}, err
+	}
 
 	// Create directory if needed
 	if dir := filepath.Dir(filePath); dir != "" {
@@ -339,7 +356,7 @@ func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) 
 		}
 	}
 
-	err := os.WriteFile(filePath, []byte(p.Content), 0o644)
+	err = os.WriteFile(filePath, []byte(p.Content), 0o644)
 	if err != nil {
 		span.RecordError(err)
 	}

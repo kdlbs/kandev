@@ -523,11 +523,14 @@ func (sm *SessionManager) SendPrompt(
 	return sm.waitForPromptDone(ctx, execution)
 }
 
-// isMethodNotFoundErr checks if an error wraps a JSON-RPC "Method not found" error (-32601).
+// jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".
+const jsonRPCMethodNotFound = -32601
+
+// isMethodNotFoundErr checks if an error wraps a JSON-RPC "Method not found" error.
 func isMethodNotFoundErr(err error) bool {
 	var reqErr *acp.RequestError
 	if errors.As(err, &reqErr) {
-		return reqErr.Code == -32601
+		return reqErr.Code == jsonRPCMethodNotFound
 	}
 	return false
 }

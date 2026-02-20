@@ -7,6 +7,7 @@ package tracing
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -41,6 +42,7 @@ func initTracing() {
 		otlptracehttp.WithInsecure(),
 	)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "kandev-agentctl: failed to initialize OTel exporter: %v\n", err)
 		return
 	}
 
@@ -59,14 +61,14 @@ func initTracing() {
 	otel.SetTracerProvider(tracerProvider)
 }
 
-// endpointHost strips the scheme from the endpoint URL for otlptracehttp.
+// endpointHost strips the scheme and trailing slashes from the endpoint URL for otlptracehttp.
 func endpointHost(endpoint string) string {
 	for _, prefix := range []string{"https://", "http://"} {
 		if strings.HasPrefix(endpoint, prefix) {
-			return endpoint[len(prefix):]
+			return strings.TrimRight(endpoint[len(prefix):], "/")
 		}
 	}
-	return endpoint
+	return strings.TrimRight(endpoint, "/")
 }
 
 // Tracer returns a named tracer. No-op when tracing is disabled.
