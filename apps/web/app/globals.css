@@ -101,10 +101,10 @@
 }
 
 .dark {
-  /* Grey scale: #141414 bg → #1c1c1c card → #2a2a2a borders → #333 hover */
-  --background: #141414;
+  /* Grey scale: #181818 bg → #1F1F1F card → #2a2a2a borders → #333 hover */
+  --background: #181818;
   --foreground: #d4d4d4;
-  --card: #1c1c1c;
+  --card: #1F1F1F;
   --card-foreground: #d4d4d4;
   --popover: #222222;
   --popover-foreground: #d4d4d4;

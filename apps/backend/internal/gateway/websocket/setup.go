@@ -12,12 +12,13 @@ import (
 
 // Gateway represents the unified WebSocket gateway
 type Gateway struct {
-	Hub             *Hub
-	Dispatcher      *ws.Dispatcher
-	Handler         *Handler
-	TerminalHandler *TerminalHandler
-	LSPHandler      *LSPHandler
-	logger          *logger.Logger
+	Hub                *Hub
+	Dispatcher         *ws.Dispatcher
+	Handler            *Handler
+	TerminalHandler    *TerminalHandler
+	LSPHandler         *LSPHandler
+	VscodeProxyHandler *VscodeProxyHandler
+	logger             *logger.Logger
 }
 
 // NewGateway creates a new WebSocket gateway with all components initialized
@@ -48,6 +49,11 @@ func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSP
 	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, installerRegistry, g.logger)
 }
 
+// SetVscodeProxy enables the VS Code reverse proxy handler.
+func (g *Gateway) SetVscodeProxy(lifecycleMgr *lifecycle.Manager) {
+	g.VscodeProxyHandler = NewVscodeProxyHandler(lifecycleMgr, g.logger)
+}
+
 // SetupRoutes adds the WebSocket routes to the Gin engine
 func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	router.GET("/ws", g.Handler.HandleConnection)
@@ -60,5 +66,10 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	// Add LSP routes if LSP handler is configured
 	if g.LSPHandler != nil {
 		router.GET("/lsp/:sessionId", g.LSPHandler.HandleLSPConnection)
+	}
+
+	// Add VS Code reverse proxy routes if configured
+	if g.VscodeProxyHandler != nil {
+		router.Any("/vscode/:sessionId/*path", g.VscodeProxyHandler.HandleVscodeProxy)
 	}
 }

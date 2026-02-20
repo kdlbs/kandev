@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
 
@@ -60,30 +61,6 @@ func binaryName(language string) (string, error) {
 	return cfg.binary, nil
 }
 
-// findGoBinary looks for a Go binary in GOBIN, GOPATH/bin, and ~/go/bin.
-func findGoBinary(binary string) (string, error) {
-	if gobin := os.Getenv("GOBIN"); gobin != "" {
-		p := filepath.Join(gobin, binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	if gopath := os.Getenv("GOPATH"); gopath != "" {
-		p := filepath.Join(gopath, "bin", binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		p := filepath.Join(home, "go", "bin", binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s not found in GOBIN/GOPATH/~/go/bin", binary)
-}
-
 // Registry maps language IDs to install strategies and resolves binary paths.
 type Registry struct {
 	binDir string // resolved absolute path
@@ -106,11 +83,11 @@ func NewRegistry(log *logger.Logger) *Registry {
 func (r *Registry) StrategyFor(language string) (Strategy, error) {
 	switch language {
 	case "typescript":
-		return NewNpmStrategy(r.binDir, "typescript-language-server", []string{"typescript-language-server", "typescript"}, r.logger), nil
+		return tools.NewNpmStrategy(r.binDir, "typescript-language-server", []string{"typescript-language-server", "typescript"}, r.logger), nil
 	case "go":
-		return NewGoInstallStrategy("gopls", "golang.org/x/tools/gopls@latest", r.logger), nil
+		return tools.NewGoInstallStrategy("gopls", "golang.org/x/tools/gopls@latest", r.logger), nil
 	case "rust":
-		return NewGithubReleaseStrategy(r.binDir, "rust-analyzer", GithubReleaseConfig{
+		return tools.NewGithubReleaseStrategy(r.binDir, "rust-analyzer", tools.GithubReleaseConfig{
 			Owner:        "rust-lang",
 			Repo:         "rust-analyzer",
 			AssetPattern: "rust-analyzer-{target}.gz",
@@ -122,7 +99,7 @@ func (r *Registry) StrategyFor(language string) (Strategy, error) {
 			},
 		}, r.logger), nil
 	case "python":
-		return NewNpmStrategy(r.binDir, "pyright-langserver", []string{"pyright"}, r.logger), nil
+		return tools.NewNpmStrategy(r.binDir, "pyright-langserver", []string{"pyright"}, r.logger), nil
 	default:
 		return nil, fmt.Errorf("no installer for language: %s", language)
 	}
@@ -155,7 +132,7 @@ func (r *Registry) BinaryPath(language string) (string, error) {
 
 	// Check Go-specific paths for Go binaries
 	if language == "go" {
-		if p, err := findGoBinary(binary); err == nil {
+		if p, err := tools.FindGoBinary(binary); err == nil {
 			return p, nil
 		}
 	}

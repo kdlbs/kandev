@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -255,9 +256,158 @@ func (c *Client) WaitForReady(ctx context.Context, timeout time.Duration) error 
 	}
 }
 
+// Re-export VS Code types from shared types package.
+type (
+	VscodeStartResponse  = types.VscodeStartResponse
+	VscodeStatusResponse = types.VscodeStatusResponse
+	VscodeStopResponse   = types.VscodeStopResponse
+)
+
+// StartVscode starts the code-server with the given theme.
+// The port is allocated by agentctl using an OS-assigned random port.
+func (c *Client) StartVscode(ctx context.Context, theme string) (*VscodeStartResponse, error) {
+	payload := struct {
+		Theme string `json:"theme,omitempty"`
+	}{Theme: theme}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/vscode/start", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("vscode start failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result VscodeStartResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse vscode start response: %w", err)
+	}
+	return &result, nil
+}
+
+// StopVscode stops the code-server.
+func (c *Client) StopVscode(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/vscode/stop", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		return fmt.Errorf("vscode stop failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// VscodeOpenFile opens a file in the running VS Code instance via agentctl.
+func (c *Client) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	payload := types.VscodeOpenFileRequest{
+		Path: path,
+		Line: line,
+		Col:  col,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/vscode/open-file", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("vscode open-file failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result types.VscodeOpenFileResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to parse vscode open-file response: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("vscode open-file failed: %s", result.Error)
+	}
+	return nil
+}
+
+// VscodeStatus returns the current code-server state.
+func (c *Client) VscodeStatus(ctx context.Context) (*VscodeStatusResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/vscode/status", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("vscode status failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result VscodeStatusResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse vscode status response: %w", err)
+	}
+	return &result, nil
+}
+
 // BaseURL returns the base URL of the agentctl client
 func (c *Client) BaseURL() string {
 	return c.baseURL
+}
+
+// Host returns the host portion (without port) of the agentctl client URL.
+func (c *Client) Host() string {
+	parsed, err := url.Parse(c.baseURL)
+	if err != nil {
+		return c.baseURL
+	}
+	return parsed.Hostname()
 }
 
 // Re-export types from types package for convenience.

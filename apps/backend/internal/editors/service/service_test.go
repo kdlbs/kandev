@@ -465,6 +465,75 @@ func TestParseRemoteSSHConfig(t *testing.T) {
 	}
 }
 
+func TestBuildInternalVscodeURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		worktreePath string
+		absPath      string
+		line         int
+		column       int
+		expected     string
+	}{
+		{
+			name:         "empty path returns base URL",
+			worktreePath: "/workspace",
+			absPath:      "",
+			line:         0,
+			column:       0,
+			expected:     "internal://vscode",
+		},
+		{
+			name:         "path same as worktree returns base URL",
+			worktreePath: "/workspace",
+			absPath:      "/workspace",
+			line:         0,
+			column:       0,
+			expected:     "internal://vscode",
+		},
+		{
+			name:         "file path without line",
+			worktreePath: "/workspace",
+			absPath:      "/workspace/src/main.go",
+			line:         0,
+			column:       0,
+			expected:     "internal://vscode?goto=src/main.go",
+		},
+		{
+			name:         "file path with line",
+			worktreePath: "/workspace",
+			absPath:      "/workspace/src/main.go",
+			line:         42,
+			column:       0,
+			expected:     "internal://vscode?goto=src/main.go:42",
+		},
+		{
+			name:         "file path with line and column",
+			worktreePath: "/workspace",
+			absPath:      "/workspace/src/main.go",
+			line:         42,
+			column:       10,
+			expected:     "internal://vscode?goto=src/main.go:42:10",
+		},
+		{
+			name:         "empty worktree uses absolute path",
+			worktreePath: "",
+			absPath:      "/some/file.go",
+			line:         5,
+			column:       0,
+			expected:     "internal://vscode?goto=/some/file.go:5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := buildInternalVscodeURL(tt.worktreePath, tt.absPath, tt.line, tt.column)
+			if result != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}
+
 func TestParseHostedURLConfig(t *testing.T) {
 	tests := []struct {
 		name      string

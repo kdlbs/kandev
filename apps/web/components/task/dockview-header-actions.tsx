@@ -14,6 +14,7 @@ import {
   IconLayoutColumns,
   IconLayoutRows,
   IconX,
+  IconBrandVscode,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -60,6 +61,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   });
 
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
@@ -103,6 +105,13 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
           >
             <IconDeviceDesktop className="h-3.5 w-3.5 mr-1.5" />
             Browser
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => addVscodePanel()}
+            className="cursor-pointer text-xs"
+          >
+            <IconBrandVscode className="h-3.5 w-3.5 mr-1.5" />
+            VS Code
           </DropdownMenuItem>
           {!isPassthrough && (
             <DropdownMenuItem

@@ -3,14 +3,15 @@ package installer
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
 
-// GoInstallStrategy installs language servers via `go install`.
-// Used for Go (gopls).
+// GoInstallStrategy installs tools via `go install`.
 type GoInstallStrategy struct {
 	binary     string // "gopls"
 	importPath string // "golang.org/x/tools/gopls@latest"
@@ -45,7 +46,7 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 	}
 
 	// Find the installed binary using the shared Go binary lookup
-	binaryPath, err := findGoBinary(s.binary)
+	binaryPath, err := FindGoBinary(s.binary)
 	if err != nil {
 		return nil, err
 	}
@@ -54,4 +55,28 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 	return &InstallResult{
 		BinaryPath: binaryPath,
 	}, nil
+}
+
+// FindGoBinary looks for a Go binary in GOBIN, GOPATH/bin, and ~/go/bin.
+func FindGoBinary(binary string) (string, error) {
+	if gobin := os.Getenv("GOBIN"); gobin != "" {
+		p := filepath.Join(gobin, binary)
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	if gopath := os.Getenv("GOPATH"); gopath != "" {
+		p := filepath.Join(gopath, "bin", binary)
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		p := filepath.Join(home, "go", "bin", binary)
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("%s not found in GOBIN/GOPATH/~/go/bin", binary)
 }

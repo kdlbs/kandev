@@ -384,7 +384,7 @@ function CustomEditorsList({
   );
 }
 
-type ExternalEditorsSectionProps = {
+type EditorsSectionProps = {
   defaultOptions: ComboboxOption[];
   defaultEditorId: string;
   availableEditors: EditorOption[];
@@ -400,7 +400,7 @@ type ExternalEditorsSectionProps = {
   deleteRequest: DeleteReq;
 };
 
-function ExternalEditorsSection({
+function EditorsSection({
   defaultOptions,
   defaultEditorId,
   availableEditors,
@@ -414,11 +414,11 @@ function ExternalEditorsSection({
   createRequest,
   updateRequest,
   deleteRequest,
-}: ExternalEditorsSectionProps) {
+}: EditorsSectionProps) {
   return (
     <div className="space-y-6">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        External Editors
+        Editors
       </div>
       <div className="space-y-2">
         <div className="text-sm font-medium text-foreground">Default</div>
@@ -569,7 +569,7 @@ export function EditorsSettings() {
           />
         </div>
         <Separator />
-        <ExternalEditorsSection
+        <EditorsSection
           defaultOptions={defaultOptions}
           defaultEditorId={state.defaultEditorId}
           availableEditors={availableEditors}

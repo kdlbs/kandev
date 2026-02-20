@@ -22,6 +22,9 @@ RUN npm install -g @augmentcode/auggie
 # Install Codex CLI from npm
 RUN npm install -g @openai/codex
 
+# Install code-server for VS Code web access (on-demand, started via agentctl)
+RUN curl -fsSL https://code-server.dev/install.sh | sh
+
 # Copy pre-built agentctl binary (run `make build-agentctl` first)
 COPY bin/agentctl /usr/local/bin/agentctl
 RUN chmod +x /usr/local/bin/agentctl

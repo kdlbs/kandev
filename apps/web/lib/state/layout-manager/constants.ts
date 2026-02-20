@@ -21,6 +21,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "plan",
   TERMINAL_DEFAULT_ID,
   "browser",
+  "vscode",
   "changes",
   "files",
 ]);
@@ -35,6 +36,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "files",
   "terminal",
   "browser",
+  "vscode",
 ]);
 
 /** Default panel configurations for known panels. */
@@ -45,6 +47,7 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   changes: { component: "changes", title: "Changes" },
   files: { component: "files", title: "Files" },
   browser: { component: "browser", title: "Browser", params: { url: "" } },
+  vscode: { component: "vscode", title: "VS Code" },
   [TERMINAL_DEFAULT_ID]: {
     component: "terminal",
     title: "Terminal",

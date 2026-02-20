@@ -12,10 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// NpmStrategy installs language servers via npm.
-// Used for TypeScript (typescript-language-server) and Python (pyright).
+// NpmStrategy installs tools via npm.
 type NpmStrategy struct {
-	binDir   string   // ~/.kandev/lsp-servers
+	binDir   string   // install prefix directory
 	binary   string   // e.g. "typescript-language-server"
 	packages []string // e.g. ["typescript-language-server", "typescript"]
 	logger   *logger.Logger

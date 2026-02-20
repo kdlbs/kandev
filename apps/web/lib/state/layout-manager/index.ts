@@ -39,3 +39,6 @@ export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serial
 // Applier
 export { applyLayout, getRootSplitview, resolveGroupIds } from "./applier";
 export type { LayoutGroupIds } from "./applier";
+
+// Merger
+export { mergeCurrentPanelsIntoPreset } from "./merger";

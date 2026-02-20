@@ -8,6 +8,7 @@ import {
   IconColumns3,
   IconFileText,
   IconDeviceDesktop,
+  IconBrandVscode,
   IconTrash,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -63,6 +64,12 @@ const BUILT_IN_PRESETS: PresetOption[] = [
     label: "Preview Mode",
     description: "Sidebar + Agent + Browser (side-by-side)",
     icon: IconDeviceDesktop,
+  },
+  {
+    id: "vscode",
+    label: "VS Code",
+    description: "Sidebar + Agent/VS Code (tabbed)",
+    icon: IconBrandVscode,
   },
 ];
 

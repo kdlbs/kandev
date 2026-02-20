@@ -22,6 +22,7 @@ export function usePanelActions() {
   const dockAddChat = useDockviewStore((s) => s.addChatPanel);
   const dockAddChanges = useDockviewStore((s) => s.addChangesPanel);
   const dockAddTerminal = useDockviewStore((s) => s.addTerminalPanel);
+  const dockAddVscode = useDockviewStore((s) => s.addVscodePanel);
 
   // File editors (works on desktop through dockview)
   const { openFile: dockOpenFile } = useFileEditors();
@@ -85,6 +86,12 @@ export function usePanelActions() {
     [isDesktop, dockAddTerminal],
   );
 
+  const addVscode = useCallback(() => {
+    if (isDesktop) {
+      dockAddVscode();
+    }
+  }, [isDesktop, dockAddVscode]);
+
   const openFile = useCallback(
     (filePath: string) => {
       if (isDesktop) {
@@ -100,6 +107,7 @@ export function usePanelActions() {
     addChat,
     addChanges,
     addTerminal,
+    addVscode,
     openFile,
   };
 }

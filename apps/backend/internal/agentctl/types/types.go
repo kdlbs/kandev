@@ -318,3 +318,39 @@ type WorkspaceStreamSubscriber chan WorkspaceStreamMessage
 func timeNowUnixMilli() int64 {
 	return time.Now().UnixMilli()
 }
+
+// VscodeStartResponse is returned after starting code-server.
+type VscodeStartResponse struct {
+	Success bool   `json:"success"`
+	Status  string `json:"status,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// VscodeStatusResponse returns the current code-server state.
+type VscodeStatusResponse struct {
+	Status  string `json:"status"`
+	Port    int    `json:"port,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// VscodeStopResponse is returned after stopping code-server.
+type VscodeStopResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// VscodeOpenFileRequest is the request body for opening a file in code-server.
+type VscodeOpenFileRequest struct {
+	Path string `json:"path"`           // Relative or absolute file path
+	Line int    `json:"line,omitempty"` // Line number (1-based, 0 means no line)
+	Col  int    `json:"col,omitempty"`  // Column number (1-based, 0 means no column)
+}
+
+// VscodeOpenFileResponse is returned after opening a file in code-server.
+type VscodeOpenFileResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
