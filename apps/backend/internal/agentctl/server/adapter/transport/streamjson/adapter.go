@@ -101,6 +101,11 @@ type Adapter struct {
 	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
 
+	// OTel tracing: active prompt span context.
+	// Notification spans become children of the prompt span for visual grouping.
+	promptTraceCtx context.Context
+	promptTraceMu  sync.RWMutex
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -216,13 +221,38 @@ func (a *Adapter) RequiresProcessKill() bool {
 // sendUpdate safely sends an event to the updates channel.
 func (a *Adapter) sendUpdate(update AgentEvent) {
 	shared.LogNormalizedEvent(shared.ProtocolStreamJSON, a.agentID, &update)
-	shared.TraceProtocolEvent(context.Background(), shared.ProtocolStreamJSON, a.agentID,
+	shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolStreamJSON, a.agentID,
 		update.Type, a.lastRawData, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
 		a.logger.Warn("updates channel full, dropping event")
 	}
+}
+
+// getPromptTraceCtx returns the current prompt span context for child-span linking.
+// Returns context.Background() if no prompt is active.
+func (a *Adapter) getPromptTraceCtx() context.Context {
+	a.promptTraceMu.RLock()
+	defer a.promptTraceMu.RUnlock()
+	if a.promptTraceCtx != nil {
+		return a.promptTraceCtx
+	}
+	return context.Background()
+}
+
+// setPromptTraceCtx stores the prompt span context.
+func (a *Adapter) setPromptTraceCtx(ctx context.Context) {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = ctx
+}
+
+// clearPromptTraceCtx clears the prompt span context.
+func (a *Adapter) clearPromptTraceCtx() {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = nil
 }
 
 // handleMessage processes streaming messages from the agent.

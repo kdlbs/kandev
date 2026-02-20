@@ -4,9 +4,11 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 )
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
@@ -144,6 +146,24 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 			isError = v
 		}
 	}
+
+	// Determine stop reason for tracing
+	stopReason := "end_turn"
+	if isError {
+		stopReason = "error"
+	} else if event.Data != nil {
+		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
+			stopReason = sr
+		}
+	}
+
+	// Create a turn_end span on the session trace
+	_, turnSpan := tracing.TraceTurnEnd(execution.SessionTraceContext(), execution.ID, execution.SessionID)
+	turnSpan.SetAttributes(
+		attribute.String("stop_reason", stopReason),
+		attribute.Bool("is_error", isError),
+	)
+	turnSpan.End()
 
 	m.logger.Info("agent turn complete",
 		zap.String("execution_id", execution.ID),

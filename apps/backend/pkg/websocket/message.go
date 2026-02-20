@@ -18,11 +18,20 @@ const (
 
 // Message is the base envelope for all WebSocket messages
 type Message struct {
-	ID        string          `json:"id,omitempty"`
-	Type      MessageType     `json:"type"`
-	Action    string          `json:"action"`
-	Payload   json.RawMessage `json:"payload"`
-	Timestamp time.Time       `json:"timestamp"`
+	ID        string            `json:"id,omitempty"`
+	Type      MessageType       `json:"type"`
+	Action    string            `json:"action"`
+	Payload   json.RawMessage   `json:"payload"`
+	Timestamp time.Time         `json:"timestamp"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+// EnsureMetadata lazily initializes and returns the Metadata map.
+func (m *Message) EnsureMetadata() map[string]string {
+	if m.Metadata == nil {
+		m.Metadata = make(map[string]string)
+	}
+	return m.Metadata
 }
 
 // Request represents a client request message

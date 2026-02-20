@@ -99,7 +99,7 @@ func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStre
 			return
 		}
 		if workspaceTracedTypes[msg.Type] {
-			tracing.TraceWorkspaceEvent(context.Background(), string(msg.Type), c.executionID)
+			tracing.TraceWorkspaceEvent(c.getTraceCtx(), string(msg.Type), c.executionID, c.sessionID)
 		}
 		dispatchWorkspaceMessage(msg, callbacks)
 	}

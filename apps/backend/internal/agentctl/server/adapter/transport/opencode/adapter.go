@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/opencode"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -102,6 +103,11 @@ type Adapter struct {
 	// lastRawData holds the raw JSON of the current event being processed.
 	// Set in handleSDKEvent before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
+
+	// OTel tracing: active prompt span context.
+	// Notification spans become children of the prompt span for visual grouping.
+	promptTraceCtx context.Context
+	promptTraceMu  sync.RWMutex
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -370,6 +376,18 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 		return fmt.Errorf("adapter not initialized")
 	}
 
+	// Start prompt span — notification spans become children via getPromptTraceCtx()
+	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolOpenCode, a.agentID, "prompt")
+	promptSpan.SetAttributes(
+		attribute.String("session_id", sessionID),
+		attribute.Int("prompt_length", len(message)),
+	)
+	a.setPromptTraceCtx(promptCtx)
+	defer func() {
+		a.clearPromptTraceCtx()
+		promptSpan.End()
+	}()
+
 	a.logger.Info("sending prompt",
 		zap.String("session_id", sessionID),
 		zap.String("operation_id", operationID))
@@ -543,7 +561,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	}
 
 	shared.LogNormalizedEvent(shared.ProtocolOpenCode, a.agentID, &event)
-	shared.TraceProtocolEvent(context.Background(), shared.ProtocolOpenCode, a.agentID,
+	shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolOpenCode, a.agentID,
 		event.Type, a.lastRawData, &event)
 	select {
 	case a.updatesCh <- event:
@@ -551,6 +569,31 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 		a.logger.Warn("update channel full, dropping event",
 			zap.String("event_type", event.Type))
 	}
+}
+
+// getPromptTraceCtx returns the current prompt span context for child-span linking.
+// Returns context.Background() if no prompt is active.
+func (a *Adapter) getPromptTraceCtx() context.Context {
+	a.promptTraceMu.RLock()
+	defer a.promptTraceMu.RUnlock()
+	if a.promptTraceCtx != nil {
+		return a.promptTraceCtx
+	}
+	return context.Background()
+}
+
+// setPromptTraceCtx stores the prompt span context.
+func (a *Adapter) setPromptTraceCtx(ctx context.Context) {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = ctx
+}
+
+// clearPromptTraceCtx clears the prompt span context.
+func (a *Adapter) clearPromptTraceCtx() {
+	a.promptTraceMu.Lock()
+	defer a.promptTraceMu.Unlock()
+	a.promptTraceCtx = nil
 }
 
 // handleSDKEvent processes events from the OpenCode SSE stream

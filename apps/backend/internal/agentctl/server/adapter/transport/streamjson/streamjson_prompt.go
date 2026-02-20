@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/claudecode"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -43,6 +45,18 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 			finalMessage = a.buildMessageWithImages(message, imagePaths)
 		}
 	}
+
+	// Start prompt span — notification spans become children via getPromptTraceCtx()
+	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolStreamJSON, a.agentID, "prompt")
+	promptSpan.SetAttributes(
+		attribute.String("session_id", sessionID),
+		attribute.Int("prompt_length", len(finalMessage)),
+	)
+	a.setPromptTraceCtx(promptCtx)
+	defer func() {
+		a.clearPromptTraceCtx()
+		promptSpan.End()
+	}()
 
 	a.logger.Info("sending prompt",
 		zap.String("session_id", sessionID),

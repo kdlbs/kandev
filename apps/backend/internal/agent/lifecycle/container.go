@@ -125,7 +125,8 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 
 	// Create agentctl client pointing to the instance port
 	agentctlClient := agentctl.NewClient(containerIP, resp.Port, cm.logger,
-		agentctl.WithExecutionID(config.InstanceID))
+		agentctl.WithExecutionID(config.InstanceID),
+		agentctl.WithSessionID(config.SessionID))
 
 	cm.logger.Info("docker container launched",
 		zap.String("container_id", containerID),

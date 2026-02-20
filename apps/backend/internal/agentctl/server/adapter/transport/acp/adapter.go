@@ -366,6 +366,7 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
 	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
 	promptSpan.SetAttributes(
+		attribute.String("session_id", sessionID),
 		attribute.Int("prompt_length", len(finalMessage)),
 		attribute.Int("image_count", len(attachments)),
 	)

@@ -90,7 +90,7 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := context.Background()
+	ctx := execution.SessionTraceContext()
 
 	err := execution.agentctl.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
 		if sm.callbacks.OnAgentEvent != nil {
@@ -182,7 +182,7 @@ func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agen
 
 // connectWorkspaceStream handles the unified workspace stream with retry logic
 func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := context.Background()
+	ctx := execution.SessionTraceContext()
 
 	// Retry connection with exponential backoff
 	maxRetries := 5

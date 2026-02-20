@@ -10,9 +10,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/codex"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -38,6 +40,18 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	if err != nil {
 		return err
 	}
+
+	// Start prompt span — notification spans become children via getPromptTraceCtx()
+	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolCodex, a.agentID, "prompt")
+	promptSpan.SetAttributes(
+		attribute.String("session_id", threadID),
+		attribute.Int("prompt_inputs", len(inputs)),
+	)
+	a.setPromptTraceCtx(promptCtx)
+	defer func() {
+		a.clearPromptTraceCtx()
+		promptSpan.End()
+	}()
 
 	a.logger.Info("sending prompt",
 		zap.String("thread_id", threadID),

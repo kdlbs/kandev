@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -226,6 +228,11 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 
 // handleAgentStreamRequest dispatches agent operation requests received on the WebSocket stream.
 func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) *ws.Message {
+	// Extract remote trace context from WS message metadata for cross-process span linking
+	if len(msg.Metadata) > 0 {
+		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(msg.Metadata))
+	}
+
 	switch msg.Action {
 	case "agent.initialize":
 		return s.handleWSInitialize(ctx, msg)
@@ -390,13 +397,14 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
-	go func() {
-		promptCtx, cancel := context.WithTimeout(context.Background(), constants.PromptTimeout)
+	// Pass ctx (which carries remote trace context) so acp.prompt spans become children of the session.
+	go func(parentCtx context.Context) {
+		promptCtx, cancel := context.WithTimeout(parentCtx, constants.PromptTimeout)
 		defer cancel()
 		if err := adapter.Prompt(promptCtx, req.Text, req.Attachments); err != nil {
 			s.logger.Error("async prompt failed", zap.Error(err))
 		}
-	}()
+	}(ctx)
 
 	s.logger.Info("prompt accepted (async)", zap.Int("attachments", len(req.Attachments)))
 

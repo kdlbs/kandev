@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -61,11 +62,27 @@ func (m *Manager) Start(ctx context.Context) error {
 				standalonePort:       ri.StandalonePort,
 				promptDoneCh:         make(chan PromptCompletionSignal, 1),
 			}
+			// Create trace span for the recovered session
+			_, recoverySpan := tracing.TraceSessionRecovered(
+				context.Background(), execution.TaskID, execution.SessionID, execution.ID,
+			)
+			execution.SetSessionSpan(recoverySpan)
+			if execution.agentctl != nil {
+				execution.agentctl.SetTraceContext(execution.SessionTraceContext())
+			}
+
+			// Create short-lived init span so recovery-phase operations are visible
+			_, initSpan := tracing.TraceSessionInit(
+				execution.SessionTraceContext(), execution.TaskID, execution.SessionID, execution.ID,
+			)
+
 			m.executionStore.Add(execution)
 
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
 			go m.streamManager.ReconnectAll(execution)
+
+			initSpan.End()
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
@@ -274,6 +291,9 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	m.logger.Info("cleaning up stale agent execution",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
+
+	// End session trace span
+	execution.EndSessionSpan()
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {

@@ -100,6 +100,10 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
+
+	// End session trace span
+	execution.EndSessionSpan()
+
 	m.executionStore.Remove(executionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
@@ -308,6 +312,9 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 			exec.Status = v1.AgentStatusFailed
 		}
 	})
+
+	// End session trace span
+	execution.EndSessionSpan()
 
 	m.logger.Info("execution completed",
 		zap.String("execution_id", executionID),

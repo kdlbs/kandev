@@ -24,6 +24,11 @@ type Client struct {
 	httpClient  *http.Client
 	logger      *logger.Logger
 	executionID string
+	sessionID   string
+
+	// Optional trace context for session-scoped spans in background goroutines.
+	// When set, stream read loops use this as parent context for tracing instead of context.Background().
+	traceCtx context.Context
 
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
@@ -46,6 +51,32 @@ func WithExecutionID(id string) ClientOption {
 	return func(c *Client) {
 		c.executionID = id
 	}
+}
+
+// WithSessionID sets the session ID used for tracing spans.
+func WithSessionID(id string) ClientOption {
+	return func(c *Client) {
+		c.sessionID = id
+	}
+}
+
+// SetTraceContext sets the trace context used as parent for spans created in
+// background goroutines (stream read loops). Thread-safe: can be called after construction.
+func (c *Client) SetTraceContext(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.traceCtx = ctx
+}
+
+// getTraceCtx returns the trace context for background operations.
+// Returns context.Background() when no trace context is set.
+func (c *Client) getTraceCtx() context.Context {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.traceCtx != nil {
+		return c.traceCtx
+	}
+	return context.Background()
 }
 
 // StatusResponse from agentctl

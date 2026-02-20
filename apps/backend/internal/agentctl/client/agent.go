@@ -276,7 +276,7 @@ func (c *Client) readUpdatesStream(
 			continue
 		}
 
-		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID)
+		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
 		handler(event)
 	}
 }

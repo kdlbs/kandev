@@ -318,7 +318,7 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 		return nil, nil
 	}
 	bootStopCh := make(chan struct{})
-	go m.pollAgentStderr(execution.agentctl, bootMsg, bootStopCh)
+	go m.pollAgentStderr(execution, execution.agentctl, bootMsg, bootStopCh)
 	return bootMsg, bootStopCh
 }
 
@@ -368,23 +368,23 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		return fmt.Errorf("failed to get agent config: %w", err)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
 	if err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(execution.ID, "failed to resolve MCP config: "+err.Error())
 		return fmt.Errorf("failed to resolve MCP config: %w", err)
 	}
 
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, mcpServers); err != nil {
-		m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, "failed")
+		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
 		m.updateExecutionError(execution.ID, "failed to initialize ACP: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP: %w", err)
 	}
 
-	m.finalizeBootMessage(bootMsg, bootStopCh, execution.agentctl, containerStateExited)
+	m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, containerStateExited)
 	return nil
 }
