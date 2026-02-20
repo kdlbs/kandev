@@ -38,6 +38,9 @@ type Config struct {
 	LogLevel   string
 	LogFormat  string
 	McpLogFile string // Optional file path for MCP debug logs
+
+	// VS Code server configuration
+	VscodeCommand string // Command to run code-server (default: "code-server")
 }
 
 // PortConfig defines port allocation for instances
@@ -140,6 +143,9 @@ type InstanceConfig struct {
 
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
+
+	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
+	VscodeCommand string
 }
 
 // Load loads the configuration from environment variables.
@@ -160,9 +166,10 @@ func Load() *Config {
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
 		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:     getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:    getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:   getEnv("KANDEV_MCP_LOG_FILE", ""),
+		LogLevel:      getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:     getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:    getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand: getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
 	}
 }
 
@@ -180,6 +187,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		LogLevel:               c.LogLevel,
 		LogFormat:              c.LogFormat,
 		ProcessBufferMaxBytes:  c.Defaults.ProcessBufferMaxBytes,
+		VscodeCommand:          c.VscodeCommand,
 	}
 
 	applyOverrides(cfg, overrides)

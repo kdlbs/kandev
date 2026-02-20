@@ -1,6 +1,13 @@
 {
   "editors": [
     {
+      "type": "vscode_web",
+      "name": "VS Code (Embedded)",
+      "command": "",
+      "scheme": "",
+      "enabled": true
+    },
+    {
       "type": "vscode",
       "name": "VS Code",
       "command": "code",

@@ -90,16 +90,24 @@ func (r *sqliteRepository) ensureDefaults(ctx context.Context) error {
 			continue
 		}
 		typeSet[def.Type] = struct{}{}
+
+		// Internal editors (no command) are always installed.
+		// External editors check PATH via exec.LookPath.
+		kind := "built_in"
 		installed := false
-		if def.Command != "" {
+		if def.Command == "" {
+			kind = "internal_vscode"
+			installed = true
+		} else {
 			_, lookupErr := exec.LookPath(def.Command)
 			installed = lookupErr == nil
 		}
+
 		defaults = append(defaults, &models.Editor{
 			ID:        uuid.New().String(),
 			Type:      def.Type,
 			Name:      def.Name,
-			Kind:      "built_in",
+			Kind:      kind,
 			Command:   def.Command,
 			Scheme:    def.Scheme,
 			Installed: installed,

@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
 
@@ -98,6 +101,10 @@ type Manager struct {
 	// Pending permission requests waiting for user response
 	pendingPermissions map[string]*PendingPermission
 	permissionMu       sync.RWMutex
+
+	// VS Code server manager (lazy-initialized on demand)
+	vscode   *VscodeManager
+	vscodeMu sync.Mutex
 
 	// Git operator for git operations (lazy-initialized)
 	gitOperator   *GitOperator
@@ -550,8 +557,15 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return nil
 }
 
-// stopShellAndProcesses stops the shell session, workspace processes, and workspace tracker.
+// stopShellAndProcesses stops the shell session, VS Code, workspace processes, and workspace tracker.
 func (m *Manager) stopShellAndProcesses(ctx context.Context) {
+	// Stop VS Code server if running
+	m.logger.Debug("stopping vscode server")
+	if err := m.StopVscode(ctx); err != nil {
+		m.logger.Debug("failed to stop vscode server", zap.Error(err))
+	}
+	m.logger.Debug("vscode server stopped")
+
 	m.logger.Debug("stopping shell session")
 	if m.shell != nil {
 		if err := m.shell.Stop(); err != nil {
@@ -995,4 +1009,88 @@ func (m *Manager) StartShell() error {
 	m.shell = shellSession
 	m.logger.Info("shell session started independently")
 	return nil
+}
+
+// StartVscode starts the code-server process on a random OS-assigned port.
+// The VS Code server runs independently of the agent process.
+// Start is non-blocking — the caller should poll VscodeInfo() for status updates.
+func (m *Manager) StartVscode(_ context.Context, theme string) {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+
+	if m.vscode != nil {
+		info := m.vscode.Info()
+		if info.Status == VscodeStatusRunning || info.Status == VscodeStatusStarting || info.Status == VscodeStatusInstalling {
+			return
+		}
+	}
+
+	command := m.cfg.VscodeCommand
+	if command == "" {
+		command = "code-server"
+	}
+
+	strategy := codeServerInstallStrategy(m.logger)
+	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
+	m.vscode.Start()
+}
+
+// codeServerInstallStrategy returns a tarball strategy that auto-installs code-server.
+func codeServerInstallStrategy(log *logger.Logger) tools.Strategy {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	installDir := filepath.Join(home, ".kandev", "tools", "code-server")
+
+	return tools.NewGithubTarballStrategy(installDir, "code-server", tools.GithubTarballConfig{
+		Owner:        "coder",
+		Repo:         "code-server",
+		Version:      "4.96.4",
+		AssetPattern: "code-server-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "code-server-{version}-{os}-{arch}/bin/code-server",
+		Targets: map[string]string{
+			"darwin/arm64": "macos-arm64",
+			"darwin/amd64": "macos-amd64",
+			"linux/amd64":  "linux-amd64",
+			"linux/arm64":  "linux-arm64",
+		},
+	}, log)
+}
+
+// StopVscode stops the code-server process if running.
+func (m *Manager) StopVscode(ctx context.Context) error {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+
+	if m.vscode == nil {
+		return nil
+	}
+
+	err := m.vscode.Stop(ctx)
+	m.vscode = nil
+	return err
+}
+
+// VscodeInfo returns the current VS Code server status.
+func (m *Manager) VscodeInfo() VscodeInfo {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+
+	if m.vscode == nil {
+		return VscodeInfo{Status: VscodeStatusStopped}
+	}
+	return m.vscode.Info()
+}
+
+// VscodeOpenFile opens a file in the running VS Code instance via the Remote CLI.
+func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	m.vscodeMu.Lock()
+	vscode := m.vscode
+	m.vscodeMu.Unlock()
+
+	if vscode == nil {
+		return fmt.Errorf("code-server is not running")
+	}
+	return vscode.OpenFile(ctx, path, line, col)
 }

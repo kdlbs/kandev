@@ -103,3 +103,17 @@ export function PanelHeaderBarSplit({ left, right, className }: PanelHeaderBarSp
     </PanelHeaderBar>
   );
 }
+
+/** Fixed-height panel footer bar with border-t. Mirrors PanelHeaderBar but anchors to the bottom. */
+export function PanelFooterBar({ children, className }: PanelHeaderBarProps) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 px-3 h-[30px] border-t border-border shrink-0 bg-card",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}

@@ -33,6 +33,7 @@ const (
 	editorKindCustomRemoteSSH = "custom_remote_ssh"
 	editorKindCustomHostedURL = "custom_hosted_url"
 	editorKindCustomCommand   = "custom_command"
+	editorKindInternalVscode  = "internal_vscode"
 )
 
 type UserSettingsProvider interface {
@@ -103,6 +104,8 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 
 func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPath string, line, column int) (string, error) {
 	switch editor.Kind {
+	case editorKindInternalVscode:
+		return buildInternalVscodeURL(worktreePath, absPath, line, column), nil
 	case editorKindCustomRemoteSSH:
 		return openRemoteSSHEditor(editor, absPath, line, column)
 	case editorKindCustomHostedURL:
@@ -120,6 +123,31 @@ func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPat
 	default:
 		return openBuiltinEditor(editor, absPath, line, column)
 	}
+}
+
+// buildInternalVscodeURL returns a sentinel URL that the frontend intercepts
+// to open the embedded code-server panel. Includes goto params when a specific
+// file is requested.
+func buildInternalVscodeURL(worktreePath, absPath string, line, column int) string {
+	if absPath == "" || absPath == worktreePath {
+		return "internal://vscode"
+	}
+	// Build goto param: relative/path:line:col
+	relPath := absPath
+	if worktreePath != "" {
+		rel, err := filepath.Rel(worktreePath, absPath)
+		if err == nil {
+			relPath = rel
+		}
+	}
+	goto_ := relPath
+	if line > 0 {
+		goto_ = fmt.Sprintf("%s:%d", goto_, line)
+		if column > 0 {
+			goto_ = fmt.Sprintf("%s:%d", goto_, column)
+		}
+	}
+	return fmt.Sprintf("internal://vscode?goto=%s", goto_)
 }
 
 func openRemoteSSHEditor(editor *models.Editor, absPath string, line, column int) (string, error) {

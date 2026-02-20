@@ -20,11 +20,10 @@ type GithubReleaseConfig struct {
 	Owner        string            // e.g. "rust-lang"
 	Repo         string            // e.g. "rust-analyzer"
 	AssetPattern string            // e.g. "rust-analyzer-{target}.gz"
-	Targets      map[string]string // "darwin/arm64" → "aarch64-apple-darwin"
+	Targets      map[string]string // "darwin/arm64" -> "aarch64-apple-darwin"
 }
 
 // GithubReleaseStrategy downloads prebuilt binaries from GitHub releases.
-// Used for Rust (rust-analyzer).
 type GithubReleaseStrategy struct {
 	binDir string
 	binary string // "rust-analyzer"
@@ -88,11 +87,11 @@ func (s *GithubReleaseStrategy) Install(ctx context.Context) (*InstallResult, er
 
 	// Decompress .gz or write directly
 	if strings.HasSuffix(asset, ".gz") {
-		if err := writeGzipBody(resp.Body, outPath); err != nil {
+		if err := WriteGzipBody(resp.Body, outPath); err != nil {
 			return nil, err
 		}
 	} else {
-		if err := writeBody(resp.Body, outPath); err != nil {
+		if err := WriteBody(resp.Body, outPath); err != nil {
 			return nil, err
 		}
 	}
@@ -108,8 +107,8 @@ func (s *GithubReleaseStrategy) Install(ctx context.Context) (*InstallResult, er
 	}, nil
 }
 
-// writeGzipBody decompresses a gzip reader into outPath.
-func writeGzipBody(body io.Reader, outPath string) error {
+// WriteGzipBody decompresses a gzip reader into outPath.
+func WriteGzipBody(body io.Reader, outPath string) error {
 	gzReader, err := gzip.NewReader(body)
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
@@ -128,8 +127,8 @@ func writeGzipBody(body io.Reader, outPath string) error {
 	return nil
 }
 
-// writeBody writes a plain reader into outPath.
-func writeBody(body io.Reader, outPath string) error {
+// WriteBody writes a plain reader into outPath.
+func WriteBody(body io.Reader, outPath string) error {
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)

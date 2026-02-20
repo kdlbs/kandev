@@ -34,6 +34,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
+import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
@@ -230,6 +231,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   files: FilesPanelWrapper,
   terminal: TerminalPanel,
   browser: BrowserPanel,
+  vscode: VscodePanel,
   plan: PlanPanelComponent,
   // Backwards compat aliases for saved layouts
   "diff-files": ChangesPanelWrapper,

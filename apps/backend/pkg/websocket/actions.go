@@ -230,6 +230,12 @@ const (
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
 
+	// VS Code server actions
+	ActionVscodeStart    = "vscode.start"    // Start code-server for a session
+	ActionVscodeStop     = "vscode.stop"     // Stop code-server for a session
+	ActionVscodeStatus   = "vscode.status"   // Get code-server status for a session
+	ActionVscodeOpenFile = "vscode.openFile" // Open a file in code-server for a session
+
 	// MCP tool actions (agentctl -> backend via WS tunnel)
 	ActionMCPListWorkspaces    = "mcp.list_workspaces"
 	ActionMCPListWorkflows     = "mcp.list_workflows"

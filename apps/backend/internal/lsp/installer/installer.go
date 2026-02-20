@@ -1,16 +1,7 @@
 package installer
 
-import "context"
+import tools "github.com/kandev/kandev/internal/tools/installer"
 
-// InstallResult contains information about an installed language server binary.
-type InstallResult struct {
-	BinaryPath string // absolute path to installed binary
-}
-
-// Strategy is the abstraction for different install methods.
-type Strategy interface {
-	// Install downloads/installs the language server. Blocks until done.
-	Install(ctx context.Context) (*InstallResult, error)
-	// Name returns a human-readable name for logging.
-	Name() string
-}
+// Re-export shared types for backward compatibility.
+type Strategy = tools.Strategy
+type InstallResult = tools.InstallResult

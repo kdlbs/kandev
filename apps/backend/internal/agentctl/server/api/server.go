@@ -100,6 +100,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/processes", s.handleListProcesses)
 		api.GET("/processes/:id", s.handleGetProcess)
 
+		// VS Code server management
+		api.POST("/vscode/start", s.handleVscodeStart)
+		api.POST("/vscode/stop", s.handleVscodeStop)
+		api.GET("/vscode/status", s.handleVscodeStatus)
+		api.POST("/vscode/open-file", s.handleVscodeOpenFile)
+
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)

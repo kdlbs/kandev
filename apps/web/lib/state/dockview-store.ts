@@ -9,9 +9,11 @@ import {
   RIGHT_BOTTOM_GROUP,
   getPresetLayout,
   applyLayout,
+  getRootSplitview,
   fromDockviewApi,
   filterEphemeral,
   defaultLayout,
+  mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 
@@ -78,6 +80,8 @@ type DockviewStore = {
   addCommitDetailPanel: (sha: string, groupId?: string) => void;
   addFileEditorPanel: (path: string, name: string, quiet?: boolean) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
+  addVscodePanel: () => void;
+  openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (groupId?: string) => void;
   addTerminalPanel: (terminalId?: string, groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
@@ -130,6 +134,36 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
       ...(action.params ? { params: action.params } : {}),
     });
   }
+}
+
+/** Read live column widths from dockview's splitview and persist them as pinned overrides. */
+function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
+  const sv = getRootSplitview(api);
+  if (!sv || sv.length < 2) return;
+  try {
+    const updates = new Map<string, number>();
+    const sidebarW = sv.getViewSize(0);
+    if (sidebarW > 50) updates.set("sidebar", sidebarW);
+    if (sv.length >= 3) {
+      const rightW = sv.getViewSize(sv.length - 1);
+      if (rightW > 50) updates.set("right", rightW);
+    }
+    if (updates.size > 0) {
+      set((prev) => {
+        const m = new Map(prev.pinnedWidths);
+        for (const [k, v] of updates) m.set(k, v);
+        return { pinnedWidths: m };
+      });
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
+function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
+  syncPinnedWidthsFromApi(api, set);
+  return useDockviewStore.getState().pinnedWidths;
 }
 
 function performSessionSwitch(
@@ -202,16 +236,20 @@ function applyLayoutAndSet(
 function buildVisibilityActions(set: StoreSet, get: StoreGet) {
   return {
     toggleSidebar: () => {
-      const { api, sidebarVisible, pinnedWidths } = get();
+      const { api, sidebarVisible } = get();
       if (!api) return;
+      const liveWidths = captureLiveWidths(api, set);
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
           columns: current.columns.filter((c) => c.id !== "sidebar"),
         };
         set({ isRestoringLayout: true, sidebarVisible: false });
-        applyLayoutAndSet(api, withoutSidebar, pinnedWidths, set);
-        requestAnimationFrame(() => set({ isRestoringLayout: false }));
+        applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
+        requestAnimationFrame(() => {
+          syncPinnedWidthsFromApi(api, set);
+          set({ isRestoringLayout: false });
+        });
       } else {
         const current = fromDockviewApi(api);
         const sidebarCol = defaultLayout().columns[0];
@@ -219,13 +257,17 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           columns: [sidebarCol, ...current.columns],
         };
         set({ isRestoringLayout: true, sidebarVisible: true });
-        applyLayoutAndSet(api, withSidebar, pinnedWidths, set);
-        requestAnimationFrame(() => set({ isRestoringLayout: false }));
+        applyLayoutAndSet(api, withSidebar, liveWidths, set);
+        requestAnimationFrame(() => {
+          syncPinnedWidthsFromApi(api, set);
+          set({ isRestoringLayout: false });
+        });
       }
     },
     toggleRightPanels: () => {
-      const { api, rightPanelsVisible, pinnedWidths } = get();
+      const { api, rightPanelsVisible } = get();
       if (!api) return;
+      const liveWidths = captureLiveWidths(api, set);
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const centerIdx = current.columns.findIndex((c) => c.id === "center");
@@ -233,8 +275,11 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           columns: current.columns.slice(0, centerIdx + 1),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
-        applyLayoutAndSet(api, withoutRight, pinnedWidths, set);
-        requestAnimationFrame(() => set({ isRestoringLayout: false }));
+        applyLayoutAndSet(api, withoutRight, liveWidths, set);
+        requestAnimationFrame(() => {
+          syncPinnedWidthsFromApi(api, set);
+          set({ isRestoringLayout: false });
+        });
       } else {
         const defLayout = defaultLayout();
         const rightCol = defLayout.columns.find((c) => c.id === "right");
@@ -244,8 +289,11 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           columns: [...current.columns, rightCol],
         };
         set({ isRestoringLayout: true, rightPanelsVisible: true });
-        applyLayoutAndSet(api, withRight, pinnedWidths, set);
-        requestAnimationFrame(() => set({ isRestoringLayout: false }));
+        applyLayoutAndSet(api, withRight, liveWidths, set);
+        requestAnimationFrame(() => {
+          syncPinnedWidthsFromApi(api, set);
+          set({ isRestoringLayout: false });
+        });
       }
     },
     setSidebarVisible: (visible: boolean) => {
@@ -264,11 +312,13 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
 function buildPresetActions(set: StoreSet, get: StoreGet) {
   return {
     applyBuiltInPreset: (preset: BuiltInPreset) => {
-      const { api, pinnedWidths } = get();
+      const { api } = get();
       if (!api) return;
+      const liveWidths = captureLiveWidths(api, set);
       set({ isRestoringLayout: true });
-      const state = getPresetLayout(preset);
-      const ids = applyLayout(api, state, pinnedWidths);
+      const presetState = getPresetLayout(preset);
+      const state = mergeCurrentPanelsIntoPreset(api, presetState);
+      const ids = applyLayout(api, state, liveWidths);
       set({
         ...ids,
         sidebarVisible: true,
@@ -276,12 +326,14 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       });
       requestAnimationFrame(() => {
         api.layout(api.width, api.height);
+        syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
     },
     applyCustomLayout: (layout: SavedLayoutConfig) => {
-      const { api, pinnedWidths } = get();
+      const { api } = get();
       if (!api) return;
+      const liveWidths = captureLiveWidths(api, set);
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
       if (!state?.columns) {
@@ -292,7 +344,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
           console.warn("applyCustomLayout: old-format restore failed:", e);
         }
       } else {
-        const ids = applyLayout(api, state, pinnedWidths);
+        const ids = applyLayout(api, state, liveWidths);
         set(ids);
       }
       const hasSidebar = !!api.getPanel("sidebar");
@@ -302,6 +354,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       requestAnimationFrame(() => {
         api.layout(api.width, api.height);
+        syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
     },
@@ -393,6 +446,39 @@ function buildPanelActions(set: StoreSet, get: StoreGet) {
       const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
       addSimplePanel(api, groupId ?? centerGroupId, { id: browserId, component: "browser", title: "Browser", params: { url: url ?? "" } });
     },
+  };
+}
+
+function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
+  return {
+    addVscodePanel: () => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      focusOrAddPanel(api, {
+        id: "vscode",
+        component: "vscode",
+        title: "VS Code",
+        position: { referenceGroup: centerGroupId },
+      });
+    },
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    openInternalVscode: (_goto: { file: string; line: number; col: number } | null) => {
+      const { api } = get();
+      if (!api) return;
+
+      const existing = api.getPanel("vscode");
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+
+      focusOrAddPanel(api, {
+        id: "vscode",
+        component: "vscode",
+        title: "VS Code",
+        position: { referencePanel: "chat", direction: "right" },
+      });
+    },
     addPlanPanel: (groupId?: string) => {
       const { api } = get();
       if (!api) return;
@@ -469,13 +555,17 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       set({ deferredPanelActions: [] });
       applyDeferredPanelActions(api, pending);
     }
-    requestAnimationFrame(() => set({ isRestoringLayout: false }));
+    requestAnimationFrame(() => {
+      syncPinnedWidthsFromApi(api, set);
+      set({ isRestoringLayout: false });
+    });
   },
   resetLayout: () => {
     const { api } = get();
     if (api) get().buildDefaultLayout(api);
   },
   ...buildPanelActions(set, get),
+  ...buildExtraPanelActions(set, get),
 }));
 
 /** Perform a layout switch between sessions. */

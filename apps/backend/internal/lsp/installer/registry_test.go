@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
 func testLogger() *logger.Logger {
@@ -234,12 +235,12 @@ func TestFindGoBinary(t *testing.T) {
 	t.Setenv("GOBIN", tmpDir)
 	t.Setenv("GOPATH", "")
 
-	p, err := findGoBinary("gopls")
+	p, err := tools.FindGoBinary("gopls")
 	if err != nil {
-		t.Errorf("findGoBinary(\"gopls\") error = %v", err)
+		t.Errorf("tools.FindGoBinary(\"gopls\") error = %v", err)
 	}
 	if p != fakeBinary {
-		t.Errorf("findGoBinary(\"gopls\") = %q, want %q", p, fakeBinary)
+		t.Errorf("tools.FindGoBinary(\"gopls\") = %q, want %q", p, fakeBinary)
 	}
 }
 
@@ -248,8 +249,8 @@ func TestFindGoBinary_NotFound(t *testing.T) {
 	t.Setenv("GOPATH", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 
-	_, err := findGoBinary("nonexistent-binary")
+	_, err := tools.FindGoBinary("nonexistent-binary")
 	if err == nil {
-		t.Error("findGoBinary(\"nonexistent-binary\") should return error")
+		t.Error("tools.FindGoBinary(\"nonexistent-binary\") should return error")
 	}
 }
