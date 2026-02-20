@@ -75,6 +75,22 @@ type AgentStreamEventData struct {
 	// AvailableCommands contains the slash commands available from the agent.
 	// Populated when Type is "available_commands".
 	AvailableCommands []streams.AvailableCommand `json:"available_commands,omitempty"`
+
+	// ToolCallContents contains rich content produced by a tool call (diffs, text, terminals).
+	// Populated when Type is "tool_call" or "tool_update".
+	ToolCallContents []streams.ToolCallContentItem `json:"tool_call_contents,omitempty"`
+
+	// ContentBlocks contains multimodal content blocks (images, audio, resource links).
+	// Populated when Type is "message_chunk" with non-text content.
+	ContentBlocks []streams.ContentBlock `json:"content_blocks,omitempty"`
+
+	// Role distinguishes user vs assistant messages (e.g., during session/load replay).
+	// Populated when Type is "message_chunk" with role "user".
+	Role string `json:"role,omitempty"`
+
+	// CurrentModeID is the active session mode identifier.
+	// Populated when Type is "session_mode".
+	CurrentModeID string `json:"current_mode_id,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
@@ -303,5 +319,19 @@ type AvailableCommandsEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p AvailableCommandsEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionModeEventPayload is the payload for session mode change events.
+type SessionModeEventPayload struct {
+	TaskID        string `json:"task_id"`
+	SessionID     string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	CurrentModeID string `json:"current_mode_id"`
+	Timestamp     string `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionModeEventPayload) GetSessionID() string {
 	return p.SessionID
 }

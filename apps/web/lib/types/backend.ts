@@ -32,6 +32,7 @@ export type BackendMessageType =
   | "session.turn.started"
   | "session.turn.completed"
   | "session.available_commands"
+  | "session.mode_changed"
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
@@ -326,6 +327,7 @@ export type TurnEventPayload = {
 export type AvailableCommandPayload = {
   name: string;
   description?: string;
+  input_hint?: string;
 };
 
 export type AvailableCommandsPayload = {
@@ -334,6 +336,14 @@ export type AvailableCommandsPayload = {
   agent_id: string;
   available_commands: AvailableCommandPayload[];
   timestamp: string;
+};
+
+export type SessionModeChangedPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  current_mode_id: string;
+  timestamp?: string;
 };
 
 export type TaskPlanEventPayload = {
@@ -407,6 +417,7 @@ export type BackendMessageMap = {
     "session.available_commands",
     AvailableCommandsPayload
   >;
+  "session.mode_changed": BackendMessage<"session.mode_changed", SessionModeChangedPayload>;
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;

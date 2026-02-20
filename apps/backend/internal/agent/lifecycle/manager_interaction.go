@@ -48,22 +48,12 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		return fmt.Errorf("failed to cancel agent: %w", err)
 	}
 
-	// Clear streaming state after cancel to ensure clean state for next prompt
-	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""
-	execution.currentThinkingID = ""
-	execution.messageMu.Unlock()
+	// Don't clear buffers or mark ready here.
+	// The agent will respond to the original prompt with StopReason=cancelled,
+	// which triggers handleCompleteEvent() to properly flush buffers and mark state.
+	// Clearing here would race with in-flight notifications and lose content.
 
-	// Mark as ready for follow-up prompts after successful cancel
-	if err := m.MarkReady(executionID); err != nil {
-		m.logger.Warn("failed to mark execution as ready after cancel",
-			zap.String("execution_id", executionID),
-			zap.Error(err))
-	}
-
-	m.logger.Info("agent turn cancelled successfully",
+	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
 	return nil
@@ -110,6 +100,10 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
+
+	// End session trace span
+	execution.EndSessionSpan()
+
 	m.executionStore.Remove(executionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
@@ -318,6 +312,9 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 			exec.Status = v1.AgentStatusFailed
 		}
 	})
+
+	// End session trace span
+	execution.EndSessionSpan()
 
 	m.logger.Info("execution completed",
 		zap.String("execution_id", executionID),

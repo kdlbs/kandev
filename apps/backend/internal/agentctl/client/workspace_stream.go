@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -68,6 +69,18 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	return stream, nil
 }
 
+// workspaceTracedTypes contains message types that are low-volume and worth tracing.
+// High-volume types (shell_output, process_output, shell_input, ping, pong) are excluded.
+var workspaceTracedTypes = map[types.WorkspaceMessageType]bool{
+	types.WorkspaceMessageTypeGitStatus:     true,
+	types.WorkspaceMessageTypeGitCommit:     true,
+	types.WorkspaceMessageTypeGitReset:      true,
+	types.WorkspaceMessageTypeFileChange:    true,
+	types.WorkspaceMessageTypeProcessStatus: true,
+	types.WorkspaceMessageTypeConnected:     true,
+	types.WorkspaceMessageTypeError:         true,
+}
+
 // readWorkspaceStream is the read loop for the workspace WebSocket stream.
 func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStream, callbacks WorkspaceStreamCallbacks) {
 	defer func() {
@@ -84,6 +97,9 @@ func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStre
 				c.logger.Debug("workspace stream read error", zap.Error(err))
 			}
 			return
+		}
+		if workspaceTracedTypes[msg.Type] {
+			tracing.TraceWorkspaceEvent(c.getTraceCtx(), string(msg.Type), c.executionID, c.sessionID)
 		}
 		dispatchWorkspaceMessage(msg, callbacks)
 	}

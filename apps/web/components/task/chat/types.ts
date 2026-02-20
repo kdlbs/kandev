@@ -108,10 +108,23 @@ export type StatusMetadata = {
 
 export type TodoMetadata = { text: string; done?: boolean } | string;
 
+export type ContentBlock = {
+  type: string; // "text", "image", "audio", "resource_link", "resource"
+  text?: string;
+  data?: string; // base64 for image/audio
+  mime_type?: string;
+  uri?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  size?: number;
+};
+
 export type RichMetadata = {
   thinking?: string;
   todos?: TodoMetadata[];
   diff?: unknown;
+  content_blocks?: ContentBlock[];
 };
 
 export type DiffPayload = {

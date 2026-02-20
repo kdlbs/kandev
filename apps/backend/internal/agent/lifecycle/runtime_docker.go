@@ -185,7 +185,9 @@ func (r *DockerRuntime) RecoverInstances(ctx context.Context) ([]*RuntimeInstanc
 			continue
 		}
 
-		client := agentctl.NewClient(containerIP, instanceInfo.Port, r.logger)
+		client := agentctl.NewClient(containerIP, instanceInfo.Port, r.logger,
+			agentctl.WithExecutionID(instanceID),
+			agentctl.WithSessionID(sessionID))
 
 		recovered = append(recovered, &RuntimeInstance{
 			InstanceID:    instanceID,

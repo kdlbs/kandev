@@ -138,6 +138,11 @@ const (
 	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
 )
 
+// Event types for session mode
+const (
+	SessionModeChanged = "session_mode.changed" // Agent session mode changed
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID
@@ -247,4 +252,14 @@ func BuildAvailableCommandsSubject(sessionID string) string {
 // BuildAvailableCommandsWildcardSubject creates a wildcard subscription for all available commands events
 func BuildAvailableCommandsWildcardSubject() string {
 	return AvailableCommandsUpdated + ".*"
+}
+
+// BuildSessionModeSubject creates a session mode subject for a specific session
+func BuildSessionModeSubject(sessionID string) string {
+	return SessionModeChanged + "." + sessionID
+}
+
+// BuildSessionModeWildcardSubject creates a wildcard subscription for all session mode events
+func BuildSessionModeWildcardSubject() string {
+	return SessionModeChanged + ".*"
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -19,9 +20,15 @@ import (
 
 // Client communicates with agentctl via HTTP and WebSocket
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	logger     *logger.Logger
+	baseURL     string
+	httpClient  *http.Client
+	logger      *logger.Logger
+	executionID string
+	sessionID   string
+
+	// Optional trace context for session-scoped spans in background goroutines.
+	// When set, stream read loops use this as parent context for tracing instead of context.Background().
+	traceCtx context.Context
 
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
@@ -34,6 +41,42 @@ type Client struct {
 	// Pending request/response tracking for agent stream
 	pendingRequests map[string]chan *ws.Message
 	pendingMu       sync.Mutex
+}
+
+// ClientOption configures optional Client settings.
+type ClientOption func(*Client)
+
+// WithExecutionID sets the execution ID used for tracing spans.
+func WithExecutionID(id string) ClientOption {
+	return func(c *Client) {
+		c.executionID = id
+	}
+}
+
+// WithSessionID sets the session ID used for tracing spans.
+func WithSessionID(id string) ClientOption {
+	return func(c *Client) {
+		c.sessionID = id
+	}
+}
+
+// SetTraceContext sets the trace context used as parent for spans created in
+// background goroutines (stream read loops). Thread-safe: can be called after construction.
+func (c *Client) SetTraceContext(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.traceCtx = ctx
+}
+
+// getTraceCtx returns the trace context for background operations.
+// Returns context.Background() when no trace context is set.
+func (c *Client) getTraceCtx() context.Context {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.traceCtx != nil {
+		return c.traceCtx
+	}
+	return context.Background()
 }
 
 // StatusResponse from agentctl
@@ -49,8 +92,8 @@ func (s *StatusResponse) IsAgentRunning() bool {
 }
 
 // NewClient creates a new agentctl client
-func NewClient(host string, port int, log *logger.Logger) *Client {
-	return &Client{
+func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) *Client {
+	c := &Client{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
@@ -58,6 +101,10 @@ func NewClient(host string, port int, log *logger.Logger) *Client {
 		logger:          log.WithFields(zap.String("component", "agentctl-client")),
 		pendingRequests: make(map[string]chan *ws.Message),
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // Health checks if agentctl is healthy
@@ -81,35 +128,49 @@ func (c *Client) Health(ctx context.Context) error {
 
 // GetStatus returns the agent status
 func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "GET", "/api/v1/status", c.executionID)
+	defer span.End()
+
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/status", nil)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return nil, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("status request failed with status %d: %s", resp.StatusCode, string(respBody))
+		httpErr := fmt.Errorf("status request failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return nil, httpErr
 	}
 
 	var status StatusResponse
 	if err := json.Unmarshal(respBody, &status); err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return nil, fmt.Errorf("failed to parse status response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return &status, nil
 }
 
 // ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
 func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[string]string, approvalPolicy string) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
+	defer span.End()
+
 	payload := struct {
 		Command        string            `json:"command"`
 		Env            map[string]string `json:"env,omitempty"`
@@ -122,30 +183,34 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 
 	body, err := json.Marshal(payload)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/agent/configure", bytes.NewReader(body))
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read the response body for better error handling
 	respBody, err := readResponseBody(resp)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Check HTTP status code first
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("configure request failed with status %d: %s", resp.StatusCode, string(respBody))
+		httpErr := fmt.Errorf("configure request failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return httpErr
 	}
 
 	var result struct {
@@ -153,34 +218,47 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 		Error   string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return fmt.Errorf("failed to parse configure response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return fmt.Errorf("configure failed: %s", result.Error)
+		cfgErr := fmt.Errorf("configure failed: %s", result.Error)
+		tracing.TraceHTTPResponse(span, resp.StatusCode, cfgErr)
+		return cfgErr
 	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return nil
 }
 
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)
+	defer span.End()
+
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", nil)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+		httpErr := fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return "", httpErr
 	}
 
 	var result struct {
@@ -189,34 +267,47 @@ func (c *Client) Start(ctx context.Context) (string, error) {
 		Error   string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return "", fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return "", fmt.Errorf("start failed: %s", result.Error)
+		startErr := fmt.Errorf("start failed: %s", result.Error)
+		tracing.TraceHTTPResponse(span, resp.StatusCode, startErr)
+		return "", startErr
 	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return result.Command, nil
 }
 
 // Stop stops the agent process
 func (c *Client) Stop(ctx context.Context) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/stop", c.executionID)
+	defer span.End()
+
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/stop", nil)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readResponseBody(resp)
 	if err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("stop request failed with status %d: %s", resp.StatusCode, string(respBody))
+		httpErr := fmt.Errorf("stop request failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return httpErr
 	}
 
 	var result struct {
@@ -224,11 +315,16 @@ func (c *Client) Stop(ctx context.Context) error {
 		Error   string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
+		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
 		return fmt.Errorf("failed to parse stop response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		return fmt.Errorf("stop failed: %s", result.Error)
+		stopErr := fmt.Errorf("stop failed: %s", result.Error)
+		tracing.TraceHTTPResponse(span, resp.StatusCode, stopErr)
+		return stopErr
 	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return nil
 }
 

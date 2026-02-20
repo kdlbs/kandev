@@ -2,14 +2,17 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -17,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SessionManager handles ACP session initialization and management
@@ -124,9 +128,9 @@ func (sm *SessionManager) createOrLoadSession(
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
 		if err != nil {
-			// If session/load fails with "Method not found" or "LoadSession capability is false",
-			// fall back to creating a new session. This handles agents that don't support session/load.
-			if strings.Contains(err.Error(), "Method not found") ||
+			// If session/load fails because the agent doesn't support it, fall back to session/new.
+			// Check for: JSON-RPC -32601 (Method not found) or our own capability check string.
+			if isMethodNotFoundErr(err) ||
 				strings.Contains(err.Error(), "LoadSession capability is false") {
 				sm.logger.Warn("agent does not support session loading, falling back to session/new",
 					zap.String("agent_type", agentConfig.ID()),
@@ -263,6 +267,21 @@ func (sm *SessionManager) InitializeAndPrompt(
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
 ) error {
+	// Create session-level trace span to group all operations under one trace
+	_, sessionSpan := tracing.TraceSessionStart(
+		context.Background(), execution.TaskID, execution.SessionID, execution.ID,
+	)
+	execution.SetSessionSpan(sessionSpan)
+	ctx = trace.ContextWithSpan(ctx, sessionSpan)
+	if execution.agentctl != nil {
+		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
+	}
+
+	// Create short-lived init span so the init phase is visible in trace backends
+	// (the parent session span won't be exported until the session ends)
+	ctx, initSpan := tracing.TraceSessionInit(ctx, execution.TaskID, execution.SessionID, execution.ID)
+	defer initSpan.End()
+
 	rt := agentConfig.Runtime()
 	sm.logger.Info("initializing ACP session",
 		zap.String("execution_id", execution.ID),
@@ -464,6 +483,11 @@ func (sm *SessionManager) SendPrompt(
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
+	// Inject session trace context so prompt spans become children of the session span
+	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
+		ctx = trace.ContextWithSpan(ctx, sessionSpan)
+	}
+
 	// For follow-up prompts, validate status and update to RUNNING
 	if validateStatus {
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
@@ -519,4 +543,16 @@ func (sm *SessionManager) SendPrompt(
 
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
 	return sm.waitForPromptDone(ctx, execution)
+}
+
+// jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".
+const jsonRPCMethodNotFound = -32601
+
+// isMethodNotFoundErr checks if an error wraps a JSON-RPC "Method not found" error.
+func isMethodNotFoundErr(err error) bool {
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		return reqErr.Code == jsonRPCMethodNotFound
+	}
+	return false
 }

@@ -248,6 +248,61 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 
 // --- LAYOUT RESTORATION HELPERS ---
 
+const VALID_COMPONENTS = new Set(Object.keys(components));
+
+/**
+ * Remove panels with unregistered component names from a serialized layout.
+ * Prevents dockview from crashing when a saved layout references a component
+ * that no longer exists (e.g. after a rename or removal).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sanitizeLayout(layout: any): any {
+  if (!layout?.panels || !layout?.grid?.root) return layout;
+
+  // Find panels with unknown components
+  const invalidIds = new Set<string>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const validPanels: Record<string, any> = {};
+  for (const [id, panel] of Object.entries(layout.panels)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const comp = (panel as any).contentComponent;
+    if (comp && VALID_COMPONENTS.has(comp)) {
+      validPanels[id] = panel;
+    } else {
+      invalidIds.add(id);
+    }
+  }
+
+  if (invalidIds.size === 0) return layout;
+
+  // Strip invalid panel IDs from grid leaf nodes
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function cleanNode(node: any): any {
+    if (node.type === "leaf") {
+      const views = (node.data.views as string[]).filter((v) => !invalidIds.has(v));
+      if (views.length === 0) return null;
+      const activeView = views.includes(node.data.activeView) ? node.data.activeView : views[0];
+      return { ...node, data: { ...node.data, views, activeView } };
+    }
+    if (node.type === "branch") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const children = (node.data as any[]).map(cleanNode).filter(Boolean);
+      if (children.length === 0) return null;
+      return { ...node, data: children };
+    }
+    return node;
+  }
+
+  const cleanedRoot = cleanNode(layout.grid.root);
+  if (!cleanedRoot) return null; // Entire layout is empty
+
+  return {
+    ...layout,
+    grid: { ...layout.grid, root: cleanedRoot },
+    panels: validPanels,
+  };
+}
+
 /** Try to restore layout from per-session or global localStorage. Returns true if restored. */
 function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
@@ -258,7 +313,9 @@ function tryRestoreLayout(
     try {
       const sessionLayout = getSessionLayout(currentSessionId);
       if (sessionLayout) {
-        api.fromJSON(sessionLayout as SerializedDockview);
+        const sanitized = sanitizeLayout(sessionLayout);
+        if (!sanitized) return false;
+        api.fromJSON(sanitized as SerializedDockview);
         useDockviewStore.setState(applyLayoutFixups(api));
         return true;
       }
@@ -274,7 +331,8 @@ function tryRestoreLayout(
     try {
       const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
       if (saved) {
-        const layout = JSON.parse(saved);
+        const layout = sanitizeLayout(JSON.parse(saved));
+        if (!layout) return false;
         api.fromJSON(layout);
         useDockviewStore.setState(applyLayoutFixups(api));
         return true;

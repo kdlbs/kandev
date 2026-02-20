@@ -154,6 +154,7 @@ export type AppState = {
   contextWindow: (typeof defaultSessionRuntimeState)["contextWindow"];
   agents: (typeof defaultSessionRuntimeState)["agents"];
   availableCommands: (typeof defaultSessionRuntimeState)["availableCommands"];
+  sessionMode: (typeof defaultSessionRuntimeState)["sessionMode"];
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
 
   // UI slice
@@ -296,6 +297,8 @@ export type AppState = {
     commands: import("./slices/session-runtime/types").AvailableCommand[],
   ) => void;
   clearAvailableCommands: (sessionId: string) => void;
+  // Session mode actions
+  setSessionMode: (sessionId: string, modeId: string) => void;
   // User shells actions
   setUserShells: (
     sessionId: string,
@@ -351,6 +354,7 @@ const defaultState = {
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
+  sessionMode: defaultSessionRuntimeState.sessionMode,
   userShells: defaultSessionRuntimeState.userShells,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
@@ -412,6 +416,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
+    sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
     userShells: { ...defaultState.userShells, ...initialState.userShells },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
@@ -478,6 +483,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       gitStatus: merged.gitStatus,
       contextWindow: merged.contextWindow,
       agents: merged.agents,
+      sessionMode: merged.sessionMode,
       userShells: merged.userShells,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,

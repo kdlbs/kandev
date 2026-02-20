@@ -74,7 +74,7 @@ func TestFinalizeBootMessage_Success(t *testing.T) {
 	}
 	stopCh := make(chan struct{})
 
-	mgr.finalizeBootMessage(msg, stopCh, nil, "exited")
+	mgr.finalizeBootMessage(nil, msg, stopCh, nil, "exited")
 
 	// Verify stop channel was closed
 	select {
@@ -112,7 +112,7 @@ func TestFinalizeBootMessage_Failed(t *testing.T) {
 	}
 	stopCh := make(chan struct{})
 
-	mgr.finalizeBootMessage(msg, stopCh, nil, "failed")
+	mgr.finalizeBootMessage(nil, msg, stopCh, nil, "failed")
 
 	lastMsg := bootSvc.getLastUpdatedMessage()
 	if lastMsg == nil {
@@ -134,7 +134,7 @@ func TestFinalizeBootMessage_NilMessage(t *testing.T) {
 	mgr.bootMessageService = bootSvc
 
 	// Should not panic with nil message
-	mgr.finalizeBootMessage(nil, nil, nil, "exited")
+	mgr.finalizeBootMessage(nil, nil, nil, nil, "exited")
 
 	bootSvc.mu.Lock()
 	defer bootSvc.mu.Unlock()
@@ -153,7 +153,7 @@ func TestFinalizeBootMessage_NilService(t *testing.T) {
 	}
 
 	// Should not panic with nil service
-	mgr.finalizeBootMessage(msg, nil, nil, "exited")
+	mgr.finalizeBootMessage(nil, msg, nil, nil, "exited")
 }
 
 func TestBootMessage_IsResumingFlag(t *testing.T) {

@@ -3,6 +3,7 @@ import type { AppState } from "@/lib/state/store";
 import { registerAgentsHandlers } from "@/lib/ws/handlers/agents";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 import { registerAvailableCommandsHandlers } from "@/lib/ws/handlers/available-commands";
+import { registerSessionModeHandlers } from "@/lib/ws/handlers/session-mode";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
 
 import { registerMessagesHandlers } from "@/lib/ws/handlers/messages";
@@ -33,6 +34,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerAgentsHandlers(store),
     ...registerTaskSessionHandlers(store),
     ...registerAvailableCommandsHandlers(store),
+    ...registerSessionModeHandlers(store),
     ...registerUsersHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),

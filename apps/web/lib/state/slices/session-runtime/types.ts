@@ -145,10 +145,15 @@ export type AgentState = {
 export type AvailableCommand = {
   name: string;
   description?: string;
+  input_hint?: string;
 };
 
 export type AvailableCommandsState = {
   bySessionId: Record<string, AvailableCommand[]>;
+};
+
+export type SessionModeState = {
+  bySessionId: Record<string, string>;
 };
 
 export type UserShellInfo = {
@@ -176,6 +181,7 @@ export type SessionRuntimeSliceState = {
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
+  sessionMode: SessionModeState;
   userShells: UserShellsState;
 };
 
@@ -206,6 +212,8 @@ export type SessionRuntimeSliceActions = {
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
+  // Session mode actions
+  setSessionMode: (sessionId: string, modeId: string) => void;
   // User shells actions
   setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;

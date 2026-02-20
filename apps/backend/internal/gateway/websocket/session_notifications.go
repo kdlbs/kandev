@@ -48,6 +48,7 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildProcessOutputWildcardSubject(), ws.ActionSessionProcessOutput)
 	b.subscribe(eventBus, events.BuildProcessStatusWildcardSubject(), ws.ActionSessionProcessStatus)
 	b.subscribe(eventBus, events.BuildAvailableCommandsWildcardSubject(), ws.ActionSessionAvailableCommands)
+	b.subscribe(eventBus, events.BuildSessionModeWildcardSubject(), ws.ActionSessionModeChanged)
 
 	go func() {
 		<-ctx.Done()

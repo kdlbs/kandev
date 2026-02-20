@@ -10,7 +10,9 @@ import (
 	"sync"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -92,10 +94,18 @@ func (c *Client) SetPermissionHandler(h PermissionRequestHandler) {
 // If a permission handler is set, it forwards the request to the handler.
 // Otherwise, auto-approves by selecting the first "allow" option.
 func (c *Client) RequestPermission(ctx context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.permission")
+	defer span.End()
+
 	title := ""
 	if p.ToolCall.Title != nil {
 		title = *p.ToolCall.Title
 	}
+	span.SetAttributes(
+		attribute.String("tool_call_id", string(p.ToolCall.ToolCallId)),
+		attribute.Int("options_count", len(p.Options)),
+	)
+
 	c.logger.Info("received permission request",
 		zap.String("session_id", string(p.SessionId)),
 		zap.String("tool_call_id", string(p.ToolCall.ToolCallId)),
@@ -261,18 +271,40 @@ func (c *Client) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	return nil
 }
 
-// ReadTextFile reads a text file from the workspace
+// resolvePath resolves a file path, making relative paths relative to the workspace root.
+// It validates that the resolved path stays within the workspace root to prevent path traversal.
+func (c *Client) resolvePath(reqPath string) (string, error) {
+	var resolved string
+	if filepath.IsAbs(reqPath) {
+		resolved = filepath.Clean(reqPath)
+	} else {
+		resolved = filepath.Join(c.workspaceRoot, reqPath)
+	}
+	// Ensure the resolved path is within the workspace root to prevent path traversal
+	root := filepath.Clean(c.workspaceRoot) + string(filepath.Separator)
+	if resolved != filepath.Clean(c.workspaceRoot) && !strings.HasPrefix(resolved, root) {
+		return "", fmt.Errorf("path %q resolves outside workspace root %q", reqPath, c.workspaceRoot)
+	}
+	return resolved, nil
+}
+
+// ReadTextFile reads a text file
 func (c *Client) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.read_file")
+	defer span.End()
+	span.SetAttributes(attribute.String("path", p.Path))
+
 	c.logger.Debug("reading file", zap.String("path", p.Path))
 
-	// Validate path is absolute
-	if !filepath.IsAbs(p.Path) {
-		return acp.ReadTextFileResponse{}, fmt.Errorf("path must be absolute: %s", p.Path)
+	filePath, err := c.resolvePath(p.Path)
+	if err != nil {
+		span.RecordError(err)
+		return acp.ReadTextFileResponse{}, err
 	}
 
-	// Read the file
-	b, err := os.ReadFile(p.Path)
+	b, err := os.ReadFile(filePath)
 	if err != nil {
+		span.RecordError(err)
 		return acp.ReadTextFileResponse{}, err
 	}
 
@@ -295,55 +327,88 @@ func (c *Client) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (a
 		content = strings.Join(lines[start:end], "\n")
 	}
 
+	span.SetAttributes(attribute.Int("content_length", len(content)))
 	return acp.ReadTextFileResponse{Content: content}, nil
 }
 
-// WriteTextFile writes a text file to the workspace
+// WriteTextFile writes a text file
 func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.write_file")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("path", p.Path),
+		attribute.Int("content_length", len(p.Content)),
+	)
+
 	c.logger.Debug("writing file", zap.String("path", p.Path))
 
-	// Validate path is absolute
-	if !filepath.IsAbs(p.Path) {
-		return acp.WriteTextFileResponse{}, fmt.Errorf("path must be absolute: %s", p.Path)
+	filePath, err := c.resolvePath(p.Path)
+	if err != nil {
+		span.RecordError(err)
+		return acp.WriteTextFileResponse{}, err
 	}
 
 	// Create directory if needed
-	if dir := filepath.Dir(p.Path); dir != "" {
+	if dir := filepath.Dir(filePath); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
+			span.RecordError(err)
 			return acp.WriteTextFileResponse{}, err
 		}
 	}
 
-	return acp.WriteTextFileResponse{}, os.WriteFile(p.Path, []byte(p.Content), 0o644)
+	err = os.WriteFile(filePath, []byte(p.Content), 0o644)
+	if err != nil {
+		span.RecordError(err)
+	}
+	return acp.WriteTextFileResponse{}, err
 }
 
 // CreateTerminal creates a new terminal
 func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.create_terminal")
+	defer span.End()
+	span.SetAttributes(attribute.String("command", p.Command))
+
 	c.logger.Debug("create terminal request", zap.String("command", p.Command))
-	// For now, return a dummy terminal ID - we can implement real terminal support later
 	return acp.CreateTerminalResponse{TerminalId: "t-1"}, nil
 }
 
 // KillTerminalCommand kills a terminal command
 func (c *Client) KillTerminalCommand(ctx context.Context, p acp.KillTerminalCommandRequest) (acp.KillTerminalCommandResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal_command")
+	defer span.End()
+	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+
 	c.logger.Debug("kill terminal request", zap.String("terminal_id", p.TerminalId))
 	return acp.KillTerminalCommandResponse{}, nil
 }
 
 // TerminalOutput gets terminal output
 func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.terminal_output")
+	defer span.End()
+	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+
 	c.logger.Debug("terminal output request", zap.String("terminal_id", p.TerminalId))
 	return acp.TerminalOutputResponse{Output: "ok", Truncated: false}, nil
 }
 
 // ReleaseTerminal releases a terminal
 func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.release_terminal")
+	defer span.End()
+	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+
 	c.logger.Debug("release terminal request", zap.String("terminal_id", p.TerminalId))
 	return acp.ReleaseTerminalResponse{}, nil
 }
 
 // WaitForTerminalExit waits for terminal to exit
 func (c *Client) WaitForTerminalExit(ctx context.Context, p acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
+	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.wait_for_terminal_exit")
+	defer span.End()
+	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+
 	c.logger.Debug("wait for terminal exit request", zap.String("terminal_id", p.TerminalId))
 	exitCode := 0
 	return acp.WaitForTerminalExitResponse{ExitCode: &exitCode}, nil

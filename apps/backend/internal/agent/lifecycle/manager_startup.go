@@ -71,7 +71,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
-func (m *Manager) pollAgentStderr(client *agentctl.Client, msg *models.Message, stopCh chan struct{}) {
+func (m *Manager) pollAgentStderr(execution *AgentExecution, client *agentctl.Client, msg *models.Message, stopCh chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -82,7 +82,8 @@ func (m *Manager) pollAgentStderr(client *agentctl.Client, msg *models.Message, 
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			baseCtx := execution.SessionTraceContext()
+			ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
 			lines, err := client.GetAgentStderr(ctx)
 			cancel()
 			if err != nil {
@@ -106,7 +107,7 @@ func (m *Manager) pollAgentStderr(client *agentctl.Client, msg *models.Message, 
 }
 
 // finalizeBootMessage stops the polling goroutine and updates the boot message with final status.
-func (m *Manager) finalizeBootMessage(msg *models.Message, stopCh chan struct{}, client *agentctl.Client, status string) {
+func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Message, stopCh chan struct{}, client *agentctl.Client, status string) {
 	if msg == nil || m.bootMessageService == nil {
 		return
 	}
@@ -117,8 +118,9 @@ func (m *Manager) finalizeBootMessage(msg *models.Message, stopCh chan struct{},
 	}
 
 	// Final stderr fetch
-	if client != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if client != nil && execution != nil {
+		baseCtx := execution.SessionTraceContext()
+		ctx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
 		lines, err := client.GetAgentStderr(ctx)
 		cancel()
 		if err == nil && len(lines) > 0 {

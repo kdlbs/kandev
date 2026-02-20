@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -275,6 +276,7 @@ func (c *Client) readUpdatesStream(
 			continue
 		}
 
+		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
 		handler(event)
 	}
 }
@@ -282,10 +284,16 @@ func (c *Client) readUpdatesStream(
 // dispatchMCPRequest handles an incoming MCP request message, dispatches it to the handler,
 // and writes the response back over the stream.
 func (c *Client) dispatchMCPRequest(ctx context.Context, msg ws.Message, mcpHandler MCPHandler, writeMessage func([]byte) error) {
+	ctx, span := tracing.TraceMCPDispatch(ctx, msg.Action, msg.ID, c.executionID)
+	defer span.End()
+
 	resp, err := mcpHandler.Dispatch(ctx, &msg)
 	if err != nil {
 		c.logger.Error("MCP dispatch error", zap.Error(err))
+		tracing.TraceMCPResponse(span, err)
 		resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	} else {
+		tracing.TraceMCPResponse(span, nil)
 	}
 	if resp != nil {
 		data, err := json.Marshal(resp)

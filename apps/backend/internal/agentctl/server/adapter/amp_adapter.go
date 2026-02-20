@@ -73,6 +73,10 @@ type AmpAdapter struct {
 	// (to avoid duplicates from both stop_reason=end_turn and result message)
 	completeSent bool
 
+	// lastRawData holds the raw JSON of the current message being processed.
+	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
+	lastRawData json.RawMessage
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -300,6 +304,8 @@ func (a *AmpAdapter) Close() error {
 // sendUpdate safely sends an event to the updates channel.
 func (a *AmpAdapter) sendUpdate(update AgentEvent) {
 	shared.LogNormalizedEvent(shared.ProtocolAmp, a.cfg.AgentID, &update)
+	shared.TraceProtocolEvent(context.Background(), shared.ProtocolAmp, a.cfg.AgentID,
+		update.Type, a.lastRawData, &update)
 	select {
 	case a.updatesCh <- update:
 	default:
@@ -309,9 +315,10 @@ func (a *AmpAdapter) sendUpdate(update AgentEvent) {
 
 // handleMessage processes streaming messages from Amp.
 func (a *AmpAdapter) handleMessage(msg *amp.Message) {
-	// Log raw event for debugging
-	if rawData, err := json.Marshal(msg); err == nil {
-		shared.LogRawEvent(shared.ProtocolAmp, a.cfg.AgentID, msg.Type, rawData)
+	// Marshal once for debug logging and tracing
+	a.lastRawData, _ = json.Marshal(msg)
+	if len(a.lastRawData) > 0 {
+		shared.LogRawEvent(shared.ProtocolAmp, a.cfg.AgentID, msg.Type, a.lastRawData)
 	}
 
 	a.mu.RLock()

@@ -79,6 +79,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
+  sessionMode: { bySessionId: {} },
   userShells: { bySessionId: {}, loading: {}, loaded: {} },
 };
 
@@ -234,6 +235,10 @@ export const createSessionRuntimeSlice: StateCreator<
   clearAvailableCommands: (sessionId) =>
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
+    }),
+  setSessionMode: (sessionId, modeId) =>
+    set((draft) => {
+      draft.sessionMode.bySessionId[sessionId] = modeId;
     }),
   ...buildUserShellActions(set),
 });

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
 )
 
@@ -231,6 +232,15 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
+	}
+
+	// Create trace span for workspace-only execution
+	_, sessionSpan := tracing.TraceSessionStart(
+		context.Background(), taskID, info.SessionID, executionID,
+	)
+	execution.SetSessionSpan(sessionSpan)
+	if execution.agentctl != nil {
+		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
 	}
 
 	m.executionStore.Add(execution)

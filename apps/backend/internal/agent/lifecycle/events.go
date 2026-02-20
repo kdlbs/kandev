@@ -144,6 +144,10 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		Data:              event.Data,
 		Normalized:        event.NormalizedPayload,
 		AvailableCommands: event.AvailableCommands,
+		ToolCallContents:  event.ToolCallContents,
+		ContentBlocks:     event.ContentBlocks,
+		Role:              event.Role,
+		CurrentModeID:     event.CurrentModeID,
 	}
 
 	// Build agent event message payload

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Default agentctl port
@@ -78,6 +79,10 @@ type AgentExecution struct {
 	// Last time an agent event was received (for stall detection)
 	lastActivityAt   time.Time
 	lastActivityAtMu sync.Mutex
+
+	// Session-level trace span for grouping all operations under one trace
+	sessionSpan   trace.Span
+	sessionSpanMu sync.RWMutex
 }
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
@@ -118,6 +123,35 @@ func (ae *AgentExecution) GetAvailableCommands() []streams.AvailableCommand {
 	ae.availableCommandsMu.RLock()
 	defer ae.availableCommandsMu.RUnlock()
 	return ae.availableCommands
+}
+
+// SetSessionSpan stores the session-level trace span on the execution.
+func (ae *AgentExecution) SetSessionSpan(span trace.Span) {
+	ae.sessionSpanMu.Lock()
+	defer ae.sessionSpanMu.Unlock()
+	ae.sessionSpan = span
+}
+
+// SessionTraceContext returns a context carrying the session span for creating child spans.
+// Uses context.Background() so the span lifetime is independent of request cancellation.
+// Returns plain context.Background() when no session span is set (no-op safe).
+func (ae *AgentExecution) SessionTraceContext() context.Context {
+	ae.sessionSpanMu.RLock()
+	defer ae.sessionSpanMu.RUnlock()
+	if ae.sessionSpan == nil {
+		return context.Background()
+	}
+	return trace.ContextWithSpan(context.Background(), ae.sessionSpan)
+}
+
+// EndSessionSpan ends the session-level trace span if one exists. Idempotent.
+func (ae *AgentExecution) EndSessionSpan() {
+	ae.sessionSpanMu.Lock()
+	defer ae.sessionSpanMu.Unlock()
+	if ae.sessionSpan != nil {
+		ae.sessionSpan.End()
+		ae.sessionSpan = nil
+	}
 }
 
 // LaunchRequest contains parameters for launching an agent

@@ -871,7 +871,9 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 	}, nil
 }
 
-// sendPermissionNotification sends a permission request notification through the updates channel
+// sendPermissionNotification sends a permission request notification through the updates channel.
+// Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
+// auto-cancels the permission so the agent doesn't hang waiting for a response.
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
 	options := make([]streams.PermissionOption, len(pending.Request.Options))
@@ -893,12 +895,18 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		zap.String("title", pending.Request.Title),
 		zap.String("action_type", pending.Request.ActionType))
 
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case m.updatesCh <- event:
 		// Sent successfully
-	default:
-		m.logger.Warn("updates channel full, dropping permission notification",
+	case <-timer.C:
+		m.logger.Error("failed to deliver permission notification, auto-cancelling",
 			zap.String("pending_id", pending.ID))
+		select {
+		case pending.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
@@ -475,6 +476,49 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 	}
 	if result.SessionID != "test-session-123" {
 		t.Errorf("expected session ID 'test-session-123', got %q", result.SessionID)
+	}
+}
+
+func TestIsMethodNotFoundErr(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "matching JSON-RPC method not found code",
+			err:      fmt.Errorf("wrapped: %w", &acp.RequestError{Code: -32601, Message: "Method not found"}),
+			expected: true,
+		},
+		{
+			name:     "non-matching JSON-RPC code",
+			err:      fmt.Errorf("wrapped: %w", &acp.RequestError{Code: -32600, Message: "Invalid Request"}),
+			expected: false,
+		},
+		{
+			name:     "non-RequestError error",
+			err:      fmt.Errorf("some other error"),
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "direct RequestError with method not found code",
+			err:      &acp.RequestError{Code: -32601, Message: "Method not found"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isMethodNotFoundErr(tt.err)
+			if got != tt.expected {
+				t.Errorf("isMethodNotFoundErr(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
 	}
 }
 

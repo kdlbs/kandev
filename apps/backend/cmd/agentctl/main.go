@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/api"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
@@ -126,6 +127,10 @@ func run(cfg *config.Config, log *logger.Logger) {
 
 	// Wait for shutdown signal
 	waitForShutdown(log, func(ctx context.Context) {
+		// Flush pending traces before stopping instances
+		if err := shared.ShutdownTracing(ctx); err != nil {
+			log.Error("error shutting down tracing", zap.Error(err))
+		}
 		// Shutdown all instances
 		if err := instMgr.Shutdown(ctx); err != nil {
 			log.Error("error shutting down instance manager", zap.Error(err))
