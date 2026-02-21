@@ -8,11 +8,7 @@ import { type QueuedMessageIndicatorHandle } from "@/components/task/chat/queued
 import { VirtualizedMessageList } from "@/components/task/chat/virtualized-message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
-import {
-  ChatInputArea,
-  useSubmitHandler,
-  useChatPanelHandlers,
-} from "./chat/chat-input-area";
+import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;

@@ -179,9 +179,7 @@ function WorkflowCardActions({
         <Button
           type="button"
           variant="outline"
-          onClick={() =>
-            handleExportWorkflow({ workflowId, setExportJson, setExportOpen, toast })
-          }
+          onClick={() => handleExportWorkflow({ workflowId, setExportJson, setExportOpen, toast })}
           className="cursor-pointer"
         >
           <IconDownload className="h-4 w-4 mr-2" />

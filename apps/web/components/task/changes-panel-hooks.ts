@@ -54,10 +54,7 @@ export function useChangesGitHandlers(
   return { handleGitOperation, handlePull, handleRebase, handlePush };
 }
 
-export function useChangesStageHandlers(
-  gitOps: GitOps,
-  changedFiles: unknown[],
-) {
+export function useChangesStageHandlers(gitOps: GitOps, changedFiles: unknown[]) {
   const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
 
   useEffect(() => {

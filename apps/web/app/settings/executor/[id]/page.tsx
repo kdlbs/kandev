@@ -108,9 +108,7 @@ function McpPolicyCard({
             Advanced
           </span>
         </CardTitle>
-        <CardDescription>
-          JSON policy overrides for MCP servers on this executor.
-        </CardDescription>
+        <CardDescription>JSON policy overrides for MCP servers on this executor.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
         <Label htmlFor="mcp-policy">MCP policy JSON</Label>
@@ -252,7 +250,11 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="cursor-pointer">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              className="cursor-pointer"
+            >
               Cancel
             </Button>
             <Button
@@ -311,9 +313,16 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
             <ExecutorIcon className="h-5 w-5 text-muted-foreground" />
             <h2 className="text-2xl font-bold">{executor.name}</h2>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{getExecutorDescription(executor.type)}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {getExecutorDescription(executor.type)}
+          </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)} className="cursor-pointer">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push(EXECUTORS_ROUTE)}
+          className="cursor-pointer"
+        >
           Back to Executors
         </Button>
       </div>

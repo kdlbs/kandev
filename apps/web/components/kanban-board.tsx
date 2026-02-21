@@ -110,11 +110,7 @@ function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
   }, [moveError, router]);
 
   const handleWorkflowSessionCreate = useCallback(
-    async (data: {
-      prompt: string;
-      agentProfileId: string;
-      executorId: string;
-    }) => {
+    async (data: { prompt: string; agentProfileId: string; executorId: string }) => {
       if (!workflowAutomation) return;
       const client = getWebSocketClient();
       if (!client) return;
@@ -178,7 +174,11 @@ interface KanbanBoardProps {
   onOpenTask?: (task: Task, sessionId: string) => void;
 }
 
-function useKanbanBoardHooks(searchQuery: string, workspaceState: ReturnType<typeof useKanbanBoardStore>["workspaceState"], workflowsState: ReturnType<typeof useKanbanBoardStore>["workflowsState"]) {
+function useKanbanBoardHooks(
+  searchQuery: string,
+  workspaceState: ReturnType<typeof useKanbanBoardStore>["workspaceState"],
+  workflowsState: ReturnType<typeof useKanbanBoardStore>["workflowsState"],
+) {
   const {
     isDialogOpen,
     editingTask,
@@ -206,11 +206,22 @@ function useKanbanBoardHooks(searchQuery: string, workspaceState: ReturnType<typ
     searchQuery,
   });
   return {
-    isDialogOpen, editingTask, setIsDialogOpen, setEditingTask,
-    handleCreate, handleEdit, handleDelete, handleDialogOpenChange,
-    handleDialogSuccess, deletingTaskId,
-    enablePreviewOnClick, userSettings, commitSettings, activeSteps,
-    isMounted, setTaskSessionAvailability,
+    isDialogOpen,
+    editingTask,
+    setIsDialogOpen,
+    setEditingTask,
+    handleCreate,
+    handleEdit,
+    handleDelete,
+    handleDialogOpenChange,
+    handleDialogSuccess,
+    deletingTaskId,
+    enablePreviewOnClick,
+    userSettings,
+    commitSettings,
+    activeSteps,
+    isMounted,
+    setTaskSessionAvailability,
   };
 }
 
@@ -222,8 +233,13 @@ function useKanbanBoardSetup(
   const { isMobile } = useResponsiveBreakpoint();
   const [searchQuery, setSearchQuery] = useState("");
   const {
-    store, kanbanViewMode, kanban, workspaceState, workflowsState,
-    setActiveWorkflow, setWorkflows,
+    store,
+    kanbanViewMode,
+    kanban,
+    workspaceState,
+    workflowsState,
+    setActiveWorkflow,
+    setWorkflows,
   } = useKanbanBoardStore();
 
   useAllWorkflowSnapshots(workspaceState.activeId);
@@ -241,15 +257,26 @@ function useKanbanBoardSetup(
   const automation = useWorkflowAutomationState(router);
 
   useWorkflowSelection({
-    store, userSettings: hooks.userSettings, workspaceState, workflowsState,
-    commitSettings: hooks.commitSettings, setActiveWorkflow, setWorkflows,
+    store,
+    userSettings: hooks.userSettings,
+    workspaceState,
+    workflowsState,
+    commitSettings: hooks.commitSettings,
+    setActiveWorkflow,
+    setWorkflows,
   });
 
   return {
-    kanbanViewMode, kanban, workspaceState, workflowsState,
-    searchQuery, setSearchQuery,
-    ...hooks, ...automation,
-    handleOpenTask, handleCardClick,
+    kanbanViewMode,
+    kanban,
+    workspaceState,
+    workflowsState,
+    searchQuery,
+    setSearchQuery,
+    ...hooks,
+    ...automation,
+    handleOpenTask,
+    handleCardClick,
   };
 }
 

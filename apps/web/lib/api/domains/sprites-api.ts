@@ -1,9 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type {
-  SpritesStatus,
-  SpritesInstance,
-  SpritesTestResult,
-} from "@/lib/types/http-sprites";
+import type { SpritesStatus, SpritesInstance, SpritesTestResult } from "@/lib/types/http-sprites";
 
 function withSecretId(url: string, secretId?: string): string {
   if (!secretId) return url;
@@ -30,20 +26,26 @@ export async function destroySprite(
   secretId?: string,
   options?: ApiRequestOptions,
 ): Promise<void> {
-  return fetchJson<void>(withSecretId(`/api/v1/sprites/instances/${encodeURIComponent(name)}`, secretId), {
-    ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
-  });
+  return fetchJson<void>(
+    withSecretId(`/api/v1/sprites/instances/${encodeURIComponent(name)}`, secretId),
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function destroyAllSprites(
   secretId?: string,
   options?: ApiRequestOptions,
 ): Promise<{ success: boolean; destroyed: number }> {
-  return fetchJson<{ success: boolean; destroyed: number }>(withSecretId("/api/v1/sprites/instances", secretId), {
-    ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
-  });
+  return fetchJson<{ success: boolean; destroyed: number }>(
+    withSecretId("/api/v1/sprites/instances", secretId),
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function testSpritesConnection(

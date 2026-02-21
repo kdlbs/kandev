@@ -285,10 +285,7 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
   }, [formState, editingId]);
 
   const createRequest = useRequest(async (s: SecretFormState) => {
-    const item = await createSecret(
-      { name: s.name.trim(), value: s.value },
-      { cache: "no-store" },
-    );
+    const item = await createSecret({ name: s.name.trim(), value: s.value }, { cache: "no-store" });
     addToStore(item);
     resetForm();
   });

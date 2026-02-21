@@ -229,7 +229,9 @@ function usePreviewPanelStore(sessionId: string | null) {
   const clearProcessOutput = useAppStore((state) => state.clearProcessOutput);
   const setActiveProcess = useAppStore((state) => state.setActiveProcess);
   const applyLayoutPreset = useLayoutStore((state) => state.applyPreset);
-  const layoutState = useLayoutStore((state) => sessionId ? state.columnsBySessionId[sessionId] : null);
+  const layoutState = useLayoutStore((state) =>
+    sessionId ? state.columnsBySessionId[sessionId] : null,
+  );
   const previewStore = usePreviewStore(sessionId);
   const devProcessId = useMemo(
     () => (sessionId ? processState.devProcessBySessionId[sessionId] : undefined),
@@ -239,9 +241,18 @@ function usePreviewPanelStore(sessionId: string | null) {
   const devOutput = devProcessId ? (processState.outputsByProcessId[devProcessId] ?? "") : "";
   const detectedUrl = useMemo(() => detectPreviewUrlFromOutput(devOutput), [devOutput]);
   return {
-    ...previewStore, processState, upsertProcessStatus, appendProcessOutput,
-    clearProcessOutput, setActiveProcess, applyLayoutPreset, layoutState,
-    devProcessId, devProcess, devOutput, detectedUrl,
+    ...previewStore,
+    processState,
+    upsertProcessStatus,
+    appendProcessOutput,
+    clearProcessOutput,
+    setActiveProcess,
+    applyLayoutPreset,
+    layoutState,
+    devProcessId,
+    devProcess,
+    devOutput,
+    detectedUrl,
   };
 }
 
@@ -262,11 +273,18 @@ export function usePreviewPanel({ sessionId, hasDevScript = false }: UsePreviewP
   }, [sessionId, s]);
 
   usePreviewStateRestore({
-    sessionId, hasDevScript, hasInitialized, layoutState: s.layoutState,
-    devProcessId: s.devProcessId, devProcess: s.devProcess,
-    previewOpen: s.previewOpen, previewStage: s.previewStage,
-    setPreviewOpen: s.setPreviewOpen, setPreviewView: s.setPreviewView,
-    setPreviewStage: s.setPreviewStage, upsertProcessStatus: s.upsertProcessStatus,
+    sessionId,
+    hasDevScript,
+    hasInitialized,
+    layoutState: s.layoutState,
+    devProcessId: s.devProcessId,
+    devProcess: s.devProcess,
+    previewOpen: s.previewOpen,
+    previewStage: s.previewStage,
+    setPreviewOpen: s.setPreviewOpen,
+    setPreviewView: s.setPreviewView,
+    setPreviewStage: s.setPreviewStage,
+    upsertProcessStatus: s.upsertProcessStatus,
     setActiveProcess: s.setActiveProcess,
   });
 

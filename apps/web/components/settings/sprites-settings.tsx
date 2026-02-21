@@ -3,14 +3,7 @@
 import { useState, useCallback } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@kandev/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import {
@@ -67,7 +60,10 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
               Sprites.dev provides ephemeral cloud sandboxes for running agents remotely.
             </CardDescription>
           </div>
-          <TokenBadge configured={status?.token_configured ?? false} connected={status?.connected ?? false} />
+          <TokenBadge
+            configured={status?.token_configured ?? false}
+            connected={status?.connected ?? false}
+          />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -81,8 +77,8 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
             </p>
           ) : (
             <p>
-              Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable
-              in the executor profile, referencing a secret with your Sprites.dev API token.
+              Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable in
+              the executor profile, referencing a secret with your Sprites.dev API token.
             </p>
           )}
         </div>
@@ -113,7 +109,11 @@ function TokenBadge({ configured, connected }: { configured: boolean; connected:
     return <Badge variant="secondary">Not Configured</Badge>;
   }
   if (connected) {
-    return <Badge variant="default" className="bg-green-600">Connected</Badge>;
+    return (
+      <Badge variant="default" className="bg-green-600">
+        Connected
+      </Badge>
+    );
   }
   return <Badge variant="destructive">Disconnected</Badge>;
 }
@@ -128,9 +128,7 @@ function TestResultDisplay({ result }: { result: SpritesTestResult }) {
           <IconX className="h-4 w-4 text-red-600" />
         )}
         {result.success ? "Connection test passed" : "Connection test failed"}
-        <span className="text-muted-foreground font-normal">
-          ({result.total_duration_ms}ms)
-        </span>
+        <span className="text-muted-foreground font-normal">({result.total_duration_ms}ms)</span>
       </div>
       {result.steps.map((step: SpritesTestStep) => (
         <StepRow key={step.name} step={step} />
@@ -295,7 +293,11 @@ function InstancesContent({
 function HealthBadge({ status }: { status: string }) {
   switch (status) {
     case "healthy":
-      return <Badge variant="default" className="bg-green-600">Healthy</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-600">
+          Healthy
+        </Badge>
+      );
     case "unhealthy":
       return <Badge variant="destructive">Unhealthy</Badge>;
     default:
@@ -318,7 +320,8 @@ export function SpritesSettings() {
       <div>
         <h2 className="text-2xl font-bold">Sprites.dev</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Manage Sprites.dev remote sandbox integration for running agents in isolated cloud environments.
+          Manage Sprites.dev remote sandbox integration for running agents in isolated cloud
+          environments.
         </p>
       </div>
       <Separator />

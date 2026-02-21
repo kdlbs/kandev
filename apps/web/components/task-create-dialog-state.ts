@@ -39,9 +39,16 @@ import type {
   DialogComputedArgs,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
-import { autoSelectBranch, computePassthroughProfile, computeEffectiveStepId } from "@/components/task-create-dialog-helpers";
+import {
+  autoSelectBranch,
+  computePassthroughProfile,
+  computeEffectiveStepId,
+} from "@/components/task-create-dialog-helpers";
 
-export type { StepType, TaskCreateDialogInitialValues } from "@/components/task-create-dialog-types";
+export type {
+  StepType,
+  TaskCreateDialogInitialValues,
+} from "@/components/task-create-dialog-types";
 export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 
 function useCreationStatusState() {
@@ -362,7 +369,9 @@ export function useDefaultSelectionsEffect(
   // Auto-select first executor profile when none selected
   useEffect(() => {
     if (!open || executorProfileId || executors.length === 0) return;
-    const allProfiles = executors.flatMap((e) => (e.profiles ?? []).map((p) => ({ ...p, _executorId: e.id })));
+    const allProfiles = executors.flatMap((e) =>
+      (e.profiles ?? []).map((p) => ({ ...p, _executorId: e.id })),
+    );
     if (allProfiles.length === 0) return;
     void Promise.resolve().then(() => setExecutorProfileId(allProfiles[0].id));
   }, [open, executorProfileId, executors, setExecutorProfileId]);

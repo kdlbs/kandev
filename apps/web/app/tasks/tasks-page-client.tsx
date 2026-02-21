@@ -355,7 +355,11 @@ function useTasksPageComputed({
 
 function useTasksPageSetup(props: TasksPageClientProps) {
   const router = useRouter();
-  const { activeWorkspaceId, activeWorkflowId, repositories: storeRepositories } = useKanbanDisplaySettings();
+  const {
+    activeWorkspaceId,
+    activeWorkflowId,
+    repositories: storeRepositories,
+  } = useKanbanDisplaySettings();
   const { toast } = useToast();
   const viewState = useTasksPageViewState({
     initialWorkflows: props.initialWorkflows,
@@ -367,20 +371,33 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   });
   const debouncedQuery = useDebounce(viewState.searchQuery, 300);
   const ops = useTaskOperations({
-    activeWorkspaceId, pagination: viewState.pagination, debouncedQuery,
-    showArchived: viewState.showArchived, setTasks: viewState.setTasks, setTotal: viewState.setTotal,
+    activeWorkspaceId,
+    pagination: viewState.pagination,
+    debouncedQuery,
+    showArchived: viewState.showArchived,
+    setTasks: viewState.setTasks,
+    setTotal: viewState.setTotal,
   });
   useTasksPageEffects({
-    debouncedQuery, setPagination: viewState.setPagination,
-    activeWorkspaceId, fetchTasks: ops.fetchTasks,
-    pagination: viewState.pagination, showArchived: viewState.showArchived,
+    debouncedQuery,
+    setPagination: viewState.setPagination,
+    activeWorkspaceId,
+    fetchTasks: ops.fetchTasks,
+    pagination: viewState.pagination,
+    showArchived: viewState.showArchived,
   });
   const computed = useTasksPageComputed({
-    total: viewState.total, pagination: viewState.pagination,
-    workflows: viewState.workflows, steps: viewState.steps,
+    total: viewState.total,
+    pagination: viewState.pagination,
+    workflows: viewState.workflows,
+    steps: viewState.steps,
     repositories: viewState.repositories,
-    handleArchive: ops.handleArchive, handleDelete: ops.handleDelete,
-    deletingTaskId: ops.deletingTaskId, router, toast, activeWorkflowId,
+    handleArchive: ops.handleArchive,
+    handleDelete: ops.handleDelete,
+    deletingTaskId: ops.deletingTaskId,
+    router,
+    toast,
+    activeWorkflowId,
   });
   return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };
 }

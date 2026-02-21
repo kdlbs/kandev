@@ -4,7 +4,13 @@ import { useMemo } from "react";
 import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
-import type { LocalRepository, Repository, Branch, Executor, ExecutorProfile } from "@/lib/types/http";
+import type {
+  LocalRepository,
+  Repository,
+  Branch,
+  Executor,
+  ExecutorProfile,
+} from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";

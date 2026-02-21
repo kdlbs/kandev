@@ -66,11 +66,7 @@ interface TaskCreateDialogProps {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null },
   ) => void;
-  onCreateSession?: (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-  }) => void;
+  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   initialValues?: TaskCreateDialogInitialValues;
   taskId?: string | null;
 }
@@ -174,7 +170,11 @@ type DialogFormBodyProps = {
   branchOptions: ReturnType<typeof useBranchOptions>;
   branchesLoading: boolean;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  executorProfileOptions: Array<{
+    value: string;
+    label: string;
+    renderLabel?: () => React.ReactNode;
+  }>;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
@@ -302,49 +302,102 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { toast } = useToast();
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const {
-    workflows, agentProfiles, executors, snapshots,
-    repositories, repositoriesLoading, branches, branchesLoading, computed,
+    workflows,
+    agentProfiles,
+    executors,
+    snapshots,
+    repositories,
+    repositoriesLoading,
+    branches,
+    branchesLoading,
+    computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   useTaskCreateDialogEffects(fs, {
-    open, workspaceId, workflowId, repositories, repositoriesLoading,
-    branches, agentProfiles, executors,
-    workspaceDefaults: computed.workspaceDefaults, toast,
+    open,
+    workspaceId,
+    workflowId,
+    repositories,
+    repositoriesLoading,
+    branches,
+    agentProfiles,
+    executors,
+    workspaceDefaults: computed.workspaceDefaults,
+    toast,
   });
   const handlers = useDialogHandlers(fs, repositories);
   const submitHandlers = useTaskSubmitHandlers({
-    isSessionMode, isEditMode, isPassthroughProfile: computed.isPassthroughProfile,
-    taskName: fs.taskName, workspaceId, workflowId,
+    isSessionMode,
+    isEditMode,
+    isPassthroughProfile: computed.isPassthroughProfile,
+    taskName: fs.taskName,
+    workspaceId,
+    workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
-    repositoryId: fs.repositoryId, selectedLocalRepo: fs.selectedLocalRepo,
-    branch: fs.branch, agentProfileId: fs.agentProfileId,
+    repositoryId: fs.repositoryId,
+    selectedLocalRepo: fs.selectedLocalRepo,
+    branch: fs.branch,
+    agentProfileId: fs.agentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
-    editingTask, onSuccess, onCreateSession, onOpenChange, taskId,
+    editingTask,
+    onSuccess,
+    onCreateSession,
+    onOpenChange,
+    taskId,
     descriptionInputRef: fs.descriptionInputRef,
-    setIsCreatingSession: fs.setIsCreatingSession, setIsCreatingTask: fs.setIsCreatingTask,
-    setHasTitle: fs.setHasTitle, setHasDescription: fs.setHasDescription,
-    setTaskName: fs.setTaskName, setRepositoryId: fs.setRepositoryId,
-    setBranch: fs.setBranch, setAgentProfileId: fs.setAgentProfileId,
+    setIsCreatingSession: fs.setIsCreatingSession,
+    setIsCreatingTask: fs.setIsCreatingTask,
+    setHasTitle: fs.setHasTitle,
+    setHasDescription: fs.setHasDescription,
+    setTaskName: fs.setTaskName,
+    setRepositoryId: fs.setRepositoryId,
+    setBranch: fs.setBranch,
+    setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
-    setSelectedWorkflowId: fs.setSelectedWorkflowId, setFetchedSteps: fs.setFetchedSteps,
+    setSelectedWorkflowId: fs.setSelectedWorkflowId,
+    setFetchedSteps: fs.setFetchedSteps,
   });
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     submitHandlers.handleSubmit(event as unknown as FormEvent);
   });
   return {
-    fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted, sessionRepoName,
-    workflows, agentProfiles, snapshots, repositoriesLoading, branchesLoading, computed,
-    handlers, submitHandlers, handleKeyDown,
+    fs,
+    isSessionMode,
+    isEditMode,
+    isCreateMode,
+    isTaskStarted,
+    sessionRepoName,
+    workflows,
+    agentProfiles,
+    snapshots,
+    repositoriesLoading,
+    branchesLoading,
+    computed,
+    handlers,
+    submitHandlers,
+    handleKeyDown,
   };
 }
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
   const {
-    fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted, sessionRepoName,
-    workflows, agentProfiles, snapshots, repositoriesLoading, branchesLoading, computed,
-    handlers, submitHandlers, handleKeyDown,
+    fs,
+    isSessionMode,
+    isEditMode,
+    isCreateMode,
+    isTaskStarted,
+    sessionRepoName,
+    workflows,
+    agentProfiles,
+    snapshots,
+    repositoriesLoading,
+    branchesLoading,
+    computed,
+    handlers,
+    submitHandlers,
+    handleKeyDown,
   } = useTaskCreateDialogSetup(props);
   const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent, handleCancel } =
     submitHandlers;

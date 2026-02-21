@@ -72,7 +72,20 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
 }
 
 export function useTipTapEditor(opts: UseTipTapEditorOptions) {
-  const { value, onChange, placeholder, disabled, className, planModeEnabled, onFocus, onBlur, sessionId, mentionSuggestion, slashSuggestion, ref } = opts;
+  const {
+    value,
+    onChange,
+    placeholder,
+    disabled,
+    className,
+    planModeEnabled,
+    onFocus,
+    onBlur,
+    sessionId,
+    mentionSuggestion,
+    slashSuggestion,
+    ref,
+  } = opts;
   const refs = useTipTapRefs(opts);
   const SubmitKeymap = useSubmitKeymap(refs.disabledRef, refs.submitKeyRef, refs.onSubmitRef);
   const isSyncingRef = useRef(false);
@@ -80,9 +93,16 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      Document, Paragraph, Text, HardBreak, History, Code,
+      Document,
+      Paragraph,
+      Text,
+      HardBreak,
+      History,
+      Code,
       CodeBlockLowlight.extend({
-        addNodeView() { return ReactNodeViewRenderer(CodeBlockView); },
+        addNodeView() {
+          return ReactNodeViewRenderer(CodeBlockView);
+        },
       }).configure({ lowlight: lowlightInstance }),
       Placeholder.configure({ placeholder }),
       ContextMention.configure({ suggestions: [mentionSuggestion, slashSuggestion] }),
@@ -92,15 +112,24 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
       attributes: {
         class: cn(
           "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
-          "text-sm leading-relaxed", "placeholder:text-muted-foreground",
-          "focus:outline-none", "disabled:cursor-not-allowed disabled:opacity-50",
-          planModeEnabled && "border-primary/40", className,
+          "text-sm leading-relaxed",
+          "placeholder:text-muted-foreground",
+          "focus:outline-none",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          planModeEnabled && "border-primary/40",
+          className,
         ),
       },
       handlePaste: (view, event) => handleEditorPaste(view, event, refs.onImagePasteRef),
       handleDOMEvents: {
-        focus: () => { onFocus?.(); return false; },
-        blur: () => { onBlur?.(); return false; },
+        focus: () => {
+          onFocus?.();
+          return false;
+        },
+        blur: () => {
+          onBlur?.();
+          return false;
+        },
       },
     },
     onUpdate: ({ editor: e }) => {
@@ -112,7 +141,16 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     },
     editable: !disabled,
   });
-  useSyncEditor({ editor, disabled, placeholder, sessionId, value, isSyncingRef, initialSyncDoneRef, onChangeRef: refs.onChangeRef });
+  useSyncEditor({
+    editor,
+    disabled,
+    placeholder,
+    sessionId,
+    value,
+    isSyncingRef,
+    initialSyncDoneRef,
+    onChangeRef: refs.onChangeRef,
+  });
   useEditorImperativeHandle(ref, editor, onChange, isSyncingRef);
   return editor;
 }

@@ -7,13 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kand
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -31,7 +25,10 @@ import {
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
-import { SpritesConnectionCard, SpritesInstancesCard } from "@/components/settings/sprites-settings";
+import {
+  SpritesConnectionCard,
+  SpritesInstancesCard,
+} from "@/components/settings/sprites-settings";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
 
@@ -80,7 +77,10 @@ export default function ProfileDetailPage({
       <Card>
         <CardContent className="py-12 text-center">
           <p className="text-muted-foreground">Profile not found</p>
-          <Button className="mt-4 cursor-pointer" onClick={() => router.push(`/settings/executor/${executorId}`)}>
+          <Button
+            className="mt-4 cursor-pointer"
+            onClick={() => router.push(`/settings/executor/${executorId}`)}
+          >
             Back to Executor
           </Button>
         </CardContent>
@@ -157,7 +157,9 @@ function EnvVarRow({
           </SelectTrigger>
           <SelectContent>
             {secrets.map((s) => (
-              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -195,10 +197,17 @@ function EnvVarsCard({
           <div>
             <CardTitle>Environment Variables</CardTitle>
             <CardDescription>
-              Injected into the execution environment. Variables can reference secrets for sensitive values.
+              Injected into the execution environment. Variables can reference secrets for sensitive
+              values.
             </CardDescription>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onAdd} className="cursor-pointer">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onAdd}
+            className="cursor-pointer"
+          >
             <IconPlus className="h-3.5 w-3.5 mr-1" />
             Add
           </Button>
@@ -209,7 +218,14 @@ function EnvVarsCard({
           <p className="text-sm text-muted-foreground">No environment variables configured.</p>
         )}
         {rows.map((row, idx) => (
-          <EnvVarRow key={idx} row={row} index={idx} secrets={secrets} onUpdate={onUpdate} onRemove={onRemove} />
+          <EnvVarRow
+            key={idx}
+            row={row}
+            index={idx}
+            secrets={secrets}
+            onUpdate={onUpdate}
+            onRemove={onRemove}
+          />
         ))}
       </CardContent>
     </Card>
@@ -241,7 +257,13 @@ function ScriptCard({
       </CardHeader>
       <CardContent>
         <div className="border rounded-md overflow-hidden">
-          <ScriptEditor value={value} onChange={onChange} height={height} placeholders={placeholders} executorType={executorType} />
+          <ScriptEditor
+            value={value}
+            onChange={onChange}
+            height={height}
+            placeholders={placeholders}
+            executorType={executorType}
+          />
         </div>
       </CardContent>
     </Card>
@@ -269,7 +291,11 @@ function ProfileActions({
         Delete Profile
       </Button>
       <div className="flex items-center gap-2">
-        <Button variant="outline" onClick={() => router.push(`/settings/executor/${executorId}`)} className="cursor-pointer">
+        <Button
+          variant="outline"
+          onClick={() => router.push(`/settings/executor/${executorId}`)}
+          className="cursor-pointer"
+        >
           Cancel
         </Button>
         <Button onClick={onSave} disabled={!nameValid || saving} className="cursor-pointer">
@@ -301,7 +327,9 @@ function DeleteProfileDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button variant="destructive" onClick={onDelete} disabled={deleting}>
             {deleting ? "Deleting..." : "Delete"}
           </Button>
@@ -320,27 +348,32 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const save = useCallback(async (data: {
-    name: string; prepare_script: string;
-    cleanup_script: string; env_vars: ProfileEnvVar[];
-  }) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const updated = await updateExecutorProfile(executor.id, profile.id, data);
-      setExecutors(
-        executors.map((e: Executor) =>
-          e.id === executor.id
-            ? { ...e, profiles: e.profiles?.map((p) => (p.id === updated.id ? updated : p)) }
-            : e,
-        ),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save profile");
-    } finally {
-      setSaving(false);
-    }
-  }, [executor.id, profile.id, executors, setExecutors]);
+  const save = useCallback(
+    async (data: {
+      name: string;
+      prepare_script: string;
+      cleanup_script: string;
+      env_vars: ProfileEnvVar[];
+    }) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const updated = await updateExecutorProfile(executor.id, profile.id, data);
+        setExecutors(
+          executors.map((e: Executor) =>
+            e.id === executor.id
+              ? { ...e, profiles: e.profiles?.map((p) => (p.id === updated.id ? updated : p)) }
+              : e,
+          ),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save profile");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [executor.id, profile.id, executors, setExecutors],
+  );
 
   const remove = useCallback(async () => {
     setDeleting(true);
@@ -363,18 +396,17 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   return { saving, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
 }
 
-function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
-  const router = useRouter();
-  const { items: secrets } = useSecrets();
-  const persistence = useProfilePersistence(executor, profile);
-
+function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [name, setName] = useState(profile.name);
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(profile.env_vars));
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
 
-  const isRemote = executor.type === "sprites" || executor.type === "local_docker" || executor.type === "remote_docker";
+  const isRemote =
+    executor.type === "sprites" ||
+    executor.type === "local_docker" ||
+    executor.type === "remote_docker";
   const isSprites = executor.type === "sprites";
 
   const spritesSecretId = useMemo(() => {
@@ -383,7 +415,9 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   }, [envVarRows]);
 
   useEffect(() => {
-    listScriptPlaceholders().then((res) => setPlaceholders(res.placeholders ?? [])).catch(() => {});
+    listScriptPlaceholders()
+      .then((res) => setPlaceholders(res.placeholders ?? []))
+      .catch(() => {});
   }, []);
 
   const addEnvVar = useCallback(() => {
@@ -396,18 +430,32 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
-  const handleSave = () => {
-    if (!name.trim()) return;
-    void persistence.save({
-      name: name.trim(),
-      prepare_script: prepareScript, cleanup_script: cleanupScript,
-      env_vars: rowsToEnvVars(envVarRows),
-    });
-  };
-
   const prepareDesc = isRemote
     ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
     : "Runs on the host machine before the agent starts.";
+
+  return {
+    name, setName, prepareScript, setPrepareScript, cleanupScript, setCleanupScript,
+    envVarRows, addEnvVar, removeEnvVar, updateEnvVar, placeholders,
+    isRemote, isSprites, spritesSecretId, prepareDesc,
+  };
+}
+
+function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+  const router = useRouter();
+  const { items: secrets } = useSecrets();
+  const persistence = useProfilePersistence(executor, profile);
+  const form = useProfileFormState(executor, profile);
+
+  const handleSave = () => {
+    if (!form.name.trim()) return;
+    void persistence.save({
+      name: form.name.trim(),
+      prepare_script: form.prepareScript,
+      cleanup_script: form.cleanupScript,
+      env_vars: rowsToEnvVars(form.envVarRows),
+    });
+  };
 
   return (
     <div className="space-y-8">
@@ -416,26 +464,64 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
           <h2 className="text-2xl font-bold">{profile.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">Profile for {executor.name}</p>
         </div>
-        <Button variant="outline" size="sm" className="cursor-pointer" onClick={() => router.push(`/settings/executor/${executor.id}`)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="cursor-pointer"
+          onClick={() => router.push(`/settings/executor/${executor.id}`)}
+        >
           Back to Executor
         </Button>
       </div>
       <Separator />
-      <ProfileDetailsCard name={name} onNameChange={setName} />
-      {isSprites && spritesSecretId && (
+      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      {form.isSprites && form.spritesSecretId && (
         <>
-          <SpritesConnectionCard secretId={spritesSecretId} />
-          <SpritesInstancesCard secretId={spritesSecretId} />
+          <SpritesConnectionCard secretId={form.spritesSecretId} />
+          <SpritesInstancesCard secretId={form.spritesSecretId} />
         </>
       )}
-      <EnvVarsCard rows={envVarRows} secrets={secrets} onAdd={addEnvVar} onUpdate={updateEnvVar} onRemove={removeEnvVar} />
-      <ScriptCard title="Prepare Script" description={prepareDesc} value={prepareScript} onChange={setPrepareScript} height="300px" placeholders={placeholders} executorType={executor.type} />
-      {isRemote && (
-        <ScriptCard title="Cleanup Script" description="Runs after the agent session ends for cleanup tasks." value={cleanupScript} onChange={setCleanupScript} height="200px" placeholders={placeholders} executorType={executor.type} />
+      <EnvVarsCard
+        rows={form.envVarRows}
+        secrets={secrets}
+        onAdd={form.addEnvVar}
+        onUpdate={form.updateEnvVar}
+        onRemove={form.removeEnvVar}
+      />
+      <ScriptCard
+        title="Prepare Script"
+        description={form.prepareDesc}
+        value={form.prepareScript}
+        onChange={form.setPrepareScript}
+        height="300px"
+        placeholders={form.placeholders}
+        executorType={executor.type}
+      />
+      {form.isRemote && (
+        <ScriptCard
+          title="Cleanup Script"
+          description="Runs after the agent session ends for cleanup tasks."
+          value={form.cleanupScript}
+          onChange={form.setCleanupScript}
+          height="200px"
+          placeholders={form.placeholders}
+          executorType={executor.type}
+        />
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
-      <ProfileActions executorId={executor.id} saving={persistence.saving} nameValid={Boolean(name.trim())} onSave={handleSave} onRequestDelete={() => persistence.setDeleteDialogOpen(true)} />
-      <DeleteProfileDialog open={persistence.deleteDialogOpen} onOpenChange={persistence.setDeleteDialogOpen} onDelete={persistence.remove} deleting={persistence.deleting} />
+      <ProfileActions
+        executorId={executor.id}
+        saving={persistence.saving}
+        nameValid={Boolean(form.name.trim())}
+        onSave={handleSave}
+        onRequestDelete={() => persistence.setDeleteDialogOpen(true)}
+      />
+      <DeleteProfileDialog
+        open={persistence.deleteDialogOpen}
+        onOpenChange={persistence.setDeleteDialogOpen}
+        onDelete={persistence.remove}
+        deleting={persistence.deleting}
+      />
     </div>
   );
 }

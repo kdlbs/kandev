@@ -7,14 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@kandev/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import {
   buildDockerImage,
@@ -124,7 +117,12 @@ export function DockerfileBuildCard({
         <div className="space-y-2">
           <Label>Dockerfile Content</Label>
           <div className="overflow-hidden rounded-md border">
-            <ScriptEditor value={dockerfile} onChange={onDockerfileChange} language="dockerfile" height="250px" />
+            <ScriptEditor
+              value={dockerfile}
+              onChange={onDockerfileChange}
+              language="dockerfile"
+              height="250px"
+            />
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -143,7 +141,10 @@ export function DockerfileBuildCard({
           <BuildStatusBadge status={buildStatus} />
         </div>
         {buildLog && (
-          <pre ref={logRef} className="max-h-[300px] overflow-auto rounded-md bg-black p-3 font-mono text-xs text-green-400">
+          <pre
+            ref={logRef}
+            className="max-h-[300px] overflow-auto rounded-md bg-black p-3 font-mono text-xs text-green-400"
+          >
             {buildLog}
           </pre>
         )}
@@ -188,11 +189,29 @@ function ContainerRow({
       <TableCell>
         <div className="flex items-center gap-1">
           {container.state === "running" && (
-            <Button variant="ghost" size="icon" onClick={() => onStop(container.id)} disabled={isLoading} className="cursor-pointer" title="Stop">
-              {isLoading ? <IconLoader2 className="h-4 w-4 animate-spin" /> : <IconX className="h-4 w-4" />}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onStop(container.id)}
+              disabled={isLoading}
+              className="cursor-pointer"
+              title="Stop"
+            >
+              {isLoading ? (
+                <IconLoader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <IconX className="h-4 w-4" />
+              )}
             </Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => onRemove(container.id)} disabled={isLoading} className="cursor-pointer" title="Remove">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onRemove(container.id)}
+            disabled={isLoading}
+            className="cursor-pointer"
+            title="Remove"
+          >
             <IconTrash className="h-4 w-4" />
           </Button>
         </div>
@@ -218,12 +237,22 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
     }
   }, [profileId]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  const handleAction = useCallback(async (id: string, action: (id: string) => Promise<void>) => {
-    setActionLoading(id);
-    try { await action(id); await refresh(); } finally { setActionLoading(null); }
+  useEffect(() => {
+    void refresh();
   }, [refresh]);
+
+  const handleAction = useCallback(
+    async (id: string, action: (id: string) => Promise<void>) => {
+      setActionLoading(id);
+      try {
+        await action(id);
+        await refresh();
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [refresh],
+  );
 
   return (
     <Card>

@@ -114,7 +114,15 @@ type ReviewDialogHandlerOptions = {
 };
 
 function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
-  const { allFiles, fileRefs, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId } = opts;
+  const {
+    allFiles,
+    fileRefs,
+    markReviewed,
+    markUnreviewed,
+    onSendComments,
+    onOpenChange,
+    sessionId,
+  } = opts;
   const { discard } = useGitOperations(sessionId);
   const { toast } = useToast();
 
@@ -174,7 +182,13 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     [discard, toast],
   );
 
-  return { handleToggleSplitView, handleSelectFile, handleToggleReviewed, handleSendComments, handleDiscard };
+  return {
+    handleToggleSplitView,
+    handleSelectFile,
+    handleToggleReviewed,
+    handleSendComments,
+    handleDiscard,
+  };
 }
 
 function useReviewDialogState(props: ReviewDialogProps) {
@@ -224,7 +238,13 @@ function useReviewDialogState(props: ReviewDialogProps) {
   }, [open, allFiles.length, onOpenChange]);
 
   const handlers = useReviewDialogHandlers({
-    allFiles, fileRefs, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId,
+    allFiles,
+    fileRefs,
+    markReviewed,
+    markUnreviewed,
+    onSendComments,
+    onOpenChange,
+    sessionId,
   });
 
   return {

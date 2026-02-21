@@ -1,24 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import {
-  IconTestPipe,
-  IconLoader2,
-  IconCheck,
-  IconX,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconTestPipe, IconLoader2, IconCheck, IconX, IconSparkles } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { testSpritesConnection } from "@/lib/api/domains/sprites-api";
 import { useSprites } from "@/hooks/domains/settings/use-sprites";
 import type { SecretListItem } from "@/lib/types/http-secrets";
@@ -86,7 +74,9 @@ export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: Sprit
             <SelectContent>
               <SelectItem value={NONE_VALUE}>None</SelectItem>
               {secrets.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -115,7 +105,11 @@ function ConnectionBadge({
     return <Badge variant="secondary">Not Configured</Badge>;
   }
   if (status?.connected) {
-    return <Badge variant="default" className="bg-green-600">Connected</Badge>;
+    return (
+      <Badge variant="default" className="bg-green-600">
+        Connected
+      </Badge>
+    );
   }
   if (status?.token_configured) {
     return <Badge variant="destructive">Disconnected</Badge>;
@@ -181,9 +175,7 @@ function TestResultDisplay({ result }: { result: SpritesTestResult }) {
           <IconX className="h-4 w-4 text-red-600" />
         )}
         {result.success ? "Connection test passed" : "Connection test failed"}
-        <span className="text-muted-foreground font-normal">
-          ({result.total_duration_ms}ms)
-        </span>
+        <span className="text-muted-foreground font-normal">({result.total_duration_ms}ms)</span>
       </div>
       {result.steps.map((step: SpritesTestStep) => (
         <StepRow key={step.name} step={step} />

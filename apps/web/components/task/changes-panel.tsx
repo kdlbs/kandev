@@ -197,7 +197,13 @@ function ChangesPanelDialogsSection({
   baseBranch,
 }: Pick<
   ChangesPanelBodyProps,
-  "dialogs" | "isLoading" | "stagedFileCount" | "stagedAdditions" | "stagedDeletions" | "displayBranch" | "baseBranch"
+  | "dialogs"
+  | "isLoading"
+  | "stagedFileCount"
+  | "stagedAdditions"
+  | "stagedDeletions"
+  | "displayBranch"
+  | "baseBranch"
 >) {
   return (
     <>
@@ -239,11 +245,25 @@ function ChangesPanelDialogsSection({
 function ChangesPanelTimeline(
   props: Pick<
     ChangesPanelBodyProps,
-    | "hasAnything" | "hasUnstaged" | "hasStaged" | "hasCommits"
-    | "unstagedFiles" | "stagedFiles" | "commits" | "pendingStageFiles"
-    | "lastTimelineSection" | "aheadCount" | "isLoading" | "dialogs"
-    | "onOpenDiffFile" | "onEditFile" | "onOpenCommitDetail"
-    | "onStageAll" | "onStage" | "onUnstage" | "onPush"
+    | "hasAnything"
+    | "hasUnstaged"
+    | "hasStaged"
+    | "hasCommits"
+    | "unstagedFiles"
+    | "stagedFiles"
+    | "commits"
+    | "pendingStageFiles"
+    | "lastTimelineSection"
+    | "aheadCount"
+    | "isLoading"
+    | "dialogs"
+    | "onOpenDiffFile"
+    | "onEditFile"
+    | "onOpenCommitDetail"
+    | "onStageAll"
+    | "onStage"
+    | "onUnstage"
+    | "onPush"
   >,
 ) {
   if (!props.hasAnything) {

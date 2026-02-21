@@ -325,10 +325,7 @@ type SaveDeleteParams = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-async function performSaveFile(
-  path: string,
-  params: SaveDeleteParams,
-) {
+async function performSaveFile(path: string, params: SaveDeleteParams) {
   const file = getOpenFiles().get(path);
   if (!file || !file.isDirty) return;
   const client = getWebSocketClient();
@@ -337,34 +334,50 @@ async function performSaveFile(
   params.setSavingFiles((prev) => new Set(prev).add(path));
   try {
     const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-    const response = await updateFileContent(client, currentSessionId, path, diff, file.originalHash);
+    const response = await updateFileContent(
+      client,
+      currentSessionId,
+      path,
+      diff,
+      file.originalHash,
+    );
     if (response.success && response.new_hash) {
       params.updateFileState(path, {
-        originalContent: file.content, originalHash: response.new_hash,
-        isDirty: false, hasRemoteUpdate: false, remoteContent: undefined, remoteOriginalHash: undefined,
+        originalContent: file.content,
+        originalHash: response.new_hash,
+        isDirty: false,
+        hasRemoteUpdate: false,
+        remoteContent: undefined,
+        remoteOriginalHash: undefined,
       });
       updatePanelAfterSave(path, file.name);
     } else {
-      params.toast({ title: "Save failed", description: response.error || "Failed to save file", variant: "error" });
+      params.toast({
+        title: "Save failed",
+        description: response.error || "Failed to save file",
+        variant: "error",
+      });
     }
   } catch (error) {
     params.toast({
       title: "Save failed",
-      description: error instanceof Error ? error.message : "An error occurred while saving the file",
+      description:
+        error instanceof Error ? error.message : "An error occurred while saving the file",
       variant: "error",
     });
   } finally {
-    params.setSavingFiles((prev) => { const next = new Set(prev); next.delete(path); return next; });
+    params.setSavingFiles((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
   }
 }
 
 function useSaveDeleteActions(params: SaveDeleteParams) {
   const { activeSessionIdRef, updateFileState, toast } = params;
 
-  const saveFile = useCallback(
-    (path: string) => performSaveFile(path, params),
-    [params],
-  );
+  const saveFile = useCallback((path: string) => performSaveFile(path, params), [params]);
 
   const deleteFileAction = useCallback(
     async (path: string) => {

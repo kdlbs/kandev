@@ -46,9 +46,17 @@ const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
 const EXECUTOR_TYPES = [
   { type: "local", label: "Local", description: "Run agents directly in the repository folder." },
-  { type: "worktree", label: "Worktree", description: "Create git worktrees for isolated agent sessions." },
+  {
+    type: "worktree",
+    label: "Worktree",
+    description: "Create git worktrees for isolated agent sessions.",
+  },
   { type: "local_docker", label: "Docker", description: "Run Docker containers on this machine." },
-  { type: "sprites", label: "Sprites.dev", description: "Run agents in Sprites.dev cloud sandboxes." },
+  {
+    type: "sprites",
+    label: "Sprites.dev",
+    description: "Run agents in Sprites.dev cloud sandboxes.",
+  },
 ] as const;
 
 function ExecutorIconBadge({ type }: { type: string }) {
@@ -60,7 +68,13 @@ function ExecutorIconBadge({ type }: { type: string }) {
   );
 }
 
-function ProfileCard({ profile, onDelete }: { profile: ProfileWithExecutor; onDelete: (id: string) => void }) {
+function ProfileCard({
+  profile,
+  onDelete,
+}: {
+  profile: ProfileWithExecutor;
+  onDelete: (id: string) => void;
+}) {
   const router = useRouter();
   return (
     <Card
@@ -73,12 +87,17 @@ function ProfileCard({ profile, onDelete }: { profile: ProfileWithExecutor; onDe
           <p className="truncate font-medium">{profile.name}</p>
           <p className="text-xs text-muted-foreground">{getExecutorLabel(profile.executor_type)}</p>
         </div>
-        <Badge variant="outline" className="shrink-0 text-xs">{getExecutorLabel(profile.executor_type)}</Badge>
+        <Badge variant="outline" className="shrink-0 text-xs">
+          {getExecutorLabel(profile.executor_type)}
+        </Badge>
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0 cursor-pointer opacity-0 group-hover:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onDelete(profile.id); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(profile.id);
+          }}
         >
           <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
@@ -87,7 +106,13 @@ function ProfileCard({ profile, onDelete }: { profile: ProfileWithExecutor; onDe
   );
 }
 
-function CreateTypeCard({ execType, onClick }: { execType: (typeof EXECUTOR_TYPES)[number]; onClick: () => void }) {
+function CreateTypeCard({
+  execType,
+  onClick,
+}: {
+  execType: (typeof EXECUTOR_TYPES)[number];
+  onClick: () => void;
+}) {
   return (
     <Card className="cursor-pointer transition-colors hover:bg-muted/50" onClick={onClick}>
       <CardContent className="flex items-center gap-3 p-4">
@@ -125,8 +150,15 @@ function DeleteProfileDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">Cancel</Button>
-          <Button variant="destructive" onClick={onDelete} disabled={deleting} className="cursor-pointer">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={onDelete}
+            disabled={deleting}
+            className="cursor-pointer"
+          >
             {deleting ? "Deleting..." : "Delete"}
           </Button>
         </DialogFooter>
@@ -143,7 +175,9 @@ export default function ExecutorsHubPage() {
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const profileToDelete = deleteProfileId ? allProfiles.find((p) => p.id === deleteProfileId) : null;
+  const profileToDelete = deleteProfileId
+    ? allProfiles.find((p) => p.id === deleteProfileId)
+    : null;
 
   const handleDelete = async () => {
     if (!profileToDelete) return;

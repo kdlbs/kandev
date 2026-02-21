@@ -27,7 +27,11 @@ type CreateEditSelectorsProps = {
   agentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  executorProfileOptions: Array<{
+    value: string;
+    label: string;
+    renderLabel?: () => React.ReactNode;
+  }>;
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
@@ -152,7 +156,11 @@ type SessionSelectorsProps = {
   onAgentProfileChange: (value: string) => void;
   agentProfilesLoading: boolean;
   isCreatingSession: boolean;
-  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  executorProfileOptions: Array<{
+    value: string;
+    label: string;
+    renderLabel?: () => React.ReactNode;
+  }>;
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;

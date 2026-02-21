@@ -389,10 +389,7 @@ export async function listDockerContainers(
   );
 }
 
-export async function stopDockerContainer(
-  id: string,
-  options?: ApiRequestOptions,
-): Promise<void> {
+export async function stopDockerContainer(id: string, options?: ApiRequestOptions): Promise<void> {
   await fetchJson<{ success: boolean }>(`/api/v1/docker/containers/${id}/stop`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },

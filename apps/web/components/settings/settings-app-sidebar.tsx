@@ -206,11 +206,7 @@ function ExecutorsSidebarSection({ pathname, executors }: ExecutorsSidebarSectio
             const profilePath = `/settings/executors/${profile.id}`;
             return (
               <SidebarMenuSubItem key={profile.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  size="sm"
-                  isActive={pathname === profilePath}
-                >
+                <SidebarMenuSubButton asChild size="sm" isActive={pathname === profilePath}>
                   <Link href={profilePath} className="!flex items-center gap-1.5">
                     <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span>{profile.name}</span>

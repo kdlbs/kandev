@@ -8,11 +8,18 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
-import { createExecutorProfile, fetchDefaultScripts, listScriptPlaceholders } from "@/lib/api/domains/settings-api";
+import {
+  createExecutorProfile,
+  fetchDefaultScripts,
+  listScriptPlaceholders,
+} from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
-import { McpPolicyCard, validateMcpPolicy } from "@/components/settings/profile-edit/mcp-policy-card";
+import {
+  McpPolicyCard,
+  validateMcpPolicy,
+} from "@/components/settings/profile-edit/mcp-policy-card";
 import {
   EnvVarsCard,
   useEnvVarRows,
@@ -28,12 +35,35 @@ import type { Executor, ProfileEnvVar } from "@/lib/types/http";
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
 
-const EXECUTOR_TYPE_MAP: Record<string, { executorId: string; label: string; description: string }> = {
-  local: { executorId: "exec-local", label: "Local", description: "Runs agents directly in the repository folder." },
-  worktree: { executorId: "exec-worktree", label: "Worktree", description: "Creates git worktrees for isolated agent sessions." },
-  local_docker: { executorId: "exec-local-docker", label: "Docker", description: "Runs Docker containers on this machine." },
-  remote_docker: { executorId: "exec-remote-docker", label: "Remote Docker", description: "Connects to a remote Docker host." },
-  sprites: { executorId: "exec-sprites", label: "Sprites.dev", description: "Runs agents in Sprites.dev cloud sandboxes." },
+const EXECUTOR_TYPE_MAP: Record<
+  string,
+  { executorId: string; label: string; description: string }
+> = {
+  local: {
+    executorId: "exec-local",
+    label: "Local",
+    description: "Runs agents directly in the repository folder.",
+  },
+  worktree: {
+    executorId: "exec-worktree",
+    label: "Worktree",
+    description: "Creates git worktrees for isolated agent sessions.",
+  },
+  local_docker: {
+    executorId: "exec-local-docker",
+    label: "Docker",
+    description: "Runs Docker containers on this machine.",
+  },
+  remote_docker: {
+    executorId: "exec-remote-docker",
+    label: "Remote Docker",
+    description: "Connects to a remote Docker host.",
+  },
+  sprites: {
+    executorId: "exec-sprites",
+    label: "Sprites.dev",
+    description: "Runs agents in Sprites.dev cloud sandboxes.",
+  },
 };
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
@@ -43,11 +73,7 @@ function ExecutorTypeIcon({ type }: { type: string }) {
   return <Icon className="h-5 w-5 text-muted-foreground" />;
 }
 
-export default function CreateProfilePage({
-  params,
-}: {
-  params: Promise<{ type: string }>;
-}) {
+export default function CreateProfilePage({ params }: { params: Promise<{ type: string }> }) {
   const { type } = use(params);
   const typeInfo = EXECUTOR_TYPE_MAP[type];
 
@@ -72,7 +98,15 @@ function InvalidTypeFallback() {
   );
 }
 
-function CreateProfileHeader({ type, label, description }: { type: string; label: string; description: string }) {
+function CreateProfileHeader({
+  type,
+  label,
+  description,
+}: {
+  type: string;
+  label: string;
+  description: string;
+}) {
   const router = useRouter();
   return (
     <>
@@ -81,11 +115,18 @@ function CreateProfileHeader({ type, label, description }: { type: string; label
           <div className="flex items-center gap-2">
             <ExecutorTypeIcon type={type} />
             <h2 className="text-2xl font-bold">New {label} Profile</h2>
-            <Badge variant="outline" className="text-xs">{getExecutorLabel(type)}</Badge>
+            <Badge variant="outline" className="text-xs">
+              {getExecutorLabel(type)}
+            </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)} className="cursor-pointer">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push(EXECUTORS_ROUTE)}
+          className="cursor-pointer"
+        >
           Back to Executors
         </Button>
       </div>
@@ -106,7 +147,11 @@ function CreateFormActions({
   const router = useRouter();
   return (
     <div className="flex items-center justify-end gap-2">
-      <Button variant="outline" onClick={() => router.push(EXECUTORS_ROUTE)} className="cursor-pointer">
+      <Button
+        variant="outline"
+        onClick={() => router.push(EXECUTORS_ROUTE)}
+        className="cursor-pointer"
+      >
         Cancel
       </Button>
       <Button onClick={onSave} disabled={saveDisabled} className="cursor-pointer">
@@ -116,7 +161,10 @@ function CreateFormActions({
   );
 }
 
-function buildProfileConfig(isSprites: boolean, networkPolicyRules: NetworkPolicyRule[]): Record<string, string> | undefined {
+function buildProfileConfig(
+  isSprites: boolean,
+  networkPolicyRules: NetworkPolicyRule[],
+): Record<string, string> | undefined {
   if (!isSprites || networkPolicyRules.length === 0) return undefined;
   return { sprites_network_policy_rules: JSON.stringify(networkPolicyRules) };
 }
@@ -131,39 +179,30 @@ function useDefaultScripts(executorType: string, setPrepareScript: (v: string) =
   }, [executorType, setPrepareScript]);
 }
 
-function CreateProfileForm({
-  executorType,
-  typeInfo,
-}: {
-  executorType: string;
-  typeInfo: { executorId: string; label: string; description: string };
-}) {
-  const router = useRouter();
-  const { items: secrets } = useSecrets();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
-
+function useCreateProfileFormState(executorType: string) {
   const [name, setName] = useState("");
   const [mcpPolicy, setMcpPolicy] = useState("");
   const [prepareScript, setPrepareScript] = useState("");
   const [cleanupScript, setCleanupScript] = useState("");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
+  const [dockerfile, setDockerfile] = useState("");
+  const [imageTag, setImageTag] = useState("");
 
-  const isRemote = executorType === "local_docker" || executorType === "remote_docker" || executorType === "sprites";
+  const isRemote =
+    executorType === "local_docker" ||
+    executorType === "remote_docker" ||
+    executorType === "sprites";
   const isDocker = executorType === "local_docker" || executorType === "remote_docker";
   const isSprites = executorType === "sprites";
   const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
-  const [dockerfile, setDockerfile] = useState("");
-  const [imageTag, setImageTag] = useState("");
-
   useEffect(() => {
-    listScriptPlaceholders().then((res) => setPlaceholders(res.placeholders ?? [])).catch(() => {});
+    listScriptPlaceholders()
+      .then((res) => setPlaceholders(res.placeholders ?? []))
+      .catch(() => {});
   }, []);
 
   useDefaultScripts(executorType, setPrepareScript);
@@ -176,24 +215,45 @@ function CreateProfileForm({
     return vars;
   }, [envVarRows, isSprites, spritesSecretId]);
 
+  const prepareDesc = isRemote
+    ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
+    : "Runs on the host machine before the agent starts.";
+
+  return {
+    name, setName, mcpPolicy, setMcpPolicy, prepareScript, setPrepareScript,
+    cleanupScript, setCleanupScript, envVarRows, addEnvVar, removeEnvVar, updateEnvVar,
+    placeholders, spritesSecretId, setSpritesSecretId, networkPolicyRules, setNetworkPolicyRules,
+    dockerfile, setDockerfile, imageTag, setImageTag,
+    isRemote, isDocker, isSprites, mcpPolicyError, buildEnvVars, prepareDesc,
+  };
+}
+
+function useCreateProfileSave(
+  form: ReturnType<typeof useCreateProfileFormState>,
+  executorId: string,
+) {
+  const router = useRouter();
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const handleSave = useCallback(async () => {
-    if (!name.trim() || mcpPolicyError) return;
+    if (!form.name.trim() || form.mcpPolicyError) return;
     setSaving(true);
     setError(null);
     try {
-      const profile = await createExecutorProfile(typeInfo.executorId, {
-        name: name.trim(),
-        mcp_policy: mcpPolicy || undefined,
-        config: buildProfileConfig(isSprites, networkPolicyRules),
-        prepare_script: prepareScript,
-        cleanup_script: cleanupScript,
-        env_vars: buildEnvVars(),
+      const profile = await createExecutorProfile(executorId, {
+        name: form.name.trim(),
+        mcp_policy: form.mcpPolicy || undefined,
+        config: buildProfileConfig(form.isSprites, form.networkPolicyRules),
+        prepare_script: form.prepareScript,
+        cleanup_script: form.cleanupScript,
+        env_vars: form.buildEnvVars(),
       });
       setExecutors(
         executors.map((e: Executor) =>
-          e.id === typeInfo.executorId
-            ? { ...e, profiles: [...(e.profiles ?? []), profile] }
-            : e,
+          e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
         ),
       );
       router.push(`/settings/executors/${profile.id}`);
@@ -201,40 +261,84 @@ function CreateProfileForm({
       setError(err instanceof Error ? err.message : "Failed to create profile");
       setSaving(false);
     }
-  }, [name, mcpPolicy, mcpPolicyError, prepareScript, cleanupScript, buildEnvVars, isSprites, networkPolicyRules, typeInfo.executorId, executors, setExecutors, router]);
+  }, [form, executorId, executors, setExecutors, router]);
 
-  const prepareDesc = isRemote
-    ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
-    : "Runs on the host machine before the agent starts.";
+  return { saving, error, handleSave };
+}
+
+function CreateProfileForm({
+  executorType,
+  typeInfo,
+}: {
+  executorType: string;
+  typeInfo: { executorId: string; label: string; description: string };
+}) {
+  const { items: secrets } = useSecrets();
+  const form = useCreateProfileFormState(executorType);
+  const { saving, error, handleSave } = useCreateProfileSave(form, typeInfo.executorId);
 
   return (
     <div className="space-y-8">
-      <CreateProfileHeader type={executorType} label={typeInfo.label} description={typeInfo.description} />
-      <ProfileDetailsCard name={name} onNameChange={setName} />
-      {isSprites && (
-        <SpritesApiKeyCard secretId={spritesSecretId} onSecretIdChange={setSpritesSecretId} secrets={secrets} />
-      )}
-      {isDocker && (
-        <DockerfileBuildCard
-          dockerfile={dockerfile}
-          onDockerfileChange={setDockerfile}
-          imageTag={imageTag}
-          onImageTagChange={setImageTag}
+      <CreateProfileHeader
+        type={executorType}
+        label={typeInfo.label}
+        description={typeInfo.description}
+      />
+      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      {form.isSprites && (
+        <SpritesApiKeyCard
+          secretId={form.spritesSecretId}
+          onSecretIdChange={form.setSpritesSecretId}
+          secrets={secrets}
         />
       )}
-      {isSprites && (
-        <NetworkPoliciesCard rules={networkPolicyRules} onRulesChange={setNetworkPolicyRules} />
+      {form.isDocker && (
+        <DockerfileBuildCard
+          dockerfile={form.dockerfile}
+          onDockerfileChange={form.setDockerfile}
+          imageTag={form.imageTag}
+          onImageTagChange={form.setImageTag}
+        />
       )}
-      <EnvVarsCard rows={envVarRows} secrets={secrets} onAdd={addEnvVar} onUpdate={updateEnvVar} onRemove={removeEnvVar} />
-      <ScriptCard title="Prepare Script" description={prepareDesc} value={prepareScript} onChange={setPrepareScript} height="300px" placeholders={placeholders} executorType={executorType} />
-      {isRemote && (
-        <ScriptCard title="Cleanup Script" description="Runs after the agent session ends for cleanup tasks." value={cleanupScript} onChange={setCleanupScript} height="200px" placeholders={placeholders} executorType={executorType} />
+      {form.isSprites && (
+        <NetworkPoliciesCard rules={form.networkPolicyRules} onRulesChange={form.setNetworkPolicyRules} />
       )}
-      <McpPolicyCard mcpPolicy={mcpPolicy} mcpPolicyError={mcpPolicyError} onPolicyChange={setMcpPolicy} />
+      <EnvVarsCard
+        rows={form.envVarRows}
+        secrets={secrets}
+        onAdd={form.addEnvVar}
+        onUpdate={form.updateEnvVar}
+        onRemove={form.removeEnvVar}
+      />
+      <ScriptCard
+        title="Prepare Script"
+        description={form.prepareDesc}
+        value={form.prepareScript}
+        onChange={form.setPrepareScript}
+        height="300px"
+        placeholders={form.placeholders}
+        executorType={executorType}
+      />
+      {form.isRemote && (
+        <ScriptCard
+          title="Cleanup Script"
+          description="Runs after the agent session ends for cleanup tasks."
+          value={form.cleanupScript}
+          onChange={form.setCleanupScript}
+          height="200px"
+          placeholders={form.placeholders}
+          executorType={executorType}
+        />
+      )}
+      <McpPolicyCard
+        mcpPolicy={form.mcpPolicy}
+        mcpPolicyError={form.mcpPolicyError}
+        onPolicyChange={form.setMcpPolicy}
+      />
       {error && <p className="text-sm text-destructive">{error}</p>}
       <CreateFormActions
         saving={saving}
-        saveDisabled={!name.trim() || Boolean(mcpPolicyError) || saving}
+        saveDisabled={!form.name.trim() || Boolean(form.mcpPolicyError) || saving}
         onSave={handleSave}
       />
     </div>

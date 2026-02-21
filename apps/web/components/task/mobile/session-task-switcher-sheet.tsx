@@ -160,11 +160,15 @@ type SheetNavOptions = {
   onOpenChange: (open: boolean) => void;
 };
 
-async function switchWorkspace(
-  newWorkspaceId: string,
-  opts: SheetNavOptions,
-) {
-  const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, onOpenChange } = opts;
+async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
+  const {
+    store,
+    loadTaskSessionsForTask,
+    setActiveSession,
+    setActiveTask,
+    updateUrl,
+    onOpenChange,
+  } = opts;
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
     const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: "no-store" });
@@ -184,7 +188,9 @@ async function switchWorkspace(
             (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
           ),
           ...newWorkspaceWorkflows.map((w) => ({
-            id: w.id, workspaceId: w.workspace_id, name: w.name,
+            id: w.id,
+            workspaceId: w.workspace_id,
+            name: w.name,
           })),
         ],
         activeId: firstWorkflow.id,

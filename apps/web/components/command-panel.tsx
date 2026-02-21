@@ -69,7 +69,15 @@ type FileSearchEffectOptions = {
 };
 
 function useFileSearchEffect(opts: FileSearchEffectOptions) {
-  const { mode, search, activeSessionId, setFileResults, setIsSearchingFiles, setSelectedValue, fileDebounceRef } = opts;
+  const {
+    mode,
+    search,
+    activeSessionId,
+    setFileResults,
+    setIsSearchingFiles,
+    setSelectedValue,
+    fileDebounceRef,
+  } = opts;
   useEffect(() => {
     if (mode !== "commands" || !search.trim() || !activeSessionId) {
       setFileResults([]);

@@ -141,25 +141,32 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	// Load profile by ID if specified in metadata, otherwise skip
 	profileID, _ := metadata["executor_profile_id"].(string)
 	if profileID != "" {
-		profile, profErr := e.repo.GetExecutorProfile(ctx, profileID)
-		if profErr != nil {
-			e.logger.Warn("failed to load executor profile",
-				zap.String("profile_id", profileID),
-				zap.Error(profErr))
-		}
-		if profile != nil {
-			cfg.SetupScript = profile.PrepareScript
-			cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
-			if policyJSON := strings.TrimSpace(profile.McpPolicy); policyJSON != "" {
-				metadata["executor_mcp_policy"] = policyJSON
-			}
-			if rulesJSON := profile.Config["sprites_network_policy_rules"]; rulesJSON != "" {
-				metadata["sprites_network_policy_rules"] = rulesJSON
-			}
-		}
+		e.applyProfile(ctx, profileID, &cfg, metadata)
 	}
 
 	return cfg
+}
+
+// applyProfile loads an executor profile and applies its settings to the config.
+func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *executorConfig, metadata map[string]interface{}) {
+	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		e.logger.Warn("failed to load executor profile",
+			zap.String("profile_id", profileID),
+			zap.Error(err))
+		return
+	}
+	if profile == nil {
+		return
+	}
+	cfg.SetupScript = profile.PrepareScript
+	cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	if policyJSON := strings.TrimSpace(profile.McpPolicy); policyJSON != "" {
+		metadata["executor_mcp_policy"] = policyJSON
+	}
+	if rulesJSON := profile.Config["sprites_network_policy_rules"]; rulesJSON != "" {
+		metadata["sprites_network_policy_rules"] = rulesJSON
+	}
 }
 
 // resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.

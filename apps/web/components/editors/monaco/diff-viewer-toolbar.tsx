@@ -40,7 +40,12 @@ function DiffViewerToggleButtons({
   setGlobalViewMode,
 }: Pick<
   DiffViewerActionsProps,
-  "foldUnchanged" | "setFoldUnchanged" | "wordWrap" | "setWordWrap" | "globalViewMode" | "setGlobalViewMode"
+  | "foldUnchanged"
+  | "setFoldUnchanged"
+  | "wordWrap"
+  | "setWordWrap"
+  | "globalViewMode"
+  | "setGlobalViewMode"
 >) {
   return (
     <>
@@ -130,7 +135,12 @@ function DiffViewerActions({
       {onRevert && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onRevert(filePath)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={iconBtn}
+              onClick={() => onRevert(filePath)}
+            >
               <IconArrowBackUp className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
@@ -140,7 +150,12 @@ function DiffViewerActions({
       {onOpenFile && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onOpenFile(filePath)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={iconBtn}
+              onClick={() => onOpenFile(filePath)}
+            >
               <IconPencil className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>

@@ -105,28 +105,78 @@ function buildCommentZones(
 }
 
 function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
-  const { path, content, originalContent, isDirty, vcsDiff, sessionId, worktreePath, enableComments = false, onChange, onSave } = props;
+  const {
+    path,
+    content,
+    originalContent,
+    isDirty,
+    vcsDiff,
+    sessionId,
+    worktreePath,
+    enableComments = false,
+    onChange,
+    onSave,
+  } = props;
   const contentRef = useRef(content);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
-  const state = useMonacoEditorComments({ path, enableComments, sessionId, wrapperRef, onChange, onSave, contentRef });
-  const lsp = useMonacoEditorLsp({ sessionId, worktreePath, language, path, contentRef, editorRef: state.editorRef });
-  const { diffStats } = useMonacoDiffDecorations({
-    originalContent, isDirty, showDiffIndicators: state.showDiffIndicators, vcsDiff,
-    editorReady: state.editorInstance, contentRef, editorRef: state.editorRef, diffDecorationsRef: state.diffDecorationsRef,
+  const state = useMonacoEditorComments({
+    path,
+    enableComments,
+    sessionId,
+    wrapperRef,
+    onChange,
+    onSave,
+    contentRef,
   });
-  useEffect(() => { contentRef.current = content; }, [content]);
+  const lsp = useMonacoEditorLsp({
+    sessionId,
+    worktreePath,
+    language,
+    path,
+    contentRef,
+    editorRef: state.editorRef,
+  });
+  const { diffStats } = useMonacoDiffDecorations({
+    originalContent,
+    isDirty,
+    showDiffIndicators: state.showDiffIndicators,
+    vcsDiff,
+    editorReady: state.editorInstance,
+    contentRef,
+    editorRef: state.editorRef,
+    diffDecorationsRef: state.diffDecorationsRef,
+  });
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],
     (addZone) => buildCommentZones(state, addZone),
   );
-  const options = { ...EDITOR_OPTIONS, wordWrap: state.wrapEnabled ? ("on" as const) : ("off" as const) };
+  const options = {
+    ...EDITOR_OPTIONS,
+    wordWrap: state.wrapEnabled ? ("on" as const) : ("off" as const),
+  };
   return { contentRef, wrapperRef, language, state, lsp, diffStats, options };
 }
 
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
-  const { path, content, isDirty, hasRemoteUpdate = false, vcsDiff, isSaving, sessionId, worktreePath, enableComments = false, onSave, onReloadFromAgent, onDelete } = props;
+  const {
+    path,
+    content,
+    isDirty,
+    hasRemoteUpdate = false,
+    vcsDiff,
+    isSaving,
+    sessionId,
+    worktreePath,
+    enableComments = false,
+    onSave,
+    onReloadFromAgent,
+    onDelete,
+  } = props;
   const { resolvedTheme } = useTheme();
   const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
 

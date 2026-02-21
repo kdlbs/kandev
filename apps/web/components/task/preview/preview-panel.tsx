@@ -388,18 +388,49 @@ function PreviewPlaceholder({ message }: { message: string }) {
 
 export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
   const panelState = usePreviewPanelState(sessionId, hasDevScript);
-  const { previewUrl, previewUrlDraft, setPreviewUrl, setPreviewUrlDraft, setPreviewOpen, setPreviewStage, setPreviewView, clearProcessOutput, appStoreApi, previewView, devProcessId, devProcess, devOutput, isStopping, handleStop, detectedUrl, isRunning } = panelState;
+  const {
+    previewUrl,
+    previewUrlDraft,
+    setPreviewUrl,
+    setPreviewUrlDraft,
+    setPreviewOpen,
+    setPreviewStage,
+    setPreviewView,
+    clearProcessOutput,
+    appStoreApi,
+    previewView,
+    devProcessId,
+    devProcess,
+    devOutput,
+    isStopping,
+    handleStop,
+    detectedUrl,
+    isRunning,
+  } = panelState;
 
   const [refreshKey, setRefreshKey] = useState(0);
   const isWaitingForUrl = isRunning && previewView === "output" && !previewUrl;
 
   usePreviewViewSync(sessionId, setPreviewView, appStoreApi);
   const { allowManualUrl, showLoadingSpinner, showIframe } = usePreviewTimers({
-    isRunning, detectedUrl, sessionId, previewUrl, refreshKey, setPreviewView,
+    isRunning,
+    detectedUrl,
+    sessionId,
+    previewUrl,
+    refreshKey,
+    setPreviewView,
   });
   const { handleStopClick, handleUrlSubmit, handleOpenInTab } = usePreviewActions(sessionId, {
-    setPreviewOpen, setPreviewStage, setPreviewView, setPreviewUrl, setPreviewUrlDraft,
-    clearProcessOutput, handleStop, previewUrl, previewUrlDraft, devProcessId,
+    setPreviewOpen,
+    setPreviewStage,
+    setPreviewView,
+    setPreviewUrl,
+    setPreviewUrlDraft,
+    clearProcessOutput,
+    handleStop,
+    previewUrl,
+    previewUrlDraft,
+    devProcessId,
   });
 
   if (!sessionId) return <PreviewPlaceholder message="Select a session to enable preview." />;

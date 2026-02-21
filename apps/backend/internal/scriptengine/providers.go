@@ -33,21 +33,15 @@ func RepositoryProvider(
 		vars["repository.setup_script"] = setupScript
 
 		// Clone URL: prefer explicit metadata, fall back to resolving from local repo
-		if cloneURL := getMetaString(metadata, "repository_clone_url"); cloneURL != "" {
-			if tokenInjector != nil {
-				vars["repository.clone_url"] = tokenInjector(cloneURL, env)
-			} else {
-				vars["repository.clone_url"] = cloneURL
-			}
-		} else if repoPath != "" && repoURLResolver != nil {
+		cloneURL := getMetaString(metadata, "repository_clone_url")
+		if cloneURL == "" && repoPath != "" && repoURLResolver != nil {
 			if remoteURL, err := repoURLResolver(repoPath); err == nil && remoteURL != "" {
 				vars["repository.ssh_url"] = remoteURL
-				if tokenInjector != nil {
-					vars["repository.clone_url"] = tokenInjector(remoteURL, env)
-				} else {
-					vars["repository.clone_url"] = remoteURL
-				}
+				cloneURL = remoteURL
 			}
+		}
+		if cloneURL != "" {
+			vars["repository.clone_url"] = injectToken(cloneURL, env, tokenInjector)
 		}
 
 		return vars
@@ -76,6 +70,14 @@ func WorkspaceProvider(workspacePath string) PlaceholderProvider {
 			"workspace.path": workspacePath,
 		}
 	}
+}
+
+// injectToken applies token injection to a URL if an injector is provided.
+func injectToken(url string, env map[string]string, injector func(string, map[string]string) string) string {
+	if injector != nil {
+		return injector(url, env)
+	}
+	return url
 }
 
 // getMetaString extracts a string value from a metadata map.

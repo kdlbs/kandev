@@ -53,11 +53,7 @@ export type SubmitHandlersDeps = {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null },
   ) => void;
-  onCreateSession?: (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-  }) => void;
+  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
   descriptionInputRef: React.RefObject<{ getValue: () => string } | null>;

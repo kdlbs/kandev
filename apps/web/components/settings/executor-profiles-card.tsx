@@ -26,9 +26,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
     try {
       const resp = await listExecutorProfiles(executorId, { cache: "no-store" });
       setExecutors(
-        executors.map((e) =>
-          e.id === executorId ? { ...e, profiles: resp.profiles } : e,
-        ),
+        executors.map((e) => (e.id === executorId ? { ...e, profiles: resp.profiles } : e)),
       );
     } catch {
       // ignore refresh failure
@@ -68,8 +66,8 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
             <div>
               <CardTitle>Profiles</CardTitle>
               <CardDescription>
-                Different configurations for this executor. Each profile can have its own
-                prepare script, environment variables, and settings.
+                Different configurations for this executor. Each profile can have its own prepare
+                script, environment variables, and settings.
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={handleCreate} className="cursor-pointer">
@@ -87,7 +85,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                 <div
                   key={profile.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/settings/executor/${executorId}/profile/${profile.id}`)}
+                  onClick={() =>
+                    router.push(`/settings/executor/${executorId}/profile/${profile.id}`)
+                  }
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{profile.name}</span>

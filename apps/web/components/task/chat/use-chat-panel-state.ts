@@ -259,8 +259,11 @@ function useSessionData(
   const agentCommands = useAppStore((state) =>
     resolvedSessionId ? state.availableCommands.bySessionId[resolvedSessionId] : undefined,
   );
-  const { cancel: cancelQueue, updateContent: updateQueueContent, ...queueRest } =
-    useQueue(resolvedSessionId);
+  const {
+    cancel: cancelQueue,
+    updateContent: updateQueueContent,
+    ...queueRest
+  } = useQueue(resolvedSessionId);
   return {
     messages,
     messagesLoading,

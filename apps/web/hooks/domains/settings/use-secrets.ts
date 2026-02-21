@@ -24,7 +24,7 @@ export function useSecrets() {
       .finally(() => {
         setSecretsLoading(false);
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { items, loaded, loading };

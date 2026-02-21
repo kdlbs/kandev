@@ -6,21 +6,8 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@kandev/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
 function PolicyRuleRow({
@@ -51,7 +38,9 @@ function PolicyRuleRow({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="allow">
-              <Badge variant="default" className="bg-green-600">Allow</Badge>
+              <Badge variant="default" className="bg-green-600">
+                Allow
+              </Badge>
             </SelectItem>
             <SelectItem value="deny">
               <Badge variant="destructive">Deny</Badge>
@@ -68,7 +57,12 @@ function PolicyRuleRow({
         />
       </TableCell>
       <TableCell>
-        <Button variant="ghost" size="icon" onClick={() => onRemove(index)} className="cursor-pointer">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => onRemove(index)}
+          className="cursor-pointer"
+        >
           <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
       </TableCell>
@@ -97,7 +91,13 @@ function PolicyRulesTable({
       </TableHeader>
       <TableBody>
         {rules.map((rule, idx) => (
-          <PolicyRuleRow key={idx} rule={rule} index={idx} onUpdate={onUpdate} onRemove={onRemove} />
+          <PolicyRuleRow
+            key={idx}
+            rule={rule}
+            index={idx}
+            onUpdate={onUpdate}
+            onRemove={onRemove}
+          />
         ))}
       </TableBody>
     </Table>
@@ -114,13 +114,19 @@ export function NetworkPoliciesCard({ rules, onRulesChange }: NetworkPoliciesCar
     onRulesChange([...rules, { domain: "", action: "allow" }]);
   }, [rules, onRulesChange]);
 
-  const removeRule = useCallback((index: number) => {
-    onRulesChange(rules.filter((_, i) => i !== index));
-  }, [rules, onRulesChange]);
+  const removeRule = useCallback(
+    (index: number) => {
+      onRulesChange(rules.filter((_, i) => i !== index));
+    },
+    [rules, onRulesChange],
+  );
 
-  const updateRule = useCallback((index: number, field: keyof NetworkPolicyRule, val: string) => {
-    onRulesChange(rules.map((rule, i) => (i === index ? { ...rule, [field]: val } : rule)));
-  }, [rules, onRulesChange]);
+  const updateRule = useCallback(
+    (index: number, field: keyof NetworkPolicyRule, val: string) => {
+      onRulesChange(rules.map((rule, i) => (i === index ? { ...rule, [field]: val } : rule)));
+    },
+    [rules, onRulesChange],
+  );
 
   return (
     <Card>
@@ -132,7 +138,13 @@ export function NetworkPoliciesCard({ rules, onRulesChange }: NetworkPoliciesCar
               Define network access rules applied when a sprite is created for this profile.
             </CardDescription>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={addRule} className="cursor-pointer">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addRule}
+            className="cursor-pointer"
+          >
             <IconPlus className="mr-1 h-3.5 w-3.5" />
             Add Rule
           </Button>
