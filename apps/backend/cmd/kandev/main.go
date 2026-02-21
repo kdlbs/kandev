@@ -41,6 +41,9 @@ import (
 	// Orchestrator
 	"github.com/kandev/kandev/internal/orchestrator"
 
+	// Secrets
+	"github.com/kandev/kandev/internal/secrets"
+
 	// Database
 	"github.com/kandev/kandev/internal/db"
 )
@@ -253,7 +256,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry, repos.Secrets)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -283,13 +286,13 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator)
+		lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator, repos.Secrets)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, dockerClient, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, runCleanups)
 }
 
@@ -300,6 +303,7 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -341,7 +345,7 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	server := buildHTTPServer(cfg, log, gateway, dockerClient, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator)
 
 	port := cfg.Server.Port
@@ -370,6 +374,7 @@ func buildHTTPServer(
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
+	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -390,6 +395,7 @@ func buildHTTPServer(
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
+		dockerClient:            dockerClient,
 		taskSvc:                 services.Task,
 		taskRepo:                repos.Task,
 		analyticsRepo:           repos.Analytics,
@@ -403,6 +409,8 @@ func buildHTTPServer(
 		editorCtrl:              editorcontroller.NewController(services.Editor),
 		promptCtrl:              promptcontroller.NewController(services.Prompts),
 		msgCreator:              msgCreator,
+		secretsSvc:              secrets.NewService(repos.Secrets, log),
+		secretStore:             repos.Secrets,
 		log:                     log,
 	})
 

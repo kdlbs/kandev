@@ -50,11 +50,12 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 // PrepareTaskSession creates a session entry without launching the agent.
 // This allows the HTTP handler to return the session ID immediately while the agent setup
 // continues in the background. Use StartTaskWithSession to continue with agent launch.
-func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error) {
+func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
 	s.logger.Debug("preparing task session",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
+		zap.String("executor_profile_id", executorProfileID),
 		zap.String("workflow_step_id", workflowStepID))
 
 	// Fetch the task to get workspace info
@@ -67,7 +68,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	}
 
 	// Create session entry in database
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, workflowStepID)
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -96,7 +97,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // This is used after PrepareTaskSession to continue with the agent launch.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting task with existing session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -204,7 +205,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 // applied if the step has plan_mode enabled.
 // If planMode is true and the workflow step doesn't already apply plan mode,
 // default plan mode instructions are injected into the prompt.
-func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
+func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -272,7 +273,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, workflowStepID, planMode)
 
-	execution, err := s.executor.ExecuteWithProfile(ctx, task, agentProfileID, executorID, effectivePrompt, workflowStepID)
+	execution, err := s.executor.ExecuteWithFullProfile(ctx, task, agentProfileID, executorID, executorProfileID, effectivePrompt, workflowStepID)
 	if err != nil {
 		return nil, err
 	}

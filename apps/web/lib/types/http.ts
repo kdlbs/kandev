@@ -471,8 +471,35 @@ export type Executor = {
   status: string;
   is_system: boolean;
   config?: Record<string, string>;
+  profiles?: ExecutorProfile[];
   created_at: string;
   updated_at: string;
+};
+
+export type ProfileEnvVar = {
+  key: string;
+  value?: string;
+  secret_id?: string;
+};
+
+export type ExecutorProfile = {
+  id: string;
+  executor_id: string;
+  executor_type?: string;
+  executor_name?: string;
+  name: string;
+  mcp_policy?: string;
+  config?: Record<string, string>;
+  prepare_script: string;
+  cleanup_script: string;
+  env_vars?: ProfileEnvVar[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ListExecutorProfilesResponse = {
+  profiles: ExecutorProfile[];
+  total: number;
 };
 
 export type Environment = {

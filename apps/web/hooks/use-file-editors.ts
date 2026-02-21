@@ -325,47 +325,59 @@ type SaveDeleteParams = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-function useSaveDeleteActions({ activeSessionIdRef, updateFileState, setSavingFiles, toast }: SaveDeleteParams) {
-  const saveFile = useCallback(
-    async (path: string) => {
-      const file = getOpenFiles().get(path);
-      if (!file || !file.isDirty) return;
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      setSavingFiles((prev) => new Set(prev).add(path));
-      try {
-        const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-        const response = await updateFileContent(client, currentSessionId, path, diff, file.originalHash);
-        if (response.success && response.new_hash) {
-          updateFileState(path, {
-            originalContent: file.content,
-            originalHash: response.new_hash,
-            isDirty: false,
-            hasRemoteUpdate: false,
-            remoteContent: undefined,
-            remoteOriginalHash: undefined,
-          });
-          updatePanelAfterSave(path, file.name);
-        } else {
-          toast({ title: "Save failed", description: response.error || "Failed to save file", variant: "error" });
-        }
-      } catch (error) {
-        toast({
-          title: "Save failed",
-          description: error instanceof Error ? error.message : "An error occurred while saving the file",
-          variant: "error",
-        });
-      } finally {
-        setSavingFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
-    },
-    [activeSessionIdRef, setSavingFiles, toast, updateFileState],
-  );
+async function performSaveFile(path: string, params: SaveDeleteParams) {
+  const file = getOpenFiles().get(path);
+  if (!file || !file.isDirty) return;
+  const client = getWebSocketClient();
+  const currentSessionId = params.activeSessionIdRef.current;
+  if (!client || !currentSessionId) return;
+  params.setSavingFiles((prev) => new Set(prev).add(path));
+  try {
+    const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
+    const response = await updateFileContent(
+      client,
+      currentSessionId,
+      path,
+      diff,
+      file.originalHash,
+    );
+    if (response.success && response.new_hash) {
+      params.updateFileState(path, {
+        originalContent: file.content,
+        originalHash: response.new_hash,
+        isDirty: false,
+        hasRemoteUpdate: false,
+        remoteContent: undefined,
+        remoteOriginalHash: undefined,
+      });
+      updatePanelAfterSave(path, file.name);
+    } else {
+      params.toast({
+        title: "Save failed",
+        description: response.error || "Failed to save file",
+        variant: "error",
+      });
+    }
+  } catch (error) {
+    params.toast({
+      title: "Save failed",
+      description:
+        error instanceof Error ? error.message : "An error occurred while saving the file",
+      variant: "error",
+    });
+  } finally {
+    params.setSavingFiles((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+  }
+}
+
+function useSaveDeleteActions(params: SaveDeleteParams) {
+  const { activeSessionIdRef, updateFileState, toast } = params;
+
+  const saveFile = useCallback((path: string) => performSaveFile(path, params), [params]);
 
   const deleteFileAction = useCallback(
     async (path: string) => {
@@ -378,12 +390,17 @@ function useSaveDeleteActions({ activeSessionIdRef, updateFileState, setSavingFi
       try {
         const response = await deleteFile(client, currentSessionId, path);
         if (!response.success) {
-          toast({ title: "Delete failed", description: response.error || "Failed to delete file", variant: "error" });
+          toast({
+            title: "Delete failed",
+            description: response.error || "Failed to delete file",
+            variant: "error",
+          });
         }
       } catch (error) {
         toast({
           title: "Delete failed",
-          description: error instanceof Error ? error.message : "An error occurred while deleting the file",
+          description:
+            error instanceof Error ? error.message : "An error occurred while deleting the file",
           variant: "error",
         });
       }
@@ -432,7 +449,11 @@ function useFileEditorActions({
         return;
       }
       try {
-        const response: FileContentResponse = await requestFileContent(client, currentSessionId, filePath);
+        const response: FileContentResponse = await requestFileContent(
+          client,
+          currentSessionId,
+          filePath,
+        );
         const state = await buildFileEditorState(filePath, response);
         setFileState(filePath, state);
         addFileEditorPanel(filePath, state.name);

@@ -171,6 +171,25 @@ export type UserShellsState = {
   loaded: Record<string, boolean>;
 };
 
+export type PrepareStepInfo = {
+  name: string;
+  status: string;
+  output?: string;
+  error?: string;
+};
+
+export type SessionPrepareState = {
+  sessionId: string;
+  status: string;
+  steps: PrepareStepInfo[];
+  errorMessage?: string;
+  durationMs?: number;
+};
+
+export type PrepareProgressState = {
+  bySessionId: Record<string, SessionPrepareState>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -183,6 +202,7 @@ export type SessionRuntimeSliceState = {
   availableCommands: AvailableCommandsState;
   sessionMode: SessionModeState;
   userShells: UserShellsState;
+  prepareProgress: PrepareProgressState;
 };
 
 export type SessionRuntimeSliceActions = {

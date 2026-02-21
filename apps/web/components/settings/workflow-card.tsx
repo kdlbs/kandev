@@ -6,15 +6,6 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
@@ -22,6 +13,7 @@ import { WorkflowExportDialog } from "@/components/settings/workflow-export-dial
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { WorkflowPipelineEditor } from "@/components/settings/workflow-pipeline-editor";
 import { listWorkflowStepsAction } from "@/app/actions/workspaces";
+import { WorkflowDeleteDialog, StepDeleteDialog } from "./workflow-card-dialogs";
 import {
   useWorkflowStepActions,
   useWorkflowDeleteHandlers,
@@ -84,205 +76,6 @@ function useWorkflowSteps(
   };
 
   return { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps };
-}
-
-type WorkflowDeleteDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  workflowTaskCount: number | null;
-  otherWorkflows: Workflow[];
-  targetWorkflowId: string;
-  setTargetWorkflowId: (id: string) => void;
-  targetWorkflowSteps: WorkflowStep[];
-  targetStepId: string;
-  setTargetStepId: (id: string) => void;
-  migrateLoading: boolean;
-  deleteLoading: boolean;
-  onDelete: () => Promise<void>;
-  onMigrateAndDelete: () => Promise<void>;
-};
-
-function WorkflowDeleteDialog({
-  open,
-  onOpenChange,
-  workflowTaskCount,
-  otherWorkflows,
-  targetWorkflowId,
-  setTargetWorkflowId,
-  targetWorkflowSteps,
-  targetStepId,
-  setTargetStepId,
-  migrateLoading,
-  deleteLoading,
-  onDelete,
-  onMigrateAndDelete,
-}: WorkflowDeleteDialogProps) {
-  const hasTasks = workflowTaskCount !== null && workflowTaskCount > 0;
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete workflow</DialogTitle>
-          <DialogDescription>
-            {hasTasks
-              ? `This workflow has ${workflowTaskCount} task${workflowTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete everything.`
-              : "This will permanently delete the workflow and all its steps."}
-          </DialogDescription>
-        </DialogHeader>
-        {hasTasks && otherWorkflows.length > 0 && (
-          <div className="space-y-3 py-2">
-            <div className="space-y-2">
-              <Label>Target Workflow</Label>
-              <Select value={targetWorkflowId} onValueChange={setTargetWorkflowId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select workflow" />
-                </SelectTrigger>
-                <SelectContent>
-                  {otherWorkflows.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {targetWorkflowSteps.length > 0 && (
-              <div className="space-y-2">
-                <Label>Target Step</Label>
-                <Select value={targetStepId} onValueChange={setTargetStepId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select step" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {targetWorkflowSteps.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        )}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="cursor-pointer"
-          >
-            Cancel
-          </Button>
-          {hasTasks && otherWorkflows.length > 0 && (
-            <Button
-              type="button"
-              onClick={onMigrateAndDelete}
-              disabled={!targetWorkflowId || !targetStepId || migrateLoading || deleteLoading}
-              className="cursor-pointer"
-            >
-              {migrateLoading ? "Migrating..." : "Migrate & Delete"}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={onDelete}
-            disabled={deleteLoading || migrateLoading}
-            className="cursor-pointer"
-          >
-            {hasTasks ? "Delete Everything" : "Delete Workflow"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-type StepDeleteDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  stepTaskCount: number | null;
-  stepsForMigration: WorkflowStep[];
-  targetStep: string;
-  setTargetStep: (id: string) => void;
-  loading: boolean;
-  onMigrateAndDelete: () => Promise<void>;
-  onDeleteAndTasks: () => Promise<void>;
-};
-
-function StepDeleteDialog({
-  open,
-  onOpenChange,
-  stepTaskCount,
-  stepsForMigration,
-  targetStep,
-  setTargetStep,
-  loading,
-  onMigrateAndDelete,
-  onDeleteAndTasks,
-}: StepDeleteDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete step</DialogTitle>
-          <DialogDescription>
-            This step has {stepTaskCount} task{stepTaskCount === 1 ? "" : "s"}.
-            {stepsForMigration.length > 0
-              ? " Choose where to migrate them, or delete the step and its tasks."
-              : " Deleting this step will affect these tasks."}
-          </DialogDescription>
-        </DialogHeader>
-        {stepsForMigration.length > 0 && (
-          <div className="space-y-2 py-2">
-            <Label>Target Step</Label>
-            <Select value={targetStep} onValueChange={setTargetStep}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select step" />
-              </SelectTrigger>
-              <SelectContent>
-                {stepsForMigration.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="cursor-pointer"
-          >
-            Cancel
-          </Button>
-          {stepsForMigration.length > 0 && (
-            <Button
-              type="button"
-              onClick={onMigrateAndDelete}
-              disabled={!targetStep || loading}
-              className="cursor-pointer"
-            >
-              {loading ? "Migrating..." : "Migrate & Delete Step"}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={onDeleteAndTasks}
-            disabled={loading}
-            className="cursor-pointer"
-          >
-            Delete Step & Tasks
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 type WorkflowDeleteState = {
@@ -361,6 +154,187 @@ function useStepDeleteState(): StepDeleteState {
   };
 }
 
+type WorkflowCardActionsProps = {
+  isNewWorkflow: boolean;
+  workflowId: string;
+  setExportJson: (json: string) => void;
+  setExportOpen: (open: boolean) => void;
+  toast: ReturnType<typeof useToast>["toast"];
+  onDeleteClick: () => Promise<void>;
+  deleteDisabled: boolean;
+};
+
+function WorkflowCardActions({
+  isNewWorkflow,
+  workflowId,
+  setExportJson,
+  setExportOpen,
+  toast,
+  onDeleteClick,
+  deleteDisabled,
+}: WorkflowCardActionsProps) {
+  return (
+    <div className="flex justify-end gap-2">
+      {!isNewWorkflow && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => handleExportWorkflow({ workflowId, setExportJson, setExportOpen, toast })}
+          className="cursor-pointer"
+        >
+          <IconDownload className="h-4 w-4 mr-2" />
+          Export
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="destructive"
+        onClick={onDeleteClick}
+        disabled={deleteDisabled}
+        className="cursor-pointer"
+      >
+        <IconTrash className="h-4 w-4 mr-2" />
+        Delete Workflow
+      </Button>
+    </div>
+  );
+}
+
+type WorkflowCardDialogsProps = {
+  wfDel: WorkflowDeleteState;
+  otherWorkflows: Workflow[];
+  deleteWorkflowLoading: boolean;
+  wfDeleteHandlers: {
+    handleDeleteWorkflow: () => Promise<void>;
+    handleMigrateAndDeleteWorkflow: () => Promise<void>;
+  };
+  exportOpen: boolean;
+  setExportOpen: (open: boolean) => void;
+  exportJson: string;
+  stepDel: StepDeleteState;
+  stepsForStepMigration: WorkflowStep[];
+  stepDeleteHandlers: {
+    handleMigrateAndDeleteStep: () => Promise<void>;
+    handleDeleteStepAndTasks: () => Promise<void>;
+  };
+};
+
+type WorkflowCardBodyProps = {
+  workflow: Workflow;
+  isWorkflowDirty: boolean;
+  onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
+  activeSaveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
+  handleSaveWorkflow: () => Promise<void>;
+  workflowLoading: boolean;
+  workflowSteps: WorkflowStep[];
+  stepActions: {
+    handleUpdateWorkflowStep: (id: string, updates: Partial<WorkflowStep>) => Promise<void>;
+    handleAddWorkflowStep: () => Promise<void>;
+    handleRemoveWorkflowStep: (id: string) => Promise<void>;
+    handleReorderWorkflowSteps: (steps: WorkflowStep[]) => Promise<void>;
+  };
+};
+
+function WorkflowCardBody({
+  workflow,
+  isWorkflowDirty,
+  onUpdateWorkflow,
+  activeSaveRequest,
+  handleSaveWorkflow,
+  workflowLoading,
+  workflowSteps,
+  stepActions,
+}: WorkflowCardBodyProps) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-2 flex-1">
+          <Label className="flex items-center gap-2">
+            <span>Workflow Name</span>
+            {isWorkflowDirty && <UnsavedChangesBadge />}
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              value={workflow.name}
+              onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+            />
+            <UnsavedSaveButton
+              isDirty={isWorkflowDirty}
+              isLoading={activeSaveRequest.isLoading}
+              status={activeSaveRequest.status}
+              onClick={handleSaveWorkflow}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Workflow Steps</Label>
+        {workflowLoading ? (
+          <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
+        ) : (
+          <WorkflowPipelineEditor
+            steps={workflowSteps}
+            onUpdateStep={stepActions.handleUpdateWorkflowStep}
+            onAddStep={stepActions.handleAddWorkflowStep}
+            onRemoveStep={stepActions.handleRemoveWorkflowStep}
+            onReorderSteps={stepActions.handleReorderWorkflowSteps}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function WorkflowCardDialogs({
+  wfDel,
+  otherWorkflows,
+  deleteWorkflowLoading,
+  wfDeleteHandlers,
+  exportOpen,
+  setExportOpen,
+  exportJson,
+  stepDel,
+  stepsForStepMigration,
+  stepDeleteHandlers,
+}: WorkflowCardDialogsProps) {
+  return (
+    <>
+      <WorkflowDeleteDialog
+        open={wfDel.deleteOpen}
+        onOpenChange={wfDel.setDeleteOpen}
+        workflowTaskCount={wfDel.workflowTaskCount}
+        otherWorkflows={otherWorkflows}
+        targetWorkflowId={wfDel.targetWorkflowId}
+        setTargetWorkflowId={wfDel.setTargetWorkflowId}
+        targetWorkflowSteps={wfDel.targetWorkflowSteps}
+        targetStepId={wfDel.targetStepId}
+        setTargetStepId={wfDel.setTargetStepId}
+        migrateLoading={wfDel.migrateLoading}
+        deleteLoading={deleteWorkflowLoading}
+        onDelete={wfDeleteHandlers.handleDeleteWorkflow}
+        onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow}
+      />
+      <WorkflowExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        title="Export Workflow"
+        json={exportJson}
+      />
+      <StepDeleteDialog
+        open={stepDel.stepDeleteOpen}
+        onOpenChange={stepDel.setStepDeleteOpen}
+        stepTaskCount={stepDel.stepTaskCount}
+        stepsForMigration={stepsForStepMigration}
+        targetStep={stepDel.targetStepForMigration}
+        setTargetStep={stepDel.setTargetStepForMigration}
+        loading={stepDel.stepMigrateLoading}
+        onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep}
+        onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks}
+      />
+    </>
+  );
+}
+
 export function WorkflowCard({
   workflow,
   isWorkflowDirty,
@@ -381,19 +355,39 @@ export function WorkflowCard({
   const { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps } =
     useWorkflowSteps(workflow.id, initialWorkflowSteps, isNewWorkflow, toast);
   const stepActions = useWorkflowStepActions({
-    workflow, isNewWorkflow, workflowSteps, setWorkflowSteps, refreshWorkflowSteps,
-    setStepToDelete: stepDel.setStepToDelete, setStepTaskCount: stepDel.setStepTaskCount,
+    workflow,
+    isNewWorkflow,
+    workflowSteps,
+    setWorkflowSteps,
+    refreshWorkflowSteps,
+    setStepToDelete: stepDel.setStepToDelete,
+    setStepTaskCount: stepDel.setStepTaskCount,
     setTargetStepForMigration: stepDel.setTargetStepForMigration,
-    setStepDeleteOpen: stepDel.setStepDeleteOpen, toast,
+    setStepDeleteOpen: stepDel.setStepDeleteOpen,
+    toast,
   });
   const { activeSaveRequest, handleSaveWorkflow } = useWorkflowSaveActions({
-    workflow, isNewWorkflow, workflowSteps, onSaveWorkflow, onWorkflowCreated, toast,
+    workflow,
+    isNewWorkflow,
+    workflowSteps,
+    onSaveWorkflow,
+    onWorkflowCreated,
+    toast,
   });
   const wfDeleteHandlers = useWorkflowDeleteHandlers({
-    workflow, isNewWorkflow, otherWorkflows, wfDel,
-    deleteWorkflowRun: deleteWorkflowRequest.run, toast,
+    workflow,
+    isNewWorkflow,
+    otherWorkflows,
+    wfDel,
+    deleteWorkflowRun: deleteWorkflowRequest.run,
+    toast,
   });
-  const stepDeleteHandlers = useStepDeleteHandlers({ workflow, stepDel, refreshWorkflowSteps, toast });
+  const stepDeleteHandlers = useStepDeleteHandlers({
+    workflow,
+    stepDel,
+    refreshWorkflowSteps,
+    toast,
+  });
   const stepsForStepMigration = stepDel.stepToDelete
     ? workflowSteps.filter((s) => s.id !== stepDel.stepToDelete)
     : [];
@@ -402,41 +396,39 @@ export function WorkflowCard({
     <Card>
       <CardContent className="pt-6">
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-2 flex-1">
-              <Label className="flex items-center gap-2">
-                <span>Workflow Name</span>
-                {isWorkflowDirty && <UnsavedChangesBadge />}
-              </Label>
-              <div className="flex items-center gap-2">
-                <Input value={workflow.name} onChange={(e) => onUpdateWorkflow({ name: e.target.value })} />
-                <UnsavedSaveButton isDirty={isWorkflowDirty} isLoading={activeSaveRequest.isLoading} status={activeSaveRequest.status} onClick={handleSaveWorkflow} />
-              </div>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Workflow Steps</Label>
-            {workflowLoading ? (
-              <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
-            ) : (
-              <WorkflowPipelineEditor steps={workflowSteps} onUpdateStep={stepActions.handleUpdateWorkflowStep} onAddStep={stepActions.handleAddWorkflowStep} onRemoveStep={stepActions.handleRemoveWorkflowStep} onReorderSteps={stepActions.handleReorderWorkflowSteps} />
-            )}
-          </div>
-          <div className="flex justify-end gap-2">
-            {!isNewWorkflow && (
-              <Button type="button" variant="outline" onClick={() => handleExportWorkflow({ workflowId: workflow.id, setExportJson, setExportOpen, toast })} className="cursor-pointer">
-                <IconDownload className="h-4 w-4 mr-2" />Export
-              </Button>
-            )}
-            <Button type="button" variant="destructive" onClick={wfDeleteHandlers.handleDeleteWorkflowClick} disabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading} className="cursor-pointer">
-              <IconTrash className="h-4 w-4 mr-2" />Delete Workflow
-            </Button>
-          </div>
+          <WorkflowCardBody
+            workflow={workflow}
+            isWorkflowDirty={isWorkflowDirty}
+            onUpdateWorkflow={onUpdateWorkflow}
+            activeSaveRequest={activeSaveRequest}
+            handleSaveWorkflow={handleSaveWorkflow}
+            workflowLoading={workflowLoading}
+            workflowSteps={workflowSteps}
+            stepActions={stepActions}
+          />
+          <WorkflowCardActions
+            isNewWorkflow={isNewWorkflow}
+            workflowId={workflow.id}
+            setExportJson={setExportJson}
+            setExportOpen={setExportOpen}
+            toast={toast}
+            onDeleteClick={wfDeleteHandlers.handleDeleteWorkflowClick}
+            deleteDisabled={deleteWorkflowRequest.isLoading || wfDel.workflowDeleteLoading}
+          />
         </div>
       </CardContent>
-      <WorkflowDeleteDialog open={wfDel.deleteOpen} onOpenChange={wfDel.setDeleteOpen} workflowTaskCount={wfDel.workflowTaskCount} otherWorkflows={otherWorkflows} targetWorkflowId={wfDel.targetWorkflowId} setTargetWorkflowId={wfDel.setTargetWorkflowId} targetWorkflowSteps={wfDel.targetWorkflowSteps} targetStepId={wfDel.targetStepId} setTargetStepId={wfDel.setTargetStepId} migrateLoading={wfDel.migrateLoading} deleteLoading={deleteWorkflowRequest.isLoading} onDelete={wfDeleteHandlers.handleDeleteWorkflow} onMigrateAndDelete={wfDeleteHandlers.handleMigrateAndDeleteWorkflow} />
-      <WorkflowExportDialog open={exportOpen} onOpenChange={setExportOpen} title="Export Workflow" json={exportJson} />
-      <StepDeleteDialog open={stepDel.stepDeleteOpen} onOpenChange={stepDel.setStepDeleteOpen} stepTaskCount={stepDel.stepTaskCount} stepsForMigration={stepsForStepMigration} targetStep={stepDel.targetStepForMigration} setTargetStep={stepDel.setTargetStepForMigration} loading={stepDel.stepMigrateLoading} onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep} onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks} />
+      <WorkflowCardDialogs
+        wfDel={wfDel}
+        otherWorkflows={otherWorkflows}
+        deleteWorkflowLoading={deleteWorkflowRequest.isLoading}
+        wfDeleteHandlers={wfDeleteHandlers}
+        exportOpen={exportOpen}
+        setExportOpen={setExportOpen}
+        exportJson={exportJson}
+        stepDel={stepDel}
+        stepsForStepMigration={stepsForStepMigration}
+        stepDeleteHandlers={stepDeleteHandlers}
+      />
     </Card>
   );
 }

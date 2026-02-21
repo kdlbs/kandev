@@ -195,7 +195,7 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
 	// Get the default runtime for on-demand execution creation
-	rt, err := m.getDefaultRuntime()
+	rt, err := m.getDefaultExecutorBackend()
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
@@ -211,7 +211,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
-	req := &RuntimeCreateRequest{
+	req := &ExecutorCreateRequest{
 		InstanceID:     executionID,
 		TaskID:         taskID,
 		SessionID:      info.SessionID,

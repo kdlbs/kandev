@@ -192,14 +192,14 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
-			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, workflow_step_id, review_status, is_passthrough
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
-		session.ExecutorID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
@@ -236,7 +236,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
-		&session.ExecutorID, &session.EnvironmentID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
@@ -290,7 +290,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 // GetTaskSession retrieves an agent session by ID
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -303,7 +303,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 // GetTaskSessionByTaskID retrieves the most recent agent session for a task
 func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -316,7 +316,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 // GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -355,13 +355,13 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET
-			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, environment_id = ?,
+			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, workflow_step_id = ?, review_status = ?, is_passthrough = ?
 		WHERE id = ?
-	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.EnvironmentID,
+	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
@@ -422,7 +422,7 @@ func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) err
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -451,7 +451,7 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 // ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -480,7 +480,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
@@ -578,7 +578,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
-		&session.ExecutorID, &session.EnvironmentID,
+		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
@@ -734,7 +734,7 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 // GetPrimarySessionByTaskID retrieves the primary session for a task
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, environment_id,
+		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,

@@ -93,13 +93,14 @@ func (h *Handlers) wsTriggerTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsStartTaskRequest struct {
-	TaskID         string `json:"task_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	ExecutorID     string `json:"executor_id,omitempty"`
-	Priority       int    `json:"priority,omitempty"`
-	Prompt         string `json:"prompt,omitempty"`
-	WorkflowStepID string `json:"workflow_step_id,omitempty"`
+	TaskID            string `json:"task_id"`
+	SessionID         string `json:"session_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	Priority          int    `json:"priority,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
 }
 
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -156,7 +157,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	}
 
 	// Otherwise, create a new session
-	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.Priority, req.Prompt, req.WorkflowStepID, false)
+	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, req.Prompt, req.WorkflowStepID, false)
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)

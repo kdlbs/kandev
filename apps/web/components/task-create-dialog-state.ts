@@ -3,19 +3,14 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type {
   LocalRepository,
-  Task,
   Workspace,
   Repository,
-  Environment,
   Executor,
+  ExecutorProfile,
   Branch,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import {
-  DEFAULT_LOCAL_ENVIRONMENT_KIND,
-  DEFAULT_LOCAL_EXECUTOR_TYPE,
-  selectPreferredBranch,
-} from "@/lib/utils";
+import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useRepositoryBranches } from "@/hooks/domains/workspace/use-repository-branches";
@@ -24,8 +19,8 @@ import {
   useRepositoryOptions,
   useBranchOptions,
   useAgentProfileOptions,
-  useExecutorOptions,
   useExecutorHint,
+  useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -35,44 +30,93 @@ import {
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import type {
+  StepType,
+  TaskCreateDialogInitialValues,
+  DialogFormState,
+  StoreSelections,
+  DialogComputedValues,
+  DialogComputedArgs,
+  TaskCreateEffectsArgs,
+} from "@/components/task-create-dialog-types";
+import {
+  autoSelectBranch,
+  computePassthroughProfile,
+  computeEffectiveStepId,
+} from "@/components/task-create-dialog-helpers";
 
-export type StepType = {
-  id: string;
-  title: string;
-  events?: {
-    on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-    on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-  };
-};
-
-export type TaskCreateDialogInitialValues = {
-  title: string;
-  description?: string;
-  repositoryId?: string;
-  branch?: string;
-  state?: Task["state"];
-};
-
-export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
-  const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
-  if (
-    lastUsedBranch &&
-    branchList.some((b) => {
-      const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-      return displayName === lastUsedBranch;
-    })
-  ) {
-    setBranch(lastUsedBranch);
-    return;
-  }
-  const preferredBranch = selectPreferredBranch(branchList);
-  if (preferredBranch) setBranch(preferredBranch);
-}
+export type {
+  StepType,
+  TaskCreateDialogInitialValues,
+} from "@/components/task-create-dialog-types";
+export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 
 function useCreationStatusState() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   return { isCreatingSession, setIsCreatingSession, isCreatingTask, setIsCreatingTask };
+}
+
+type FormResetters = {
+  setTaskName: (v: string) => void;
+  setHasTitle: (v: boolean) => void;
+  setHasDescription: (v: boolean) => void;
+  setRepositoryId: (v: string) => void;
+  setBranch: (v: string) => void;
+  setAgentProfileId: (v: string) => void;
+  setExecutorId: (v: string) => void;
+  setExecutorProfileId: (v: string) => void;
+  setSelectedWorkflowId: (v: string | null) => void;
+  setFetchedSteps: (v: StepType[] | null) => void;
+  setDiscoveredRepositories: (v: LocalRepository[]) => void;
+  setDiscoveredRepoPath: (v: string) => void;
+  setSelectedLocalRepo: (v: LocalRepository | null) => void;
+  setLocalBranches: (v: Branch[]) => void;
+  setDiscoverReposLoaded: (v: boolean) => void;
+};
+
+function useFormResetEffects(
+  open: boolean,
+  workspaceId: string | null,
+  workflowId: string | null,
+  initialValues: TaskCreateDialogInitialValues | undefined,
+  resetters: FormResetters,
+) {
+  useEffect(() => {
+    if (!open) return;
+    const name = initialValues?.title || "";
+    void Promise.resolve().then(() => {
+      resetters.setTaskName(name);
+      resetters.setHasTitle(name.trim().length > 0);
+      resetters.setHasDescription(Boolean(initialValues?.description?.trim()));
+      resetters.setRepositoryId(initialValues?.repositoryId ?? "");
+      resetters.setBranch(initialValues?.branch ?? "");
+      resetters.setAgentProfileId("");
+      resetters.setExecutorId("");
+      resetters.setExecutorProfileId("");
+      resetters.setSelectedWorkflowId(workflowId);
+      resetters.setFetchedSteps(null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    initialValues?.branch,
+    initialValues?.description,
+    initialValues?.repositoryId,
+    initialValues?.title,
+    open,
+    workflowId,
+  ]);
+  useEffect(() => {
+    if (!open) return;
+    void Promise.resolve().then(() => {
+      resetters.setDiscoveredRepositories([]);
+      resetters.setDiscoveredRepoPath("");
+      resetters.setSelectedLocalRepo(null);
+      resetters.setLocalBranches([]);
+      resetters.setDiscoverReposLoaded(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, workspaceId]);
 }
 
 export function useDialogFormState(
@@ -88,8 +132,8 @@ export function useDialogFormState(
   const [repositoryId, setRepositoryId] = useState(initialValues?.repositoryId ?? "");
   const [branch, setBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
-  const [environmentId, setEnvironmentId] = useState("");
   const [executorId, setExecutorId] = useState("");
+  const [executorProfileId, setExecutorProfileId] = useState("");
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
   const [discoveredRepoPath, setDiscoveredRepoPath] = useState("");
   const [selectedLocalRepo, setSelectedLocalRepo] = useState<LocalRepository | null>(null);
@@ -101,53 +145,67 @@ export function useDialogFormState(
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const { isCreatingSession, setIsCreatingSession, isCreatingTask, setIsCreatingTask } =
     useCreationStatusState();
-  useEffect(() => {
-    if (!open) return;
-    const name = initialValues?.title || "";
-    void Promise.resolve().then(() => {
-      setTaskName(name);
-      setHasTitle(name.trim().length > 0);
-      setHasDescription(Boolean(initialValues?.description?.trim()));
-      setRepositoryId(initialValues?.repositoryId ?? "");
-      setBranch(initialValues?.branch ?? "");
-      setAgentProfileId("");
-      setEnvironmentId("");
-      setExecutorId("");
-      setSelectedWorkflowId(workflowId);
-      setFetchedSteps(null);
-    });
-  }, [
-    initialValues?.branch,
-    initialValues?.description,
-    initialValues?.repositoryId,
-    initialValues?.title,
-    open,
-    workflowId,
-  ]);
-  useEffect(() => {
-    if (!open) return;
-    void Promise.resolve().then(() => {
-      setDiscoveredRepositories([]);
-      setDiscoveredRepoPath("");
-      setSelectedLocalRepo(null);
-      setLocalBranches([]);
-      setDiscoverReposLoaded(false);
-    });
-  }, [open, workspaceId]);
+  useFormResetEffects(open, workspaceId, workflowId, initialValues, {
+    setTaskName,
+    setHasTitle,
+    setHasDescription,
+    setRepositoryId,
+    setBranch,
+    setAgentProfileId,
+    setExecutorId,
+    setExecutorProfileId,
+    setSelectedWorkflowId,
+    setFetchedSteps,
+    setDiscoveredRepositories,
+    setDiscoveredRepoPath,
+    setSelectedLocalRepo,
+    setLocalBranches,
+    setDiscoverReposLoaded,
+  });
   return {
-    taskName, setTaskName, hasTitle, setHasTitle, hasDescription, setHasDescription,
-    descriptionInputRef, repositoryId, setRepositoryId, branch, setBranch,
-    agentProfileId, setAgentProfileId, environmentId, setEnvironmentId,
-    executorId, setExecutorId, discoveredRepositories, setDiscoveredRepositories,
-    discoveredRepoPath, setDiscoveredRepoPath, selectedLocalRepo, setSelectedLocalRepo,
-    localBranches, setLocalBranches, localBranchesLoading, setLocalBranchesLoading,
-    discoverReposLoading, setDiscoverReposLoading, discoverReposLoaded, setDiscoverReposLoaded,
-    selectedWorkflowId, setSelectedWorkflowId, fetchedSteps, setFetchedSteps,
-    isCreatingSession, setIsCreatingSession, isCreatingTask, setIsCreatingTask,
+    taskName,
+    setTaskName,
+    hasTitle,
+    setHasTitle,
+    hasDescription,
+    setHasDescription,
+    descriptionInputRef,
+    repositoryId,
+    setRepositoryId,
+    branch,
+    setBranch,
+    agentProfileId,
+    setAgentProfileId,
+    executorId,
+    setExecutorId,
+    executorProfileId,
+    setExecutorProfileId,
+    discoveredRepositories,
+    setDiscoveredRepositories,
+    discoveredRepoPath,
+    setDiscoveredRepoPath,
+    selectedLocalRepo,
+    setSelectedLocalRepo,
+    localBranches,
+    setLocalBranches,
+    localBranchesLoading,
+    setLocalBranchesLoading,
+    discoverReposLoading,
+    setDiscoverReposLoading,
+    discoverReposLoaded,
+    setDiscoverReposLoaded,
+    selectedWorkflowId,
+    setSelectedWorkflowId,
+    fetchedSteps,
+    setFetchedSteps,
+    isCreatingSession,
+    setIsCreatingSession,
+    isCreatingTask,
+    setIsCreatingTask,
   };
 }
 
-export type DialogFormState = ReturnType<typeof useDialogFormState>;
+export type { DialogFormState } from "@/components/task-create-dialog-types";
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -199,8 +257,11 @@ export function useDiscoverReposEffect(
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const {
-    discoverReposLoaded, discoverReposLoading, setDiscoveredRepositories,
-    setDiscoverReposLoading, setDiscoverReposLoaded,
+    discoverReposLoaded,
+    discoverReposLoading,
+    setDiscoveredRepositories,
+    setDiscoverReposLoading,
+    setDiscoverReposLoaded,
   } = fs;
   useEffect(() => {
     if (!open || !workspaceId || repositoriesLoading || discoverReposLoaded || discoverReposLoading)
@@ -208,7 +269,9 @@ export function useDiscoverReposEffect(
     void Promise.resolve()
       .then(() => setDiscoverReposLoading(true))
       .then(() => discoverRepositoriesAction(workspaceId))
-      .then((r) => { setDiscoveredRepositories(r.repositories); })
+      .then((r) => {
+        setDiscoveredRepositories(r.repositories);
+      })
       .catch((e) => {
         toast({
           title: "Failed to discover repositories",
@@ -223,8 +286,13 @@ export function useDiscoverReposEffect(
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    discoverReposLoaded, discoverReposLoading, open, fs.discoveredRepositories.length,
-    repositoriesLoading, toast, workspaceId,
+    discoverReposLoaded,
+    discoverReposLoading,
+    open,
+    fs.discoveredRepositories.length,
+    repositoriesLoading,
+    toast,
+    workspaceId,
   ]);
 }
 
@@ -241,7 +309,9 @@ export function useLocalBranchesEffect(
     void Promise.resolve()
       .then(() => setLocalBranchesLoading(true))
       .then(() => listLocalRepositoryBranchesAction(workspaceId, repoPath))
-      .then((r) => { setLocalBranches(r.branches); })
+      .then((r) => {
+        setLocalBranches(r.branches);
+      })
       .catch((e) => {
         toast({
           title: "Failed to load branches",
@@ -250,24 +320,26 @@ export function useLocalBranchesEffect(
         });
         setLocalBranches([]);
       })
-      .finally(() => { setLocalBranchesLoading(false); });
+      .finally(() => {
+        setLocalBranchesLoading(false);
+      });
   }, [open, selectedLocalRepo, toast, workspaceId, setLocalBranches, setLocalBranchesLoading]);
 }
-
-type StoreSelections = {
-  agentProfiles: AgentProfileOption[];
-  environments: Environment[];
-  executors: Executor[];
-  workspaceDefaults: Workspace | null | undefined;
-};
 
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
   open: boolean,
   sel: StoreSelections,
 ) {
-  const { agentProfiles, environments, executors, workspaceDefaults } = sel;
-  const { agentProfileId, environmentId, executorId, setAgentProfileId, setEnvironmentId, setExecutorId } = fs;
+  const { agentProfiles, executors, workspaceDefaults } = sel;
+  const {
+    agentProfileId,
+    executorId,
+    executorProfileId,
+    setAgentProfileId,
+    setExecutorId,
+    setExecutorProfileId,
+  } = fs;
   useEffect(() => {
     if (!open || agentProfileId || agentProfiles.length === 0) return;
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
@@ -284,17 +356,6 @@ export function useDefaultSelectionsEffect(
   }, [open, agentProfileId, agentProfiles, workspaceDefaults, setAgentProfileId]);
 
   useEffect(() => {
-    if (!open || environmentId || environments.length === 0) return;
-    const defId = workspaceDefaults?.default_environment_id ?? null;
-    if (defId && environments.some((e: Environment) => e.id === defId)) {
-      void Promise.resolve().then(() => setEnvironmentId(defId));
-      return;
-    }
-    const local = environments.find((e: Environment) => e.kind === DEFAULT_LOCAL_ENVIRONMENT_KIND);
-    void Promise.resolve().then(() => setEnvironmentId(local?.id ?? environments[0].id));
-  }, [open, environmentId, environments, workspaceDefaults, setEnvironmentId]);
-
-  useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
     const defId = workspaceDefaults?.default_executor_id ?? null;
     if (defId && executors.some((e: Executor) => e.id === defId)) {
@@ -304,6 +365,28 @@ export function useDefaultSelectionsEffect(
     const local = executors.find((e: Executor) => e.type === DEFAULT_LOCAL_EXECUTOR_TYPE);
     void Promise.resolve().then(() => setExecutorId(local?.id ?? executors[0].id));
   }, [open, executorId, executors, workspaceDefaults, setExecutorId]);
+
+  // Auto-select first executor profile when none selected
+  useEffect(() => {
+    if (!open || executorProfileId || executors.length === 0) return;
+    const allProfiles = executors.flatMap((e) =>
+      (e.profiles ?? []).map((p) => ({ ...p, _executorId: e.id })),
+    );
+    if (allProfiles.length === 0) return;
+    void Promise.resolve().then(() => setExecutorProfileId(allProfiles[0].id));
+  }, [open, executorProfileId, executors, setExecutorProfileId]);
+
+  // Derive executorId from the selected executor profile
+  useEffect(() => {
+    if (!executorProfileId) return;
+    for (const executor of executors) {
+      const match = (executor.profiles ?? []).find((p) => p.id === executorProfileId);
+      if (match) {
+        void Promise.resolve().then(() => setExecutorId(executor.id));
+        return;
+      }
+    }
+  }, [executorProfileId, executors, setExecutorId]);
 }
 
 export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[]) {
@@ -353,6 +436,12 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     },
     [fs],
   );
+  const handleExecutorProfileChange = useCallback(
+    (value: string) => {
+      fs.setExecutorProfileId(value);
+    },
+    [fs],
+  );
   const handleTaskNameChange = useCallback(
     (value: string) => {
       fs.setTaskName(value);
@@ -368,77 +457,40 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     [fs],
   );
   const handleWorkflowChange = useCallback(
-    (value: string) => { fs.setSelectedWorkflowId(value); },
+    (value: string) => {
+      fs.setSelectedWorkflowId(value);
+    },
     [fs],
   );
 
   return {
-    handleRepositoryChange, handleAgentProfileChange, handleTaskNameChange,
-    handleBranchChange, handleWorkflowChange,
+    handleRepositoryChange,
+    handleAgentProfileChange,
+    handleExecutorProfileChange,
+    handleTaskNameChange,
+    handleBranchChange,
+    handleWorkflowChange,
   };
 }
 
-export function computePassthroughProfile(
-  agentProfileId: string,
-  agentProfiles: AgentProfileOption[],
-) {
-  if (!agentProfileId) return false;
-  return (
-    agentProfiles.find((p: AgentProfileOption) => p.id === agentProfileId)?.cli_passthrough === true
-  );
-}
-
-export function computeEffectiveStepId(
-  selectedWorkflowId: string | null,
-  workflowId: string | null,
-  fetchedSteps: StepType[] | null,
-  defaultStepId: string | null,
-) {
-  return selectedWorkflowId && selectedWorkflowId !== workflowId && fetchedSteps
-    ? (fetchedSteps[0]?.id ?? null)
-    : defaultStepId;
-}
-
-export function computeIsTaskStarted(
-  isEditMode: boolean,
-  editingTask?: { state?: Task["state"] } | null,
-) {
-  if (!isEditMode || !editingTask?.state) return false;
-  return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
-}
-
-type DialogComputedValues = {
-  isPassthroughProfile: boolean;
-  effectiveWorkflowId: string | null;
-  effectiveDefaultStepId: string | null;
-  workspaceDefaults: Workspace | null | undefined;
-  hasRepositorySelection: boolean;
-  branchOptions: ReturnType<typeof useBranchOptions>;
-  agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorOptions: ReturnType<typeof useExecutorOptions>;
-  executorHint: string | null;
-  headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
-  agentProfilesLoading: boolean;
-  executorsLoading: boolean;
-};
-
-type DialogComputedArgs = {
-  fs: DialogFormState;
-  open: boolean;
-  workspaceId: string | null;
-  workflowId: string | null;
-  defaultStepId: string | null;
-  branches: Branch[];
-  settingsData: { agentsLoaded: boolean; executorsLoaded: boolean };
-  agentProfiles: AgentProfileOption[];
-  workspaces: Workspace[];
-  executors: Executor[];
-  repositories: Repository[];
-};
+export {
+  computePassthroughProfile,
+  computeEffectiveStepId,
+  computeIsTaskStarted,
+} from "@/components/task-create-dialog-helpers";
 
 export function useDialogComputed({
-  fs, open, workspaceId, workflowId, defaultStepId, branches,
-  settingsData, agentProfiles, workspaces, executors, repositories,
+  fs,
+  open,
+  workspaceId,
+  workflowId,
+  defaultStepId,
+  branches,
+  settingsData,
+  agentProfiles,
+  workspaces,
+  executors,
+  repositories,
 }: DialogComputedArgs): DialogComputedValues {
   const isPassthroughProfile = useMemo(
     () => computePassthroughProfile(fs.agentProfileId, agentProfiles),
@@ -446,7 +498,10 @@ export function useDialogComputed({
   );
   const effectiveWorkflowId = fs.selectedWorkflowId ?? workflowId;
   const effectiveDefaultStepId = computeEffectiveStepId(
-    fs.selectedWorkflowId, workflowId, fs.fetchedSteps, defaultStepId,
+    fs.selectedWorkflowId,
+    workflowId,
+    fs.fetchedSteps,
+    defaultStepId,
   );
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
@@ -454,15 +509,33 @@ export function useDialogComputed({
   const hasRepositorySelection = Boolean(fs.repositoryId || fs.selectedLocalRepo);
   const branchOptions = useBranchOptions(fs.repositoryId ? branches : fs.localBranches);
   const agentProfileOptions = useAgentProfileOptions(agentProfiles);
-  const executorOptions = useExecutorOptions(executors);
+  const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
+    return executors.flatMap((executor) =>
+      (executor.profiles ?? []).map((p) => ({
+        ...p,
+        executor_type: p.executor_type ?? executor.type,
+        executor_name: p.executor_name ?? executor.name,
+      })),
+    );
+  }, [executors]);
+  const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   const executorHint = useExecutorHint(executors, fs.executorId);
   const { headerRepositoryOptions } = useRepositoryOptions(repositories, fs.discoveredRepositories);
   const agentProfilesLoading = open && !settingsData.agentsLoaded;
   const executorsLoading = open && !settingsData.executorsLoaded;
   return {
-    isPassthroughProfile, effectiveWorkflowId, effectiveDefaultStepId, workspaceDefaults,
-    hasRepositorySelection, branchOptions, agentProfileOptions, executorOptions,
-    executorHint, headerRepositoryOptions, agentProfilesLoading, executorsLoading,
+    isPassthroughProfile,
+    effectiveWorkflowId,
+    effectiveDefaultStepId,
+    workspaceDefaults,
+    hasRepositorySelection,
+    branchOptions,
+    agentProfileOptions,
+    executorProfileOptions,
+    executorHint,
+    headerRepositoryOptions,
+    agentProfilesLoading,
+    executorsLoading,
   };
 }
 
@@ -494,7 +567,6 @@ export function useTaskCreateDialogData(
   const workspaces = useAppStore((state) => state.workspaces.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
-  const environments = useAppStore((state) => state.environments.items);
   const settingsData = useAppStore((state) => state.settingsData);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
 
@@ -505,38 +577,53 @@ export function useTaskCreateDialogData(
     Boolean(open && fs.repositoryId),
   );
   const computed = useDialogComputed({
-    fs, open, workspaceId, workflowId, defaultStepId, branches,
-    settingsData, agentProfiles, workspaces, executors, repositories,
+    fs,
+    open,
+    workspaceId,
+    workflowId,
+    defaultStepId,
+    branches,
+    settingsData,
+    agentProfiles,
+    workspaces,
+    executors,
+    repositories,
   });
   return {
-    workflows, workspaces, agentProfiles, executors, environments, snapshots,
-    repositories, repositoriesLoading, branches, branchesLoading, computed,
+    workflows,
+    workspaces,
+    agentProfiles,
+    executors,
+    snapshots,
+    repositories,
+    repositoriesLoading,
+    branches,
+    branchesLoading,
+    computed,
   };
 }
 
-type TaskCreateEffectsArgs = {
-  open: boolean;
-  workspaceId: string | null;
-  workflowId: string | null;
-  repositories: Repository[];
-  repositoriesLoading: boolean;
-  branches: Branch[];
-  agentProfiles: AgentProfileOption[];
-  environments: Environment[];
-  executors: Executor[];
-  workspaceDefaults: Workspace | null | undefined;
-  toast: ReturnType<typeof useToast>["toast"];
-};
-
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const {
-    open, workspaceId, workflowId, repositories, repositoriesLoading,
-    branches, agentProfiles, environments, executors, workspaceDefaults, toast,
+    open,
+    workspaceId,
+    workflowId,
+    repositories,
+    repositoriesLoading,
+    branches,
+    agentProfiles,
+    executors,
+    workspaceDefaults,
+    toast,
   } = args;
   useWorkflowStepsEffect(fs, workflowId);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs, branches);
   useLocalBranchesEffect(fs, open, workspaceId, toast);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, environments, executors, workspaceDefaults });
+  useDefaultSelectionsEffect(fs, open, {
+    agentProfiles,
+    executors,
+    workspaceDefaults,
+  });
 }

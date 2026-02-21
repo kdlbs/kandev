@@ -518,6 +518,89 @@ func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error)
 	return s.repo.ListExecutors(ctx)
 }
 
+// Executor Profile operations
+
+func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutorProfileRequest) (*models.ExecutorProfile, error) {
+	if req.Name == "" {
+		return nil, fmt.Errorf("profile name is required")
+	}
+	if req.ExecutorID == "" {
+		return nil, fmt.Errorf("executor_id is required")
+	}
+	// Verify executor exists
+	if _, err := s.repo.GetExecutor(ctx, req.ExecutorID); err != nil {
+		return nil, fmt.Errorf("executor not found: %w", err)
+	}
+	profile := &models.ExecutorProfile{
+		ExecutorID:    req.ExecutorID,
+		Name:          req.Name,
+		McpPolicy:     req.McpPolicy,
+		Config:        req.Config,
+		PrepareScript: req.PrepareScript,
+		CleanupScript: req.CleanupScript,
+		EnvVars:       req.EnvVars,
+	}
+	if err := s.repo.CreateExecutorProfile(ctx, profile); err != nil {
+		return nil, err
+	}
+	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileCreated, profile)
+	return profile, nil
+}
+
+func (s *Service) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	return s.repo.GetExecutorProfile(ctx, id)
+}
+
+func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *UpdateExecutorProfileRequest) (*models.ExecutorProfile, error) {
+	profile, err := s.repo.GetExecutorProfile(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req.Name != nil {
+		profile.Name = *req.Name
+	}
+	if req.McpPolicy != nil {
+		profile.McpPolicy = *req.McpPolicy
+	}
+	if req.Config != nil {
+		profile.Config = req.Config
+	}
+	if req.PrepareScript != nil {
+		profile.PrepareScript = *req.PrepareScript
+	}
+	if req.CleanupScript != nil {
+		profile.CleanupScript = *req.CleanupScript
+	}
+	if req.EnvVars != nil {
+		profile.EnvVars = req.EnvVars
+	}
+	if err := s.repo.UpdateExecutorProfile(ctx, profile); err != nil {
+		return nil, err
+	}
+	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
+	return profile, nil
+}
+
+func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
+	profile, err := s.repo.GetExecutorProfile(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteExecutorProfile(ctx, id); err != nil {
+		return err
+	}
+	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileDeleted, profile)
+	return nil
+}
+
+func (s *Service) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
+	return s.repo.ListExecutorProfiles(ctx, executorID)
+}
+
+func (s *Service) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
+	return s.repo.ListAllExecutorProfiles(ctx)
+}
+
 // Environment operations
 
 func (s *Service) CreateEnvironment(ctx context.Context, req *CreateEnvironmentRequest) (*models.Environment, error) {

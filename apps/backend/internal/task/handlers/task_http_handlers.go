@@ -252,21 +252,22 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID    string                    `json:"workspace_id"`
-	WorkflowID     string                    `json:"workflow_id"`
-	WorkflowStepID string                    `json:"workflow_step_id"`
-	Title          string                    `json:"title"`
-	Description    string                    `json:"description,omitempty"`
-	Priority       int                       `json:"priority,omitempty"`
-	State          *v1.TaskState             `json:"state,omitempty"`
-	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position       int                       `json:"position,omitempty"`
-	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent     bool                      `json:"start_agent,omitempty"`
-	PrepareSession bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID     string                    `json:"executor_id,omitempty"`
-	PlanMode       bool                      `json:"plan_mode,omitempty"`
+	WorkspaceID       string                    `json:"workspace_id"`
+	WorkflowID        string                    `json:"workflow_id"`
+	WorkflowStepID    string                    `json:"workflow_step_id"`
+	Title             string                    `json:"title"`
+	Description       string                    `json:"description,omitempty"`
+	Priority          int                       `json:"priority,omitempty"`
+	State             *v1.TaskState             `json:"state,omitempty"`
+	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position          int                       `json:"position,omitempty"`
+	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent        bool                      `json:"start_agent,omitempty"`
+	PrepareSession    bool                      `json:"prepare_session,omitempty"`
+	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID        string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
+	PlanMode          bool                      `json:"plan_mode,omitempty"`
 }
 
 type createTaskResponse struct {
@@ -359,7 +360,7 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 	if body.PrepareSession && !body.StartAgent {
 		// Create session entry without launching the agent.
 		// The session stays in CREATED state until the user triggers it.
-		sessionID, err := h.orchestrator.PrepareTaskSession(c.Request.Context(), taskID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
+		sessionID, err := h.orchestrator.PrepareTaskSession(c.Request.Context(), taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID)
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
@@ -381,7 +382,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 	resolvedStepID string,
 ) {
 	// Create session entry synchronously so we can return the session ID immediately
-	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, resolvedStepID)
+	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID)
 	if err != nil {
 		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		// Continue without session - task was created successfully
@@ -398,7 +399,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 		defer cancel()
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		execution, err := h.orchestrator.StartTaskWithSession(startCtx, taskID, sessionID, body.AgentProfileID, executorID, body.Priority, description, stepID, body.PlanMode)
+		execution, err := h.orchestrator.StartTaskWithSession(startCtx, taskID, sessionID, body.AgentProfileID, executorID, body.ExecutorProfileID, body.Priority, description, stepID, body.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
 			return

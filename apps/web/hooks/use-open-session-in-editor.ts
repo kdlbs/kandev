@@ -17,9 +17,7 @@ type OpenEditorOptions = {
  * Parse an `internal://vscode?goto=file:line:col` sentinel URL.
  * Returns goto info or null if no file param.
  */
-function parseInternalVscodeURL(
-  url: string,
-): { file: string; line: number; col: number } | null {
+function parseInternalVscodeURL(url: string): { file: string; line: number; col: number } | null {
   const qIdx = url.indexOf("?goto=");
   if (qIdx === -1) return null;
 

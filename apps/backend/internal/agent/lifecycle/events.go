@@ -524,3 +524,35 @@ func (p *EventPublisher) PublishAvailableCommands(execution *AgentExecution, com
 			zap.Error(err))
 	}
 }
+
+// PublishPrepareProgress publishes an environment preparation progress event.
+func (p *EventPublisher) PublishPrepareProgress(sessionID string, payload *PrepareProgressEventPayload) {
+	if p.eventBus == nil {
+		return
+	}
+	if payload.Timestamp == "" {
+		payload.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	event := bus.NewEvent(events.ExecutorPrepareProgress, "lifecycle", payload)
+	if err := p.eventBus.Publish(context.Background(), events.ExecutorPrepareProgress, event); err != nil {
+		p.logger.Error("failed to publish prepare progress event",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// PublishPrepareCompleted publishes an environment preparation completed event.
+func (p *EventPublisher) PublishPrepareCompleted(sessionID string, payload *PrepareCompletedEventPayload) {
+	if p.eventBus == nil {
+		return
+	}
+	if payload.Timestamp == "" {
+		payload.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	event := bus.NewEvent(events.ExecutorPrepareCompleted, "lifecycle", payload)
+	if err := p.eventBus.Publish(context.Background(), events.ExecutorPrepareCompleted, event); err != nil {
+		p.logger.Error("failed to publish prepare completed event",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}

@@ -10,6 +10,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
+import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 
 type ContainerResizeContext = {
@@ -246,9 +247,7 @@ function MessageListBody({
 }
 
 function getSessionRunningState(sessionState: string | null | undefined) {
-  return (
-    sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING"
-  );
+  return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
 }
 
 function getLastTurnGroupId(items: RenderItem[]) {
@@ -360,6 +359,7 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
         isRunning={isRunning}
         handleScrollToMessage={handleScrollToMessage}
       />
+      {sessionId && <PrepareProgress sessionId={sessionId} />}
       <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
     </SessionPanelContent>
   );

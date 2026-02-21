@@ -110,12 +110,7 @@ function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
   }, [moveError, router]);
 
   const handleWorkflowSessionCreate = useCallback(
-    async (data: {
-      prompt: string;
-      agentProfileId: string;
-      executorId: string;
-      environmentId: string;
-    }) => {
+    async (data: { prompt: string; agentProfileId: string; executorId: string }) => {
       if (!workflowAutomation) return;
       const client = getWebSocketClient();
       if (!client) return;
@@ -179,22 +174,110 @@ interface KanbanBoardProps {
   onOpenTask?: (task: Task, sessionId: string) => void;
 }
 
-function useKanbanBoardSetup(onPreviewTask: KanbanBoardProps["onPreviewTask"], onOpenTask: KanbanBoardProps["onOpenTask"]) {
+function useKanbanBoardHooks(
+  searchQuery: string,
+  workspaceState: ReturnType<typeof useKanbanBoardStore>["workspaceState"],
+  workflowsState: ReturnType<typeof useKanbanBoardStore>["workflowsState"],
+) {
+  const {
+    isDialogOpen,
+    editingTask,
+    setIsDialogOpen,
+    setEditingTask,
+    handleCreate,
+    handleEdit,
+    handleDelete,
+    handleDialogOpenChange,
+    handleDialogSuccess,
+    handleWorkspaceChange,
+    handleWorkflowChange,
+    deletingTaskId,
+  } = useKanbanActions({ workspaceState, workflowsState });
+  const {
+    enablePreviewOnClick,
+    userSettings,
+    commitSettings,
+    activeSteps,
+    isMounted,
+    setTaskSessionAvailability,
+  } = useKanbanData({
+    onWorkspaceChange: handleWorkspaceChange,
+    onWorkflowChange: handleWorkflowChange,
+    searchQuery,
+  });
+  return {
+    isDialogOpen,
+    editingTask,
+    setIsDialogOpen,
+    setEditingTask,
+    handleCreate,
+    handleEdit,
+    handleDelete,
+    handleDialogOpenChange,
+    handleDialogSuccess,
+    deletingTaskId,
+    enablePreviewOnClick,
+    userSettings,
+    commitSettings,
+    activeSteps,
+    isMounted,
+    setTaskSessionAvailability,
+  };
+}
+
+function useKanbanBoardSetup(
+  onPreviewTask: KanbanBoardProps["onPreviewTask"],
+  onOpenTask: KanbanBoardProps["onOpenTask"],
+) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
   const [searchQuery, setSearchQuery] = useState("");
-  const { store, kanbanViewMode, kanban, workspaceState, workflowsState, setActiveWorkflow, setWorkflows } = useKanbanBoardStore();
+  const {
+    store,
+    kanbanViewMode,
+    kanban,
+    workspaceState,
+    workflowsState,
+    setActiveWorkflow,
+    setWorkflows,
+  } = useKanbanBoardStore();
 
   useAllWorkflowSnapshots(workspaceState.activeId);
 
-  const { isDialogOpen, editingTask, setIsDialogOpen, setEditingTask, handleCreate, handleEdit, handleDelete, handleDialogOpenChange, handleDialogSuccess, handleWorkspaceChange, handleWorkflowChange, deletingTaskId } = useKanbanActions({ workspaceState, workflowsState });
-  const { enablePreviewOnClick, userSettings, commitSettings, activeSteps, isMounted, setTaskSessionAvailability } = useKanbanData({ onWorkspaceChange: handleWorkspaceChange, onWorkflowChange: handleWorkflowChange, searchQuery });
-  const { handleOpenTask, handleCardClick } = useKanbanNavigation({ enablePreviewOnClick, isMobile, onPreviewTask, onOpenTask, setEditingTask, setIsDialogOpen, setTaskSessionAvailability });
-  const { workflowAutomation, setWorkflowAutomation, isWorkflowDialogOpen, setIsWorkflowDialogOpen, moveError, setMoveError, handleWorkflowAutomation, handleMoveError, handleGoToTask, handleWorkflowSessionCreate } = useWorkflowAutomationState(router);
+  const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
+  const { handleOpenTask, handleCardClick } = useKanbanNavigation({
+    enablePreviewOnClick: hooks.enablePreviewOnClick,
+    isMobile,
+    onPreviewTask,
+    onOpenTask,
+    setEditingTask: hooks.setEditingTask,
+    setIsDialogOpen: hooks.setIsDialogOpen,
+    setTaskSessionAvailability: hooks.setTaskSessionAvailability,
+  });
+  const automation = useWorkflowAutomationState(router);
 
-  useWorkflowSelection({ store, userSettings, workspaceState, workflowsState, commitSettings, setActiveWorkflow, setWorkflows });
+  useWorkflowSelection({
+    store,
+    userSettings: hooks.userSettings,
+    workspaceState,
+    workflowsState,
+    commitSettings: hooks.commitSettings,
+    setActiveWorkflow,
+    setWorkflows,
+  });
 
-  return { kanbanViewMode, kanban, workspaceState, workflowsState, searchQuery, setSearchQuery, isDialogOpen, editingTask, handleCreate, handleEdit, handleDelete, handleDialogOpenChange, handleDialogSuccess, deletingTaskId, activeSteps, isMounted, userSettings, workflowAutomation, setWorkflowAutomation, isWorkflowDialogOpen, setIsWorkflowDialogOpen, moveError, setMoveError, handleWorkflowAutomation, handleMoveError, handleGoToTask, handleWorkflowSessionCreate, handleOpenTask, handleCardClick };
+  return {
+    kanbanViewMode,
+    kanban,
+    workspaceState,
+    workflowsState,
+    searchQuery,
+    setSearchQuery,
+    ...hooks,
+    ...automation,
+    handleOpenTask,
+    handleCardClick,
+  };
 }
 
 export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}) {
@@ -204,7 +287,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
     return <div className="h-dvh w-full bg-background" />;
   }
 
-  const stepOptions = s.activeSteps.map((step) => ({ id: step.id, title: step.title, events: step.events }));
+  const stepOptions = s.activeSteps.map((step) => ({
+    id: step.id,
+    title: step.title,
+    events: step.events,
+  }));
 
   return (
     <div className="h-dvh w-full flex flex-col">
@@ -274,7 +361,6 @@ type KanbanBoardDialogsProps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
-    environmentId: string;
   }) => Promise<void>;
   moveError: MoveTaskError | null;
   setMoveError: (error: MoveTaskError | null) => void;

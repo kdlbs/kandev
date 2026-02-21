@@ -9,7 +9,11 @@ import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { QueuedMessageIndicatorHandle } from "./queued-message-indicator";
 import { useChatInputContainer } from "./use-chat-input-container";
-import { ChatInputBody, type ChatInputContextAreaProps, type ChatInputEditorAreaProps } from "./chat-input-body";
+import {
+  ChatInputBody,
+  type ChatInputContextAreaProps,
+  type ChatInputEditorAreaProps,
+} from "./chat-input-body";
 import type { ContextItem } from "@/lib/types/context";
 
 // Re-export ImageAttachment type for consumers
@@ -183,8 +187,15 @@ function buildEditorAreaProps(
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   function ChatInputContainer(props, ref) {
     const {
-      sessionId, taskId, taskTitle, taskDescription, isAgentBusy,
-      isStarting, isSending, isFailed = false, isPanelFocused,
+      sessionId,
+      taskId,
+      taskTitle,
+      taskDescription,
+      isAgentBusy,
+      isStarting,
+      isSending,
+      isFailed = false,
+      isPanelFocused,
       showRequestChangesTooltip = false,
     } = props;
 
@@ -202,16 +213,27 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     } as const;
 
     const s = useChatInputContainer({
-      ref, sessionId, isSending, isStarting, isFailed: p.isFailed, isAgentBusy,
-      hasAgentCommands: p.hasAgentCommands, isQueued: p.isQueued,
-      placeholder: props.placeholder, contextItems: p.contextItems,
+      ref,
+      sessionId,
+      isSending,
+      isStarting,
+      isFailed: p.isFailed,
+      isAgentBusy,
+      hasAgentCommands: p.hasAgentCommands,
+      isQueued: p.isQueued,
+      placeholder: props.placeholder,
+      contextItems: p.contextItems,
       pendingClarification: props.pendingClarification,
       onClarificationResolved: props.onClarificationResolved,
       pendingCommentsByFile: props.pendingCommentsByFile,
-      queuedMessage: props.queuedMessage, onCancelQueue: props.onCancelQueue,
-      updateQueueContent: props.updateQueueContent, todoItems: p.todoItems,
-      showRequestChangesTooltip, onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
-      onSubmit: props.onSubmit, queuedMessageRef: props.queuedMessageRef,
+      queuedMessage: props.queuedMessage,
+      onCancelQueue: props.onCancelQueue,
+      updateQueueContent: props.updateQueueContent,
+      todoItems: p.todoItems,
+      showRequestChangesTooltip,
+      onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
+      onSubmit: props.onSubmit,
+      queuedMessageRef: props.queuedMessageRef,
     });
 
     if (p.isFailed) {

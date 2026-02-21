@@ -6,7 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
-import type { WorkflowStepDTO } from "@/lib/types/http";
+import type { WorkflowStepDTO, MoveTaskResponse } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 export type WorkflowAutomation = {
@@ -84,10 +84,13 @@ function useDragAndDropRefs({ onWorkflowAutomation, onMoveError }: UseDragAndDro
   return { onWorkflowAutomationRef, onMoveErrorRef };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function maybeHandleWorkflowAutomation(task: Task, response: any, onWorkflowAutomationRef: {
-  current: DragAndDropOptions["onWorkflowAutomation"];
-}) {
+async function maybeHandleWorkflowAutomation(
+  task: Task,
+  response: MoveTaskResponse,
+  onWorkflowAutomationRef: {
+    current: DragAndDropOptions["onWorkflowAutomation"];
+  },
+) {
   const hasAutoStart = response.workflow_step?.events?.on_enter?.some(
     (a: { type: string }) => a.type === "auto_start_agent",
   );

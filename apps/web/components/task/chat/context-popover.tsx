@@ -132,10 +132,7 @@ function PromptsSection({ query, prompts, contextFiles, onToggleFile }: PromptsS
   );
 }
 
-function useContextPopoverState(
-  open: boolean,
-  sessionId: string | null,
-) {
+function useContextPopoverState(open: boolean, sessionId: string | null) {
   const [query, setQuery] = useState("");
   const [fileResults, setFileResults] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -164,7 +161,10 @@ function useContextPopoverState(
       try {
         const client = getWebSocketClient();
         if (!client) {
-          if (!cancelled) { setFileResults([]); setIsLoading(false); }
+          if (!cancelled) {
+            setFileResults([]);
+            setIsLoading(false);
+          }
           return;
         }
         const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);

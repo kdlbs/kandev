@@ -31,28 +31,24 @@ const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
 type DiffViewerActionsProps = Omit<DiffViewerToolbarProps, "data"> & { filePath: string };
 
-function DiffViewerActions({
-  filePath,
+function DiffViewerToggleButtons({
   foldUnchanged,
   setFoldUnchanged,
   wordWrap,
   setWordWrap,
   globalViewMode,
   setGlobalViewMode,
-  onCopyDiff,
-  onOpenFile,
-  onRevert,
-}: DiffViewerActionsProps) {
+}: Pick<
+  DiffViewerActionsProps,
+  | "foldUnchanged"
+  | "setFoldUnchanged"
+  | "wordWrap"
+  | "setWordWrap"
+  | "globalViewMode"
+  | "setGlobalViewMode"
+>) {
   return (
-    <div className="flex items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className={iconBtn} onClick={onCopyDiff}>
-            <IconCopy className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Copy diff</TooltipContent>
-      </Tooltip>
+    <>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -70,16 +66,6 @@ function DiffViewerActions({
         </TooltipTrigger>
         <TooltipContent>{foldUnchanged ? "Show all lines" : "Fold unchanged lines"}</TooltipContent>
       </Tooltip>
-      {onRevert && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onRevert(filePath)}>
-              <IconArrowBackUp className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Revert changes</TooltipContent>
-        </Tooltip>
-      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -112,10 +98,64 @@ function DiffViewerActions({
           {globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
         </TooltipContent>
       </Tooltip>
+    </>
+  );
+}
+
+function DiffViewerActions({
+  filePath,
+  foldUnchanged,
+  setFoldUnchanged,
+  wordWrap,
+  setWordWrap,
+  globalViewMode,
+  setGlobalViewMode,
+  onCopyDiff,
+  onOpenFile,
+  onRevert,
+}: DiffViewerActionsProps) {
+  return (
+    <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="sm" className={iconBtn} onClick={onCopyDiff}>
+            <IconCopy className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copy diff</TooltipContent>
+      </Tooltip>
+      <DiffViewerToggleButtons
+        foldUnchanged={foldUnchanged}
+        setFoldUnchanged={setFoldUnchanged}
+        wordWrap={wordWrap}
+        setWordWrap={setWordWrap}
+        globalViewMode={globalViewMode}
+        setGlobalViewMode={setGlobalViewMode}
+      />
+      {onRevert && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={iconBtn}
+              onClick={() => onRevert(filePath)}
+            >
+              <IconArrowBackUp className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Revert changes</TooltipContent>
+        </Tooltip>
+      )}
       {onOpenFile && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onOpenFile(filePath)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={iconBtn}
+              onClick={() => onOpenFile(filePath)}
+            >
               <IconPencil className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>

@@ -1,11 +1,16 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
@@ -76,6 +81,19 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 	}
 	cleanups = append(cleanups, cleanup)
 
+	// Initialize master key and secrets store
+	kandevDir := filepath.Join(os.Getenv("HOME"), ".kandev")
+	masterKeyProvider, err := secrets.NewMasterKeyProvider(kandevDir)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("master key: %w", err)
+	}
+
+	secretStore, cleanup, err := secrets.Provide(writer, reader, masterKeyProvider)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("secret store: %w", err)
+	}
+	cleanups = append(cleanups, cleanup)
+
 	repos := &Repositories{
 		Task:          taskRepoImpl,
 		Analytics:     analyticsRepo,
@@ -85,6 +103,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 		Editor:        editorRepo,
 		Prompts:       promptRepo,
 		Workflow:      workflowRepo,
+		Secrets:       secretStore,
 	}
 	return pool, repos, cleanups, nil
 }

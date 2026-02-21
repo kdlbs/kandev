@@ -37,7 +37,6 @@ export type {
 } from "./workspace/types";
 export type {
   ExecutorsState,
-  EnvironmentsState,
   SettingsAgentsState,
   AgentDiscoveryState,
   AvailableAgentsState,
@@ -45,6 +44,7 @@ export type {
   AgentProfilesState,
   EditorsState,
   PromptsState,
+  SecretsState,
   NotificationProvidersState,
   SettingsDataState,
   UserSettingsState,
@@ -87,6 +87,9 @@ export type {
   AvailableCommandsState,
   UserShellInfo,
   UserShellsState,
+  PrepareStepInfo,
+  SessionPrepareState,
+  PrepareProgressState,
 } from "./session-runtime/types";
 export type {
   PreviewStage,

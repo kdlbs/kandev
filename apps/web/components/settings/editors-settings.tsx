@@ -530,7 +530,10 @@ export function EditorsSettings() {
   );
 
   const customEditors = useMemo(() => sortCustomEditors(editors.filter(isCustomEditor)), [editors]);
-  const builtInEditors = useMemo(() => editors.filter((editor) => !isCustomEditor(editor)), [editors]);
+  const builtInEditors = useMemo(
+    () => editors.filter((editor) => !isCustomEditor(editor)),
+    [editors],
+  );
   const availableEditors = useMemo(() => resolveAvailableEditors(editors), [editors]);
   const defaultOptions = useMemo<ComboboxOption[]>(
     () => buildDefaultEditorOptions(availableEditors, state.defaultEditorId),

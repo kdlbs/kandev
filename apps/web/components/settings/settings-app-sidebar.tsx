@@ -6,11 +6,11 @@ import { usePathname } from "next/navigation";
 import {
   IconSettings,
   IconFolder,
-  IconServer,
   IconRobot,
   IconBell,
   IconCode,
   IconCpu,
+  IconKey,
   IconMessageCircle,
 } from "@tabler/icons-react";
 import {
@@ -33,7 +33,8 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
-import type { Workspace, Agent, AgentProfile, Environment, Executor } from "@/lib/types/http";
+import { getExecutorIcon } from "@/lib/executor-icons";
+import type { Workspace, Agent, AgentProfile, Executor } from "@/lib/types/http";
 
 type GeneralSidebarSectionProps = {
   pathname: string;
@@ -180,71 +181,56 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
   );
 }
 
-type ResourceSidebarSectionProps = {
+type ExecutorsSidebarSectionProps = {
   pathname: string;
   executors: Executor[];
-  environments: Environment[];
 };
 
-function ResourceSidebarSection({
-  pathname,
-  executors,
-  environments,
-}: ResourceSidebarSectionProps) {
-  return (
-    <>
-      {/* Executors */}
-      <SidebarMenuItem>
-        <SidebarMenuButton asChild tooltip="Executors">
-          <Link href="/settings/executors">
-            <IconCpu className="h-4 w-4" />
-            <span>Executors</span>
-          </Link>
-        </SidebarMenuButton>
-        {executors.length > 0 && (
-          <SidebarMenuSub className="ml-3 mt-1">
-            {executors.map((executor: Executor) => (
-              <SidebarMenuSubItem key={executor.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === `/settings/executor/${executor.id}`}
-                >
-                  <Link href={`/settings/executor/${executor.id}`}>
-                    <span>{executor.name}</span>
-                  </Link>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        )}
-      </SidebarMenuItem>
+function ExecutorsSidebarSection({ pathname, executors }: ExecutorsSidebarSectionProps) {
+  const allProfiles = executors.flatMap((e) =>
+    (e.profiles ?? []).map((p) => ({ ...p, executorType: e.type })),
+  );
 
-      {/* Environments */}
-      <SidebarMenuItem>
-        <SidebarMenuButton asChild tooltip="Environments">
-          <Link href="/settings/environments">
-            <IconServer className="h-4 w-4" />
-            <span>Environments</span>
-          </Link>
-        </SidebarMenuButton>
-        {environments.length > 0 && (
-          <SidebarMenuSub className="ml-3 mt-1">
-            {environments.map((env: Environment) => (
-              <SidebarMenuSubItem key={env.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === `/settings/environment/${env.id}`}
-                >
-                  <Link href={`/settings/environment/${env.id}`}>
-                    <span>{env.name}</span>
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="Executors" isActive={pathname === "/settings/executors"}>
+        <Link href="/settings/executors">
+          <IconCpu className="h-4 w-4" />
+          <span>Executors</span>
+        </Link>
+      </SidebarMenuButton>
+      {allProfiles.length > 0 && (
+        <SidebarMenuSub className="ml-3 mt-1">
+          {allProfiles.map((profile) => {
+            const Icon = getExecutorIcon(profile.executorType);
+            const profilePath = `/settings/executors/${profile.id}`;
+            return (
+              <SidebarMenuSubItem key={profile.id}>
+                <SidebarMenuSubButton asChild size="sm" isActive={pathname === profilePath}>
+                  <Link href={profilePath} className="!flex items-center gap-1.5">
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span>{profile.name}</span>
                   </Link>
                 </SidebarMenuSubButton>
               </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        )}
-      </SidebarMenuItem>
-    </>
+            );
+          })}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+function SecretsSidebarSection({ pathname }: { pathname: string }) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={pathname === "/settings/general/secrets"}>
+        <Link href="/settings/general/secrets">
+          <IconKey className="h-4 w-4" />
+          <span>Secrets</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 
@@ -252,7 +238,6 @@ export function SettingsAppSidebar() {
   const pathname = usePathname();
   const { setOpenMobile, isMobile } = useSidebar();
   const workspaces = useAppStore((state) => state.workspaces.items);
-  const environments = useAppStore((state) => state.environments.items);
   const executors = useAppStore((state) => state.executors.items);
   const agents = useAppStore((state) => state.settingsAgents.items);
   useAvailableAgents();
@@ -302,11 +287,8 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
-                <ResourceSidebarSection
-                  pathname={pathname}
-                  executors={executors}
-                  environments={environments}
-                />
+                <ExecutorsSidebarSection pathname={pathname} executors={executors} />
+                <SecretsSidebarSection pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

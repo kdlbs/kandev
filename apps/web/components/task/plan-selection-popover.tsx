@@ -132,7 +132,8 @@ function usePopoverComposer(
     handleSubmit,
     handleKeyDown,
     isDisabled: !comment.trim(),
-    previewText: selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText,
+    previewText:
+      selectedText.length > 80 ? selectedText.slice(0, 80).trim() + "\u2026" : selectedText,
   };
 }
 

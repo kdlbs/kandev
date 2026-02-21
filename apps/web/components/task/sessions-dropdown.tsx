@@ -197,11 +197,11 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           activeSessionId={activeSessionId}
           primarySessionId={primarySessionId}
           currentTime={currentTime}
-        resolveAgentLabel={resolveAgentLabel}
-        onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
-        onSetPrimary={onSetPrimary}
-        onNewSession={() => setShowNewSessionDialog(true)}
-      />
+          resolveAgentLabel={resolveAgentLabel}
+          onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
+          onSetPrimary={onSetPrimary}
+          onNewSession={() => setShowNewSessionDialog(true)}
+        />
       </DropdownMenu>
       <NewSessionDialog
         open={showNewSessionDialog}

@@ -129,6 +129,27 @@ type UpdateExecutorRequest struct {
 	Config    map[string]string      `json:"config,omitempty"`
 }
 
+// CreateExecutorProfileRequest contains the data for creating an executor profile
+type CreateExecutorProfileRequest struct {
+	ExecutorID    string                 `json:"executor_id"`
+	Name          string                 `json:"name"`
+	McpPolicy     string                 `json:"mcp_policy"`
+	Config        map[string]string      `json:"config,omitempty"`
+	PrepareScript string                 `json:"prepare_script"`
+	CleanupScript string                 `json:"cleanup_script"`
+	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+}
+
+// UpdateExecutorProfileRequest contains the data for updating an executor profile
+type UpdateExecutorProfileRequest struct {
+	Name          *string                `json:"name,omitempty"`
+	McpPolicy     *string                `json:"mcp_policy,omitempty"`
+	Config        map[string]string      `json:"config,omitempty"`
+	PrepareScript *string                `json:"prepare_script,omitempty"`
+	CleanupScript *string                `json:"cleanup_script,omitempty"`
+	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+}
+
 // CreateEnvironmentRequest contains the data for creating an environment
 type CreateEnvironmentRequest struct {
 	Name         string                 `json:"name"`

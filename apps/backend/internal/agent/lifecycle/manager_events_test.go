@@ -66,7 +66,7 @@ func createTestManagerWithTracking() (*Manager, *MockEventBusWithTracking) {
 	eventBus := &MockEventBusWithTracking{}
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
-	mgr := NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, nil, RuntimeFallbackWarn, log)
+	mgr := NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, log)
 	return mgr, eventBus
 }
 

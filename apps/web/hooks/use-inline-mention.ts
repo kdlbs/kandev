@@ -256,7 +256,14 @@ type MentionItemsOptions = {
   onPromptSelect?: (id: string, name: string) => void;
 };
 
-function useMentionItems({ query, fileResults, prompts, onPlanSelect, onFileSelect, onPromptSelect }: MentionItemsOptions) {
+function useMentionItems({
+  query,
+  fileResults,
+  prompts,
+  onPlanSelect,
+  onFileSelect,
+  onPromptSelect,
+}: MentionItemsOptions) {
   const planItem = useMemo((): MentionItem | null => {
     if (!onPlanSelect) return null;
     return makePlanItem(onPlanSelect);

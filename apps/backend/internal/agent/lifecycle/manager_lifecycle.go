@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -19,16 +19,16 @@ const containerStateExited = "exited"
 
 // Start starts the lifecycle manager background tasks
 func (m *Manager) Start(ctx context.Context) error {
-	if m.runtimeRegistry == nil {
+	if m.executorRegistry == nil {
 		m.logger.Warn("no runtime registry configured")
 		return nil
 	}
 
-	runtimeNames := m.runtimeRegistry.List()
+	runtimeNames := m.executorRegistry.List()
 	m.logger.Info("starting lifecycle manager", zap.Int("runtimes", len(runtimeNames)))
 
 	// Check health of all registered runtimes
-	healthResults := m.runtimeRegistry.HealthCheckAll(ctx)
+	healthResults := m.executorRegistry.HealthCheckAll(ctx)
 	for name, err := range healthResults {
 		if err != nil {
 			m.logger.Warn("runtime health check failed",
@@ -40,7 +40,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Try to recover executions from all runtimes
-	recovered, err := m.runtimeRegistry.RecoverAll(ctx)
+	recovered, err := m.executorRegistry.RecoverAll(ctx)
 	if err != nil {
 		m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 	}
@@ -94,8 +94,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("cleanup loop started")
 	}
 
+	// Start health check loop for registered executor backends
+	m.wg.Add(1)
+	go m.healthCheckLoop(ctx)
+	m.logger.Info("health check loop started")
+
 	// Set up callbacks for passthrough mode (using standalone runtime)
-	if standaloneRT, err := m.runtimeRegistry.GetRuntime(runtime.NameStandalone); err == nil {
+	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
 			// Turn complete callback
 			interactiveRunner.SetTurnCompleteCallback(func(sessionID string) {
@@ -144,6 +149,39 @@ func (m *Manager) Stop() error {
 	m.wg.Wait()
 
 	return nil
+}
+
+// healthCheckLoop periodically checks the health of all registered executor backends.
+func (m *Manager) healthCheckLoop(ctx context.Context) {
+	defer m.wg.Done()
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.runHealthChecks(ctx)
+		}
+	}
+}
+
+// runHealthChecks runs health checks on all registered executor backends.
+func (m *Manager) runHealthChecks(ctx context.Context) {
+	if m.executorRegistry == nil {
+		return
+	}
+	results := m.executorRegistry.HealthCheckAll(ctx)
+	for name, err := range results {
+		if err != nil {
+			m.logger.Warn("executor backend health check failed",
+				zap.String("executor", string(name)),
+				zap.Error(err))
+		}
+	}
 }
 
 // StopAllAgents attempts a graceful shutdown of all active agents concurrently.

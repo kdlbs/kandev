@@ -81,6 +81,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   availableCommands: { bySessionId: {} },
   sessionMode: { bySessionId: {} },
   userShells: { bySessionId: {}, loading: {}, loaded: {} },
+  prepareProgress: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];

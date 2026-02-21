@@ -172,6 +172,9 @@ type LaunchRequest struct {
 	ExecutorType   string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig map[string]string // Executor config (docker_host, git_token, etc.)
 
+	// Environment preparation
+	SetupScript string // Setup script to run before agent starts
+
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
 	RepositoryID         string // Repository ID for worktree tracking

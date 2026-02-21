@@ -68,8 +68,29 @@ type ExecutorDTO struct {
 	IsSystem  bool                  `json:"is_system"`
 	Resumable bool                  `json:"resumable"`
 	Config    map[string]string     `json:"config,omitempty"`
+	Profiles  []ExecutorProfileDTO  `json:"profiles,omitempty"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
+}
+
+type ExecutorProfileDTO struct {
+	ID            string                 `json:"id"`
+	ExecutorID    string                 `json:"executor_id"`
+	ExecutorType  string                 `json:"executor_type,omitempty"`
+	ExecutorName  string                 `json:"executor_name,omitempty"`
+	Name          string                 `json:"name"`
+	McpPolicy     string                 `json:"mcp_policy,omitempty"`
+	Config        map[string]string      `json:"config,omitempty"`
+	PrepareScript string                 `json:"prepare_script"`
+	CleanupScript string                 `json:"cleanup_script"`
+	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+}
+
+type ListExecutorProfilesResponse struct {
+	Profiles []ExecutorProfileDTO `json:"profiles"`
+	Total    int                  `json:"total"`
 }
 
 type EnvironmentDTO struct {
@@ -336,6 +357,32 @@ func FromExecutor(executor *models.Executor) ExecutorDTO {
 		CreatedAt: executor.CreatedAt,
 		UpdatedAt: executor.UpdatedAt,
 	}
+}
+
+func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
+	return ExecutorProfileDTO{
+		ID:            profile.ID,
+		ExecutorID:    profile.ExecutorID,
+		Name:          profile.Name,
+		McpPolicy:     profile.McpPolicy,
+		Config:        profile.Config,
+		PrepareScript: profile.PrepareScript,
+		CleanupScript: profile.CleanupScript,
+		EnvVars:       profile.EnvVars,
+		CreatedAt:     profile.CreatedAt,
+		UpdatedAt:     profile.UpdatedAt,
+	}
+}
+
+// FromExecutorProfileWithExecutor converts an ExecutorProfile model to a DTO
+// with executor type and name populated.
+func FromExecutorProfileWithExecutor(profile *models.ExecutorProfile, executor *models.Executor) ExecutorProfileDTO {
+	d := FromExecutorProfile(profile)
+	if executor != nil {
+		d.ExecutorType = string(executor.Type)
+		d.ExecutorName = executor.Name
+	}
+	return d
 }
 
 func FromEnvironment(environment *models.Environment) EnvironmentDTO {

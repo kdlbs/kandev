@@ -1,6 +1,12 @@
 "use client";
 
-import { IconBrain, IconCode, IconExternalLink, IconListCheck, IconPhoto } from "@tabler/icons-react";
+import {
+  IconBrain,
+  IconCode,
+  IconExternalLink,
+  IconListCheck,
+  IconPhoto,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { ContentBlock, RichMetadata } from "@/components/task/chat/types";
@@ -129,16 +135,15 @@ export function RichBlocks({ comment }: { comment: Message }) {
           </pre>
         </div>
       )}
-      {contentBlocks.length > 0 && contentBlocks.map((block, i) => (
-        <ContentBlockView key={i} block={block} />
-      ))}
+      {contentBlocks.length > 0 &&
+        contentBlocks.map((block, i) => <ContentBlockView key={i} block={block} />)}
     </>
   );
 }
 
 function ContentBlockView({ block }: { block: ContentBlock }) {
   switch (block.type) {
-    case 'image':
+    case "image":
       return (
         <div className="mt-3 rounded-md border border-border/50 bg-background/60 p-2">
           <div className="flex items-center gap-2 text-muted-foreground mb-1 text-xs uppercase tracking-wide">
@@ -148,22 +153,18 @@ function ContentBlockView({ block }: { block: ContentBlock }) {
           {block.data && (
             // eslint-disable-next-line @next/next/no-img-element -- base64 data URIs are not optimizable by next/image
             <img
-              src={block.uri || `data:${block.mime_type || 'image/png'};base64,${block.data}`}
+              src={block.uri || `data:${block.mime_type || "image/png"};base64,${block.data}`}
               alt="Agent image"
               className="max-w-full max-h-96 rounded"
             />
           )}
           {block.uri && !block.data && (
             // eslint-disable-next-line @next/next/no-img-element -- external agent image URIs
-            <img
-              src={block.uri}
-              alt="Agent image"
-              className="max-w-full max-h-96 rounded"
-            />
+            <img src={block.uri} alt="Agent image" className="max-w-full max-h-96 rounded" />
           )}
         </div>
       );
-    case 'resource_link':
+    case "resource_link":
       return (
         <a
           href={block.uri}
@@ -173,7 +174,9 @@ function ContentBlockView({ block }: { block: ContentBlock }) {
         >
           <IconExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <div className="min-w-0">
-            <div className="font-medium text-foreground truncate">{block.title || block.name || block.uri}</div>
+            <div className="font-medium text-foreground truncate">
+              {block.title || block.name || block.uri}
+            </div>
             {block.description && (
               <div className="text-muted-foreground truncate">{block.description}</div>
             )}

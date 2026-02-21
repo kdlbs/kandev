@@ -5,8 +5,10 @@ import type {
   ListAgentDiscoveryResponse,
   ListAvailableAgentsResponse,
   AgentProfileMcpConfig,
-  ListEnvironmentsResponse,
   ListExecutorsResponse,
+  ListExecutorProfilesResponse,
+  ExecutorProfile,
+  ProfileEnvVar,
   NotificationProvidersResponse,
   NotificationProvider,
   EditorsResponse,
@@ -52,11 +54,92 @@ export async function listExecutors(options?: ApiRequestOptions): Promise<ListEx
   return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
 }
 
-// Environments
-export async function listEnvironments(
+// Executor profiles
+export async function listExecutorProfiles(
+  executorId: string,
   options?: ApiRequestOptions,
-): Promise<ListEnvironmentsResponse> {
-  return fetchJson<ListEnvironmentsResponse>("/api/v1/environments", options);
+): Promise<ListExecutorProfilesResponse> {
+  return fetchJson<ListExecutorProfilesResponse>(
+    `/api/v1/executors/${executorId}/profiles`,
+    options,
+  );
+}
+
+export async function listAllExecutorProfiles(
+  options?: ApiRequestOptions,
+): Promise<ListExecutorProfilesResponse> {
+  return fetchJson<ListExecutorProfilesResponse>("/api/v1/executor-profiles", options);
+}
+
+export type ScriptPlaceholder = {
+  key: string;
+  description: string;
+  example: string;
+  executor_types: string[];
+};
+
+export async function listScriptPlaceholders(
+  options?: ApiRequestOptions,
+): Promise<{ placeholders: ScriptPlaceholder[] }> {
+  return fetchJson<{ placeholders: ScriptPlaceholder[] }>("/api/v1/script-placeholders", options);
+}
+
+export async function fetchDefaultScripts(
+  executorType: string,
+  options?: ApiRequestOptions,
+): Promise<{ prepare_script: string; cleanup_script: string }> {
+  return fetchJson<{ prepare_script: string; cleanup_script: string }>(
+    `/api/v1/executor-profiles/default-script?type=${encodeURIComponent(executorType)}`,
+    options,
+  );
+}
+
+export async function createExecutorProfile(
+  executorId: string,
+  payload: {
+    name: string;
+    mcp_policy?: string;
+    config?: Record<string, string>;
+    prepare_script?: string;
+    cleanup_script?: string;
+    env_vars?: ProfileEnvVar[];
+  },
+  options?: ApiRequestOptions,
+): Promise<ExecutorProfile> {
+  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function updateExecutorProfile(
+  executorId: string,
+  profileId: string,
+  payload: {
+    name?: string;
+    mcp_policy?: string;
+    config?: Record<string, string>;
+    prepare_script?: string;
+    cleanup_script?: string;
+    env_vars?: ProfileEnvVar[];
+  },
+  options?: ApiRequestOptions,
+): Promise<ExecutorProfile> {
+  return fetchJson<ExecutorProfile>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteExecutorProfile(
+  executorId: string,
+  profileId: string,
+  options?: ApiRequestOptions,
+): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`/api/v1/executors/${executorId}/profiles/${profileId}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
 }
 
 // Agents
@@ -246,5 +329,113 @@ export async function deleteNotificationProvider(providerId: string, options?: A
   return fetchJson<void>(`/api/v1/notification-providers/${providerId}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
+}
+
+// Docker management
+
+export type DockerContainer = {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  started_at?: string;
+};
+
+export function buildDockerImageUrl(payload: {
+  dockerfile: string;
+  tag: string;
+  build_args?: Record<string, string>;
+}): string {
+  // Returns the URL for SSE streaming. Caller should use EventSource or fetch with streaming.
+  const params = new URLSearchParams();
+  params.set("dockerfile", payload.dockerfile);
+  params.set("tag", payload.tag);
+  if (payload.build_args) {
+    params.set("build_args", JSON.stringify(payload.build_args));
+  }
+  return `/api/v1/docker/build?${params.toString()}`;
+}
+
+export async function buildDockerImage(
+  payload: {
+    dockerfile: string;
+    tag: string;
+    build_args?: Record<string, string>;
+  },
+  options?: ApiRequestOptions,
+): Promise<Response> {
+  const baseUrl = options?.baseUrl ?? "";
+  return fetch(`${baseUrl}/api/v1/docker/build`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    ...(options?.init ?? {}),
+  });
+}
+
+export async function listDockerContainers(
+  filter?: { image?: string; labels?: Record<string, string> },
+  options?: ApiRequestOptions,
+): Promise<{ containers: DockerContainer[] }> {
+  const params = new URLSearchParams();
+  if (filter?.image) params.set("image", filter.image);
+  if (filter?.labels) params.set("labels", JSON.stringify(filter.labels));
+  const qs = params.toString();
+  return fetchJson<{ containers: DockerContainer[] }>(
+    `/api/v1/docker/containers${qs ? `?${qs}` : ""}`,
+    options,
+  );
+}
+
+export async function stopDockerContainer(id: string, options?: ApiRequestOptions): Promise<void> {
+  await fetchJson<{ success: boolean }>(`/api/v1/docker/containers/${id}/stop`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+export async function removeDockerContainer(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<{ success: boolean }>(`/api/v1/docker/containers/${id}`, {
+    ...options,
+    init: { method: "DELETE", ...(options?.init ?? {}) },
+  });
+}
+
+// Sprites network policies
+
+export type NetworkPolicyRule = {
+  domain: string;
+  action: "allow" | "deny";
+  include?: string;
+};
+
+export type NetworkPolicy = {
+  rules: NetworkPolicyRule[];
+};
+
+export async function getSpritesNetworkPolicies(
+  secretId: string,
+  spriteName: string,
+  options?: ApiRequestOptions,
+): Promise<NetworkPolicy> {
+  const params = new URLSearchParams({ secret_id: secretId, sprite_name: spriteName });
+  return fetchJson<NetworkPolicy>(`/api/v1/sprites/network-policies?${params.toString()}`, options);
+}
+
+export async function updateSpritesNetworkPolicies(
+  secretId: string,
+  spriteName: string,
+  policy: NetworkPolicy,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  const params = new URLSearchParams({ secret_id: secretId, sprite_name: spriteName });
+  await fetchJson<void>(`/api/v1/sprites/network-policies?${params.toString()}`, {
+    ...options,
+    init: { method: "PUT", body: JSON.stringify(policy), ...(options?.init ?? {}) },
   });
 }

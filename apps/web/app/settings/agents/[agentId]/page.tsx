@@ -7,7 +7,13 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import type { Agent, AgentDiscovery, AvailableAgent, PermissionSetting, ModelConfig } from "@/lib/types/http";
+import type {
+  Agent,
+  AgentDiscovery,
+  AvailableAgent,
+  PermissionSetting,
+  ModelConfig,
+} from "@/lib/types/http";
 import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { generateUUID } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";

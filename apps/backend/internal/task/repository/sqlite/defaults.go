@@ -105,6 +105,9 @@ func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
 	if err := r.ensureDefaultExecutors(ctx); err != nil {
 		return err
 	}
+	if err := r.ensureDefaultExecutorProfiles(ctx); err != nil {
+		return err
+	}
 	return r.ensureDefaultEnvironment(ctx)
 }
 
@@ -141,6 +144,7 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 		{id: models.ExecutorIDLocal, name: "Local", execType: models.ExecutorTypeLocal, status: models.ExecutorStatusActive, isSystem: true, resumable: true, config: map[string]string{}},
 		{id: models.ExecutorIDWorktree, name: "Worktree", execType: models.ExecutorTypeWorktree, status: models.ExecutorStatusActive, isSystem: true, resumable: true, config: map[string]string{}},
 		{id: models.ExecutorIDLocalDocker, name: "Local Docker", execType: models.ExecutorTypeLocalDocker, status: models.ExecutorStatusActive, isSystem: false, resumable: true, config: map[string]string{"docker_host": config.DefaultDockerHost()}},
+		{id: models.ExecutorIDSprites, name: "Sprites.dev", execType: models.ExecutorTypeSprites, status: models.ExecutorStatusDisabled, isSystem: false, resumable: false, config: map[string]string{}},
 	}
 	for _, executor := range executors {
 		configJSON, err := json.Marshal(executor.config)
@@ -152,6 +156,35 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`), executor.id, executor.name, executor.execType, executor.status, dialect.BoolToInt(executor.isSystem), dialect.BoolToInt(executor.resumable), string(configJSON), now, now); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) ensureDefaultExecutorProfiles(ctx context.Context) error {
+	profileSeeds := []struct {
+		executorID string
+		name       string
+	}{
+		{models.ExecutorIDLocal, "Local"},
+		{models.ExecutorIDWorktree, "Worktree"},
+	}
+	for _, seed := range profileSeeds {
+		var profileCount int
+		if err := r.db.QueryRowContext(ctx, r.db.Rebind(
+			"SELECT COUNT(1) FROM executor_profiles WHERE executor_id = ?",
+		), seed.executorID).Scan(&profileCount); err != nil {
+			return err
+		}
+		if profileCount == 0 {
+			now := time.Now().UTC()
+			id := uuid.New().String()
+			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+				INSERT INTO executor_profiles (id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`), id, seed.executorID, seed.name, "", "{}", "", "", now, now); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

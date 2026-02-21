@@ -4,19 +4,16 @@ import type {
   AvailableAgent,
   AgentDiscovery,
   CustomPrompt,
-  Environment,
   EditorOption,
   Executor,
   NotificationProvider,
   SavedLayout,
 } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
+import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
 export type ExecutorsState = {
   items: Executor[];
-};
-
-export type EnvironmentsState = {
-  items: Environment[];
 };
 
 export type SettingsAgentsState = {
@@ -72,6 +69,19 @@ export type PromptsState = {
   loading: boolean;
 };
 
+export type SecretsState = {
+  items: SecretListItem[];
+  loaded: boolean;
+  loading: boolean;
+};
+
+export type SpritesState = {
+  status: SpritesStatus | null;
+  instances: SpritesInstance[];
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type NotificationProvidersState = {
   items: NotificationProvider[];
   events: string[];
@@ -82,7 +92,6 @@ export type NotificationProvidersState = {
 
 export type SettingsDataState = {
   executorsLoaded: boolean;
-  environmentsLoaded: boolean;
   agentsLoaded: boolean;
 };
 
@@ -106,13 +115,14 @@ export type UserSettingsState = {
 
 export type SettingsSliceState = {
   executors: ExecutorsState;
-  environments: EnvironmentsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
   availableAgents: AvailableAgentsState;
   agentProfiles: AgentProfilesState;
   editors: EditorsState;
   prompts: PromptsState;
+  secrets: SecretsState;
+  sprites: SpritesState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
   userSettings: UserSettingsState;
@@ -120,7 +130,6 @@ export type SettingsSliceState = {
 
 export type SettingsSliceActions = {
   setExecutors: (executors: ExecutorsState["items"]) => void;
-  setEnvironments: (environments: EnvironmentsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
   setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
@@ -130,6 +139,15 @@ export type SettingsSliceActions = {
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
+  setSecrets: (items: SecretsState["items"]) => void;
+  setSecretsLoading: (loading: boolean) => void;
+  addSecret: (item: SecretListItem) => void;
+  updateSecret: (item: SecretListItem) => void;
+  removeSecret: (id: string) => void;
+  setSpritesStatus: (status: SpritesStatus) => void;
+  setSpritesInstances: (instances: SpritesInstance[]) => void;
+  setSpritesLoading: (loading: boolean) => void;
+  removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;

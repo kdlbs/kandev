@@ -318,7 +318,9 @@ export function useNotificationsActions(state: NotificationsState, bumpPermissio
     const nextEvents = hasEvent
       ? currentEvents.filter((e) => e !== eventType)
       : [...currentEvents, eventType];
-    setProviders((prev) => prev.map((p) => (p.id === provider.id ? { ...p, events: nextEvents } : p)));
+    setProviders((prev) =>
+      prev.map((p) => (p.id === provider.id ? { ...p, events: nextEvents } : p)),
+    );
   };
 
   const handleRequestPermission = async () => {

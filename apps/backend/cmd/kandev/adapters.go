@@ -76,6 +76,8 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		Metadata:        req.Metadata,
 		ModelOverride:   req.ModelOverride,
 		ExecutorType:    req.ExecutorType,
+		ExecutorConfig:  req.ExecutorConfig,
+		SetupScript:     req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
 		RepositoryID:         req.RepositoryID,

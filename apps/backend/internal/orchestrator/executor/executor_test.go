@@ -471,6 +471,24 @@ func (m *mockRepository) CountTasksByWorkflowStep(ctx context.Context, stepID st
 	return 0, nil
 }
 
+// Executor profile operations
+func (m *mockRepository) CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
 // Close operation
 func (m *mockRepository) Close() error { return nil }
 
@@ -507,7 +525,7 @@ func TestPrepareSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	sessionID, err := executor.PrepareSession(context.Background(), task, "profile-123", "executor-123", "step-123")
+	sessionID, err := executor.PrepareSession(context.Background(), task, "profile-123", "executor-123", "", "step-123")
 	if err != nil {
 		t.Fatalf("PrepareSession failed: %v", err)
 	}
@@ -551,7 +569,7 @@ func TestPrepareSession_NoAgentProfileID(t *testing.T) {
 		WorkspaceID: "workspace-123",
 	}
 
-	_, err := executor.PrepareSession(context.Background(), task, "", "executor-123", "step-123")
+	_, err := executor.PrepareSession(context.Background(), task, "", "executor-123", "", "step-123")
 	if err != ErrNoAgentProfileID {
 		t.Errorf("Expected ErrNoAgentProfileID, got %v", err)
 	}
@@ -578,7 +596,7 @@ func TestPrepareSession_WithRepository(t *testing.T) {
 		WorkspaceID: "workspace-123",
 	}
 
-	sessionID, err := executor.PrepareSession(context.Background(), task, "profile-123", "", "")
+	sessionID, err := executor.PrepareSession(context.Background(), task, "profile-123", "", "", "")
 	if err != nil {
 		t.Fatalf("PrepareSession failed: %v", err)
 	}

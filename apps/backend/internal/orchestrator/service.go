@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -172,6 +173,7 @@ func NewService(
 	taskRepo scheduler.TaskRepository,
 	repo repository.Repository,
 	shellPrefs executor.ShellPreferenceProvider,
+	secretStore secrets.SecretStore,
 	log *logger.Logger,
 ) *Service {
 	svcLogger := log.WithFields(zap.String("component", "orchestrator"))
@@ -181,7 +183,8 @@ func NewService(
 
 	// Create the executor with the agent manager client and repository for persistent sessions
 	execCfg := executor.ExecutorConfig{
-		ShellPrefs: shellPrefs,
+		ShellPrefs:  shellPrefs,
+		SecretStore: secretStore,
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 

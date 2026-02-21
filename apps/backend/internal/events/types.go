@@ -73,6 +73,19 @@ const (
 	ExecutorDeleted = "executor.deleted"
 )
 
+// Event types for executor profiles
+const (
+	ExecutorProfileCreated = "executor.profile.created"
+	ExecutorProfileUpdated = "executor.profile.updated"
+	ExecutorProfileDeleted = "executor.profile.deleted"
+)
+
+// Event types for executor preparation
+const (
+	ExecutorPrepareProgress  = "executor.prepare.progress"
+	ExecutorPrepareCompleted = "executor.prepare.completed"
+)
+
 // Event types for users
 const (
 	UserSettingsUpdated = "user.settings.updated"

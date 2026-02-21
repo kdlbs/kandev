@@ -79,7 +79,12 @@ function useGutterHoverEffect(
     hoverDecRef.current = editor.createDecorationsCollection([]);
     const moveSub = editor.onMouseMove((e) => {
       const line = e.target.position?.lineNumber;
-      if (!isGutterTarget(e.target.type) || !line || commentedRef.current.has(line) || hasSelectionRef.current) {
+      if (
+        !isGutterTarget(e.target.type) ||
+        !line ||
+        commentedRef.current.has(line) ||
+        hasSelectionRef.current
+      ) {
         hoverDecRef.current?.set([]);
         return;
       }
@@ -108,8 +113,15 @@ type DragEffectOptions = {
 
 /** Manages drag-to-select: mousedown → DOM mousemove → DOM mouseup. */
 function useGutterDragEffect({
-  editor, enabled, selectionDecRef, hoverDecRef,
-  isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection,
+  editor,
+  enabled,
+  selectionDecRef,
+  hoverDecRef,
+  isDraggingRef,
+  anchorLineRef,
+  commentedRef,
+  callbackRef,
+  setGutterSelection,
 }: DragEffectOptions) {
   useEffect(() => {
     if (!editor || !enabled) return;
@@ -126,7 +138,12 @@ function useGutterDragEffect({
       if (!model) return;
       const s = Math.min(dragStart, dragEnd);
       const e = Math.max(dragStart, dragEnd);
-      const code = model.getValueInRange({ startLineNumber: s, startColumn: 1, endLineNumber: e, endColumn: model.getLineMaxColumn(e) });
+      const code = model.getValueInRange({
+        startLineNumber: s,
+        startColumn: 1,
+        endLineNumber: e,
+        endColumn: model.getLineMaxColumn(e),
+      });
       setGutterSelection({ startLine: s, endLine: e });
       const pos = getLineBottomPosition(editor, e) ?? { x: 0, y: 0 };
       callbackRef.current({ range: { start: s, end: e }, code, position: pos });
@@ -138,8 +155,15 @@ function useGutterDragEffect({
       const line = target?.position?.lineNumber;
       if (!line) return;
       dragEnd = line;
-      applySelectionDecos(selectionDecRef.current, Math.min(dragStart, dragEnd), Math.max(dragStart, dragEnd));
-      setGutterSelection({ startLine: Math.min(dragStart, dragEnd), endLine: Math.max(dragStart, dragEnd) });
+      applySelectionDecos(
+        selectionDecRef.current,
+        Math.min(dragStart, dragEnd),
+        Math.max(dragStart, dragEnd),
+      );
+      setGutterSelection({
+        startLine: Math.min(dragStart, dragEnd),
+        endLine: Math.max(dragStart, dragEnd),
+      });
       hoverDecRef.current?.set([]);
     };
 
@@ -171,7 +195,17 @@ function useGutterDragEffect({
       isDraggingRef.current = false;
       selectionDecRef.current?.set([]);
     };
-  }, [editor, enabled, selectionDecRef, hoverDecRef, isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection]);
+  }, [
+    editor,
+    enabled,
+    selectionDecRef,
+    hoverDecRef,
+    isDraggingRef,
+    anchorLineRef,
+    commentedRef,
+    callbackRef,
+    setGutterSelection,
+  ]);
 }
 
 /**
@@ -186,7 +220,10 @@ export function useGutterComments(
 ) {
   const { enabled, commentedLines, onSelectionComplete } = options;
 
-  const [gutterSelection, setGutterSelection] = useState<{ startLine: number; endLine: number } | null>(null);
+  const [gutterSelection, setGutterSelection] = useState<{
+    startLine: number;
+    endLine: number;
+  } | null>(null);
   const anchorLineRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
   const hasSelectionRef = useRef(false);
@@ -195,9 +232,15 @@ export function useGutterComments(
   const callbackRef = useRef(onSelectionComplete);
   const commentedRef = useRef(commentedLines);
 
-  useEffect(() => { callbackRef.current = onSelectionComplete; }, [onSelectionComplete]);
-  useEffect(() => { commentedRef.current = commentedLines; }, [commentedLines]);
-  useEffect(() => { hasSelectionRef.current = gutterSelection !== null; }, [gutterSelection]);
+  useEffect(() => {
+    callbackRef.current = onSelectionComplete;
+  }, [onSelectionComplete]);
+  useEffect(() => {
+    commentedRef.current = commentedLines;
+  }, [commentedLines]);
+  useEffect(() => {
+    hasSelectionRef.current = gutterSelection !== null;
+  }, [gutterSelection]);
 
   const clearGutterSelection = useCallback(() => {
     setGutterSelection(null);
@@ -207,8 +250,15 @@ export function useGutterComments(
 
   useGutterHoverEffect(editor, enabled, hoverDecRef, commentedRef, hasSelectionRef);
   useGutterDragEffect({
-    editor, enabled, selectionDecRef, hoverDecRef,
-    isDraggingRef, anchorLineRef, commentedRef, callbackRef, setGutterSelection,
+    editor,
+    enabled,
+    selectionDecRef,
+    hoverDecRef,
+    isDraggingRef,
+    anchorLineRef,
+    commentedRef,
+    callbackRef,
+    setGutterSelection,
   });
 
   return { gutterSelection, clearGutterSelection };

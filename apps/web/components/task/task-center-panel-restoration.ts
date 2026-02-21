@@ -184,22 +184,38 @@ export function useFileSaveDelete({
       setSavingFiles((prev) => new Set(prev).add(path));
       try {
         const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
-        const response = await updateFileContent(client, activeSessionId, path, diff, tab.originalHash);
+        const response = await updateFileContent(
+          client,
+          activeSessionId,
+          path,
+          diff,
+          tab.originalHash,
+        );
         if (response.success && response.new_hash) {
           setOpenFileTabs((prev) =>
             prev.map((t) =>
               t.path === path
-                ? { ...t, originalContent: t.content, originalHash: response.new_hash!, isDirty: false }
+                ? {
+                    ...t,
+                    originalContent: t.content,
+                    originalHash: response.new_hash!,
+                    isDirty: false,
+                  }
                 : t,
             ),
           );
         } else {
-          toast({ title: "Save failed", description: response.error || "Failed to save file", variant: "error" });
+          toast({
+            title: "Save failed",
+            description: response.error || "Failed to save file",
+            variant: "error",
+          });
         }
       } catch (error) {
         toast({
           title: "Save failed",
-          description: error instanceof Error ? error.message : "An error occurred while saving the file",
+          description:
+            error instanceof Error ? error.message : "An error occurred while saving the file",
           variant: "error",
         });
       } finally {
@@ -222,12 +238,17 @@ export function useFileSaveDelete({
         if (response.success) {
           handleCloseFileTab(path);
         } else {
-          toast({ title: "Delete failed", description: response.error || "Failed to delete file", variant: "error" });
+          toast({
+            title: "Delete failed",
+            description: response.error || "Failed to delete file",
+            variant: "error",
+          });
         }
       } catch (error) {
         toast({
           title: "Delete failed",
-          description: error instanceof Error ? error.message : "An error occurred while deleting the file",
+          description:
+            error instanceof Error ? error.message : "An error occurred while deleting the file",
           variant: "error",
         });
       }

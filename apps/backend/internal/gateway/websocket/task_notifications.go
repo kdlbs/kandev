@@ -47,6 +47,11 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.ExecutorCreated, ws.ActionExecutorCreated)
 	b.subscribe(eventBus, events.ExecutorUpdated, ws.ActionExecutorUpdated)
 	b.subscribe(eventBus, events.ExecutorDeleted, ws.ActionExecutorDeleted)
+	b.subscribe(eventBus, events.ExecutorProfileCreated, ws.ActionExecutorProfileCreated)
+	b.subscribe(eventBus, events.ExecutorProfileUpdated, ws.ActionExecutorProfileUpdated)
+	b.subscribe(eventBus, events.ExecutorProfileDeleted, ws.ActionExecutorProfileDeleted)
+	b.subscribe(eventBus, events.ExecutorPrepareProgress, ws.ActionExecutorPrepareProgress)
+	b.subscribe(eventBus, events.ExecutorPrepareCompleted, ws.ActionExecutorPrepareCompleted)
 	b.subscribe(eventBus, events.EnvironmentCreated, ws.ActionEnvironmentCreated)
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
@@ -116,6 +121,11 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionMessageQueueStatusChanged:
+			if sessionID != "" {
+				b.hub.BroadcastToSession(sessionID, msg)
+				return nil
+			}
+		case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil

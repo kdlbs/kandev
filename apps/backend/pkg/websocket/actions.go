@@ -40,6 +40,14 @@ const (
 	ActionExecutorUpdate = "executor.update"
 	ActionExecutorDelete = "executor.delete"
 
+	// Executor profile actions
+	ActionExecutorProfileList    = "executor.profile.list"
+	ActionExecutorProfileListAll = "executor.profile.list_all"
+	ActionExecutorProfileCreate  = "executor.profile.create"
+	ActionExecutorProfileGet     = "executor.profile.get"
+	ActionExecutorProfileUpdate  = "executor.profile.update"
+	ActionExecutorProfileDelete  = "executor.profile.delete"
+
 	// Environment actions
 	ActionEnvironmentList   = "environment.list"
 	ActionEnvironmentCreate = "environment.create"
@@ -166,6 +174,11 @@ const (
 	ActionEnvironmentCreated       = "environment.created"
 	ActionEnvironmentUpdated       = "environment.updated"
 	ActionEnvironmentDeleted       = "environment.deleted"
+	ActionExecutorProfileCreated   = "executor.profile.created"
+	ActionExecutorProfileUpdated   = "executor.profile.updated"
+	ActionExecutorProfileDeleted   = "executor.profile.deleted"
+	ActionExecutorPrepareProgress  = "executor.prepare.progress"
+	ActionExecutorPrepareCompleted = "executor.prepare.completed"
 
 	ActionAgentProfileDeleted = "agent.profile.deleted"
 	ActionAgentProfileCreated = "agent.profile.created"
@@ -235,6 +248,21 @@ const (
 	ActionVscodeStop     = "vscode.stop"     // Stop code-server for a session
 	ActionVscodeStatus   = "vscode.status"   // Get code-server status for a session
 	ActionVscodeOpenFile = "vscode.openFile" // Open a file in code-server for a session
+
+	// Secret actions
+	ActionSecretList   = "secrets.list"
+	ActionSecretCreate = "secrets.create"
+	ActionSecretUpdate = "secrets.update"
+	ActionSecretDelete = "secrets.delete"
+	ActionSecretReveal = "secrets.reveal"
+
+	// Sprites actions
+	ActionSpritesStatus              = "sprites.status"
+	ActionSpritesInstancesList       = "sprites.instances.list"
+	ActionSpritesInstancesDestroy    = "sprites.instances.destroy"
+	ActionSpritesTest                = "sprites.test"
+	ActionSpritesNetworkPolicyGet    = "sprites.network_policy.get"
+	ActionSpritesNetworkPolicyUpdate = "sprites.network_policy.update"
 
 	// MCP tool actions (agentctl -> backend via WS tunnel)
 	ActionMCPListWorkspaces    = "mcp.list_workspaces"

@@ -38,8 +38,8 @@ export type SubmitHandlersDeps = {
   selectedLocalRepo: LocalRepository | null;
   branch: string;
   agentProfileId: string;
-  environmentId: string;
   executorId: string;
+  executorProfileId: string;
   editingTask?: {
     id: string;
     title: string;
@@ -53,12 +53,7 @@ export type SubmitHandlersDeps = {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null },
   ) => void;
-  onCreateSession?: (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-    environmentId: string;
-  }) => void;
+  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
   descriptionInputRef: React.RefObject<{ getValue: () => string } | null>;
@@ -70,7 +65,6 @@ export type SubmitHandlersDeps = {
   setRepositoryId: (v: string) => void;
   setBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
-  setEnvironmentId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
@@ -112,6 +106,7 @@ type BuildCreatePayloadArgs = {
   repositoriesPayload: CreateTaskParams["repositories"];
   agentProfileId: string;
   executorId: string;
+  executorProfileId: string;
   withAgent: boolean;
 };
 
@@ -123,6 +118,7 @@ function buildCreateTaskPayload({
   repositoriesPayload,
   agentProfileId,
   executorId,
+  executorProfileId,
   withAgent,
 }: BuildCreatePayloadArgs): CreateTaskParams {
   return {
@@ -136,6 +132,7 @@ function buildCreateTaskPayload({
     prepare_session: withAgent ? undefined : true,
     agent_profile_id: agentProfileId || undefined,
     executor_id: executorId || undefined,
+    executor_profile_id: executorProfileId || undefined,
   };
 }
 
@@ -179,8 +176,8 @@ export function useTaskSubmitHandlers({
   selectedLocalRepo,
   branch,
   agentProfileId,
-  environmentId,
   executorId,
+  executorProfileId,
   editingTask,
   onSuccess,
   onCreateSession,
@@ -195,7 +192,6 @@ export function useTaskSubmitHandlers({
   setRepositoryId,
   setBranch,
   setAgentProfileId,
-  setEnvironmentId,
   setExecutorId,
   setSelectedWorkflowId,
   setFetchedSteps,
@@ -212,7 +208,6 @@ export function useTaskSubmitHandlers({
     setRepositoryId("");
     setBranch("");
     setAgentProfileId("");
-    setEnvironmentId("");
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
@@ -225,7 +220,6 @@ export function useTaskSubmitHandlers({
     setRepositoryId,
     setBranch,
     setAgentProfileId,
-    setEnvironmentId,
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
@@ -255,7 +249,7 @@ export function useTaskSubmitHandlers({
     if (!trimmedDescription && !isPassthroughProfile) return;
 
     if (onCreateSession) {
-      onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId, environmentId });
+      onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId });
       resetForm();
       onOpenChange(false);
       return;
@@ -274,6 +268,7 @@ export function useTaskSubmitHandlers({
           task_id: taskId,
           agent_profile_id: agentProfileId,
           executor_id: executorId,
+          executor_profile_id: executorProfileId || undefined,
           prompt: trimmedDescription,
         },
         15000,
@@ -297,8 +292,8 @@ export function useTaskSubmitHandlers({
     }
   }, [
     agentProfileId,
-    environmentId,
     executorId,
+    executorProfileId,
     isPassthroughProfile,
     onCreateSession,
     onOpenChange,
@@ -346,6 +341,7 @@ export function useTaskSubmitHandlers({
                 task_id: updatedTask.id,
                 agent_profile_id: agentProfileId,
                 executor_id: executorId,
+                executor_profile_id: executorProfileId || undefined,
                 prompt: trimmedDescription || "",
               },
               15000,
@@ -373,6 +369,7 @@ export function useTaskSubmitHandlers({
     performTaskUpdate,
     agentProfileId,
     executorId,
+    executorProfileId,
     onSuccess,
     resetForm,
     onOpenChange,
@@ -415,6 +412,7 @@ export function useTaskSubmitHandlers({
           repositoriesPayload,
           agentProfileId,
           executorId,
+          executorProfileId,
           withAgent: true,
         }),
       );
@@ -432,6 +430,7 @@ export function useTaskSubmitHandlers({
       effectiveWorkflowId,
       agentProfileId,
       executorId,
+      executorProfileId,
       isPassthroughProfile,
       onSuccess,
       resetForm,
@@ -452,6 +451,7 @@ export function useTaskSubmitHandlers({
           repositoriesPayload,
           agentProfileId,
           executorId,
+          executorProfileId,
           withAgent: false,
         }),
       );
@@ -475,6 +475,7 @@ export function useTaskSubmitHandlers({
       effectiveWorkflowId,
       agentProfileId,
       executorId,
+      executorProfileId,
       onSuccess,
       resetForm,
       onOpenChange,
@@ -564,6 +565,7 @@ export function useTaskSubmitHandlers({
         state: "CREATED",
         agent_profile_id: agentProfileId || undefined,
         executor_id: executorId || undefined,
+        executor_profile_id: executorProfileId || undefined,
       });
       onSuccess?.(taskResponse, "create");
       resetForm();
@@ -586,6 +588,7 @@ export function useTaskSubmitHandlers({
     agentProfileId,
     effectiveDefaultStepId,
     executorId,
+    executorProfileId,
     getRepositoriesPayload,
     onSuccess,
     onOpenChange,

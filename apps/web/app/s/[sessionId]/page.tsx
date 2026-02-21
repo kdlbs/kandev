@@ -208,7 +208,6 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
     settingsData: {
       agentsLoaded: true,
       executorsLoaded: false,
-      environmentsLoaded: false,
     },
     availableAgents: { items: availableAgents, loaded: true, loading: false },
     userSettings: buildUserSettingsFromResponse(userSettingsResponse),

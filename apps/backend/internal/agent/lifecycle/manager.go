@@ -15,16 +15,16 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-// RuntimeFallbackPolicy controls behavior when a requested runtime is unavailable.
-type RuntimeFallbackPolicy string
+// ExecutorFallbackPolicy controls behavior when a requested runtime is unavailable.
+type ExecutorFallbackPolicy string
 
 const (
-	// RuntimeFallbackAllow silently falls back to the default runtime (current behavior).
-	RuntimeFallbackAllow RuntimeFallbackPolicy = "allow"
-	// RuntimeFallbackWarn falls back but logs a warning (current behavior, explicit).
-	RuntimeFallbackWarn RuntimeFallbackPolicy = "warn"
-	// RuntimeFallbackDeny returns an error if the requested runtime is unavailable.
-	RuntimeFallbackDeny RuntimeFallbackPolicy = "deny"
+	// ExecutorFallbackAllow silently falls back to the default runtime (current behavior).
+	ExecutorFallbackAllow ExecutorFallbackPolicy = "allow"
+	// ExecutorFallbackWarn falls back but logs a warning (current behavior, explicit).
+	ExecutorFallbackWarn ExecutorFallbackPolicy = "warn"
+	// ExecutorFallbackDeny returns an error if the requested runtime is unavailable.
+	ExecutorFallbackDeny ExecutorFallbackPolicy = "deny"
 )
 
 // Manager manages agent instance lifecycles
@@ -37,12 +37,12 @@ type Manager struct {
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
 
-	// RuntimeRegistry manages multiple runtimes (Docker, Standalone, etc.)
+	// ExecutorRegistry manages multiple runtimes (Docker, Standalone, etc.)
 	// Each task can select its runtime based on executor type.
-	runtimeRegistry *RuntimeRegistry
+	executorRegistry *ExecutorRegistry
 
-	// runtimeFallbackPolicy controls behavior when a requested runtime is unavailable.
-	runtimeFallbackPolicy RuntimeFallbackPolicy
+	// executorFallbackPolicy controls behavior when a requested runtime is unavailable.
+	executorFallbackPolicy ExecutorFallbackPolicy
 
 	// Refactored components for separation of concerns
 	executionStore   *ExecutionStore        // Thread-safe execution tracking
@@ -59,6 +59,9 @@ type Manager struct {
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
 
+	// preparerRegistry maps executor types to environment preparers.
+	preparerRegistry *PreparerRegistry
+
 	// mcpHandler is the MCP request dispatcher for handling MCP requests
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
@@ -70,18 +73,18 @@ type Manager struct {
 }
 
 // NewManager creates a new lifecycle manager.
-// The runtimeRegistry manages multiple runtimes (Docker, Standalone, etc.) for task-specific execution.
+// The executorRegistry manages multiple runtimes (Docker, Standalone, etc.) for task-specific execution.
 // The containerManager parameter is optional and used for Docker cleanup (pass nil for non-Docker runtimes).
 // The fallbackPolicy controls behavior when a requested runtime is unavailable.
 func NewManager(
 	reg *registry.Registry,
 	eventBus bus.EventBus,
-	runtimeRegistry *RuntimeRegistry,
+	executorRegistry *ExecutorRegistry,
 	containerManager *ContainerManager,
 	credsMgr CredentialsManager,
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
-	fallbackPolicy RuntimeFallbackPolicy,
+	fallbackPolicy ExecutorFallbackPolicy,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -108,22 +111,22 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:              reg,
-		eventBus:              eventBus,
-		runtimeRegistry:       runtimeRegistry,
-		runtimeFallbackPolicy: fallbackPolicy,
-		credsMgr:              credsMgr,
-		profileResolver:       profileResolver,
-		mcpProvider:           mcpProvider,
-		logger:                componentLogger,
-		executionStore:        executionStore,
-		commandBuilder:        commandBuilder,
-		sessionManager:        sessionManager,
-		eventPublisher:        eventPublisher,
-		containerManager:      containerManager,
-		historyManager:        historyManager,
-		cleanupInterval:       30 * time.Second,
-		stopCh:                stopCh,
+		registry:               reg,
+		eventBus:               eventBus,
+		executorRegistry:       executorRegistry,
+		executorFallbackPolicy: fallbackPolicy,
+		credsMgr:               credsMgr,
+		profileResolver:        profileResolver,
+		mcpProvider:            mcpProvider,
+		logger:                 componentLogger,
+		executionStore:         executionStore,
+		commandBuilder:         commandBuilder,
+		sessionManager:         sessionManager,
+		eventPublisher:         eventPublisher,
+		containerManager:       containerManager,
+		historyManager:         historyManager,
+		cleanupInterval:        30 * time.Second,
+		stopCh:                 stopCh,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
@@ -143,8 +146,8 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 
-	if runtimeRegistry != nil {
-		mgr.logger.Info("initialized with runtimes", zap.Int("count", len(runtimeRegistry.List())))
+	if executorRegistry != nil {
+		mgr.logger.Info("initialized with runtimes", zap.Int("count", len(executorRegistry.List())))
 	}
 
 	return mgr
@@ -197,4 +200,9 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 // during agent startup. If not set, no boot messages will be created.
 func (m *Manager) SetBootMessageService(svc BootMessageService) {
 	m.bootMessageService = svc
+}
+
+// SetPreparerRegistry sets the registry of environment preparers.
+func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
+	m.preparerRegistry = registry
 }

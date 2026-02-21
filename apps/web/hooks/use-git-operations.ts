@@ -115,7 +115,11 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
 
       const timeout = action === "worktree.create_pr" ? 120000 : 60000;
       try {
-        const result = await client.request<T>(action, { session_id: sessionId, ...payload }, timeout);
+        const result = await client.request<T>(
+          action,
+          { session_id: sessionId, ...payload },
+          timeout,
+        );
         setLastResult(result);
         if (!result.success && result.error) setError(result.error);
         return result;

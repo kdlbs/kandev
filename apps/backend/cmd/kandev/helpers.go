@@ -29,6 +29,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/secrets"
+	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -247,6 +249,7 @@ func newSessionStateChangedHandler(gateway *gateways.Gateway, log *logger.Logger
 type routeParams struct {
 	router                  *gin.Engine
 	gateway                 *gateways.Gateway
+	dockerClient            *docker.Client
 	taskSvc                 *taskservice.Service
 	taskRepo                repository.Repository
 	analyticsRepo           analyticsrepository.Repository
@@ -260,6 +263,8 @@ type routeParams struct {
 	editorCtrl              *editorcontroller.Controller
 	promptCtrl              *promptcontroller.Controller
 	msgCreator              *messageCreatorAdapter
+	secretsSvc              *secrets.Service
+	secretStore             secrets.SecretStore
 	log                     *logger.Logger
 }
 
@@ -285,6 +290,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
 	taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
@@ -324,6 +330,19 @@ func registerSecondaryRoutes(
 
 	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	if p.secretsSvc != nil {
+		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
+		p.log.Debug("Registered Secrets handlers (HTTP + WebSocket)")
+	}
+
+	if p.secretStore != nil {
+		spriteshandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretStore, p.log)
+		p.log.Debug("Registered Sprites handlers (HTTP + WebSocket)")
+	}
+
+	docker.RegisterDockerRoutes(p.router, p.dockerClient, p.log)
+	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 }

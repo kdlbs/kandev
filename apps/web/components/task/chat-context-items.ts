@@ -49,8 +49,14 @@ function makeUnpinHandler(
 
 function buildPlanContextItem(params: BuildContextItemsParams): ContextItem | null {
   if (!params.planContextEnabled) return null;
-  const { contextFiles, resolvedSessionId: sid, removeContextFile, unpinFile, addPlan, taskId } =
-    params;
+  const {
+    contextFiles,
+    resolvedSessionId: sid,
+    removeContextFile,
+    unpinFile,
+    addPlan,
+    taskId,
+  } = params;
   const planFile = contextFiles.find((f) => f.path === PLAN_CONTEXT_PATH);
   return {
     kind: "plan",
@@ -102,8 +108,14 @@ function buildFileContextItem(
 }
 
 function buildFileAndPromptItems(params: BuildContextItemsParams): ContextItem[] {
-  const { contextFiles, resolvedSessionId: sid, removeContextFile, unpinFile, promptsMap, onOpenFile } =
-    params;
+  const {
+    contextFiles,
+    resolvedSessionId: sid,
+    removeContextFile,
+    unpinFile,
+    promptsMap,
+    onOpenFile,
+  } = params;
   const helpers: FileItemHelpers = { sid, removeContextFile, unpinFile };
   const items: ContextItem[] = [];
   for (const f of contextFiles) {

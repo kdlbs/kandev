@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/credentials"
 	"github.com/kandev/kandev/internal/agent/docker"
+	agentexecutor "github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -17,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 func provideLifecycleManager(
@@ -27,11 +29,12 @@ func provideLifecycleManager(
 	dockerClient *docker.Client,
 	agentSettingsRepo settingsstore.Repository,
 	agentRegistry *registry.Registry,
+	secretStore secrets.SecretStore,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
 	// Create runtime registry to manage multiple runtimes
-	runtimeRegistry := lifecycle.NewRuntimeRegistry(log)
+	executorRegistry := lifecycle.NewExecutorRegistry(log)
 
 	// Standalone runtime is always available (agentctl is a core service)
 	controlClient := agentctl.NewControlClient(
@@ -39,7 +42,7 @@ func provideLifecycleManager(
 		cfg.Agent.StandalonePort,
 		log,
 	)
-	standaloneRuntime := lifecycle.NewStandaloneRuntime(
+	standaloneExec := lifecycle.NewStandaloneExecutor(
 		controlClient,
 		cfg.Agent.StandaloneHost,
 		cfg.Agent.StandalonePort,
@@ -48,9 +51,9 @@ func provideLifecycleManager(
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
-	standaloneRuntime.SetInteractiveRunner(interactiveRunner)
+	standaloneExec.SetInteractiveRunner(interactiveRunner)
 
-	runtimeRegistry.Register(standaloneRuntime)
+	executorRegistry.Register(standaloneExec)
 	log.Info("Standalone runtime registered with passthrough support",
 		zap.String("host", cfg.Agent.StandaloneHost),
 		zap.Int("port", cfg.Agent.StandalonePort))
@@ -59,19 +62,28 @@ func provideLifecycleManager(
 	var containerMgr *lifecycle.ContainerManager
 	if cfg.Docker.Enabled && dockerClient != nil {
 		containerMgr = lifecycle.NewContainerManager(dockerClient, "", log)
-		dockerRuntime := lifecycle.NewDockerRuntime(dockerClient, log)
-		runtimeRegistry.Register(dockerRuntime)
+		dockerExec := lifecycle.NewDockerExecutor(dockerClient, log)
+		executorRegistry.Register(dockerExec)
 		log.Info("Docker runtime registered")
 	} else if cfg.Docker.Enabled && dockerClient == nil {
 		log.Warn("Docker runtime enabled but Docker client not available")
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)
-	remoteDockerRuntime := lifecycle.NewRemoteDockerRuntime(log)
-	runtimeRegistry.Register(remoteDockerRuntime)
+	remoteDockerExec := lifecycle.NewRemoteDockerExecutor(log)
+	executorRegistry.Register(remoteDockerExec)
 	log.Info("Remote Docker runtime registered")
 
+	// Register Sprites runtime (remote sandboxes via Sprites.dev)
+	agentctlResolver := lifecycle.NewAgentctlResolver(log)
+	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentctlResolver, 8765, log)
+	executorRegistry.Register(spritesExec)
+	log.Info("Sprites runtime registered")
+
 	credsMgr := credentials.NewManager(log)
+	if secretStore != nil {
+		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
+	}
 	credsMgr.AddProvider(credentials.NewEnvProvider("KANDEV_"))
 	credsMgr.AddProvider(credentials.NewAugmentSessionProvider())
 	if credsFile := os.Getenv("KANDEV_CREDENTIALS_FILE"); credsFile != "" {
@@ -84,14 +96,21 @@ func provideLifecycleManager(
 	lifecycleMgr := lifecycle.NewManager(
 		agentRegistry,
 		eventBus,
-		runtimeRegistry,
+		executorRegistry,
 		containerMgr,
 		credsMgr,
 		profileResolver,
 		mcpService,
-		lifecycle.RuntimeFallbackWarn,
+		lifecycle.ExecutorFallbackWarn,
 		log,
 	)
+
+	// Register environment preparers
+	preparerRegistry := lifecycle.NewPreparerRegistry(log)
+	preparerRegistry.Register(agentexecutor.NameStandalone, lifecycle.NewLocalPreparer(log))
+	preparerRegistry.Register(agentexecutor.NameDocker, lifecycle.NewDockerPreparer(log))
+	preparerRegistry.Register(agentexecutor.NameSprites, lifecycle.NewSpritesPreparer(log))
+	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
@@ -101,7 +120,7 @@ func provideLifecycleManager(
 	}
 
 	log.Info("Agent Manager initialized",
-		zap.Int("runtimes", len(runtimeRegistry.List())),
+		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil
 }

@@ -143,9 +143,9 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 	}
 }
 
-// buildEnvForRuntime builds environment variables for any runtime.
+// buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForRuntime(executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
+func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
 	env := make(map[string]string)
 
 	// Copy request environment

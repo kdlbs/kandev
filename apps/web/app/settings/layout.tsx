@@ -4,7 +4,6 @@ import {
   listAgentDiscovery,
   listAvailableAgents,
   listAgents,
-  listEnvironments,
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
@@ -17,10 +16,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 async function SettingsLayoutServer({ children }: { children: React.ReactNode }) {
   let initialState = {};
   try {
-    const [workspaces, executors, environments, agents, discovery] = await Promise.all([
+    const [workspaces, executors, agents, discovery] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       listExecutors({ cache: "no-store" }),
-      listEnvironments({ cache: "no-store" }),
       listAgents({ cache: "no-store" }),
       listAgentDiscovery({ cache: "no-store" }),
     ]);
@@ -48,9 +46,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       executors: {
         items: executors.executors,
       },
-      environments: {
-        items: environments.environments,
-      },
       agentProfiles: {
         items: agents.agents.flatMap((agent) =>
           agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
@@ -69,7 +64,6 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       settingsData: {
         executorsLoaded: true,
-        environmentsLoaded: true,
         agentsLoaded: true,
       },
     };
