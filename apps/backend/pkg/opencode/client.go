@@ -38,9 +38,9 @@ type Client struct {
 	controlCh    chan ControlEvent
 
 	// SSE connection tracking - prevents multiple concurrent connections
-	sseCancel    context.CancelFunc
-	sseActive    bool
-	lastEventID  string // Last-Event-ID for reconnection
+	sseCancel   context.CancelFunc
+	sseActive   bool
+	lastEventID string // Last-Event-ID for reconnection
 
 	mu     sync.RWMutex
 	closed bool

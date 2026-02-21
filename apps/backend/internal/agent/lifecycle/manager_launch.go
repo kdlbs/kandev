@@ -53,7 +53,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 
 // agentCommands holds the initial and continue command strings for an agent execution.
 type agentCommands struct {
-	initial  string
+	initial   string
 	continue_ string // continue command for one-shot agents (empty if not applicable)
 }
 

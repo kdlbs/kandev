@@ -8,16 +8,14 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-// https://www.npmjs.com/package/@augmentcode/auggie
+// openCodeACPCommand is the CLI command for OpenCode in ACP mode (JSON-RPC over stdin/stdout).
+// Derived from internal/agent/agents/opencode_acp.go.
+const openCodeACPCommand = "npx -y opencode-ai acp"
 
-// auggieCommand is the CLI command for Auggie in ACP mode.
-// Derived from internal/agent/agents/auggie.go.
-const auggieCommand = "npx -y @augmentcode/auggie --acp"
-
-func TestAuggie_BasicPrompt(t *testing.T) {
+func TestOpenCodeACP_BasicPrompt(t *testing.T) {
 	result := RunAgent(t, AgentSpec{
-		Name:          "auggie",
-		Command:       auggieCommand,
+		Name:          "opencode-acp",
+		Command:       openCodeACPCommand,
 		Protocol:      agent.ProtocolACP,
 		DefaultPrompt: "What is 2 + 2? Reply with just the number.",
 		AutoApprove:   true,
@@ -28,5 +26,5 @@ func TestAuggie_BasicPrompt(t *testing.T) {
 	AssertSessionIDConsistent(t, result.Events)
 
 	counts := CountEventsByType(result.Events)
-	t.Logf("auggie completed in %s: %v", result.Duration, counts)
+	t.Logf("opencode-acp completed in %s: %v", result.Duration, counts)
 }

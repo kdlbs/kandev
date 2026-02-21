@@ -12,7 +12,7 @@ import (
 
 // geminiCommand is the CLI command for Google Gemini in ACP mode.
 // Derived from internal/agent/agents/gemini.go.
-const geminiCommand = "npx -y @google/gemini-cli@0.29.5 --experimental-acp"
+const geminiCommand = "npx -y @google/gemini-cli --experimental-acp"
 
 func TestGemini_BasicPrompt(t *testing.T) {
 	result := RunAgent(t, AgentSpec{

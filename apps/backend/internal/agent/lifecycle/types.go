@@ -21,23 +21,23 @@ const AgentCtlPort = 9999
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID             string
-	TaskID         string
-	SessionID      string
-	AgentProfileID string
-	ContainerID    string
-	ContainerIP    string // IP address of the container for agentctl communication
-	WorkspacePath  string // Path to the workspace (worktree or repository path)
-	ACPSessionID   string // ACP session ID to resume, if available
+	ID              string
+	TaskID          string
+	SessionID       string
+	AgentProfileID  string
+	ContainerID     string
+	ContainerIP     string // IP address of the container for agentctl communication
+	WorkspacePath   string // Path to the workspace (worktree or repository path)
+	ACPSessionID    string // ACP session ID to resume, if available
 	AgentCommand    string // Command to start the agent subprocess
 	ContinueCommand string // Command for follow-up prompts (one-shot agents like Amp)
 	RuntimeName     string // Name of the runtime used (e.g., "docker", "standalone")
-	Status         v1.AgentStatus
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	ExitCode       *int
-	ErrorMessage   string
-	Metadata       map[string]interface{}
+	Status          v1.AgentStatus
+	StartedAt       time.Time
+	FinishedAt      *time.Time
+	ExitCode        *int
+	ErrorMessage    string
+	Metadata        map[string]interface{}
 
 	// agentctl client for this execution
 	agentctl *agentctl.Client

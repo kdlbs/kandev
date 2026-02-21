@@ -1119,6 +1119,6 @@ func (a *AmpAdapter) IsOneShot() bool {
 
 // Verify interface implementation.
 var (
-	_ AgentAdapter  = (*AmpAdapter)(nil)
+	_ AgentAdapter   = (*AmpAdapter)(nil)
 	_ OneShotAdapter = (*AmpAdapter)(nil)
 )

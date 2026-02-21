@@ -170,7 +170,7 @@ func Load() *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled: getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		ShellEnabled:  getEnvBool("AGENTCTL_SHELL_ENABLED", true),
 		LogLevel:      getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
 		LogFormat:     getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		McpLogFile:    getEnv("KANDEV_MCP_LOG_FILE", ""),

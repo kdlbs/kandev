@@ -51,6 +51,7 @@ func (r *Registry) LoadDefaults() {
 		agents.NewCopilot(),
 		agents.NewGemini(),
 		agents.NewOpenCode(),
+		agents.NewOpenCodeACP(),
 		agents.NewAmp(),
 		agents.NewMockAgent(),
 	}

@@ -392,7 +392,7 @@ func TestHandleUserMessage_ToolResultStillProcessed(t *testing.T) {
 		Type: claudecode.MessageTypeUser,
 		UUID: "msg-uuid-4",
 		Message: &claudecode.AssistantMessage{
-			Role: "user",
+			Role:    "user",
 			Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"tool-123","content":"output"}]`),
 		},
 	}
@@ -535,7 +535,7 @@ func (b *syncBuf) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (b *syncBuf) Len() int    { return len(b.data) }
+func (b *syncBuf) Len() int      { return len(b.data) }
 func (b *syncBuf) Bytes() []byte { return b.data }
 
 // emptyReader always returns EOF.
@@ -597,8 +597,8 @@ func TestHandleUserMessage_SubagentToolUseResult(t *testing.T) {
 	// Pre-register a pending Task tool call
 	n := NewNormalizer()
 	taskPayload := n.NormalizeToolCall("Task", map[string]any{
-		"description":  "Count lines",
-		"prompt":       "Count lines in file",
+		"description":   "Count lines",
+		"prompt":        "Count lines in file",
 		"subagent_type": "Bash",
 	})
 	a.pendingToolCalls["task-1"] = taskPayload
