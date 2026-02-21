@@ -2,7 +2,6 @@ import type {
   LocalRepository,
   Repository,
   Workspace,
-  Environment,
   Executor,
   Branch,
   Task,
@@ -12,7 +11,7 @@ import type {
   useRepositoryOptions,
   useBranchOptions,
   useAgentProfileOptions,
-  useExecutorOptions,
+  useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 
@@ -35,7 +34,6 @@ export type TaskCreateDialogInitialValues = {
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
-  environments: Environment[];
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
 };
@@ -48,7 +46,7 @@ export type DialogComputedValues = {
   hasRepositorySelection: boolean;
   branchOptions: ReturnType<typeof useBranchOptions>;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorOptions: ReturnType<typeof useExecutorOptions>;
+  executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   executorHint: string | null;
   headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
   agentProfilesLoading: boolean;
@@ -77,7 +75,6 @@ export type TaskCreateEffectsArgs = {
   repositoriesLoading: boolean;
   branches: Branch[];
   agentProfiles: AgentProfileOption[];
-  environments: Environment[];
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
@@ -97,10 +94,10 @@ export type DialogFormState = {
   setBranch: (v: string) => void;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
-  environmentId: string;
-  setEnvironmentId: (v: string) => void;
   executorId: string;
   setExecutorId: (v: string) => void;
+  executorProfileId: string;
+  setExecutorProfileId: (v: string) => void;
   discoveredRepositories: LocalRepository[];
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
   discoveredRepoPath: string;

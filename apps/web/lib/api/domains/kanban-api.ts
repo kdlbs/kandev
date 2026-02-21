@@ -42,6 +42,7 @@ export async function createTask(
     prepare_session?: boolean;
     agent_profile_id?: string;
     executor_id?: string;
+    executor_profile_id?: string;
     plan_mode?: boolean;
   },
   options?: ApiRequestOptions,

@@ -9,9 +9,10 @@ function toProfile(payload: ExecutorProfilePayload): ExecutorProfile {
     id: payload.id,
     executor_id: payload.executor_id,
     name: payload.name,
-    is_default: payload.is_default,
+    mcp_policy: payload.mcp_policy,
     config: payload.config,
-    setup_script: payload.setup_script,
+    prepare_script: payload.prepare_script,
+    cleanup_script: payload.cleanup_script,
     created_at: payload.created_at ?? new Date().toISOString(),
     updated_at: payload.updated_at ?? new Date().toISOString(),
   };

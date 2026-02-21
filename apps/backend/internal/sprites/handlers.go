@@ -2,9 +2,7 @@ package sprites
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +17,6 @@ import (
 )
 
 const (
-	spritesAPIBase  = "https://api.sprites.dev/v1"
 	spritesPrefix   = "kandev-"
 	requestTimeout  = 30 * time.Second
 	testStepTimeout = 60 * time.Second
@@ -53,6 +50,8 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.DELETE("/instances/:name", h.httpDestroyInstance)
 	api.DELETE("/instances", h.httpDestroyAll)
 	api.POST("/test", h.httpTest)
+	api.GET("/network-policies", h.httpGetNetworkPolicy)
+	api.PUT("/network-policies", h.httpUpdateNetworkPolicy)
 }
 
 func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
@@ -60,6 +59,8 @@ func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionSpritesInstancesList, h.wsListInstances)
 	dispatcher.RegisterFunc(ws.ActionSpritesInstancesDestroy, h.wsDestroyInstance)
 	dispatcher.RegisterFunc(ws.ActionSpritesTest, h.wsTest)
+	dispatcher.RegisterFunc(ws.ActionSpritesNetworkPolicyGet, h.wsGetNetworkPolicy)
+	dispatcher.RegisterFunc(ws.ActionSpritesNetworkPolicyUpdate, h.wsUpdateNetworkPolicy)
 }
 
 // --- Response types ---
@@ -82,11 +83,11 @@ type SpritesInstance struct {
 
 // SpritesTestResult is the test connection result.
 type SpritesTestResult struct {
-	Success        bool            `json:"success"`
-	Steps          []SpritesTestStep `json:"steps"`
-	TotalDurationMs int64          `json:"total_duration_ms"`
-	SpriteName     string          `json:"sprite_name"`
-	Error          string          `json:"error,omitempty"`
+	Success         bool              `json:"success"`
+	Steps           []SpritesTestStep `json:"steps"`
+	TotalDurationMs int64             `json:"total_duration_ms"`
+	SpriteName      string            `json:"sprite_name"`
+	Error           string            `json:"error,omitempty"`
 }
 
 // SpritesTestStep is a single step in the test.
@@ -141,6 +142,42 @@ func (h *Handler) httpTest(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *Handler) httpGetNetworkPolicy(c *gin.Context) {
+	secretID := c.Query("secret_id")
+	spriteName := c.Query("sprite_name")
+	if spriteName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sprite_name is required"})
+		return
+	}
+	policy, err := h.getNetworkPolicy(c.Request.Context(), secretID, spriteName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, policy)
+}
+
+func (h *Handler) httpUpdateNetworkPolicy(c *gin.Context) {
+	secretID := c.Query("secret_id")
+	spriteName := c.Query("sprite_name")
+	if spriteName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sprite_name is required"})
+		return
+	}
+
+	var policy sprites.NetworkPolicy
+	if err := c.ShouldBindJSON(&policy); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	if err := h.updateNetworkPolicy(c.Request.Context(), secretID, spriteName, &policy); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // --- WS handlers ---
 
 func (h *Handler) wsStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -185,6 +222,42 @@ func (h *Handler) wsTest(ctx context.Context, msg *ws.Message) (*ws.Message, err
 	return ws.NewResponse(msg.ID, msg.Action, h.testConnection(ctx, payload.SecretID))
 }
 
+func (h *Handler) wsGetNetworkPolicy(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var payload struct {
+		SecretID   string `json:"secret_id"`
+		SpriteName string `json:"sprite_name"`
+	}
+	if err := msg.ParsePayload(&payload); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+	}
+	if payload.SpriteName == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "sprite_name is required", nil)
+	}
+	policy, err := h.getNetworkPolicy(ctx, payload.SecretID, payload.SpriteName)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, policy)
+}
+
+func (h *Handler) wsUpdateNetworkPolicy(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var payload struct {
+		SecretID   string                `json:"secret_id"`
+		SpriteName string                `json:"sprite_name"`
+		Policy     sprites.NetworkPolicy `json:"policy"`
+	}
+	if err := msg.ParsePayload(&payload); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+	}
+	if payload.SpriteName == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "sprite_name is required", nil)
+	}
+	if err := h.updateNetworkPolicy(ctx, payload.SecretID, payload.SpriteName, &payload.Policy); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})
+}
+
 // --- Business logic ---
 
 func (h *Handler) getToken(ctx context.Context, secretID string) (string, error) {
@@ -223,50 +296,31 @@ func (h *Handler) getStatus(ctx context.Context, secretID string) *SpritesStatus
 }
 
 func (h *Handler) listInstances(ctx context.Context, secretID string) ([]*SpritesInstance, error) {
-	token, err := h.getToken(ctx, secretID)
+	client, err := h.createClient(ctx, secretID)
 	if err != nil {
-		return nil, fmt.Errorf("API token not configured: %w", err)
+		return nil, err
 	}
+	defer func() { _ = client.Close() }()
 
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, spritesAPIBase+"/sprites", nil)
+	list, err := client.ListSprites(reqCtx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var apiSprites []struct {
-		Name      string `json:"name"`
-		CreatedAt string `json:"created_at"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiSprites); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to list sprites: %w", err)
 	}
 
 	var result []*SpritesInstance
-	for _, s := range apiSprites {
+	for _, s := range list.Sprites {
 		if !strings.HasPrefix(s.Name, spritesPrefix) {
 			continue
 		}
-		uptime := computeUptime(s.CreatedAt)
+		createdAt := s.CreatedAt.Format(time.RFC3339)
 		result = append(result, &SpritesInstance{
 			Name:          s.Name,
-			HealthStatus:  "unknown",
-			CreatedAt:     s.CreatedAt,
-			UptimeSeconds: uptime,
+			HealthStatus:  s.Status,
+			CreatedAt:     createdAt,
+			UptimeSeconds: computeUptime(createdAt),
 		})
 	}
 	return result, nil
@@ -314,8 +368,7 @@ func (h *Handler) destroyAll(ctx context.Context, secretID string) (int, error) 
 
 func (h *Handler) testConnection(ctx context.Context, secretID string) *SpritesTestResult {
 	start := time.Now()
-	spriteName := fmt.Sprintf("kandev-test-%d", time.Now().UnixMilli())
-	result := &SpritesTestResult{SpriteName: spriteName}
+	result := &SpritesTestResult{}
 
 	// Step 1: Get token
 	tokenStep := h.runTestStep("Get API token", func() error {
@@ -329,32 +382,22 @@ func (h *Handler) testConnection(ctx context.Context, secretID string) *SpritesT
 		return result
 	}
 
-	token, _ := h.getToken(ctx, secretID)
-	client := sprites.New(token)
-	sprite := client.Sprite(spriteName)
-
-	// Step 2: Create sprite (lazy, via first command)
-	createStep := h.runTestStep("Create sprite", func() error {
-		stepCtx, cancel := context.WithTimeout(ctx, testStepTimeout)
-		defer cancel()
-		out, err := sprite.CommandContext(stepCtx, "echo", "hello-kandev").Output()
+	// Step 2: List sprites (verifies token + API connectivity)
+	var instanceCount int
+	listStep := h.runTestStep("List sprites", func() error {
+		instances, err := h.listInstances(ctx, secretID)
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(string(out), "hello-kandev") {
-			return fmt.Errorf("unexpected output: %s", string(out))
-		}
+		instanceCount = len(instances)
 		return nil
 	})
-	result.Steps = append(result.Steps, createStep)
+	result.Steps = append(result.Steps, listStep)
+	if listStep.Success {
+		result.SpriteName = fmt.Sprintf("%d active sprite(s)", instanceCount)
+	}
 
-	// Step 3: Destroy
-	destroyStep := h.runTestStep("Destroy sprite", func() error {
-		return sprite.Destroy()
-	})
-	result.Steps = append(result.Steps, destroyStep)
-
-	result.Success = tokenStep.Success && createStep.Success && destroyStep.Success
+	result.Success = tokenStep.Success && listStep.Success
 	if !result.Success {
 		for _, s := range result.Steps {
 			if s.Error != "" {
@@ -379,6 +422,50 @@ func (h *Handler) runTestStep(name string, fn func() error) SpritesTestStep {
 		step.Error = err.Error()
 	}
 	return step
+}
+
+func (h *Handler) createClient(ctx context.Context, secretID string) (*sprites.Client, error) {
+	token, err := h.getToken(ctx, secretID)
+	if err != nil {
+		return nil, fmt.Errorf("API token not configured: %w", err)
+	}
+	return sprites.New(token, sprites.WithDisableControl()), nil
+}
+
+func (h *Handler) getNetworkPolicy(ctx context.Context, secretID, spriteName string) (*sprites.NetworkPolicy, error) {
+	client, err := h.createClient(ctx, secretID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = client.Close() }()
+
+	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	policy, err := client.GetNetworkPolicy(reqCtx, spriteName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get network policy for %q: %w", spriteName, err)
+	}
+	return policy, nil
+}
+
+func (h *Handler) updateNetworkPolicy(ctx context.Context, secretID, spriteName string, policy *sprites.NetworkPolicy) error {
+	client, err := h.createClient(ctx, secretID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	if err := client.UpdateNetworkPolicy(reqCtx, spriteName, policy); err != nil {
+		return fmt.Errorf("failed to update network policy for %q: %w", spriteName, err)
+	}
+	h.logger.Info("updated network policy",
+		zap.String("sprite_name", spriteName),
+		zap.Int("rule_count", len(policy.Rules)))
+	return nil
 }
 
 func computeUptime(createdAt string) int64 {

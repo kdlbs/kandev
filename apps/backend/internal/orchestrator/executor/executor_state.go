@@ -97,10 +97,10 @@ func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) st
 type executorConfig struct {
 	ExecutorID   string
 	ExecutorType string
-	ExecutorCfg  map[string]string      // The executor record's Config map (docker_host, etc.)
+	ExecutorCfg  map[string]string // The executor record's Config map (docker_host, etc.)
 	Metadata     map[string]interface{}
-	SetupScript  string            // Setup script from default profile
-	ProfileEnv   map[string]string // Resolved env vars from default profile (secrets decrypted)
+	SetupScript  string            // Setup script from profile
+	ProfileEnv   map[string]string // Resolved env vars from profile (secrets decrypted)
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
@@ -131,10 +131,6 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		}
 	}
 
-	if policyJSON := strings.TrimSpace(executor.Config["mcp_policy"]); policyJSON != "" {
-		metadata["executor_mcp_policy"] = policyJSON
-	}
-
 	cfg := executorConfig{
 		ExecutorID:   resolved,
 		ExecutorType: string(executor.Type),
@@ -142,16 +138,25 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		Metadata:     metadata,
 	}
 
-	// Load default profile for setup script and env vars
-	profile, err := e.repo.GetDefaultExecutorProfile(ctx, resolved)
-	if err != nil {
-		e.logger.Warn("failed to load default executor profile",
-			zap.String("executor_id", resolved),
-			zap.Error(err))
-	}
-	if profile != nil {
-		cfg.SetupScript = profile.SetupScript
-		cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	// Load profile by ID if specified in metadata, otherwise skip
+	profileID, _ := metadata["executor_profile_id"].(string)
+	if profileID != "" {
+		profile, profErr := e.repo.GetExecutorProfile(ctx, profileID)
+		if profErr != nil {
+			e.logger.Warn("failed to load executor profile",
+				zap.String("profile_id", profileID),
+				zap.Error(profErr))
+		}
+		if profile != nil {
+			cfg.SetupScript = profile.PrepareScript
+			cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+			if policyJSON := strings.TrimSpace(profile.McpPolicy); policyJSON != "" {
+				metadata["executor_mcp_policy"] = policyJSON
+			}
+			if rulesJSON := profile.Config["sprites_network_policy_rules"]; rulesJSON != "" {
+				metadata["sprites_network_policy_rules"] = rulesJSON
+			}
+		}
 	}
 
 	return cfg

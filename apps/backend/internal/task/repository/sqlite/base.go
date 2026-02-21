@@ -74,6 +74,12 @@ func (r *Repository) initSchema() error {
 	if err := r.initReviewSchema(); err != nil {
 		return err
 	}
+	if err := r.migrateExecutorProfiles(); err != nil {
+		return err
+	}
+	if err := r.migrateTaskSessions(); err != nil {
+		return err
+	}
 	if err := r.ensureDefaultWorkspace(); err != nil {
 		return err
 	}
@@ -84,6 +90,21 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	return r.ensureWorkspaceIndexes()
+}
+
+// migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
+func (r *Repository) migrateExecutorProfiles() error {
+	// Add mcp_policy column if it doesn't exist
+	_, _ = r.db.Exec(`ALTER TABLE executor_profiles ADD COLUMN mcp_policy TEXT DEFAULT ''`)
+	// Drop is_default column - SQLite doesn't support DROP COLUMN before 3.35.0,
+	// so we just ignore the old column if present. New schema omits it.
+	return nil
+}
+
+// migrateTaskSessions adds new columns to task_sessions.
+func (r *Repository) migrateTaskSessions() error {
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN executor_profile_id TEXT DEFAULT ''`)
+	return nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -157,9 +178,10 @@ func (r *Repository) initInfraSchema() error {
 		id TEXT PRIMARY KEY,
 		executor_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		is_default INTEGER NOT NULL DEFAULT 0,
+		mcp_policy TEXT DEFAULT '',
 		config TEXT DEFAULT '{}',
-		setup_script TEXT DEFAULT '',
+		prepare_script TEXT DEFAULT '',
+		cleanup_script TEXT DEFAULT '',
 		env_vars TEXT DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -350,6 +372,7 @@ func (r *Repository) initSessionWorktreeSchema() error {
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL,
 		executor_id TEXT DEFAULT '',
+		executor_profile_id TEXT DEFAULT '',
 		environment_id TEXT DEFAULT '',
 		repository_id TEXT DEFAULT '',
 		base_branch TEXT DEFAULT '',

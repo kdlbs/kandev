@@ -193,6 +193,18 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		Metadata:       metadata,
 		AgentConfig:    agentConfig,
 		McpServers:     mcpServers,
+		OnProgress: func(step PrepareStep, stepIndex int, totalSteps int) {
+			m.eventPublisher.PublishPrepareProgress(reqWithWorktree.SessionID, &PrepareProgressEventPayload{
+				TaskID:     reqWithWorktree.TaskID,
+				SessionID:  reqWithWorktree.SessionID,
+				StepName:   step.Name,
+				StepIndex:  stepIndex,
+				TotalSteps: totalSteps,
+				Status:     string(step.Status),
+				Output:     step.Output,
+				Error:      step.Error,
+			})
+		},
 	}
 
 	execInstance, err := rt.CreateInstance(ctx, execReq)

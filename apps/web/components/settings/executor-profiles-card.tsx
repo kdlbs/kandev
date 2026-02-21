@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { IconTrash, IconPlus, IconPencil, IconStar } from "@tabler/icons-react";
+import { useRouter } from "next/navigation";
+import { IconTrash, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
@@ -16,8 +17,8 @@ type ExecutorProfilesCardProps = {
 };
 
 export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesCardProps) {
+  const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<ExecutorProfile | null>(null);
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
 
@@ -35,17 +36,20 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   }, [executorId, executors, setExecutors]);
 
   const handleCreate = useCallback(() => {
-    setEditingProfile(null);
     setDialogOpen(true);
   }, []);
 
-  const handleEdit = useCallback((profile: ExecutorProfile) => {
-    setEditingProfile(profile);
-    setDialogOpen(true);
-  }, []);
+  const handleProfileCreated = useCallback(
+    (profile: ExecutorProfile) => {
+      refreshProfiles();
+      router.push(`/settings/executor/${executorId}/profile/${profile.id}`);
+    },
+    [executorId, refreshProfiles, router],
+  );
 
   const handleDelete = useCallback(
-    async (profileId: string) => {
+    async (e: React.MouseEvent, profileId: string) => {
+      e.stopPropagation();
       try {
         await deleteExecutorProfile(executorId, profileId);
         await refreshProfiles();
@@ -64,8 +68,8 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
             <div>
               <CardTitle>Profiles</CardTitle>
               <CardDescription>
-                Different configurations for this executor. Each profile can have its own setup
-                script.
+                Different configurations for this executor. Each profile can have its own
+                prepare script, environment variables, and settings.
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={handleCreate} className="cursor-pointer">
@@ -82,19 +86,14 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
               {profiles.map((profile) => (
                 <div
                   key={profile.id}
-                  className="flex items-center justify-between rounded-md border px-3 py-2"
+                  className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                  onClick={() => router.push(`/settings/executor/${executorId}/profile/${profile.id}`)}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium truncate">{profile.name}</span>
-                    {profile.is_default && (
-                      <Badge variant="secondary" className="text-xs flex-shrink-0">
-                        <IconStar className="h-3 w-3 mr-1" />
-                        Default
-                      </Badge>
-                    )}
-                    {profile.setup_script && (
+                    {profile.prepare_script && (
                       <Badge variant="outline" className="text-xs flex-shrink-0">
-                        Setup script
+                        Prepare script
                       </Badge>
                     )}
                   </div>
@@ -102,19 +101,12 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleEdit(profile)}
-                      className="h-7 w-7 p-0 cursor-pointer"
-                    >
-                      <IconPencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(profile.id)}
+                      onClick={(e) => handleDelete(e, profile.id)}
                       className="h-7 w-7 p-0 text-destructive hover:text-destructive cursor-pointer"
                     >
                       <IconTrash className="h-3.5 w-3.5" />
                     </Button>
+                    <IconChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
               ))}
@@ -126,8 +118,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         executorId={executorId}
-        profile={editingProfile}
-        onSaved={refreshProfiles}
+        onSaved={handleProfileCreated}
       />
     </>
   );

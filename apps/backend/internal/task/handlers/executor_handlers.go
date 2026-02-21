@@ -52,12 +52,19 @@ func (h *ExecutorHandlers) listExecutors(ctx context.Context) (dto.ListExecutors
 	if err != nil {
 		return dto.ListExecutorsResponse{}, err
 	}
+	profiles, _ := h.service.ListAllExecutorProfiles(ctx)
+	profilesByExecutor := make(map[string][]dto.ExecutorProfileDTO, len(executors))
+	for _, p := range profiles {
+		profilesByExecutor[p.ExecutorID] = append(profilesByExecutor[p.ExecutorID], dto.FromExecutorProfile(p))
+	}
 	resp := dto.ListExecutorsResponse{
 		Executors: make([]dto.ExecutorDTO, 0, len(executors)),
 		Total:     len(executors),
 	}
 	for _, executor := range executors {
-		resp.Executors = append(resp.Executors, dto.FromExecutor(executor))
+		d := dto.FromExecutor(executor)
+		d.Profiles = profilesByExecutor[executor.ID]
+		resp.Executors = append(resp.Executors, d)
 	}
 	return resp, nil
 }

@@ -1,173 +1,207 @@
 "use client";
 
-import Link from "next/link";
-import { IconChevronRight, IconBrandDocker, IconCloud } from "@tabler/icons-react";
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
-import type { Executor } from "@/lib/types/http";
+import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
+import type { Executor, ExecutorProfile } from "@/lib/types/http";
 
-const CREATION_OPTIONS = [
-  {
-    id: "local_docker",
-    label: "Local Docker",
-    description: "Run on the local Docker daemon.",
-    href: "/settings/executor/new?type=local_docker",
-    icon: IconBrandDocker,
-    enabled: true,
-  },
-  {
-    id: "remote_docker",
-    label: "Remote Docker",
-    description: "Connect to a remote Docker host.",
-    href: "/settings/executor/new?type=remote_docker",
-    icon: IconCloud,
-    enabled: true,
-  },
-];
-
-type CreationOptionCardProps = {
-  option: (typeof CREATION_OPTIONS)[number];
+type ProfileWithExecutor = ExecutorProfile & {
+  executor_type: string;
+  executor_name: string;
+  parent_executor_id: string;
 };
 
-function CreationOptionCard({ option }: CreationOptionCardProps) {
-  const Icon = option.icon;
-  const cardBody = (
-    <CardContent className="py-4">
-      <div className="flex items-start gap-3">
-        <div className="p-2 bg-muted rounded-md">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{option.label}</span>
-            {!option.enabled && (
-              <Badge variant="outline" className="text-xs">
-                Coming soon
-              </Badge>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">{option.description}</p>
-        </div>
-      </div>
-    </CardContent>
+function useAllProfiles(): ProfileWithExecutor[] {
+  const executors = useAppStore((state) => state.executors.items);
+  return useMemo(
+    () =>
+      executors.flatMap((e: Executor) =>
+        (e.profiles ?? []).map((p) => ({
+          ...p,
+          executor_type: e.type,
+          executor_name: e.name,
+          parent_executor_id: e.id,
+        })),
+      ),
+    [executors],
   );
-  if (!option.enabled) {
-    return (
-      <div className="cursor-not-allowed opacity-60">
-        <Card className="h-full">{cardBody}</Card>
-      </div>
-    );
-  }
-  return (
-    <Link href={option.href} className="block">
-      <Card className="h-full hover:bg-accent transition-colors">{cardBody}</Card>
-    </Link>
-  );
-}
-
-function ExecutorTypeDescription({ type }: { type: string }) {
-  if (type === "local") {
-    return (
-      <div className="text-xs text-muted-foreground mt-1">
-        Runs agents directly in the repository folder. No worktree isolation.
-      </div>
-    );
-  }
-  if (type === "worktree") {
-    return (
-      <div className="text-xs text-muted-foreground mt-1">
-        Creates a git worktree for each session. Agents work in isolated branches.
-      </div>
-    );
-  }
-  return null;
 }
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
+const EXECUTOR_TYPES = [
+  { type: "local", label: "Local", description: "Run agents directly in the repository folder." },
+  { type: "worktree", label: "Worktree", description: "Create git worktrees for isolated agent sessions." },
+  { type: "local_docker", label: "Docker", description: "Run Docker containers on this machine." },
+  { type: "sprites", label: "Sprites.dev", description: "Run agents in Sprites.dev cloud sandboxes." },
+] as const;
+
 function ExecutorIconBadge({ type }: { type: string }) {
   const Icon = EXECUTOR_ICON_MAP[type] ?? DefaultIcon;
   return (
-    <div className="p-2 bg-muted rounded-md">
+    <div className="rounded-md bg-muted p-2">
       <Icon className="h-4 w-4" />
     </div>
   );
 }
 
-function ExecutorListItem({ executor }: { executor: Executor }) {
-  const typeLabel = getExecutorLabel(executor.type);
-  const showDockerHost =
-    (executor.type === "local_docker" || executor.type === "remote_docker") &&
-    executor.config?.docker_host;
-
+function ProfileCard({ profile, onDelete }: { profile: ProfileWithExecutor; onDelete: (id: string) => void }) {
+  const router = useRouter();
   return (
-    <Link href={`/settings/executor/${executor.id}`}>
-      <Card className="hover:bg-accent transition-colors cursor-pointer">
-        <CardContent className="py-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start gap-3 flex-1">
-              <ExecutorIconBadge type={executor.type} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h4 className="font-medium">{executor.name}</h4>
-                  <Badge variant="secondary" className="text-xs">
-                    {typeLabel}
-                  </Badge>
-                  {executor.status === "disabled" && (
-                    <Badge variant="outline" className="text-xs">
-                      Disabled
-                    </Badge>
-                  )}
-                </div>
-                {showDockerHost && (
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {executor.config?.docker_host}
-                  </div>
-                )}
-                <ExecutorTypeDescription type={executor.type} />
-              </div>
-            </div>
-            <IconChevronRight className="h-5 w-5 text-muted-foreground" />
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+    <Card
+      className="group cursor-pointer transition-colors hover:bg-muted/50"
+      onClick={() => router.push(`/settings/executors/${profile.id}`)}
+    >
+      <CardContent className="flex items-center gap-3 p-4">
+        <ExecutorIconBadge type={profile.executor_type} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{profile.name}</p>
+          <p className="text-xs text-muted-foreground">{getExecutorLabel(profile.executor_type)}</p>
+        </div>
+        <Badge variant="outline" className="shrink-0 text-xs">{getExecutorLabel(profile.executor_type)}</Badge>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 cursor-pointer opacity-0 group-hover:opacity-100"
+          onClick={(e) => { e.stopPropagation(); onDelete(profile.id); }}
+        >
+          <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
-export default function ExecutorsSettingsPage() {
+function CreateTypeCard({ execType, onClick }: { execType: (typeof EXECUTOR_TYPES)[number]; onClick: () => void }) {
+  return (
+    <Card className="cursor-pointer transition-colors hover:bg-muted/50" onClick={onClick}>
+      <CardContent className="flex items-center gap-3 p-4">
+        <ExecutorIconBadge type={execType.type} />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">{execType.label}</p>
+          <p className="text-xs text-muted-foreground">{execType.description}</p>
+        </div>
+        <IconPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function DeleteProfileDialog({
+  profileName,
+  open,
+  onOpenChange,
+  onDelete,
+  deleting,
+}: {
+  profileName: string | undefined;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onDelete: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete Profile</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete &quot;{profileName}&quot;? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">Cancel</Button>
+          <Button variant="destructive" onClick={onDelete} disabled={deleting} className="cursor-pointer">
+            {deleting ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export default function ExecutorsHubPage() {
+  const router = useRouter();
+  const allProfiles = useAllProfiles();
   const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+  const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const profileToDelete = deleteProfileId ? allProfiles.find((p) => p.id === deleteProfileId) : null;
+
+  const handleDelete = async () => {
+    if (!profileToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteExecutorProfile(profileToDelete.parent_executor_id, profileToDelete.id);
+      setExecutors(
+        executors.map((e: Executor) =>
+          e.id === profileToDelete.parent_executor_id
+            ? { ...e, profiles: (e.profiles ?? []).filter((p) => p.id !== profileToDelete.id) }
+            : e,
+        ),
+      );
+      setDeleteProfileId(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">Executors</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Choose where environments run today and prepare for remote targets.
-          </p>
-        </div>
-      </div>
-
-      <Separator />
-
       <div>
-        <div className="text-sm font-medium mb-3">Create an executor</div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {CREATION_OPTIONS.map((option) => (
-            <CreationOptionCard key={option.id} option={option} />
+        <h2 className="text-2xl font-bold">Executors</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Executor profiles define how and where agents run. Each profile configures an execution
+          environment with scripts, environment variables, and MCP policies.
+        </p>
+      </div>
+      <Separator />
+      {allProfiles.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Profiles</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {allProfiles.map((profile) => (
+              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Create New Profile</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EXECUTOR_TYPES.map((execType) => (
+            <CreateTypeCard
+              key={execType.type}
+              execType={execType}
+              onClick={() => router.push(`/settings/executors/new/${execType.type}`)}
+            />
           ))}
         </div>
       </div>
-
-      <div className="grid gap-3">
-        {executors.map((executor: Executor) => (
-          <ExecutorListItem key={executor.id} executor={executor} />
-        ))}
-      </div>
+      <DeleteProfileDialog
+        profileName={profileToDelete?.name}
+        open={Boolean(deleteProfileId)}
+        onOpenChange={() => setDeleteProfileId(null)}
+        onDelete={handleDelete}
+        deleting={deleting}
+      />
     </div>
   );
 }

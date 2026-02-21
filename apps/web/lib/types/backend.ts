@@ -264,9 +264,10 @@ export type ExecutorProfilePayload = {
   id: string;
   executor_id: string;
   name: string;
-  is_default: boolean;
+  mcp_policy?: string;
   config?: Record<string, string>;
-  setup_script: string;
+  prepare_script: string;
+  cleanup_script: string;
   created_at?: string;
   updated_at?: string;
 };

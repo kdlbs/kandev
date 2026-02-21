@@ -123,6 +123,12 @@ func completeStepError(step *PrepareStep, errMsg string) {
 	step.EndedAt = &now
 }
 
+func completeStepSkipped(step *PrepareStep) {
+	now := time.Now()
+	step.Status = PrepareStepSkipped
+	step.EndedAt = &now
+}
+
 func reportProgress(cb PrepareProgressCallback, step PrepareStep, index, total int) {
 	if cb != nil {
 		cb(step, index, total)

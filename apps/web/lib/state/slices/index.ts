@@ -37,7 +37,6 @@ export type {
 } from "./workspace/types";
 export type {
   ExecutorsState,
-  EnvironmentsState,
   SettingsAgentsState,
   AgentDiscoveryState,
   AvailableAgentsState,

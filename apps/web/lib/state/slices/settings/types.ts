@@ -4,7 +4,6 @@ import type {
   AvailableAgent,
   AgentDiscovery,
   CustomPrompt,
-  Environment,
   EditorOption,
   Executor,
   NotificationProvider,
@@ -15,10 +14,6 @@ import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
 export type ExecutorsState = {
   items: Executor[];
-};
-
-export type EnvironmentsState = {
-  items: Environment[];
 };
 
 export type SettingsAgentsState = {
@@ -97,7 +92,6 @@ export type NotificationProvidersState = {
 
 export type SettingsDataState = {
   executorsLoaded: boolean;
-  environmentsLoaded: boolean;
   agentsLoaded: boolean;
 };
 
@@ -121,7 +115,6 @@ export type UserSettingsState = {
 
 export type SettingsSliceState = {
   executors: ExecutorsState;
-  environments: EnvironmentsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
   availableAgents: AvailableAgentsState;
@@ -137,7 +130,6 @@ export type SettingsSliceState = {
 
 export type SettingsSliceActions = {
   setExecutors: (executors: ExecutorsState["items"]) => void;
-  setEnvironments: (environments: EnvironmentsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
   setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;

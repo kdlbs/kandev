@@ -14,7 +14,7 @@ export function useSprites(secretId?: string) {
   const setSpritesLoading = useAppStore((state) => state.setSpritesLoading);
 
   useEffect(() => {
-    if (loaded || loading) return;
+    if (!secretId || loaded || loading) return;
     setSpritesLoading(true);
 
     Promise.all([

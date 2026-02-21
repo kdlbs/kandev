@@ -155,6 +155,39 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   );
 });
 
+type ExecutorProfileSelectorProps = {
+  options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  triggerClassName?: string;
+};
+
+export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: ExecutorProfileSelectorProps) {
+  return (
+    <Combobox
+      options={options}
+      value={value}
+      onValueChange={onValueChange}
+      placeholder={placeholder}
+      searchPlaceholder="Search profiles..."
+      emptyMessage="No profile found."
+      disabled={disabled}
+      dropdownLabel="Executor Profile"
+      className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      triggerClassName={triggerClassName}
+    />
+  );
+});
+
 type InlineTaskNameProps = {
   value: string;
   onChange: (value: string) => void;

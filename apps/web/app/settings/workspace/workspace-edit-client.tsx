@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/workspaces";
-import type { Workspace, Executor, Environment } from "@/lib/types/http";
+import type { Workspace, Executor } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
@@ -107,9 +107,6 @@ type WorkspaceSettingsCardProps = {
   onExecutorChange: (value: string) => void;
   activeExecutors: Executor[];
   executorsEmpty: boolean;
-  defaultEnvironmentId: string;
-  onEnvironmentChange: (value: string) => void;
-  environments: Environment[];
   defaultAgentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
@@ -126,9 +123,6 @@ function WorkspaceSettingsCard({
   onExecutorChange,
   activeExecutors,
   executorsEmpty,
-  defaultEnvironmentId,
-  onEnvironmentChange,
-  environments,
   defaultAgentProfileId,
   onAgentProfileChange,
   agentProfiles,
@@ -137,7 +131,6 @@ function WorkspaceSettingsCard({
   onSave,
 }: WorkspaceSettingsCardProps) {
   const executorOptions = activeExecutors.map((e: Executor) => ({ id: e.id, name: e.name }));
-  const envOptions = environments.map((e: Environment) => ({ id: e.id, name: e.name }));
   const profileOptions = agentProfiles.map((p: AgentProfileOption) => ({
     id: p.id,
     name: p.label,
@@ -167,14 +160,6 @@ function WorkspaceSettingsCard({
             options={executorsEmpty ? [] : executorOptions}
             emptyLabel="No executors available"
             emptyValue=""
-          />
-          <SelectField
-            label="Default Environment"
-            value={defaultEnvironmentId}
-            onChange={onEnvironmentChange}
-            options={envOptions}
-            emptyLabel="No environments available"
-            emptyValue="empty-environments"
           />
           <SelectField
             label="Default Agent Profile"
@@ -310,19 +295,16 @@ function DeleteWorkspaceCard({
 type SavedState = {
   name: string;
   executorId: string;
-  environmentId: string;
   agentProfileId: string;
 };
 
 function buildWorkspaceUpdates(
-  draft: { name: string; executorId: string; environmentId: string; agentProfileId: string },
+  draft: { name: string; executorId: string; agentProfileId: string },
   saved: SavedState,
 ): Record<string, string | undefined> {
   const updates: Record<string, string | undefined> = {};
   if (draft.name.trim() !== saved.name) updates.name = draft.name.trim();
   if (draft.executorId !== saved.executorId) updates.default_executor_id = draft.executorId;
-  if (draft.environmentId !== saved.environmentId)
-    updates.default_environment_id = draft.environmentId;
   if (draft.agentProfileId !== saved.agentProfileId)
     updates.default_agent_profile_id = draft.agentProfileId;
   return updates;
@@ -331,7 +313,6 @@ function buildWorkspaceUpdates(
 type WorkspaceDraftState = {
   workspaceNameDraft: string;
   defaultExecutorId: string;
-  defaultEnvironmentId: string;
   defaultAgentProfileId: string;
 };
 
@@ -371,7 +352,6 @@ function buildSaveHandler({
         {
           name: draft.workspaceNameDraft,
           executorId: draft.defaultExecutorId,
-          environmentId: draft.defaultEnvironmentId,
           agentProfileId: draft.defaultAgentProfileId,
         },
         savedState,
@@ -381,7 +361,6 @@ function buildSaveHandler({
       setSavedState({
         name: updated.name ?? draft.workspaceNameDraft.trim(),
         executorId: updated.default_executor_id ?? "",
-        environmentId: updated.default_environment_id ?? "",
         agentProfileId: updated.default_agent_profile_id ?? "",
       });
       setWorkspaces(
@@ -413,23 +392,18 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(workspace);
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspace.name ?? "");
   const [defaultExecutorId, setDefaultExecutorId] = useState(workspace.default_executor_id ?? "");
-  const [defaultEnvironmentId, setDefaultEnvironmentId] = useState(
-    workspace.default_environment_id ?? "",
-  );
   const [defaultAgentProfileId, setDefaultAgentProfileId] = useState(
     workspace.default_agent_profile_id ?? "",
   );
   const [savedState, setSavedState] = useState<SavedState>({
     name: workspace.name ?? "",
     executorId: workspace.default_executor_id ?? "",
-    environmentId: workspace.default_environment_id ?? "",
     agentProfileId: workspace.default_agent_profile_id ?? "",
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const executors = useAppStore((state) => state.executors.items);
-  const environments = useAppStore((state) => state.environments.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
@@ -441,12 +415,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const isDirty =
     workspaceNameDraft.trim() !== savedState.name ||
     defaultExecutorId !== savedState.executorId ||
-    defaultEnvironmentId !== savedState.environmentId ||
     defaultAgentProfileId !== savedState.agentProfileId;
 
   const handleSave = buildSaveHandler({
     currentWorkspace,
-    draft: { workspaceNameDraft, defaultExecutorId, defaultEnvironmentId, defaultAgentProfileId },
+    draft: { workspaceNameDraft, defaultExecutorId, defaultAgentProfileId },
     savedState,
     isDirty,
     setSavedState,
@@ -478,8 +451,6 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setWorkspaceNameDraft,
     defaultExecutorId,
     setDefaultExecutorId,
-    defaultEnvironmentId,
-    setDefaultEnvironmentId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
     deleteDialogOpen,
@@ -488,7 +459,6 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setDeleteConfirmText,
     activeExecutors,
     executors,
-    environments,
     agentProfiles,
     isDirty,
     saveWorkspaceRequest,
@@ -504,8 +474,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setWorkspaceNameDraft,
     defaultExecutorId,
     setDefaultExecutorId,
-    defaultEnvironmentId,
-    setDefaultEnvironmentId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
     deleteDialogOpen,
@@ -514,7 +482,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setDeleteConfirmText,
     activeExecutors,
     executors,
-    environments,
     agentProfiles,
     isDirty,
     saveWorkspaceRequest,
@@ -539,9 +506,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onExecutorChange={setDefaultExecutorId}
         activeExecutors={activeExecutors}
         executorsEmpty={executors.length === 0}
-        defaultEnvironmentId={defaultEnvironmentId}
-        onEnvironmentChange={setDefaultEnvironmentId}
-        environments={environments}
         defaultAgentProfileId={defaultAgentProfileId}
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}

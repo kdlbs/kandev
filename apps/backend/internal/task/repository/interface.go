@@ -139,7 +139,7 @@ type Repository interface {
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
-	GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error)
+	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 
 	// Executor running operations
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)

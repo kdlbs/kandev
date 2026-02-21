@@ -149,14 +149,15 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 		return
 	}
 	data := map[string]interface{}{
-		"id":           profile.ID,
-		"executor_id":  profile.ExecutorID,
-		"name":         profile.Name,
-		"is_default":   profile.IsDefault,
-		"config":       profile.Config,
-		"setup_script": profile.SetupScript,
-		"created_at":   profile.CreatedAt.Format(time.RFC3339),
-		"updated_at":   profile.UpdatedAt.Format(time.RFC3339),
+		"id":             profile.ID,
+		"executor_id":    profile.ExecutorID,
+		"name":           profile.Name,
+		"mcp_policy":     profile.McpPolicy,
+		"config":         profile.Config,
+		"prepare_script": profile.PrepareScript,
+		"cleanup_script": profile.CleanupScript,
+		"created_at":     profile.CreatedAt.Format(time.RFC3339),
+		"updated_at":     profile.UpdatedAt.Format(time.RFC3339),
 	}
 	s.publishEventToBus(ctx, eventType, "executor_profile", profile.ID, data)
 }

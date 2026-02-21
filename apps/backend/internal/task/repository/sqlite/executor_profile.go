@@ -34,15 +34,10 @@ func (r *Repository) CreateExecutorProfile(ctx context.Context, profile *models.
 		return fmt.Errorf("failed to serialize profile env_vars: %w", err)
 	}
 
-	isDefault := 0
-	if profile.IsDefault {
-		isDefault = 1
-	}
-
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO executor_profiles (id, executor_id, name, is_default, config, setup_script, env_vars, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), profile.ID, profile.ExecutorID, profile.Name, isDefault, string(configJSON), profile.SetupScript, string(envVarsJSON), profile.CreatedAt, profile.UpdatedAt)
+		INSERT INTO executor_profiles (id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), profile.ID, profile.ExecutorID, profile.Name, profile.McpPolicy, string(configJSON), profile.PrepareScript, profile.CleanupScript, string(envVarsJSON), profile.CreatedAt, profile.UpdatedAt)
 	return err
 }
 
@@ -50,14 +45,13 @@ func (r *Repository) GetExecutorProfile(ctx context.Context, id string) (*models
 	profile := &models.ExecutorProfile{}
 	var configJSON string
 	var envVarsJSON sql.NullString
-	var isDefault int
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, executor_id, name, is_default, config, setup_script, env_vars, created_at, updated_at
+		SELECT id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at
 		FROM executor_profiles WHERE id = ?
 	`), id).Scan(
-		&profile.ID, &profile.ExecutorID, &profile.Name, &isDefault,
-		&configJSON, &profile.SetupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
+		&profile.ID, &profile.ExecutorID, &profile.Name, &profile.McpPolicy,
+		&configJSON, &profile.PrepareScript, &profile.CleanupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("executor profile not found: %s", id)
@@ -66,7 +60,6 @@ func (r *Repository) GetExecutorProfile(ctx context.Context, id string) (*models
 		return nil, err
 	}
 
-	profile.IsDefault = isDefault == 1
 	if configJSON != "" && configJSON != "{}" {
 		if err := json.Unmarshal([]byte(configJSON), &profile.Config); err != nil {
 			return nil, fmt.Errorf("failed to deserialize profile config: %w", err)
@@ -93,15 +86,10 @@ func (r *Repository) UpdateExecutorProfile(ctx context.Context, profile *models.
 		return fmt.Errorf("failed to serialize profile env_vars: %w", err)
 	}
 
-	isDefault := 0
-	if profile.IsDefault {
-		isDefault = 1
-	}
-
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE executor_profiles SET name = ?, is_default = ?, config = ?, setup_script = ?, env_vars = ?, updated_at = ?
+		UPDATE executor_profiles SET name = ?, mcp_policy = ?, config = ?, prepare_script = ?, cleanup_script = ?, env_vars = ?, updated_at = ?
 		WHERE id = ?
-	`), profile.Name, isDefault, string(configJSON), profile.SetupScript, string(envVarsJSON), profile.UpdatedAt, profile.ID)
+	`), profile.Name, profile.McpPolicy, string(configJSON), profile.PrepareScript, profile.CleanupScript, string(envVarsJSON), profile.UpdatedAt, profile.ID)
 	if err != nil {
 		return err
 	}
@@ -126,27 +114,42 @@ func (r *Repository) DeleteExecutorProfile(ctx context.Context, id string) error
 
 func (r *Repository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, executor_id, name, is_default, config, setup_script, env_vars, created_at, updated_at
-		FROM executor_profiles WHERE executor_id = ? ORDER BY is_default DESC, name ASC
+		SELECT id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at
+		FROM executor_profiles WHERE executor_id = ? ORDER BY name ASC
 	`), executorID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
+	return scanExecutorProfiles(rows)
+}
+
+func (r *Repository) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
+	rows, err := r.ro.QueryContext(ctx, `
+		SELECT id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at
+		FROM executor_profiles ORDER BY executor_id ASC, name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorProfiles(rows)
+}
+
+func scanExecutorProfiles(rows *sql.Rows) ([]*models.ExecutorProfile, error) {
 	var result []*models.ExecutorProfile
 	for rows.Next() {
 		profile := &models.ExecutorProfile{}
 		var configJSON string
 		var envVarsJSON sql.NullString
-		var isDefault int
 		if err := rows.Scan(
-			&profile.ID, &profile.ExecutorID, &profile.Name, &isDefault,
-			&configJSON, &profile.SetupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
+			&profile.ID, &profile.ExecutorID, &profile.Name, &profile.McpPolicy,
+			&configJSON, &profile.PrepareScript, &profile.CleanupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-		profile.IsDefault = isDefault == 1
 		if configJSON != "" && configJSON != "{}" {
 			if err := json.Unmarshal([]byte(configJSON), &profile.Config); err != nil {
 				return nil, fmt.Errorf("failed to deserialize profile config: %w", err)
@@ -160,38 +163,4 @@ func (r *Repository) ListExecutorProfiles(ctx context.Context, executorID string
 		result = append(result, profile)
 	}
 	return result, rows.Err()
-}
-
-func (r *Repository) GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error) {
-	profile := &models.ExecutorProfile{}
-	var configJSON string
-	var envVarsJSON sql.NullString
-	var isDefault int
-
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, executor_id, name, is_default, config, setup_script, env_vars, created_at, updated_at
-		FROM executor_profiles WHERE executor_id = ? AND is_default = 1 LIMIT 1
-	`), executorID).Scan(
-		&profile.ID, &profile.ExecutorID, &profile.Name, &isDefault,
-		&configJSON, &profile.SetupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil // No default profile is not an error
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	profile.IsDefault = isDefault == 1
-	if configJSON != "" && configJSON != "{}" {
-		if err := json.Unmarshal([]byte(configJSON), &profile.Config); err != nil {
-			return nil, fmt.Errorf("failed to deserialize profile config: %w", err)
-		}
-	}
-	if envVarsJSON.Valid && envVarsJSON.String != "" && envVarsJSON.String != jsonNull {
-		if err := json.Unmarshal([]byte(envVarsJSON.String), &profile.EnvVars); err != nil {
-			return nil, fmt.Errorf("failed to deserialize profile env_vars: %w", err)
-		}
-	}
-	return profile, nil
 }

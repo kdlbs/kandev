@@ -403,7 +403,7 @@ func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) e
 func (m *mockRepository) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
 	return nil, nil
 }
-func (m *mockRepository) GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error) {
+func (m *mockRepository) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
 	return nil, nil
 }
 

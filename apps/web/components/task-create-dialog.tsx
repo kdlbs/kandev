@@ -16,13 +16,12 @@ import {
   useRepositoryOptions,
   useBranchOptions,
   useAgentProfileOptions,
-  useExecutorOptions,
 } from "@/components/task-create-dialog-options";
 import {
   RepositorySelector,
   BranchSelector,
   AgentSelector,
-  ExecutorSelector,
+  ExecutorProfileSelector,
   InlineTaskName,
   TaskFormInputs,
 } from "@/components/task-create-dialog-selectors";
@@ -71,7 +70,6 @@ interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
-    environmentId: string;
   }) => void;
   initialValues?: TaskCreateDialogInitialValues;
   taskId?: string | null;
@@ -176,7 +174,7 @@ type DialogFormBodyProps = {
   branchOptions: ReturnType<typeof useBranchOptions>;
   branchesLoading: boolean;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorOptions: ReturnType<typeof useExecutorOptions>;
+  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
@@ -188,6 +186,7 @@ type DialogFormBodyProps = {
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   onBranchChange: (v: string) => void;
   onAgentProfileChange: (v: string) => void;
+  onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
   hasRepositorySelection: boolean;
 };
@@ -203,7 +202,7 @@ function DialogFormBody({
   branchOptions,
   branchesLoading,
   agentProfileOptions,
-  executorOptions,
+  executorProfileOptions,
   agentProfiles,
   agentProfilesLoading,
   executorsLoading,
@@ -215,6 +214,7 @@ function DialogFormBody({
   handleKeyDown,
   onBranchChange,
   onAgentProfileChange,
+  onExecutorProfileChange,
   onWorkflowChange,
   hasRepositorySelection,
 }: DialogFormBodyProps) {
@@ -255,13 +255,13 @@ function DialogFormBody({
           agentProfileId={fs.agentProfileId}
           onAgentProfileChange={onAgentProfileChange}
           isCreatingSession={isCreatingSession}
-          executorOptions={executorOptions}
-          executorId={fs.executorId}
-          onExecutorChange={fs.setExecutorId}
+          executorProfileOptions={executorProfileOptions}
+          executorProfileId={fs.executorProfileId}
+          onExecutorProfileChange={onExecutorProfileChange}
           executorsLoading={executorsLoading}
           BranchSelectorComponent={BranchSelector}
           AgentSelectorComponent={AgentSelector}
-          ExecutorSelectorComponent={ExecutorSelector}
+          ExecutorProfileSelectorComponent={ExecutorProfileSelector}
         />
       )}
       <WorkflowSection
@@ -279,12 +279,12 @@ function DialogFormBody({
           onAgentProfileChange={onAgentProfileChange}
           agentProfilesLoading={agentProfilesLoading}
           isCreatingSession={isCreatingSession}
-          executorOptions={executorOptions}
-          executorId={fs.executorId}
-          onExecutorChange={fs.setExecutorId}
+          executorProfileOptions={executorProfileOptions}
+          executorProfileId={fs.executorProfileId}
+          onExecutorProfileChange={onExecutorProfileChange}
           executorsLoading={executorsLoading}
           AgentSelectorComponent={AgentSelector}
-          ExecutorSelectorComponent={ExecutorSelector}
+          ExecutorProfileSelectorComponent={ExecutorProfileSelector}
         />
       )}
     </div>
@@ -302,12 +302,12 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   const { toast } = useToast();
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const {
-    workflows, agentProfiles, executors, environments, snapshots,
+    workflows, agentProfiles, executors, snapshots,
     repositories, repositoriesLoading, branches, branchesLoading, computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   useTaskCreateDialogEffects(fs, {
     open, workspaceId, workflowId, repositories, repositoriesLoading,
-    branches, agentProfiles, environments, executors,
+    branches, agentProfiles, executors,
     workspaceDefaults: computed.workspaceDefaults, toast,
   });
   const handlers = useDialogHandlers(fs, repositories);
@@ -318,14 +318,15 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositoryId: fs.repositoryId, selectedLocalRepo: fs.selectedLocalRepo,
     branch: fs.branch, agentProfileId: fs.agentProfileId,
-    environmentId: fs.environmentId, executorId: fs.executorId,
+    executorId: fs.executorId,
+    executorProfileId: fs.executorProfileId,
     editingTask, onSuccess, onCreateSession, onOpenChange, taskId,
     descriptionInputRef: fs.descriptionInputRef,
     setIsCreatingSession: fs.setIsCreatingSession, setIsCreatingTask: fs.setIsCreatingTask,
     setHasTitle: fs.setHasTitle, setHasDescription: fs.setHasDescription,
     setTaskName: fs.setTaskName, setRepositoryId: fs.setRepositoryId,
     setBranch: fs.setBranch, setAgentProfileId: fs.setAgentProfileId,
-    setEnvironmentId: fs.setEnvironmentId, setExecutorId: fs.setExecutorId,
+    setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId, setFetchedSteps: fs.setFetchedSteps,
   });
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
@@ -380,7 +381,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             branchOptions={computed.branchOptions}
             branchesLoading={branchesLoading}
             agentProfileOptions={computed.agentProfileOptions}
-            executorOptions={computed.executorOptions}
+            executorProfileOptions={computed.executorProfileOptions}
             agentProfiles={agentProfiles}
             agentProfilesLoading={computed.agentProfilesLoading}
             executorsLoading={computed.executorsLoading}
@@ -392,6 +393,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             handleKeyDown={handleKeyDown}
             onBranchChange={handlers.handleBranchChange}
             onAgentProfileChange={handlers.handleAgentProfileChange}
+            onExecutorProfileChange={handlers.handleExecutorProfileChange}
             onWorkflowChange={handlers.handleWorkflowChange}
             hasRepositorySelection={computed.hasRepositorySelection}
           />

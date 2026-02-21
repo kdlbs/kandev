@@ -485,10 +485,13 @@ export type ProfileEnvVar = {
 export type ExecutorProfile = {
   id: string;
   executor_id: string;
+  executor_type?: string;
+  executor_name?: string;
   name: string;
-  is_default: boolean;
+  mcp_policy?: string;
   config?: Record<string, string>;
-  setup_script: string;
+  prepare_script: string;
+  cleanup_script: string;
   env_vars?: ProfileEnvVar[];
   created_at: string;
   updated_at: string;

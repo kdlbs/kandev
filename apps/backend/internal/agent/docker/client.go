@@ -2,6 +2,8 @@
 package docker
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -122,6 +125,54 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 
 	c.logger.Info("Image pulled successfully", zap.String("image", imageName))
 	return nil
+}
+
+// BuildImage builds a Docker image from a Dockerfile string.
+// It returns the build output as an io.ReadCloser for streaming.
+// The caller is responsible for closing the returned reader.
+func (c *Client) BuildImage(ctx context.Context, dockerfile string, tag string, buildArgs map[string]*string) (io.ReadCloser, error) {
+	c.logger.Info("Building image", zap.String("tag", tag))
+
+	buildContext, err := createDockerfileTar(dockerfile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create build context: %w", err)
+	}
+
+	resp, err := c.cli.ImageBuild(ctx, buildContext, build.ImageBuildOptions{
+		Tags:       []string{tag},
+		BuildArgs:  buildArgs,
+		Dockerfile: "Dockerfile",
+		Remove:     true,
+	})
+	if err != nil {
+		c.logger.Error("Failed to build image", zap.String("tag", tag), zap.Error(err))
+		return nil, fmt.Errorf("failed to build image %s: %w", tag, err)
+	}
+
+	return resp.Body, nil
+}
+
+// createDockerfileTar creates a tar archive containing a single Dockerfile.
+func createDockerfileTar(dockerfile string) (io.Reader, error) {
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+
+	header := &tar.Header{
+		Name: "Dockerfile",
+		Size: int64(len(dockerfile)),
+		Mode: 0o644,
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		return nil, fmt.Errorf("failed to write tar header: %w", err)
+	}
+	if _, err := tw.Write([]byte(dockerfile)); err != nil {
+		return nil, fmt.Errorf("failed to write Dockerfile to tar: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	return buf, nil
 }
 
 // CreateContainer creates a new container.

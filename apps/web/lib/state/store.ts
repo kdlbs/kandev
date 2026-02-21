@@ -25,7 +25,6 @@ import {
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
-  type EnvironmentsState,
   type SettingsAgentsState,
   type AgentDiscoveryState,
   type AvailableAgentsState,
@@ -61,7 +60,6 @@ export type {
   RepositoryBranchesState,
   RepositoryScriptsState,
   ExecutorsState,
-  EnvironmentsState,
   SettingsAgentsState,
   AgentDiscoveryState,
   AvailableAgentsState,
@@ -122,7 +120,6 @@ export type AppState = {
 
   // Settings slice
   executors: (typeof defaultSettingsState)["executors"];
-  environments: (typeof defaultSettingsState)["environments"];
   settingsAgents: (typeof defaultSettingsState)["settingsAgents"];
   agentDiscovery: (typeof defaultSettingsState)["agentDiscovery"];
   availableAgents: (typeof defaultSettingsState)["availableAgents"];
@@ -190,7 +187,6 @@ export type AppState = {
   ) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
-  setEnvironments: (environments: EnvironmentsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
   setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
@@ -338,7 +334,6 @@ const defaultState = {
   repositoryBranches: defaultWorkspaceState.repositoryBranches,
   repositoryScripts: defaultWorkspaceState.repositoryScripts,
   executors: defaultSettingsState.executors,
-  environments: defaultSettingsState.environments,
   settingsAgents: defaultSettingsState.settingsAgents,
   agentDiscovery: defaultSettingsState.agentDiscovery,
   availableAgents: defaultSettingsState.availableAgents,
@@ -397,7 +392,6 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
-    environments: { ...defaultState.environments, ...initialState.environments },
     settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
     agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
     availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
@@ -475,7 +469,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
       repositoryBranches: merged.repositoryBranches,
       repositoryScripts: merged.repositoryScripts,
       executors: merged.executors,
-      environments: merged.environments,
       settingsAgents: merged.settingsAgents,
       agentDiscovery: merged.agentDiscovery,
       availableAgents: merged.availableAgents,

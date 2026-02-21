@@ -112,7 +112,7 @@ func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]st
 
 // Execute starts agent execution for a task
 func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, error) {
-	return e.ExecuteWithProfile(ctx, task, "", "", task.Description, "")
+	return e.ExecuteWithFullProfile(ctx, task, "", "", "", task.Description, "")
 }
 
 // ExecuteWithProfile starts agent execution for a task using an explicit agent profile.
@@ -121,8 +121,13 @@ func (e *Executor) Execute(ctx context.Context, task *v1.Task) (*TaskExecution, 
 // The prompt parameter is the initial prompt to send to the agent.
 // The workflowStepID parameter associates the session with a workflow step for transitions.
 func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, prompt string, workflowStepID string) (*TaskExecution, error) {
+	return e.ExecuteWithFullProfile(ctx, task, agentProfileID, executorID, "", prompt, workflowStepID)
+}
+
+// ExecuteWithFullProfile starts agent execution for a task using an explicit agent profile and executor profile.
+func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, prompt string, workflowStepID string) (*TaskExecution, error) {
 	// Create session entry in database first
-	sessionID, err := e.PrepareSession(ctx, task, agentProfileID, executorID, workflowStepID)
+	sessionID, err := e.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +139,7 @@ func (e *Executor) ExecuteWithProfile(ctx context.Context, task *v1.Task, agentP
 // PrepareSession creates a session entry in the database without launching the agent.
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
-func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, workflowStepID string) (string, error) {
+func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
@@ -179,6 +184,15 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 	if workflowStepID != "" {
 		session.WorkflowStepID = &workflowStepID
+	}
+
+	// Store executor profile ID on session
+	if executorProfileID != "" {
+		session.ExecutorProfileID = executorProfileID
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["executor_profile_id"] = executorProfileID
 	}
 
 	// Resolve executor configuration
@@ -261,7 +275,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	req, err := e.buildLaunchAgentRequest(ctx, task, sessionID, agentProfileID, executorID, prompt, repoInfo)
+	req, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -338,8 +352,15 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
-func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, sessionID, agentProfileID, executorID, prompt string, repoInfo *repoInfo) (*LaunchAgentRequest, error) {
+func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo) (*LaunchAgentRequest, error) {
 	metadata := cloneMetadata(task.Metadata)
+	if session.ExecutorProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["executor_profile_id"] = session.ExecutorProfileID
+	}
+	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		TaskTitle:       task.Title,

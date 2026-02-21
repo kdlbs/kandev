@@ -532,12 +532,13 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
 	profile := &models.ExecutorProfile{
-		ExecutorID:  req.ExecutorID,
-		Name:        req.Name,
-		IsDefault:   req.IsDefault,
-		Config:      req.Config,
-		SetupScript: req.SetupScript,
-		EnvVars:     req.EnvVars,
+		ExecutorID:    req.ExecutorID,
+		Name:          req.Name,
+		McpPolicy:     req.McpPolicy,
+		Config:        req.Config,
+		PrepareScript: req.PrepareScript,
+		CleanupScript: req.CleanupScript,
+		EnvVars:       req.EnvVars,
 	}
 	if err := s.repo.CreateExecutorProfile(ctx, profile); err != nil {
 		return nil, err
@@ -558,14 +559,17 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if req.Name != nil {
 		profile.Name = *req.Name
 	}
-	if req.IsDefault != nil {
-		profile.IsDefault = *req.IsDefault
+	if req.McpPolicy != nil {
+		profile.McpPolicy = *req.McpPolicy
 	}
 	if req.Config != nil {
 		profile.Config = req.Config
 	}
-	if req.SetupScript != nil {
-		profile.SetupScript = *req.SetupScript
+	if req.PrepareScript != nil {
+		profile.PrepareScript = *req.PrepareScript
+	}
+	if req.CleanupScript != nil {
+		profile.CleanupScript = *req.CleanupScript
 	}
 	if req.EnvVars != nil {
 		profile.EnvVars = req.EnvVars
@@ -593,8 +597,8 @@ func (s *Service) ListExecutorProfiles(ctx context.Context, executorID string) (
 	return s.repo.ListExecutorProfiles(ctx, executorID)
 }
 
-func (s *Service) GetDefaultExecutorProfile(ctx context.Context, executorID string) (*models.ExecutorProfile, error) {
-	return s.repo.GetDefaultExecutorProfile(ctx, executorID)
+func (s *Service) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
+	return s.repo.ListAllExecutorProfiles(ctx)
 }
 
 // Environment operations

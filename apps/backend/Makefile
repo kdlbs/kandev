@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-mock-agent clean run dev test test-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-mock-agent clean run dev test test-e2e test-sprites-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -59,6 +59,7 @@ build-agentctl-linux:
 	@$(MKDIR) $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
+
 ## Clean build artifacts
 clean:
 	@echo "Cleaning..."
@@ -86,6 +87,13 @@ test:
 test-e2e:
 	@echo "Running E2E adapter tests..."
 	$(GO) test -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
+
+## Run sprites e2e test (requires SPRITES_API_TOKEN env var)
+## Sprites VMs are always x86_64/amd64 regardless of host architecture.
+test-sprites-e2e: build-agentctl-linux
+	@echo "Running sprites e2e test..."
+	KANDEV_AGENTCTL_LINUX_BINARY=$(CURDIR)/$(BUILD_DIR)/agentctl-linux-amd64 \
+		$(GO) test -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/lifecycle/
 
 ## Run tests with coverage
 test-coverage:

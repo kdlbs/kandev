@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { IconGitBranch, IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
-import type { LocalRepository, Repository, Branch, Executor } from "@/lib/types/http";
+import type { LocalRepository, Repository, Branch, Executor, ExecutorProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
@@ -163,4 +163,38 @@ export function useExecutorHint(executors: Executor[], executorId: string): stri
     if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
     return null;
   }, [executors, executorId]);
+}
+
+export type ExecutorProfileOptionItem = OptionItem & {
+  executorType?: string;
+  executorName?: string;
+};
+
+export function useExecutorProfileOptions(
+  allProfiles: ExecutorProfile[],
+): ExecutorProfileOptionItem[] {
+  return useMemo(() => {
+    return allProfiles.map((profile) => {
+      const Icon = getExecutorIcon(profile.executor_type ?? "local");
+      return {
+        value: profile.id,
+        label: profile.name,
+        executorType: profile.executor_type,
+        executorName: profile.executor_name,
+        renderLabel: () => (
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{profile.name}</span>
+            </span>
+            {profile.executor_name && (
+              <Badge variant="outline" className="text-xs">
+                {profile.executor_name}
+              </Badge>
+            )}
+          </span>
+        ),
+      };
+    });
+  }, [allProfiles]);
 }

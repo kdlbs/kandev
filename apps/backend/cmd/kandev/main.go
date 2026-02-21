@@ -292,7 +292,7 @@ func startAgentInfrastructure(
 		return false
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, dockerClient, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, runCleanups)
 }
 
@@ -303,6 +303,7 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -344,7 +345,7 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	server := buildHTTPServer(cfg, log, gateway, dockerClient, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator)
 
 	port := cfg.Server.Port
@@ -373,6 +374,7 @@ func buildHTTPServer(
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
+	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -393,6 +395,7 @@ func buildHTTPServer(
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
+		dockerClient:            dockerClient,
 		taskSvc:                 services.Task,
 		taskRepo:                repos.Task,
 		analyticsRepo:           repos.Analytics,

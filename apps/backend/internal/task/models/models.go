@@ -209,6 +209,7 @@ type TaskSession struct {
 	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
 	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
 	ExecutorID           string                 `json:"executor_id"`
+	ExecutorProfileID    string                 `json:"executor_profile_id"`
 	EnvironmentID        string                 `json:"environment_id"`
 	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
 	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
@@ -235,19 +236,20 @@ type TaskSession struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                 s.ID,
-		"task_id":            s.TaskID,
-		"agent_execution_id": s.AgentExecutionID,
-		"container_id":       s.ContainerID,
-		"agent_profile_id":   s.AgentProfileID,
-		"executor_id":        s.ExecutorID,
-		"environment_id":     s.EnvironmentID,
-		"repository_id":      s.RepositoryID,
-		"base_branch":        s.BaseBranch,
-		"worktrees":          s.Worktrees,
-		"state":              string(s.State),
-		"started_at":         s.StartedAt,
-		"updated_at":         s.UpdatedAt,
+		"id":                  s.ID,
+		"task_id":             s.TaskID,
+		"agent_execution_id":  s.AgentExecutionID,
+		"container_id":        s.ContainerID,
+		"agent_profile_id":    s.AgentProfileID,
+		"executor_id":         s.ExecutorID,
+		"executor_profile_id": s.ExecutorProfileID,
+		"environment_id":      s.EnvironmentID,
+		"repository_id":       s.RepositoryID,
+		"base_branch":         s.BaseBranch,
+		"worktrees":           s.Worktrees,
+		"state":               string(s.State),
+		"started_at":          s.StartedAt,
+		"updated_at":          s.UpdatedAt,
 	}
 	// For backward compatibility, populate worktree_path and worktree_branch from first worktree
 	if len(s.Worktrees) > 0 {
@@ -390,15 +392,16 @@ type ProfileEnvVar struct {
 
 // ExecutorProfile represents a named configuration preset for an executor.
 type ExecutorProfile struct {
-	ID          string            `json:"id"`
-	ExecutorID  string            `json:"executor_id"`
-	Name        string            `json:"name"`
-	IsDefault   bool              `json:"is_default"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript string            `json:"setup_script,omitempty"`
-	EnvVars     []ProfileEnvVar   `json:"env_vars,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID            string            `json:"id"`
+	ExecutorID    string            `json:"executor_id"`
+	Name          string            `json:"name"`
+	McpPolicy     string            `json:"mcp_policy,omitempty"`
+	Config        map[string]string `json:"config,omitempty"`
+	PrepareScript string            `json:"prepare_script,omitempty"`
+	CleanupScript string            `json:"cleanup_script,omitempty"`
+	EnvVars       []ProfileEnvVar   `json:"env_vars,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 // EnvironmentKind represents the runtime type for environments.

@@ -28,7 +28,7 @@ import {
   destroySprite,
   destroyAllSprites,
 } from "@/lib/api/domains/sprites-api";
-import type { SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
+import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   const { status } = useSprites(secretId);
@@ -217,55 +217,78 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-            Loading...
-          </div>
-        ) : instances.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">No active sprites.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Health</TableHead>
-                <TableHead>Uptime</TableHead>
-                <TableHead className="w-[80px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {instances.map((inst) => (
-                <TableRow key={inst.name}>
-                  <TableCell className="font-mono text-sm">{inst.name}</TableCell>
-                  <TableCell>
-                    <HealthBadge status={inst.health_status} />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatUptime(inst.uptime_seconds)}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDestroy(inst.name)}
-                      disabled={destroying === inst.name}
-                      className="cursor-pointer"
-                    >
-                      {destroying === inst.name ? (
-                        <IconLoader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <IconTrash className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        <InstancesContent
+          loading={loading}
+          instances={instances}
+          destroying={destroying}
+          onDestroy={handleDestroy}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+function InstancesContent({
+  loading,
+  instances,
+  destroying,
+  onDestroy,
+}: {
+  loading: boolean;
+  instances: SpritesInstance[];
+  destroying: string | null;
+  onDestroy: (name: string) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <IconLoader2 className="h-4 w-4 animate-spin" />
+        Loading...
+      </div>
+    );
+  }
+  if (instances.length === 0) {
+    return <p className="text-sm text-muted-foreground py-4">No active sprites.</p>;
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Health</TableHead>
+          <TableHead>Uptime</TableHead>
+          <TableHead className="w-[80px]" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {instances.map((inst) => (
+          <TableRow key={inst.name}>
+            <TableCell className="font-mono text-sm">{inst.name}</TableCell>
+            <TableCell>
+              <HealthBadge status={inst.health_status} />
+            </TableCell>
+            <TableCell className="text-sm text-muted-foreground">
+              {formatUptime(inst.uptime_seconds)}
+            </TableCell>
+            <TableCell>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onDestroy(inst.name)}
+                disabled={destroying === inst.name}
+                className="cursor-pointer"
+              >
+                {destroying === inst.name ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <IconTrash className="h-4 w-4" />
+                )}
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 

@@ -114,7 +114,6 @@ function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
       prompt: string;
       agentProfileId: string;
       executorId: string;
-      environmentId: string;
     }) => {
       if (!workflowAutomation) return;
       const client = getWebSocketClient();
@@ -335,7 +334,6 @@ type KanbanBoardDialogsProps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
-    environmentId: string;
   }) => Promise<void>;
   moveError: MoveTaskError | null;
   setMoveError: (error: MoveTaskError | null) => void;

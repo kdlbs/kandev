@@ -305,7 +305,7 @@ Static analysis runs in CI and pre-commit. New code **must** stay within these l
 - **Interactivity:** All buttons and links with actions must have `cursor-pointer` class
 
 ### Plan Implementation
-- After implementing a plan, run `make typecheck test lint` to verify the changes
+- After implementing a plan, run `make fmt` first to format code, then run `make typecheck test lint` to verify the changes. Formatting must come first because formatters may split lines, which can trigger complexity linter warnings.
 
 ---
 

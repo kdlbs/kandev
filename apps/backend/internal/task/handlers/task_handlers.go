@@ -24,15 +24,11 @@ type TaskHandlers struct {
 
 type OrchestratorStarter interface {
 	// StartTask starts agent execution for a task.
-	// If workflowStepID is provided, prompt prefix/suffix and plan mode from the step are applied.
-	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
-	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
+	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 	// PrepareTaskSession creates a session entry without launching the agent.
-	// Returns the session ID immediately so it can be returned in the HTTP response.
-	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, workflowStepID string) (string, error)
+	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error)
 	// StartTaskWithSession starts agent execution for a task using a pre-created session.
-	// If planMode is true and the step doesn't already enable it, default plan mode is injected.
-	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
+	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }
 
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {

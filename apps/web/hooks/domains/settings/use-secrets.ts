@@ -12,7 +12,7 @@ export function useSecrets() {
   const setSecretsLoading = useAppStore((state) => state.setSecretsLoading);
 
   useEffect(() => {
-    if (loaded || loading) return;
+    if (loading) return;
     setSecretsLoading(true);
     listSecrets({ cache: "no-store" })
       .then((response) => {
@@ -24,7 +24,8 @@ export function useSecrets() {
       .finally(() => {
         setSecretsLoading(false);
       });
-  }, [loaded, loading, setSecrets, setSecretsLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { items, loaded, loading };
 }

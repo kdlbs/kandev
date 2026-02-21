@@ -73,6 +73,11 @@ type ExecutorCreateRequest struct {
 	Metadata       map[string]interface{}
 	McpServers     []McpServerConfig
 	AgentConfig    agents.Agent // Agent type info needed by runtimes
+
+	// OnProgress is an optional callback for streaming preparation progress.
+	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
+	// call this to report real-time progress to the frontend.
+	OnProgress PrepareProgressCallback
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.

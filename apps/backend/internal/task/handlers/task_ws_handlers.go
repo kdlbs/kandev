@@ -73,20 +73,21 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID    string                    `json:"workspace_id"`
-	WorkflowID     string                    `json:"workflow_id"`
-	WorkflowStepID string                    `json:"workflow_step_id"`
-	Title          string                    `json:"title"`
-	Description    string                    `json:"description,omitempty"`
-	Priority       int                       `json:"priority,omitempty"`
-	State          *v1.TaskState             `json:"state,omitempty"`
-	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position       int                       `json:"position,omitempty"`
-	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent     bool                      `json:"start_agent,omitempty"`
-	AgentProfileID string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID     string                    `json:"executor_id,omitempty"`
-	PlanMode       bool                      `json:"plan_mode,omitempty"`
+	WorkspaceID       string                    `json:"workspace_id"`
+	WorkflowID        string                    `json:"workflow_id"`
+	WorkflowStepID    string                    `json:"workflow_step_id"`
+	Title             string                    `json:"title"`
+	Description       string                    `json:"description,omitempty"`
+	Priority          int                       `json:"priority,omitempty"`
+	State             *v1.TaskState             `json:"state,omitempty"`
+	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position          int                       `json:"position,omitempty"`
+	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent        bool                      `json:"start_agent,omitempty"`
+	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID        string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
+	PlanMode          bool                      `json:"plan_mode,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -147,7 +148,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
 		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
 		// Use taskDTO.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
-		execution, err := h.orchestrator.StartTask(ctx, taskDTO.ID, req.AgentProfileID, req.ExecutorID, req.Priority, taskDTO.Description, taskDTO.WorkflowStepID, req.PlanMode)
+		execution, err := h.orchestrator.StartTask(ctx, taskDTO.ID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, taskDTO.Description, taskDTO.WorkflowStepID, req.PlanMode)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)

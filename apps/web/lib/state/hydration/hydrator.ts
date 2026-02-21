@@ -36,7 +36,6 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppSta
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.environments) deepMerge(draft.environments, state.environments);
   if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
   if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
   mergeWithLoading(draft.availableAgents, state.availableAgents);

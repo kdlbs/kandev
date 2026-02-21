@@ -145,7 +145,6 @@ export function selectPreferredBranch(branches: BranchSelectionCandidate[]): str
   return null;
 }
 
-export const DEFAULT_LOCAL_ENVIRONMENT_KIND = "local_pc";
 export const DEFAULT_LOCAL_EXECUTOR_TYPE = "worktree";
 
 /**

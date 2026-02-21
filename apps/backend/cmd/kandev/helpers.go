@@ -249,6 +249,7 @@ func newSessionStateChangedHandler(gateway *gateways.Gateway, log *logger.Logger
 type routeParams struct {
 	router                  *gin.Engine
 	gateway                 *gateways.Gateway
+	dockerClient            *docker.Client
 	taskSvc                 *taskservice.Service
 	taskRepo                repository.Repository
 	analyticsRepo           analyticsrepository.Repository
@@ -339,6 +340,9 @@ func registerSecondaryRoutes(
 		spriteshandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretStore, p.log)
 		p.log.Debug("Registered Sprites handlers (HTTP + WebSocket)")
 	}
+
+	docker.RegisterDockerRoutes(p.router, p.dockerClient, p.log)
+	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
 }

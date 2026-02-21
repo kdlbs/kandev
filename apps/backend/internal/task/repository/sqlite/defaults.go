@@ -162,20 +162,27 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 }
 
 func (r *Repository) ensureDefaultExecutorProfiles(ctx context.Context) error {
-	for _, executorID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree, models.ExecutorIDLocalDocker, models.ExecutorIDSprites} {
+	profileSeeds := []struct {
+		executorID string
+		name       string
+	}{
+		{models.ExecutorIDLocal, "Local"},
+		{models.ExecutorIDWorktree, "Worktree"},
+	}
+	for _, seed := range profileSeeds {
 		var profileCount int
 		if err := r.db.QueryRowContext(ctx, r.db.Rebind(
 			"SELECT COUNT(1) FROM executor_profiles WHERE executor_id = ?",
-		), executorID).Scan(&profileCount); err != nil {
+		), seed.executorID).Scan(&profileCount); err != nil {
 			return err
 		}
 		if profileCount == 0 {
 			now := time.Now().UTC()
 			id := uuid.New().String()
 			if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-				INSERT INTO executor_profiles (id, executor_id, name, is_default, config, setup_script, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			`), id, executorID, "Default", 1, "{}", "", now, now); err != nil {
+				INSERT INTO executor_profiles (id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`), id, seed.executorID, seed.name, "", "{}", "", "", now, now); err != nil {
 				return err
 			}
 		}

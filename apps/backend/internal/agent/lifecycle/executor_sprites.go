@@ -3,7 +3,9 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -18,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -29,6 +32,8 @@ const (
 	spriteHealthTimeout   = 15 * time.Second
 	spriteDestroyTimeout  = 30 * time.Second
 	spriteHealthRetryWait = 500 * time.Millisecond
+	spritesTotalSteps     = 6 // create, upload, prepare script, health, create instance, network policy
+	spriteOutputMaxLines  = 20
 )
 
 // SpritesProxySession tracks an active port-forwarding session to a sprite.
@@ -80,50 +85,98 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		return nil, fmt.Errorf("SPRITES_API_TOKEN not set in execution environment (configure it in the executor profile)")
 	}
 
-	// Cache the token for later use (e.g., StopInstance)
 	r.mu.Lock()
 	r.tokens[req.InstanceID] = token
 	r.mu.Unlock()
 
 	spriteName := spritesNamePrefix + req.InstanceID[:12]
-	client := sprites.New(token)
-	sprite := client.Sprite(spriteName)
+	client := sprites.New(token, sprites.WithDisableControl())
 
 	r.logger.Info("creating sprite instance",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("sprite_name", spriteName))
 
-	// Sequence: create → install deps → upload agentctl → clone repo → setup → start agentctl → proxy
-	if err := r.initializeSprite(ctx, sprite, spriteName); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.installDependencies(ctx, sprite); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.uploadAgentctl(ctx, sprite); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.cloneRepository(ctx, sprite, req); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.runSetupScript(ctx, sprite, req); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.startAgentctlProcess(ctx, sprite, req); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
-	if err := r.waitForHealth(ctx, sprite); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
-		return nil, err
-	}
+	report := newStepReporter(req.OnProgress)
 
-	localPort, err := r.setupPortForwarding(ctx, sprite, spriteName, req.InstanceID)
+	// Step 0: Create sprite
+	step := beginStep("Creating cloud sandbox")
+	report(step, 0)
+	sprite, err := r.createSprite(ctx, client, spriteName)
+	if err != nil {
+		completeStepError(&step, err.Error())
+		report(step, 0)
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
+		return nil, err
+	}
+	completeStepSuccess(&step)
+	report(step, 0)
+
+	// Step 1: Upload agentctl binary
+	step = beginStep("Uploading agent controller")
+	report(step, 1)
+	if err := r.uploadAgentctl(ctx, sprite); err != nil {
+		completeStepError(&step, err.Error())
+		report(step, 1)
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
+		return nil, err
+	}
+	completeStepSuccess(&step)
+	report(step, 1)
+
+	// Step 2: Run prepare script (with output streaming)
+	step = beginStep("Running prepare script")
+	report(step, 2)
+	err = r.runPrepareScript(ctx, sprite, req, func(output string) {
+		step.Output = output
+		report(step, 2)
+	})
+	if err != nil {
+		completeStepError(&step, err.Error())
+		report(step, 2)
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
+		return nil, err
+	}
+	completeStepSuccess(&step)
+	report(step, 2)
+
+	// Step 3: Wait for agentctl health
+	step = beginStep("Waiting for agent controller")
+	report(step, 3)
+	if err := r.waitForHealth(ctx, sprite); err != nil {
+		completeStepError(&step, err.Error())
+		report(step, 3)
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
+		return nil, err
+	}
+	completeStepSuccess(&step)
+	report(step, 3)
+
+	// Step 4: Create agent instance (control server → per-instance server)
+	step = beginStep("Creating agent instance")
+	report(step, 4)
+	instancePort, err := r.createAgentInstance(ctx, sprite, req)
+	if err != nil {
+		completeStepError(&step, err.Error())
+		report(step, 4)
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
+		return nil, err
+	}
+	completeStepSuccess(&step)
+	report(step, 4)
+
+	// Step 5: Apply network policy
+	step = beginStep("Applying network policy")
+	report(step, 5)
+	if err := r.applyNetworkPolicy(ctx, client, spriteName, req); err != nil {
+		r.logger.Warn("failed to apply network policy from profile", zap.Error(err))
+		completeStepSkipped(&step)
+	} else {
+		completeStepSuccess(&step)
+	}
+	report(step, 5)
+
+	// Port forwarding to the per-instance server (not the control server)
+	localPort, err := r.setupPortForwarding(ctx, sprite, spriteName, req.InstanceID, instancePort)
 	if err != nil {
 		r.cleanupOnFailure(ctx, sprite, req.InstanceID)
 		return nil, err
@@ -136,30 +189,30 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	r.logger.Info("sprite instance ready",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("sprite_name", spriteName),
-		zap.Int("local_port", localPort))
+		zap.Int("local_port", localPort),
+		zap.Int("instance_port", instancePort))
 
 	return &ExecutorInstance{
-		InstanceID:  req.InstanceID,
-		TaskID:      req.TaskID,
-		SessionID:   req.SessionID,
-		RuntimeName: string(r.Name()),
-		Client:      agentctlClient,
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   string(r.Name()),
+		Client:        agentctlClient,
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			"sprite_name": spriteName,
-			"local_port":  localPort,
+			"sprite_name":       spriteName,
+			"local_port":        localPort,
 			MetadataKeyIsRemote: true,
 		},
 	}, nil
 }
 
-func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, _ bool) error {
+func (r *SpritesExecutor) StopInstance(_ context.Context, instance *ExecutorInstance, _ bool) error {
 	spriteName := getMetadataString(instance.Metadata, "sprite_name")
 	if spriteName == "" {
 		return nil
 	}
 
-	// Close port forwarding
 	r.mu.Lock()
 	if proxy, ok := r.proxies[instance.InstanceID]; ok {
 		if proxy.proxySession != nil {
@@ -169,12 +222,12 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	}
 	r.mu.Unlock()
 
-	// Get cached token for this instance
 	r.mu.RLock()
 	token := r.tokens[instance.InstanceID]
 	r.mu.RUnlock()
 	if token == "" {
-		r.logger.Warn("no cached API token for sprite instance, cannot destroy", zap.String("instance_id", instance.InstanceID))
+		r.logger.Warn("no cached API token for sprite instance, cannot destroy",
+			zap.String("instance_id", instance.InstanceID))
 		return nil
 	}
 	client := sprites.New(token)
@@ -186,7 +239,6 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 		return fmt.Errorf("failed to destroy sprite: %w", err)
 	}
 
-	// Clean up cached token
 	r.mu.Lock()
 	delete(r.tokens, instance.InstanceID)
 	r.mu.Unlock()
@@ -196,7 +248,6 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 }
 
 func (r *SpritesExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
-	// Sprites tunnels don't survive backend restarts
 	return nil, nil
 }
 
@@ -204,48 +255,60 @@ func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }
 
-// --- helper methods ---
+// createAgentInstance creates a per-instance server on the agentctl control server
+// running inside the sprite. Returns the port of the per-instance server.
+func (r *SpritesExecutor) createAgentInstance(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+) (int, error) {
+	instanceReq := agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: spritesWorkspacePath,
+		SessionID:     req.SessionID,
+	}
+	reqJSON, err := json.Marshal(instanceReq)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
+	}
 
-func (r *SpritesExecutor) initializeSprite(ctx context.Context, sprite *sprites.Sprite, name string) error {
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	createCmd := fmt.Sprintf(
+		"curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' -d '%s'",
+		r.agentctlPort, string(reqJSON))
+
+	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	r.logger.Debug("initializing sprite (lazy create on first command)", zap.String("sprite", name))
-	out, err := sprite.CommandContext(stepCtx, "echo", "kandev-ready").Output()
+	out, err := sprite.CommandContext(stepCtx, "sh", "-c", createCmd).Output()
 	if err != nil {
-		return fmt.Errorf("failed to create sprite: %w", err)
+		return 0, fmt.Errorf("failed to create agent instance: %w", err)
 	}
-	if !strings.Contains(string(out), "kandev-ready") {
-		return fmt.Errorf("unexpected sprite output: %s", string(out))
+
+	var resp agentctl.CreateInstanceResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return 0, fmt.Errorf("failed to parse instance response: %w (output: %s)", err, string(out))
 	}
-	return nil
+
+	r.logger.Debug("agent instance created inside sprite",
+		zap.String("instance_id", resp.ID),
+		zap.Int("port", resp.Port))
+
+	return resp.Port, nil
 }
 
-func (r *SpritesExecutor) installDependencies(ctx context.Context, sprite *sprites.Sprite) error {
+// --- core operations ---
+
+// createSprite creates a new sprite via the API (explicit POST, not lazy).
+func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Client, name string) (*sprites.Sprite, error) {
 	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer cancel()
 
-	r.logger.Debug("installing system dependencies in sprite")
-
-	// Check if node is already available
-	if out, err := sprite.CommandContext(stepCtx, "node", "--version").Output(); err == nil {
-		r.logger.Debug("node already installed", zap.String("version", strings.TrimSpace(string(out))))
-		return nil
+	r.logger.Debug("creating sprite via API", zap.String("sprite", name))
+	sprite, err := client.CreateSprite(stepCtx, name, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sprite: %w", err)
 	}
-
-	// Install git, curl, ca-certificates
-	script := "apt-get update -qq && apt-get install -y -qq git curl ca-certificates > /dev/null 2>&1"
-	if _, err := sprite.CommandContext(stepCtx, "sh", "-c", script).Output(); err != nil {
-		return fmt.Errorf("failed to install system deps: %w", err)
-	}
-
-	// Install Node.js 22.x
-	nodeScript := "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1 && " +
-		"apt-get install -y -qq nodejs > /dev/null 2>&1"
-	if _, err := sprite.CommandContext(stepCtx, "sh", "-c", nodeScript).Output(); err != nil {
-		return fmt.Errorf("failed to install Node.js: %w", err)
-	}
-	return nil
+	return sprite, nil
 }
 
 func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sprite) error {
@@ -264,118 +327,113 @@ func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sp
 
 	r.logger.Debug("uploading agentctl binary", zap.Int("size_bytes", len(data)))
 
-	// Upload via stdin pipe
-	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
-		"cat > /usr/local/bin/agentctl && chmod +x /usr/local/bin/agentctl")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to get stdin pipe: %w", err)
+	// Upload via sprites filesystem API (HTTP PUT, much faster than stdin pipe for large binaries).
+	if err := sprite.Filesystem().WriteFileContext(stepCtx, "/usr/local/bin/agentctl", data, 0o755); err != nil {
+		return fmt.Errorf("failed to upload agentctl: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start upload: %w", err)
-	}
-
-	if _, err := stdin.Write(data); err != nil {
-		return fmt.Errorf("failed to write binary data: %w", err)
-	}
-	if err := stdin.Close(); err != nil {
-		return fmt.Errorf("failed to close stdin: %w", err)
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("upload command failed: %w", err)
-	}
-
-	// Verify
-	if _, err := sprite.CommandContext(stepCtx, "agentctl", "--version").Output(); err != nil {
+	// Verify the binary is present and executable.
+	if _, err := sprite.CommandContext(stepCtx, "test", "-x", "/usr/local/bin/agentctl").Output(); err != nil {
 		return fmt.Errorf("agentctl verification failed: %w", err)
 	}
 	return nil
 }
 
-func (r *SpritesExecutor) cloneRepository(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
-	repoPath := getMetadataString(req.Metadata, MetadataKeyRepositoryPath)
-	if repoPath == "" {
-		repoPath = req.WorkspacePath
-	}
-	if repoPath == "" {
-		// No repo to clone — just create the workspace directory
-		stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-		defer cancel()
-		_, err := sprite.CommandContext(stepCtx, "mkdir", "-p", spritesWorkspacePath).Output()
-		return err
-	}
-
-	// Get remote URL from local repo
-	remoteURL, err := r.getGitRemoteURL(repoPath)
-	if err != nil || remoteURL == "" {
-		r.logger.Warn("no git remote found, creating empty workspace", zap.Error(err))
-		stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-		defer cancel()
-		_, mkErr := sprite.CommandContext(stepCtx, "mkdir", "-p", spritesWorkspacePath).Output()
-		return mkErr
-	}
-
-	branch := r.resolveCloneBranch(repoPath, req)
-	cloneURL := r.injectTokenIntoURL(remoteURL, req.Env)
-
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer cancel()
-
-	r.logger.Debug("cloning repository",
-		zap.String("branch", branch),
-		zap.String("remote", remoteURL))
-
-	args := []string{"clone", "--depth=1"}
-	if branch != "" {
-		args = append(args, "--branch", branch)
-	}
-	args = append(args, cloneURL, spritesWorkspacePath)
-
-	cmd := sprite.CommandContext(stepCtx, "git", args...)
-	cmd.Env = r.buildGitEnv(req.Env)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git clone failed: %w\n%s", err, string(out))
-	}
-	return nil
-}
-
-func (r *SpritesExecutor) runSetupScript(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
-	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
+// runPrepareScript resolves the prepare script with scriptengine and executes it,
+// streaming stdout/stderr output through the onOutput callback.
+func (r *SpritesExecutor) runPrepareScript(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+	onOutput func(string),
+) error {
+	script := r.resolvePrepareScript(req)
 	if script == "" {
+		r.logger.Debug("no prepare script configured, skipping")
 		return nil
 	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
 	defer cancel()
 
-	r.logger.Debug("running setup script")
+	r.logger.Debug("running prepare script")
 	cmd := sprite.CommandContext(stepCtx, "sh", "-c", script)
-	cmd.Dir = spritesWorkspacePath
 	cmd.Env = r.buildSpriteEnv(req.Env)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("setup script failed: %w\n%s", err, string(out))
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start prepare script: %w", err)
+	}
+
+	// Stream stdout and stderr concurrently (io.MultiReader is sequential,
+	// which blocks stderr until stdout EOF — bad for git progress output).
+	var outputBuf strings.Builder
+	var outputMu sync.Mutex
+	emitOutput := func(chunk []byte) {
+		outputMu.Lock()
+		outputBuf.Write(chunk)
+		if onOutput != nil {
+			onOutput(lastLines(outputBuf.String(), spriteOutputMaxLines))
+		}
+		outputMu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+	readStream := func(r io.Reader) {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := r.Read(buf)
+			if n > 0 {
+				emitOutput(buf[:n])
+			}
+			if readErr != nil {
+				break
+			}
+		}
+	}
+	wg.Add(2)
+	go readStream(stdout)
+	go readStream(stderr)
+
+	waitErr := cmd.Wait()
+	wg.Wait() // ensure all output is collected
+
+	if waitErr != nil {
+		return fmt.Errorf("prepare script failed: %w\n%s", waitErr, lastLines(outputBuf.String(), spriteOutputMaxLines))
 	}
 	return nil
 }
 
-func (r *SpritesExecutor) startAgentctlProcess(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
-	r.logger.Debug("starting agentctl process in sprite")
-
-	// Use background context — agentctl should outlive this call
-	cmd := sprite.CommandContext(context.Background(),
-		"agentctl",
-		"--port", fmt.Sprintf("%d", r.agentctlPort),
-		"--workspace", spritesWorkspacePath)
-	cmd.Env = r.buildSpriteEnv(req.Env)
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start agentctl: %w", err)
+// resolvePrepareScript builds the resolved prepare script using scriptengine.
+func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
+	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
+	if script == "" {
+		script = scriptengine.DefaultPrepareScript("sprites")
+	}
+	if script == "" {
+		return ""
 	}
 
-	_ = ctx // kept for signature consistency
-	return nil
+	resolver := scriptengine.NewResolver().
+		WithProvider(scriptengine.WorkspaceProvider(spritesWorkspacePath)).
+		WithProvider(scriptengine.AgentctlProvider(r.agentctlPort, spritesWorkspacePath)).
+		WithProvider(scriptengine.RepositoryProvider(
+			req.Metadata,
+			req.Env,
+			r.getGitRemoteURL,
+			r.injectTokenIntoURL,
+		))
+
+	return resolver.Resolve(script)
 }
 
 func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Sprite) error {
@@ -396,7 +454,12 @@ func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Spr
 	return fmt.Errorf("agentctl did not become healthy within %v", spriteHealthTimeout)
 }
 
-func (r *SpritesExecutor) setupPortForwarding(ctx context.Context, sprite *sprites.Sprite, spriteName, instanceID string) (int, error) {
+func (r *SpritesExecutor) setupPortForwarding(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	spriteName, instanceID string,
+	remotePort int,
+) (int, error) {
 	localPort, err := getFreePort()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get free port: %w", err)
@@ -404,9 +467,9 @@ func (r *SpritesExecutor) setupPortForwarding(ctx context.Context, sprite *sprit
 
 	r.logger.Debug("setting up port forwarding",
 		zap.Int("local_port", localPort),
-		zap.Int("remote_port", r.agentctlPort))
+		zap.Int("remote_port", remotePort))
 
-	session, err := sprite.ProxyPort(ctx, localPort, r.agentctlPort)
+	session, err := sprite.ProxyPort(ctx, localPort, remotePort)
 	if err != nil {
 		return 0, fmt.Errorf("port forwarding failed: %w", err)
 	}
@@ -423,6 +486,9 @@ func (r *SpritesExecutor) setupPortForwarding(ctx context.Context, sprite *sprit
 }
 
 func (r *SpritesExecutor) cleanupOnFailure(_ context.Context, sprite *sprites.Sprite, instanceID string) {
+	if sprite == nil {
+		return
+	}
 	r.logger.Warn("cleaning up sprite after failure", zap.String("instance_id", instanceID))
 
 	r.mu.Lock()
@@ -439,6 +505,35 @@ func (r *SpritesExecutor) cleanupOnFailure(_ context.Context, sprite *sprites.Sp
 	}
 }
 
+func (r *SpritesExecutor) applyNetworkPolicy(
+	ctx context.Context,
+	client *sprites.Client,
+	spriteName string,
+	req *ExecutorCreateRequest,
+) error {
+	rulesJSON, _ := req.Metadata["sprites_network_policy_rules"].(string)
+	if rulesJSON == "" {
+		return nil
+	}
+
+	var rules []sprites.NetworkPolicyRule
+	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
+		return fmt.Errorf("failed to parse network policy rules: %w", err)
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+
+	policyCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	defer cancel()
+
+	r.logger.Info("applying network policy from profile",
+		zap.String("sprite_name", spriteName),
+		zap.Int("rule_count", len(rules)))
+
+	return client.UpdateNetworkPolicy(policyCtx, spriteName, &sprites.NetworkPolicy{Rules: rules})
+}
+
 // --- utility helpers ---
 
 func (r *SpritesExecutor) getGitRemoteURL(repoPath string) (string, error) {
@@ -451,46 +546,43 @@ func (r *SpritesExecutor) getGitRemoteURL(repoPath string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-func (r *SpritesExecutor) resolveCloneBranch(repoPath string, req *ExecutorCreateRequest) string {
-	if branch := getMetadataString(req.Metadata, MetadataKeyBaseBranch); branch != "" {
-		return branch
-	}
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out.String())
-}
-
 func (r *SpritesExecutor) injectTokenIntoURL(remoteURL string, env map[string]string) string {
 	token := env["GITHUB_TOKEN"]
 	if token == "" {
 		return remoteURL
 	}
-	// Convert https://github.com/owner/repo.git → https://token@github.com/owner/repo.git
 	if strings.HasPrefix(remoteURL, "https://") {
 		return strings.Replace(remoteURL, "https://", "https://"+token+"@", 1)
 	}
 	return remoteURL
 }
 
-func (r *SpritesExecutor) buildGitEnv(env map[string]string) []string {
-	var result []string
-	if token := env["GITHUB_TOKEN"]; token != "" {
-		result = append(result, "GITHUB_TOKEN="+token)
-	}
-	result = append(result, "GIT_TERMINAL_PROMPT=0")
-	return result
-}
-
 func (r *SpritesExecutor) buildSpriteEnv(env map[string]string) []string {
-	var result []string
+	result := make([]string, 0, len(env))
 	for k, v := range env {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+// --- step reporting helpers ---
+
+// newStepReporter creates a reporting function that calls OnProgress if non-nil.
+func newStepReporter(onProgress PrepareProgressCallback) func(PrepareStep, int) {
+	return func(step PrepareStep, idx int) {
+		if onProgress != nil {
+			onProgress(step, idx, spritesTotalSteps)
+		}
+	}
+}
+
+// lastLines returns the last n lines of s.
+func lastLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // getFreePort finds an available local port.

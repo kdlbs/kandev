@@ -21,7 +21,6 @@ import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/execut
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
-import { SpritesConnectionCard, SpritesInstancesCard } from "@/components/settings/sprites-settings";
 import type { Executor } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
@@ -40,7 +39,7 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">Executor not found</p>
-            <Button className="mt-4" onClick={() => router.push(EXECUTORS_ROUTE)}>
+            <Button className="mt-4 cursor-pointer" onClick={() => router.push(EXECUTORS_ROUTE)}>
               Go to Executors
             </Button>
           </CardContent>
@@ -51,10 +50,6 @@ export default function ExecutorEditPage({ params }: { params: Promise<{ id: str
 
   return <ExecutorEditForm key={executor.id} executor={executor} />;
 }
-
-type ExecutorEditFormProps = {
-  executor: Executor;
-};
 
 function getExecutorDescription(type: string): string {
   if (type === "local") return "Runs agents directly in the repository folder.";
@@ -77,12 +72,7 @@ function parseMcpPolicyJson(currentPolicy: string | undefined): Record<string, u
   return parsed;
 }
 
-type McpPresetButtonProps = {
-  label: string;
-  onClick: () => void;
-};
-
-function McpPresetButton({ label, onClick }: McpPresetButtonProps) {
+function McpPresetButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -94,13 +84,15 @@ function McpPresetButton({ label, onClick }: McpPresetButtonProps) {
   );
 }
 
-type McpPolicyCardProps = {
+function McpPolicyCard({
+  mcpPolicy,
+  mcpPolicyError,
+  onPolicyChange,
+}: {
   mcpPolicy: string;
   mcpPolicyError: string | null;
   onPolicyChange: (value: string) => void;
-};
-
-function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyCardProps) {
+}) {
   const applyPreset = (updater: (parsed: Record<string, unknown>) => Record<string, unknown>) => {
     const parsed = parseMcpPolicyJson(mcpPolicy);
     const next = updater(parsed);
@@ -117,12 +109,7 @@ function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyC
           </span>
         </CardTitle>
         <CardDescription>
-          JSON policy overrides for MCP servers on this executor. Use it to enforce transport rules,
-          restrict which servers can run, or rewrite URLs for this runtime.
-          <p className="text-xs text-muted-foreground mt-2">
-            Examples: block stdio on remote runners, allowlist approved servers, or rewrite
-            localhost URLs for Docker/K8s networking.
-          </p>
+          JSON policy overrides for MCP servers on this executor.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -131,7 +118,7 @@ function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyC
           id="mcp-policy"
           value={mcpPolicy}
           onChange={(event) => onPolicyChange(event.target.value)}
-          placeholder='{"allow_stdio":true,"allow_http":true,"allowlist_servers":["github"],"url_rewrite":{"http://localhost:3000":"http://mcp-svc:3000"}}'
+          placeholder='{"allow_stdio":true,"allow_http":true}'
           rows={8}
         />
         {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
@@ -182,183 +169,8 @@ function McpPolicyCard({ mcpPolicy, mcpPolicyError, onPolicyChange }: McpPolicyC
             }
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          Leave empty to use the default policy for the runtime (local runs allow stdio + HTTP +
-          SSE, and apply no allowlist or URL rewrites).
-        </p>
       </CardContent>
     </Card>
-  );
-}
-
-type DeleteExecutorDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onDelete: () => void;
-  isDeleting: boolean;
-  confirmText: string;
-  onConfirmTextChange: (value: string) => void;
-};
-
-function DeleteExecutorDialog({
-  open,
-  onOpenChange,
-  onDelete,
-  isDeleting,
-  confirmText,
-  onConfirmTextChange,
-}: DeleteExecutorDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete Executor</DialogTitle>
-          <DialogDescription>
-            Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="confirm-delete">Confirm Delete</Label>
-          <Input
-            id="confirm-delete"
-            value={confirmText}
-            onChange={(event) => onConfirmTextChange(event.target.value)}
-            placeholder="delete"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={onDelete}
-            disabled={confirmText !== "delete" || isDeleting}
-          >
-            {isDeleting ? "Deleting..." : "Delete"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-type ExecutorDetailsCardProps = {
-  draft: Executor;
-  isSystem: boolean;
-  onNameChange: (value: string) => void;
-};
-
-function ExecutorDetailsCard({ draft, isSystem, onNameChange }: ExecutorDetailsCardProps) {
-  const ExecutorIcon = EXECUTOR_ICON_MAP[draft.type] ?? EXECUTOR_ICON_MAP.local;
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Executor Details</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ExecutorIcon className="h-4 w-4" />
-          <span>{draft.type}</span>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="executor-name">Executor name</Label>
-          <Input
-            id="executor-name"
-            value={draft.name}
-            onChange={(event) => onNameChange(event.target.value)}
-            disabled={isSystem}
-          />
-          {isSystem && (
-            <p className="text-xs text-muted-foreground">System executor names cannot be edited.</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function DockerConfigCard({
-  draft,
-  onDraftChange,
-}: {
-  draft: Executor;
-  onDraftChange: (next: Executor) => void;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Docker Configuration</CardTitle>
-        <CardDescription>
-          {draft.type === "remote_docker"
-            ? "Remote Docker host settings."
-            : "Local Docker host settings."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <Label htmlFor="docker-host">Docker host env value</Label>
-        <Input
-          id="docker-host"
-          value={draft.config?.docker_host ?? ""}
-          onChange={(event) =>
-            onDraftChange({
-              ...draft,
-              config: { ...(draft.config ?? {}), docker_host: event.target.value },
-            })
-          }
-          placeholder="unix:///var/run/docker.sock"
-        />
-        <p className="text-xs text-muted-foreground">
-          The repository will be mounted as a volume during runtime.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function DeleteExecutorSection({
-  onDeleteClick,
-  deleteDialogOpen,
-  setDeleteDialogOpen,
-  onDelete,
-  isDeleting,
-  confirmText,
-  onConfirmTextChange,
-}: {
-  onDeleteClick: () => void;
-  deleteDialogOpen: boolean;
-  setDeleteDialogOpen: (open: boolean) => void;
-  onDelete: () => void;
-  isDeleting: boolean;
-  confirmText: string;
-  onConfirmTextChange: (value: string) => void;
-}) {
-  return (
-    <>
-      <Card className="border-destructive">
-        <CardHeader>
-          <CardTitle className="text-destructive">Delete Executor</CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Remove this executor</p>
-            <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
-          </div>
-          <Button variant="destructive" onClick={onDeleteClick}>
-            <IconTrash className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
-        </CardContent>
-      </Card>
-      <DeleteExecutorDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        onDelete={onDelete}
-        isDeleting={isDeleting}
-        confirmText={confirmText}
-        onConfirmTextChange={onConfirmTextChange}
-      />
-    </>
   );
 }
 
@@ -375,43 +187,112 @@ function validateMcpPolicy(value: string | undefined): string | null {
   return null;
 }
 
-type ExecutorEditHandlersOptions = {
-  draft: Executor;
-  setDraft: (e: Executor) => void;
-  setSavedExecutor: (e: Executor) => void;
-  deleteConfirmText: string;
-  setDeleteDialogOpen: (open: boolean) => void;
-  executors: Executor[];
-  setExecutors: (items: Executor[]) => void;
-  pushRoute: (path: string) => void;
-};
-
-function useExecutorEditHandlers({
-  draft,
-  setDraft,
-  setSavedExecutor,
-  deleteConfirmText,
-  setDeleteDialogOpen,
-  executors,
-  setExecutors,
-  pushRoute,
-}: ExecutorEditHandlersOptions) {
-  const [isSaving, setIsSaving] = useState(false);
+function DeleteExecutorSection({ executor }: { executor: Executor }) {
+  const router = useRouter();
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
-  const isSystem = draft.is_system ?? false;
 
-  const handleSaveExecutor = async () => {
+  const handleDelete = async () => {
+    if (deleteConfirmText !== "delete") return;
+    setIsDeleting(true);
+    try {
+      const client = getWebSocketClient();
+      if (client) {
+        await client.request("executor.delete", { id: executor.id });
+      } else {
+        await deleteExecutorAction(executor.id);
+      }
+      setExecutors(executors.filter((item: Executor) => item.id !== executor.id));
+      router.push(EXECUTORS_ROUTE);
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <Card className="border-destructive">
+        <CardHeader>
+          <CardTitle className="text-destructive">Delete Executor</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Remove this executor</p>
+            <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
+          </div>
+          <Button
+            variant="destructive"
+            onClick={() => setDeleteDialogOpen(true)}
+            className="cursor-pointer"
+          >
+            <IconTrash className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+        </CardContent>
+      </Card>
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Executor</DialogTitle>
+            <DialogDescription>
+              Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="confirm-delete">Confirm Delete</Label>
+            <Input
+              id="confirm-delete"
+              value={deleteConfirmText}
+              onChange={(event) => setDeleteConfirmText(event.target.value)}
+              placeholder="delete"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="cursor-pointer">
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteConfirmText !== "delete" || isDeleting}
+              className="cursor-pointer"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ExecutorEditForm({ executor }: { executor: Executor }) {
+  const router = useRouter();
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+  const [mcpPolicy, setMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
+  const [savedMcpPolicy, setSavedMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const isSystem = executor.is_system ?? false;
+  const ExecutorIcon = EXECUTOR_ICON_MAP[executor.type] ?? EXECUTOR_ICON_MAP.local;
+  const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
+  const isDirty = mcpPolicy !== savedMcpPolicy;
+
+  const handleSave = async () => {
     setIsSaving(true);
     try {
-      const payload = isSystem
-        ? { config: draft.config ?? {} }
-        : { name: draft.name, type: draft.type, status: draft.status, config: draft.config ?? {} };
+      const config = { ...(executor.config ?? {}), mcp_policy: mcpPolicy };
+      const payload = isSystem ? { config } : { name: executor.name, config };
       const client = getWebSocketClient();
       const updated = client
-        ? await client.request<Executor>("executor.update", { id: draft.id, ...payload })
-        : await updateExecutorAction(draft.id, payload);
-      setDraft(updated);
-      setSavedExecutor(updated);
+        ? await client.request<Executor>("executor.update", { id: executor.id, ...payload })
+        : await updateExecutorAction(executor.id, payload);
+      setSavedMcpPolicy(updated.config?.mcp_policy ?? "");
       setExecutors(
         executors.map((item: Executor) =>
           item.id === updated.id ? { ...item, ...updated } : item,
@@ -422,126 +303,50 @@ function useExecutorEditHandlers({
     }
   };
 
-  const handleDeleteExecutor = async () => {
-    if (deleteConfirmText !== "delete") return;
-    setIsDeleting(true);
-    try {
-      const client = getWebSocketClient();
-      if (client) {
-        await client.request("executor.delete", { id: draft.id });
-      } else {
-        await deleteExecutorAction(draft.id);
-      }
-      setExecutors(executors.filter((item: Executor) => item.id !== draft.id));
-      pushRoute(EXECUTORS_ROUTE);
-    } finally {
-      setIsDeleting(false);
-      setDeleteDialogOpen(false);
-    }
-  };
-
-  const handleMcpPolicyChange = (value: string) => {
-    setDraft({ ...draft, config: { ...(draft.config ?? {}), mcp_policy: value } });
-  };
-
-  return { isSaving, isDeleting, handleSaveExecutor, handleDeleteExecutor, handleMcpPolicyChange };
-}
-
-function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
-  const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
-  const [draft, setDraft] = useState<Executor>({ ...executor });
-  const [savedExecutor, setSavedExecutor] = useState<Executor>({ ...executor });
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-
-  const isSystem = draft.is_system ?? false;
-  const isDockerType = draft.type === "local_docker" || draft.type === "remote_docker";
-  const isSprites = draft.type === "sprites";
-  const spritesSecretId = useMemo(() => {
-    const defaultProfile = draft.profiles?.find((p) => p.is_default) ?? draft.profiles?.[0];
-    const tokenVar = defaultProfile?.env_vars?.find((ev) => ev.key === "SPRITES_API_TOKEN");
-    return tokenVar?.secret_id;
-  }, [draft.profiles]);
-  const mcpPolicyError = useMemo(
-    () => validateMcpPolicy(draft.config?.mcp_policy),
-    [draft.config?.mcp_policy],
-  );
-  const isDirty = useMemo(
-    () =>
-      draft.name !== savedExecutor.name ||
-      draft.type !== savedExecutor.type ||
-      draft.status !== savedExecutor.status ||
-      JSON.stringify(draft.config ?? {}) !== JSON.stringify(savedExecutor.config ?? {}),
-    [draft, savedExecutor],
-  );
-
-  const { isSaving, isDeleting, handleSaveExecutor, handleDeleteExecutor, handleMcpPolicyChange } =
-    useExecutorEditHandlers({
-      draft,
-      setDraft,
-      setSavedExecutor,
-      deleteConfirmText,
-      setDeleteDialogOpen,
-      executors,
-      setExecutors,
-      pushRoute: (path) => router.push(path),
-    });
-
   return (
     <div className="space-y-8">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold">{draft.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">{getExecutorDescription(draft.type)}</p>
+          <div className="flex items-center gap-2">
+            <ExecutorIcon className="h-5 w-5 text-muted-foreground" />
+            <h2 className="text-2xl font-bold">{executor.name}</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">{getExecutorDescription(executor.type)}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)}>
+        <Button variant="outline" size="sm" onClick={() => router.push(EXECUTORS_ROUTE)} className="cursor-pointer">
           Back to Executors
         </Button>
       </div>
       <Separator />
-      <ExecutorDetailsCard
-        draft={draft}
-        isSystem={isSystem}
-        onNameChange={(value) => setDraft({ ...draft, name: value })}
-      />
-      <ExecutorProfilesCard executorId={executor.id} profiles={draft.profiles ?? []} />
-      {isSprites && (
-        <>
-          <SpritesConnectionCard secretId={spritesSecretId} />
-          <SpritesInstancesCard secretId={spritesSecretId} />
-        </>
-      )}
-      {isDockerType && <DockerConfigCard draft={draft} onDraftChange={setDraft} />}
+
+      <ExecutorProfilesCard executorId={executor.id} profiles={executor.profiles ?? []} />
+
       <McpPolicyCard
-        mcpPolicy={draft.config?.mcp_policy ?? ""}
+        mcpPolicy={mcpPolicy}
         mcpPolicyError={mcpPolicyError}
-        onPolicyChange={handleMcpPolicyChange}
+        onPolicyChange={setMcpPolicy}
       />
-      <Separator />
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" onClick={() => router.push(EXECUTORS_ROUTE)}>
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSaveExecutor}
-          disabled={!isDirty || Boolean(mcpPolicyError) || isSaving}
-        >
-          {isSaving ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
-      {!isSystem && (
-        <DeleteExecutorSection
-          onDeleteClick={() => setDeleteDialogOpen(true)}
-          deleteDialogOpen={deleteDialogOpen}
-          setDeleteDialogOpen={setDeleteDialogOpen}
-          onDelete={handleDeleteExecutor}
-          isDeleting={isDeleting}
-          confirmText={deleteConfirmText}
-          onConfirmTextChange={setDeleteConfirmText}
-        />
+
+      {isDirty && (
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setMcpPolicy(savedMcpPolicy)}
+            className="cursor-pointer"
+          >
+            Discard
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={Boolean(mcpPolicyError) || isSaving}
+            className="cursor-pointer"
+          >
+            {isSaving ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
       )}
+
+      {!isSystem && <DeleteExecutorSection executor={executor} />}
     </div>
   );
 }

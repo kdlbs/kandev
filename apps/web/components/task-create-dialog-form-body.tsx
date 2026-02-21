@@ -27,9 +27,9 @@ type CreateEditSelectorsProps = {
   agentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   isCreatingSession: boolean;
-  executorOptions: SelectorOption[];
-  executorId: string;
-  onExecutorChange: (value: string) => void;
+  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  executorProfileId: string;
+  onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
   BranchSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
@@ -48,7 +48,7 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     triggerClassName?: string;
   }>;
-  ExecutorSelectorComponent: React.ComponentType<{
+  ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
     value: string;
     onValueChange: (value: string) => void;
@@ -73,13 +73,13 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   agentProfileId,
   onAgentProfileChange,
   isCreatingSession,
-  executorOptions,
-  executorId,
-  onExecutorChange,
+  executorProfileOptions,
+  executorProfileId,
+  onExecutorProfileChange,
   executorsLoading,
   BranchSelectorComponent,
   AgentSelectorComponent,
-  ExecutorSelectorComponent,
+  ExecutorProfileSelectorComponent,
 }: CreateEditSelectorsProps) {
   if (isTaskStarted) return null;
 
@@ -134,11 +134,11 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
         )}
       </div>
       <div>
-        <ExecutorSelectorComponent
-          options={executorOptions}
-          value={executorId}
-          onValueChange={onExecutorChange}
-          placeholder={executorsLoading ? "Loading executors..." : "Select executor"}
+        <ExecutorProfileSelectorComponent
+          options={executorProfileOptions}
+          value={executorProfileId}
+          onValueChange={onExecutorProfileChange}
+          placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
           disabled={executorsLoading}
         />
       </div>
@@ -152,9 +152,9 @@ type SessionSelectorsProps = {
   onAgentProfileChange: (value: string) => void;
   agentProfilesLoading: boolean;
   isCreatingSession: boolean;
-  executorOptions: SelectorOption[];
-  executorId: string;
-  onExecutorChange: (value: string) => void;
+  executorProfileOptions: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+  executorProfileId: string;
+  onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
@@ -164,7 +164,7 @@ type SessionSelectorsProps = {
     placeholder: string;
     triggerClassName?: string;
   }>;
-  ExecutorSelectorComponent: React.ComponentType<{
+  ExecutorProfileSelectorComponent: React.ComponentType<{
     options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
     value: string;
     onValueChange: (value: string) => void;
@@ -180,12 +180,12 @@ export const SessionSelectors = memo(function SessionSelectors({
   onAgentProfileChange,
   agentProfilesLoading,
   isCreatingSession,
-  executorOptions,
-  executorId,
-  onExecutorChange,
+  executorProfileOptions,
+  executorProfileId,
+  onExecutorProfileChange,
   executorsLoading,
   AgentSelectorComponent,
-  ExecutorSelectorComponent,
+  ExecutorProfileSelectorComponent,
 }: SessionSelectorsProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -196,11 +196,11 @@ export const SessionSelectors = memo(function SessionSelectors({
         placeholder={agentProfilesLoading ? "Loading agent profiles..." : "Select agent profile"}
         disabled={agentProfilesLoading || isCreatingSession}
       />
-      <ExecutorSelectorComponent
-        options={executorOptions}
-        value={executorId}
-        onValueChange={onExecutorChange}
-        placeholder={executorsLoading ? "Loading executors..." : "Select executor"}
+      <ExecutorProfileSelectorComponent
+        options={executorProfileOptions}
+        value={executorProfileId}
+        onValueChange={onExecutorProfileChange}
+        placeholder={executorsLoading ? "Loading profiles..." : "Select profile"}
         disabled={executorsLoading || isCreatingSession}
       />
     </div>

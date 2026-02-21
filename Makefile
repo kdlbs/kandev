@@ -193,6 +193,10 @@ install-web:
 test: test-backend test-web
 	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
 
+.PHONY: test-sprites-e2e
+test-sprites-e2e:
+	@$(MAKE) -C $(BACKEND_DIR) test-sprites-e2e
+
 .PHONY: test-backend
 test-backend:
 	@printf "$(CYAN)Running backend tests...$(RESET)\n"

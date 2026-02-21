@@ -9,7 +9,6 @@ import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
 import { registerMessagesHandlers } from "@/lib/ws/handlers/messages";
 import { registerNotificationsHandlers } from "@/lib/ws/handlers/notifications";
 import { registerDiffsHandlers } from "@/lib/ws/handlers/diffs";
-import { registerEnvironmentsHandlers } from "@/lib/ws/handlers/environments";
 import { registerExecutorsHandlers } from "@/lib/ws/handlers/executors";
 import { registerExecutorProfileHandlers } from "@/lib/ws/handlers/executor-profiles";
 import { registerExecutorPrepareHandlers } from "@/lib/ws/handlers/executor-prepare";
@@ -35,7 +34,6 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerExecutorsHandlers(store),
     ...registerExecutorProfileHandlers(store),
     ...registerExecutorPrepareHandlers(store),
-    ...registerEnvironmentsHandlers(store),
     ...registerAgentsHandlers(store),
     ...registerTaskSessionHandlers(store),
     ...registerAvailableCommandsHandlers(store),
