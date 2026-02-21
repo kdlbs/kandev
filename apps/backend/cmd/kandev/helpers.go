@@ -30,6 +30,7 @@ import (
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/secrets"
+	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -262,6 +263,7 @@ type routeParams struct {
 	promptCtrl              *promptcontroller.Controller
 	msgCreator              *messageCreatorAdapter
 	secretsSvc              *secrets.Service
+	secretStore             secrets.SecretStore
 	log                     *logger.Logger
 }
 
@@ -331,6 +333,11 @@ func registerSecondaryRoutes(
 	if p.secretsSvc != nil {
 		secrets.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretsSvc, p.log)
 		p.log.Debug("Registered Secrets handlers (HTTP + WebSocket)")
+	}
+
+	if p.secretStore != nil {
+		spriteshandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretStore, p.log)
+		p.log.Debug("Registered Sprites handlers (HTTP + WebSocket)")
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)

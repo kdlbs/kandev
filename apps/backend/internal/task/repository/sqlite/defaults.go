@@ -144,6 +144,7 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 		{id: models.ExecutorIDLocal, name: "Local", execType: models.ExecutorTypeLocal, status: models.ExecutorStatusActive, isSystem: true, resumable: true, config: map[string]string{}},
 		{id: models.ExecutorIDWorktree, name: "Worktree", execType: models.ExecutorTypeWorktree, status: models.ExecutorStatusActive, isSystem: true, resumable: true, config: map[string]string{}},
 		{id: models.ExecutorIDLocalDocker, name: "Local Docker", execType: models.ExecutorTypeLocalDocker, status: models.ExecutorStatusActive, isSystem: false, resumable: true, config: map[string]string{"docker_host": config.DefaultDockerHost()}},
+		{id: models.ExecutorIDSprites, name: "Sprites.dev", execType: models.ExecutorTypeSprites, status: models.ExecutorStatusDisabled, isSystem: false, resumable: false, config: map[string]string{}},
 	}
 	for _, executor := range executors {
 		configJSON, err := json.Marshal(executor.config)
@@ -161,7 +162,7 @@ func (r *Repository) insertDefaultExecutors(ctx context.Context) error {
 }
 
 func (r *Repository) ensureDefaultExecutorProfiles(ctx context.Context) error {
-	for _, executorID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree, models.ExecutorIDLocalDocker} {
+	for _, executorID := range []string{models.ExecutorIDLocal, models.ExecutorIDWorktree, models.ExecutorIDLocalDocker, models.ExecutorIDSprites} {
 		var profileCount int
 		if err := r.db.QueryRowContext(ctx, r.db.Rebind(
 			"SELECT COUNT(1) FROM executor_profiles WHERE executor_id = ?",

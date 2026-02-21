@@ -11,6 +11,7 @@ export const defaultSettingsState: SettingsSliceState = {
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
   secrets: { items: [], loaded: false, loading: false },
+  sprites: { status: null, instances: [], loaded: false, loading: false },
   notificationProviders: {
     items: [],
     events: [],
@@ -114,6 +115,27 @@ export const createSettingsSlice: StateCreator<
   removeSecret: (id) =>
     set((draft) => {
       draft.secrets.items = draft.secrets.items.filter((s) => s.id !== id);
+    }),
+  setSpritesStatus: (status) =>
+    set((draft) => {
+      draft.sprites.status = status;
+      draft.sprites.loaded = true;
+    }),
+  setSpritesInstances: (instances) =>
+    set((draft) => {
+      draft.sprites.instances = instances;
+      draft.sprites.loaded = true;
+    }),
+  setSpritesLoading: (loading) =>
+    set((draft) => {
+      draft.sprites.loading = loading;
+    }),
+  removeSpritesInstance: (name) =>
+    set((draft) => {
+      draft.sprites.instances = draft.sprites.instances.filter((i) => i.name !== name);
+      if (draft.sprites.status) {
+        draft.sprites.status.instance_count = draft.sprites.instances.length;
+      }
     }),
   setNotificationProviders: (state) =>
     set((draft) => {

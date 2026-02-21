@@ -130,6 +130,7 @@ export type AppState = {
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
+  sprites: (typeof defaultSettingsState)["sprites"];
   notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
   settingsData: (typeof defaultSettingsState)["settingsData"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
@@ -213,6 +214,10 @@ export type AppState = {
   addSecret: (item: import("@/lib/types/http-secrets").SecretListItem) => void;
   updateSecret: (item: import("@/lib/types/http-secrets").SecretListItem) => void;
   removeSecret: (id: string) => void;
+  setSpritesStatus: (status: import("@/lib/types/http-sprites").SpritesStatus) => void;
+  setSpritesInstances: (instances: import("@/lib/types/http-sprites").SpritesInstance[]) => void;
+  setSpritesLoading: (loading: boolean) => void;
+  removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;

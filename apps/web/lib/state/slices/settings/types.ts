@@ -11,6 +11,7 @@ import type {
   SavedLayout,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
+import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -79,6 +80,13 @@ export type SecretsState = {
   loading: boolean;
 };
 
+export type SpritesState = {
+  status: SpritesStatus | null;
+  instances: SpritesInstance[];
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type NotificationProvidersState = {
   items: NotificationProvider[];
   events: string[];
@@ -121,6 +129,7 @@ export type SettingsSliceState = {
   editors: EditorsState;
   prompts: PromptsState;
   secrets: SecretsState;
+  sprites: SpritesState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
   userSettings: UserSettingsState;
@@ -143,6 +152,10 @@ export type SettingsSliceActions = {
   addSecret: (item: SecretListItem) => void;
   updateSecret: (item: SecretListItem) => void;
   removeSecret: (id: string) => void;
+  setSpritesStatus: (status: SpritesStatus) => void;
+  setSpritesInstances: (instances: SpritesInstance[]) => void;
+  setSpritesLoading: (loading: boolean) => void;
+  removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;

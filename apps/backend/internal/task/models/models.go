@@ -323,12 +323,14 @@ const (
 	ExecutorTypeWorktree     ExecutorType = "worktree"
 	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
+	ExecutorTypeSprites      ExecutorType = "sprites"
 )
 
 const (
 	ExecutorIDLocal       = "exec-local"
 	ExecutorIDWorktree    = "exec-worktree"
 	ExecutorIDLocalDocker = "exec-local-docker"
+	ExecutorIDSprites     = "exec-sprites"
 )
 
 // ExecutorStatus represents executor availability.

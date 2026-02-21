@@ -407,6 +407,7 @@ func buildHTTPServer(
 		promptCtrl:              promptcontroller.NewController(services.Prompts),
 		msgCreator:              msgCreator,
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
+		secretStore:             repos.Secrets,
 		log:                     log,
 	})
 

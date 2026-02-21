@@ -255,6 +255,12 @@ const (
 	ActionSecretDelete = "secrets.delete"
 	ActionSecretReveal = "secrets.reveal"
 
+	// Sprites actions
+	ActionSpritesStatus           = "sprites.status"
+	ActionSpritesInstancesList    = "sprites.instances.list"
+	ActionSpritesInstancesDestroy = "sprites.instances.destroy"
+	ActionSpritesTest             = "sprites.test"
+
 	// MCP tool actions (agentctl -> backend via WS tunnel)
 	ActionMCPListWorkspaces    = "mcp.list_workspaces"
 	ActionMCPListWorkflows     = "mcp.list_workflows"

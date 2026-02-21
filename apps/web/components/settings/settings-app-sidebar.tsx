@@ -12,6 +12,7 @@ import {
   IconCode,
   IconCpu,
   IconKey,
+  IconSparkles,
   IconMessageCircle,
 } from "@tabler/icons-react";
 import {
@@ -83,6 +84,18 @@ function GeneralSidebarSection({ pathname }: GeneralSidebarSectionProps) {
             <Link href="/settings/general/secrets">
               <IconKey className="h-4 w-4" />
               <span>Secrets</span>
+            </Link>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+        <SidebarMenuSubItem>
+          <SidebarMenuSubButton
+            asChild
+            size="sm"
+            isActive={pathname === "/settings/general/sprites"}
+          >
+            <Link href="/settings/general/sprites">
+              <IconSparkles className="h-4 w-4" />
+              <span>Sprites.dev</span>
             </Link>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>

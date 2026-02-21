@@ -49,6 +49,16 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if worktreeBranch != "" {
 		metadata[MetadataKeyWorktreeBranch] = worktreeBranch
 	}
+	// Pass repo info for remote executors (Sprites, remote docker, etc.)
+	if req.RepositoryPath != "" {
+		metadata[MetadataKeyRepositoryPath] = req.RepositoryPath
+	}
+	if req.SetupScript != "" {
+		metadata[MetadataKeySetupScript] = req.SetupScript
+	}
+	if req.BaseBranch != "" {
+		metadata[MetadataKeyBaseBranch] = req.BaseBranch
+	}
 	return metadata
 }
 

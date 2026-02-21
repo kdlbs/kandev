@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-mock-agent clean run dev test test-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-mock-agent clean run dev test test-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -52,6 +52,12 @@ build-agentctl:
 	@echo "Building agentctl..."
 	@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl ./cmd/agentctl
+
+## Build agentctl for linux/amd64 (used by Sprites remote executor)
+build-agentctl-linux:
+	@echo "Building agentctl for linux/amd64..."
+	@$(MKDIR) $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Clean build artifacts
 clean:

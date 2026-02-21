@@ -53,6 +53,12 @@ const (
 	MetadataKeyMainRepoGitDir = "main_repo_git_dir"
 	MetadataKeyWorktreeID     = "worktree_id"
 	MetadataKeyWorktreeBranch = "worktree_branch"
+
+	// Remote executor metadata keys
+	MetadataKeyRepositoryPath = "repository_path"
+	MetadataKeySetupScript    = "setup_script"
+	MetadataKeyBaseBranch     = "base_branch"
+	MetadataKeyIsRemote       = "is_remote"
 )
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.

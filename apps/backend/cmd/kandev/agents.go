@@ -74,6 +74,12 @@ func provideLifecycleManager(
 	executorRegistry.Register(remoteDockerExec)
 	log.Info("Remote Docker runtime registered")
 
+	// Register Sprites runtime (remote sandboxes via Sprites.dev)
+	agentctlResolver := lifecycle.NewAgentctlResolver(log)
+	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentctlResolver, 8765, log)
+	executorRegistry.Register(spritesExec)
+	log.Info("Sprites runtime registered")
+
 	credsMgr := credentials.NewManager(log)
 	if secretStore != nil {
 		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
@@ -103,6 +109,7 @@ func provideLifecycleManager(
 	preparerRegistry := lifecycle.NewPreparerRegistry(log)
 	preparerRegistry.Register(agentexecutor.NameStandalone, lifecycle.NewLocalPreparer(log))
 	preparerRegistry.Register(agentexecutor.NameDocker, lifecycle.NewDockerPreparer(log))
+	preparerRegistry.Register(agentexecutor.NameSprites, lifecycle.NewSpritesPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 
 	// MCP handler is set later in main.go after MCP handlers are registered
