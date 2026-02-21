@@ -492,14 +492,8 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 		return nil, err
 	}
 
-	// Load repositories for each task
-	for _, task := range tasks {
-		repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
-		if err != nil {
-			s.logger.Error("failed to list task repositories", zap.String("task_id", task.ID), zap.Error(err))
-		} else {
-			task.Repositories = repos
-		}
+	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
+		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
 
 	return tasks, nil
@@ -513,15 +507,28 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, 
 		return nil, 0, err
 	}
 
-	// Load repositories for each task
-	for _, task := range tasks {
-		repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
-		if err != nil {
-			s.logger.Error("failed to list task repositories", zap.String("task_id", task.ID), zap.Error(err))
-		} else {
-			task.Repositories = repos
-		}
+	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
+		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
 
 	return tasks, total, nil
+}
+
+// loadTaskRepositoriesBatch loads repositories for multiple tasks in a single query.
+func (s *Service) loadTaskRepositoriesBatch(ctx context.Context, tasks []*models.Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	taskIDs := make([]string, len(tasks))
+	for i, t := range tasks {
+		taskIDs[i] = t.ID
+	}
+	repoMap, err := s.repo.ListTaskRepositoriesByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		task.Repositories = repoMap[task.ID]
+	}
+	return nil
 }

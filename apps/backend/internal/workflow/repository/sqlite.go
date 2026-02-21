@@ -807,6 +807,24 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 	return r.scanSteps(rows)
 }
 
+// ListStepsByWorkspaceID returns all workflow steps for all workflows in a workspace.
+func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
+			ws.allow_manual_move, ws.is_start_step, ws.auto_archive_after_hours, ws.created_at, ws.updated_at
+		FROM workflow_steps ws
+		JOIN workflows w ON ws.workflow_id = w.id
+		WHERE w.workspace_id = ?
+		ORDER BY ws.workflow_id, ws.position
+	`), workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanSteps(rows)
+}
+
 // scanSteps is a helper to scan multiple workflow step rows.
 func (r *Repository) scanSteps(rows *sql.Rows) ([]*models.WorkflowStep, error) {
 	var result []*models.WorkflowStep

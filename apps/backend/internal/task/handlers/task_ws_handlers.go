@@ -32,11 +32,11 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
-	sessionDTOs := make([]dto.TaskSessionDTO, 0, len(sessions))
+	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSession(session))
+		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
 	}
-	resp := dto.ListTaskSessionsResponse{
+	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
 		Total:    len(sessionDTOs),
 	}

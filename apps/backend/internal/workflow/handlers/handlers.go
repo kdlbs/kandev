@@ -42,6 +42,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 
 	// Step routes
 	api.GET("/workflows/:id/workflow/steps", h.httpListStepsByWorkflow)
+	api.GET("/workspaces/:id/workflow-steps", h.httpListStepsByWorkspace)
 	api.GET("/workflow/steps/:id", h.httpGetStep)
 	api.POST("/workflows/:id/workflow/steps", h.httpCreateStepsFromTemplate)
 	api.POST("/workflow/steps", h.httpCreateStep)
@@ -97,6 +98,16 @@ func (h *Handlers) httpListStepsByWorkflow(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("failed to list steps", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpListStepsByWorkspace(c *gin.Context) {
+	resp, err := h.controller.ListStepsByWorkspace(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.logger.Error("failed to list steps by workspace", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list steps"})
 		return
 	}

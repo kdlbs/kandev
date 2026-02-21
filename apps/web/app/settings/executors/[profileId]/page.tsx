@@ -337,10 +337,29 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     : "Runs on the host machine before the agent starts.";
 
   return {
-    name, setName, mcpPolicy, setMcpPolicy, prepareScript, setPrepareScript,
-    cleanupScript, setCleanupScript, envVarRows, addEnvVar, removeEnvVar, updateEnvVar,
-    placeholders, spritesSecretId, setSpritesSecretId, networkPolicyRules, setNetworkPolicyRules,
-    isRemote, isDocker, isSprites, mcpPolicyError, buildEnvVars, prepareDesc,
+    name,
+    setName,
+    mcpPolicy,
+    setMcpPolicy,
+    prepareScript,
+    setPrepareScript,
+    cleanupScript,
+    setCleanupScript,
+    envVarRows,
+    addEnvVar,
+    removeEnvVar,
+    updateEnvVar,
+    placeholders,
+    spritesSecretId,
+    setSpritesSecretId,
+    networkPolicyRules,
+    setNetworkPolicyRules,
+    isRemote,
+    isDocker,
+    isSprites,
+    mcpPolicyError,
+    buildEnvVars,
+    prepareDesc,
   };
 }
 

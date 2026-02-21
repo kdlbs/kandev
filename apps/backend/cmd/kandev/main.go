@@ -389,6 +389,7 @@ func buildHTTPServer(
 	}
 	router := gin.New()
 	router.Use(httpmw.RequestLogger(log, "kandev"))
+	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 

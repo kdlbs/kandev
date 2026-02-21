@@ -90,6 +90,9 @@ func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*mod
 func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListTaskRepositoriesByTaskIDs(_ context.Context, _ []string) (map[string][]*models.TaskRepository, error) {
+	return make(map[string][]*models.TaskRepository), nil
+}
 func (m *mockRepository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
@@ -221,6 +224,9 @@ func (m *mockRepository) CreateTaskSessionWorktree(ctx context.Context, sessionW
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListWorktreesBySessionIDs(_ context.Context, _ []string) (map[string][]*models.TaskSessionWorktree, error) {
+	return make(map[string][]*models.TaskSessionWorktree), nil
+}
 func (m *mockRepository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
 	return nil
 }
@@ -259,6 +265,9 @@ func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID
 		return nil, nil
 	}
 	return m.scriptsByRepo[repositoryID], nil
+}
+func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []string) (map[string][]*models.RepositoryScript, error) {
+	return make(map[string][]*models.RepositoryScript), nil
 }
 func (m *mockRepository) CreateExecutor(ctx context.Context, executor *models.Executor) error {
 	return nil

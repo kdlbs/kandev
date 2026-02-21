@@ -113,37 +113,37 @@ function buildBaseState(
   };
 }
 
-async function loadSessionMessages(
-  sessionId: string,
-  state: Partial<AppState>,
+async function loadSnapshotState(
+  workflowId: string,
+  taskId: string | undefined,
+  sessionId: string | undefined,
 ): Promise<Partial<AppState>> {
-  try {
-    const messagesResponse = await listTaskSessionMessages(
-      sessionId,
-      { limit: 50, sort: "desc" },
-      { cache: "no-store" },
-    );
+  const [snapshot, messagesResponse] = await Promise.all([
+    fetchWorkflowSnapshot(workflowId, { cache: "no-store" }),
+    taskId && sessionId
+      ? listTaskSessionMessages(
+          sessionId,
+          { limit: 50, sort: "desc" },
+          { cache: "no-store" },
+        ).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const state: Partial<AppState> = { ...snapshotToState(snapshot) };
+
+  if (sessionId && messagesResponse) {
     const messages = [...(messagesResponse.messages ?? [])].reverse();
-    return {
-      ...state,
-      messages: {
-        bySession: { [sessionId]: messages },
-        metaBySession: {
-          [sessionId]: {
-            isLoading: false,
-            hasMore: messagesResponse.has_more ?? false,
-            oldestCursor: messages[0]?.id ?? null,
-          },
+    state.messages = {
+      bySession: { [sessionId]: messages },
+      metaBySession: {
+        [sessionId]: {
+          isLoading: false,
+          hasMore: messagesResponse.has_more ?? false,
+          oldestCursor: messages[0]?.id ?? null,
         },
       },
     };
-  } catch (error) {
-    console.warn(
-      "Could not SSR messages (client will load via WebSocket):",
-      error instanceof Error ? error.message : String(error),
-    );
-    return state;
   }
+  return state;
 }
 
 export default async function Page({ searchParams }: PageProps) {
@@ -216,12 +216,8 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const snapshot = await fetchWorkflowSnapshot(workflowId, { cache: "no-store" });
-    initialState = { ...initialState, ...snapshotToState(snapshot) };
-
-    if (taskId && sessionId) {
-      initialState = await loadSessionMessages(sessionId, initialState);
-    }
+    const snapshotState = await loadSnapshotState(workflowId, taskId, sessionId);
+    initialState = { ...initialState, ...snapshotState };
 
     return (
       <>

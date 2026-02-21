@@ -81,15 +81,22 @@ func (h *RepositoryHandlers) httpListRepositories(c *gin.Context) {
 		Repositories: make([]dto.RepositoryDTO, 0, len(repositories)),
 		Total:        len(repositories),
 	}
+
+	var scriptsByRepo map[string][]*models.RepositoryScript
+	if includeScripts && len(repositories) > 0 {
+		repoIDs := make([]string, len(repositories))
+		for i, r := range repositories {
+			repoIDs[i] = r.ID
+		}
+		scriptsByRepo, _ = h.service.ListScriptsByRepositoryIDs(c.Request.Context(), repoIDs)
+	}
+
 	for _, repository := range repositories {
 		repoDTO := dto.FromRepository(repository)
-		if includeScripts {
-			scripts, scriptsErr := h.service.ListRepositoryScripts(c.Request.Context(), repository.ID)
-			if scriptsErr == nil {
-				repoDTO.Scripts = make([]dto.RepositoryScriptDTO, 0, len(scripts))
-				for _, script := range scripts {
-					repoDTO.Scripts = append(repoDTO.Scripts, dto.FromRepositoryScript(script))
-				}
+		if scripts, ok := scriptsByRepo[repository.ID]; ok {
+			repoDTO.Scripts = make([]dto.RepositoryScriptDTO, 0, len(scripts))
+			for _, script := range scripts {
+				repoDTO.Scripts = append(repoDTO.Scripts, dto.FromRepositoryScript(script))
 			}
 		}
 		resp.Repositories = append(resp.Repositories, repoDTO)

@@ -332,6 +332,19 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   updated_at: step.updated_at,
 });
 
+// Workspace Workflow Steps (batch: all steps for all workflows in a workspace)
+export async function listWorkspaceWorkflowStepsAction(
+  workspaceId: string,
+): Promise<ListWorkflowStepsResponse> {
+  const response = await fetchJson<{ steps: BackendWorkflowStep[] | null }>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflow-steps`,
+  );
+  return {
+    steps: (response.steps ?? []).map(transformWorkflowStep),
+    total: response.steps?.length ?? 0,
+  };
+}
+
 // Workflow Steps
 export async function listWorkflowStepsAction(
   workflowId: string,

@@ -36,6 +36,7 @@ type Repository interface {
 	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
 	GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskRepositoriesByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskRepository, error)
 	UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
@@ -97,6 +98,7 @@ type Repository interface {
 	// Task Session Worktree operations
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
+	ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error)
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error
 	DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error
 
@@ -125,6 +127,7 @@ type Repository interface {
 	UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
 	DeleteRepositoryScript(ctx context.Context, id string) error
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
+	ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error)
 
 	// Executor operations
 	CreateExecutor(ctx context.Context, executor *models.Executor) error

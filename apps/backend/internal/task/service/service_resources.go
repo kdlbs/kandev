@@ -403,6 +403,11 @@ func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string
 	return s.repo.ListRepositoryScripts(ctx, repositoryID)
 }
 
+// ListScriptsByRepositoryIDs returns scripts for multiple repositories in a single query.
+func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error) {
+	return s.repo.ListScriptsByRepositoryIDs(ctx, repoIDs)
+}
+
 // Executor operations
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
