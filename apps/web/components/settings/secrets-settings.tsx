@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { IconEdit, IconTrash, IconEye, IconEyeOff, IconKey } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -14,7 +13,6 @@ import {
 } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useAppStore } from "@/components/state-provider";
@@ -25,34 +23,16 @@ import {
   revealSecret,
 } from "@/lib/api/domains/secrets-api";
 import { useRequest } from "@/lib/http/use-request";
-import type { SecretListItem, SecretCategory } from "@/lib/types/http-secrets";
-
-const CATEGORY_OPTIONS: Array<{ value: SecretCategory; label: string }> = [
-  { value: "api_key", label: "API Key" },
-  { value: "service_token", label: "Service Token" },
-  { value: "ssh_key", label: "SSH Key" },
-  { value: "custom", label: "Custom" },
-];
-
-const CATEGORY_LABELS: Record<SecretCategory, string> = {
-  api_key: "API Key",
-  service_token: "Service Token",
-  ssh_key: "SSH Key",
-  custom: "Custom",
-};
+import type { SecretListItem } from "@/lib/types/http-secrets";
 
 type SecretFormState = {
   name: string;
-  envKey: string;
   value: string;
-  category: SecretCategory;
 };
 
 const defaultFormState: SecretFormState = {
   name: "",
-  envKey: "",
   value: "",
-  category: "api_key",
 };
 
 /* ------------------------------------------------------------------ */
@@ -68,7 +48,6 @@ type SecretFormProps = {
   isValid: boolean;
   isBusy: boolean;
   submitLabel: string;
-  hideEnvKey?: boolean;
 };
 
 function SecretForm({
@@ -80,7 +59,6 @@ function SecretForm({
   isValid,
   isBusy,
   submitLabel,
-  hideEnvKey,
 }: SecretFormProps) {
   return (
     <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
@@ -89,16 +67,8 @@ function SecretForm({
         <Input
           value={formState.name}
           onChange={(e) => onFormChange({ name: e.target.value })}
-          placeholder="Display name (e.g. OpenAI Production)"
+          placeholder="Name (e.g. OpenAI Production Key)"
         />
-        {!hideEnvKey && (
-          <Input
-            value={formState.envKey}
-            onChange={(e) => onFormChange({ envKey: e.target.value.toUpperCase() })}
-            placeholder="ENV key (e.g. OPENAI_API_KEY)"
-            className="font-mono text-sm"
-          />
-        )}
         <Textarea
           value={formState.value}
           onChange={(e) => onFormChange({ value: e.target.value })}
@@ -106,21 +76,6 @@ function SecretForm({
           rows={2}
           className="resize-y font-mono text-sm"
         />
-        <Select
-          value={formState.category}
-          onValueChange={(v) => onFormChange({ category: v as SecretCategory })}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CATEGORY_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
       <div className="flex items-center gap-2">
         <Button onClick={onSubmit} disabled={!isValid || isBusy} className="cursor-pointer">
@@ -183,9 +138,6 @@ function SecretListItemRow({
         <div className="flex items-center gap-2 min-w-0">
           <IconKey className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="text-sm font-medium text-foreground truncate">{secret.name}</div>
-          <Badge variant="secondary" className="text-[10px] shrink-0">
-            {CATEGORY_LABELS[secret.category] ?? secret.category}
-          </Badge>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <Button
@@ -217,7 +169,6 @@ function SecretListItemRow({
           </Button>
         </div>
       </div>
-      <div className="text-xs text-muted-foreground font-mono">{secret.env_key}</div>
       {revealed && revealedValue !== null && (
         <div className="text-xs font-mono bg-muted/50 rounded px-2 py-1 break-all">
           {revealedValue}
@@ -309,7 +260,6 @@ function useSecretsState() {
 
 function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
   const {
-    items,
     addSecret: addToStore,
     updateSecretInStore,
     removeSecret: removeFromStore,
@@ -330,14 +280,13 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
 
   const isValid = useMemo(() => {
     const nameOk = formState.name.trim().length > 0;
-    const envKeyOk = /^[A-Z][A-Z0-9_]*$/.test(formState.envKey);
     const valueOk = editingId ? true : formState.value.trim().length > 0;
-    return nameOk && envKeyOk && valueOk;
+    return nameOk && valueOk;
   }, [formState, editingId]);
 
   const createRequest = useRequest(async (s: SecretFormState) => {
     const item = await createSecret(
-      { name: s.name.trim(), env_key: s.envKey.trim(), value: s.value, category: s.category },
+      { name: s.name.trim(), value: s.value },
       { cache: "no-store" },
     );
     addToStore(item);
@@ -347,7 +296,6 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
   const updateRequest = useRequest(async (id: string, s: SecretFormState) => {
     const payload: Record<string, unknown> = {
       name: s.name.trim(),
-      category: s.category,
     };
     if (s.value.trim()) payload.value = s.value;
     const item = await updateSecret(id, payload, { cache: "no-store" });
@@ -380,9 +328,7 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       setShowCreate(false);
       setFormState({
         name: secret.name,
-        envKey: secret.env_key,
         value: "",
-        category: secret.category,
       });
     },
     startCreate: () => {
@@ -397,7 +343,7 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       deleteRequest.run(deleteTarget.id).catch(() => undefined);
       setDeleteTarget(null);
     },
-    items,
+    items: state.items,
   };
 }
 
@@ -417,7 +363,7 @@ export function SecretsSettings() {
   return (
     <SettingsPageTemplate
       title="Secrets"
-      description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments."
+      description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars."
       isDirty={false}
       saveStatus="idle"
       onSave={() => undefined}
@@ -458,7 +404,6 @@ export function SecretsSettings() {
             isValid={isValid}
             isBusy={isBusy}
             submitLabel="Save changes"
-            hideEnvKey
           />
         )}
 

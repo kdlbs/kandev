@@ -270,7 +270,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	// Create orchestrator service
 	cfg := orchestrator.DefaultServiceConfig()
 	cfg.Scheduler.ProcessInterval = 50 * time.Millisecond // Faster for tests
-	orchestratorSvc := orchestrator.NewService(cfg, eventBus, agentManager, taskRepoAdapter, taskRepo, nil, log)
+	orchestratorSvc := orchestrator.NewService(cfg, eventBus, agentManager, taskRepoAdapter, taskRepo, nil, nil, log)
 
 	// Wire message creator for message persistence (similar to cmd/kandev/orchestrator.go)
 	msgCreator := &testMessageCreatorAdapter{svc: taskSvc}

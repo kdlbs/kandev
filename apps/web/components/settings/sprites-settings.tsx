@@ -30,8 +30,8 @@ import {
 } from "@/lib/api/domains/sprites-api";
 import type { SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 
-function ConnectionCard() {
-  const { status } = useSprites();
+export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
+  const { status } = useSprites(secretId);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<SpritesTestResult | null>(null);
 
@@ -39,7 +39,7 @@ function ConnectionCard() {
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testSpritesConnection();
+      const result = await testSpritesConnection(secretId);
       setTestResult(result);
     } catch {
       setTestResult({
@@ -52,7 +52,7 @@ function ConnectionCard() {
     } finally {
       setTesting(false);
     }
-  }, []);
+  }, [secretId]);
 
   return (
     <Card>
@@ -74,18 +74,15 @@ function ConnectionCard() {
         <div className="text-sm text-muted-foreground">
           {status?.token_configured ? (
             <p>
-              API token is configured via the <code className="text-xs">SPRITES_API_TOKEN</code> secret.
+              API token is configured.
               {status.connected
                 ? ` ${status.instance_count} active sprite${status.instance_count !== 1 ? "s" : ""}.`
                 : " Unable to connect."}
             </p>
           ) : (
             <p>
-              Add a secret with env key <code className="text-xs">SPRITES_API_TOKEN</code> in{" "}
-              <a href="/settings/general/secrets" className="text-primary underline cursor-pointer">
-                Secrets
-              </a>{" "}
-              to enable Sprites.dev integration.
+              Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable
+              in the executor profile, referencing a secret with your Sprites.dev API token.
             </p>
           )}
         </div>
@@ -160,8 +157,8 @@ function StepRow({ step }: { step: SpritesTestStep }) {
   );
 }
 
-function InstancesCard() {
-  const { instances, loading } = useSprites();
+export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
+  const { instances, loading } = useSprites(secretId);
   const removeSpritesInstance = useAppStore((state) => state.removeSpritesInstance);
   const [destroying, setDestroying] = useState<string | null>(null);
   const [destroyingAll, setDestroyingAll] = useState(false);
@@ -170,26 +167,26 @@ function InstancesCard() {
     async (name: string) => {
       setDestroying(name);
       try {
-        await destroySprite(name);
+        await destroySprite(name, secretId);
         removeSpritesInstance(name);
       } finally {
         setDestroying(null);
       }
     },
-    [removeSpritesInstance],
+    [secretId, removeSpritesInstance],
   );
 
   const handleDestroyAll = useCallback(async () => {
     setDestroyingAll(true);
     try {
-      await destroyAllSprites();
+      await destroyAllSprites(secretId);
       for (const inst of instances) {
         removeSpritesInstance(inst.name);
       }
     } finally {
       setDestroyingAll(false);
     }
-  }, [instances, removeSpritesInstance]);
+  }, [secretId, instances, removeSpritesInstance]);
 
   return (
     <Card>
@@ -303,8 +300,8 @@ export function SpritesSettings() {
       </div>
       <Separator />
       <div className="space-y-6">
-        <ConnectionCard />
-        <InstancesCard />
+        <SpritesConnectionCard />
+        <SpritesInstancesCard />
       </div>
     </div>
   );

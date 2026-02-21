@@ -73,14 +73,15 @@ type ExecutorDTO struct {
 }
 
 type ExecutorProfileDTO struct {
-	ID          string            `json:"id"`
-	ExecutorID  string            `json:"executor_id"`
-	Name        string            `json:"name"`
-	IsDefault   bool              `json:"is_default"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript string            `json:"setup_script"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID          string                 `json:"id"`
+	ExecutorID  string                 `json:"executor_id"`
+	Name        string                 `json:"name"`
+	IsDefault   bool                   `json:"is_default"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript string                 `json:"setup_script"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type ListExecutorProfilesResponse struct {
@@ -362,6 +363,7 @@ func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
 		IsDefault:   profile.IsDefault,
 		Config:      profile.Config,
 		SetupScript: profile.SetupScript,
+		EnvVars:     profile.EnvVars,
 		CreatedAt:   profile.CreatedAt,
 		UpdatedAt:   profile.UpdatedAt,
 	}

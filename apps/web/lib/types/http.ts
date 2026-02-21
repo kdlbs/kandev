@@ -476,6 +476,12 @@ export type Executor = {
   updated_at: string;
 };
 
+export type ProfileEnvVar = {
+  key: string;
+  value?: string;
+  secret_id?: string;
+};
+
 export type ExecutorProfile = {
   id: string;
   executor_id: string;
@@ -483,6 +489,7 @@ export type ExecutorProfile = {
   is_default: boolean;
   config?: Record<string, string>;
   setup_script: string;
+  env_vars?: ProfileEnvVar[];
   created_at: string;
   updated_at: string;
 };

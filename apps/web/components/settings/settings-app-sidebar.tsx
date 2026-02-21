@@ -12,7 +12,6 @@ import {
   IconCode,
   IconCpu,
   IconKey,
-  IconSparkles,
   IconMessageCircle,
 } from "@tabler/icons-react";
 import {
@@ -72,30 +71,6 @@ function GeneralSidebarSection({ pathname }: GeneralSidebarSectionProps) {
             <Link href="/settings/general/editors">
               <IconCode className="h-4 w-4" />
               <span>Editors</span>
-            </Link>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-        <SidebarMenuSubItem>
-          <SidebarMenuSubButton
-            asChild
-            size="sm"
-            isActive={pathname === "/settings/general/secrets"}
-          >
-            <Link href="/settings/general/secrets">
-              <IconKey className="h-4 w-4" />
-              <span>Secrets</span>
-            </Link>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-        <SidebarMenuSubItem>
-          <SidebarMenuSubButton
-            asChild
-            size="sm"
-            isActive={pathname === "/settings/general/sprites"}
-          >
-            <Link href="/settings/general/sprites">
-              <IconSparkles className="h-4 w-4" />
-              <span>Sprites.dev</span>
             </Link>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
@@ -206,71 +181,108 @@ function AgentsSidebarSection({ pathname, agents }: AgentsSidebarSectionProps) {
   );
 }
 
-type ResourceSidebarSectionProps = {
+type ExecutorsSidebarSectionProps = {
   pathname: string;
   executors: Executor[];
-  environments: Environment[];
 };
 
-function ResourceSidebarSection({
-  pathname,
-  executors,
-  environments,
-}: ResourceSidebarSectionProps) {
+function ExecutorsSidebarSection({ pathname, executors }: ExecutorsSidebarSectionProps) {
   return (
-    <>
-      {/* Executors */}
-      <SidebarMenuItem>
-        <SidebarMenuButton asChild tooltip="Executors">
-          <Link href="/settings/executors">
-            <IconCpu className="h-4 w-4" />
-            <span>Executors</span>
-          </Link>
-        </SidebarMenuButton>
-        {executors.length > 0 && (
-          <SidebarMenuSub className="ml-3 mt-1">
-            {executors.map((executor: Executor) => (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="Executors">
+        <Link href="/settings/executors">
+          <IconCpu className="h-4 w-4" />
+          <span>Executors</span>
+        </Link>
+      </SidebarMenuButton>
+      {executors.length > 0 && (
+        <SidebarMenuSub className="ml-3 mt-1">
+          {executors.map((executor: Executor) => {
+            const executorPath = `/settings/executor/${executor.id}`;
+            const hasProfiles = executor.profiles && executor.profiles.length > 0;
+            return (
               <SidebarMenuSubItem key={executor.id}>
                 <SidebarMenuSubButton
                   asChild
-                  isActive={pathname === `/settings/executor/${executor.id}`}
+                  isActive={pathname === executorPath}
                 >
-                  <Link href={`/settings/executor/${executor.id}`}>
+                  <Link href={executorPath}>
                     <span>{executor.name}</span>
                   </Link>
                 </SidebarMenuSubButton>
+                {hasProfiles && (
+                  <SidebarMenuSub className="ml-3">
+                    {executor.profiles!.map((profile) => {
+                      const profilePath = `/settings/executor/${executor.id}/profile/${profile.id}`;
+                      return (
+                        <SidebarMenuSubItem key={profile.id}>
+                          <SidebarMenuSubButton
+                            asChild
+                            size="sm"
+                            isActive={pathname === profilePath}
+                          >
+                            <Link href={profilePath}>
+                              <span>{profile.name}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                )}
               </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        )}
-      </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
 
-      {/* Environments */}
-      <SidebarMenuItem>
-        <SidebarMenuButton asChild tooltip="Environments">
-          <Link href="/settings/environments">
-            <IconServer className="h-4 w-4" />
-            <span>Environments</span>
-          </Link>
-        </SidebarMenuButton>
-        {environments.length > 0 && (
-          <SidebarMenuSub className="ml-3 mt-1">
-            {environments.map((env: Environment) => (
-              <SidebarMenuSubItem key={env.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === `/settings/environment/${env.id}`}
-                >
-                  <Link href={`/settings/environment/${env.id}`}>
-                    <span>{env.name}</span>
-                  </Link>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        )}
-      </SidebarMenuItem>
-    </>
+type EnvironmentsSidebarSectionProps = {
+  pathname: string;
+  environments: Environment[];
+};
+
+function EnvironmentsSidebarSection({ pathname, environments }: EnvironmentsSidebarSectionProps) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="Environments">
+        <Link href="/settings/environments">
+          <IconServer className="h-4 w-4" />
+          <span>Environments</span>
+        </Link>
+      </SidebarMenuButton>
+      {environments.length > 0 && (
+        <SidebarMenuSub className="ml-3 mt-1">
+          {environments.map((env: Environment) => (
+            <SidebarMenuSubItem key={env.id}>
+              <SidebarMenuSubButton
+                asChild
+                isActive={pathname === `/settings/environment/${env.id}`}
+              >
+                <Link href={`/settings/environment/${env.id}`}>
+                  <span>{env.name}</span>
+                </Link>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+function SecretsSidebarSection({ pathname }: { pathname: string }) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={pathname === "/settings/general/secrets"}>
+        <Link href="/settings/general/secrets">
+          <IconKey className="h-4 w-4" />
+          <span>Secrets</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 
@@ -328,11 +340,9 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
-                <ResourceSidebarSection
-                  pathname={pathname}
-                  executors={executors}
-                  environments={environments}
-                />
+                <ExecutorsSidebarSection pathname={pathname} executors={executors} />
+                <EnvironmentsSidebarSection pathname={pathname} environments={environments} />
+                <SecretsSidebarSection pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

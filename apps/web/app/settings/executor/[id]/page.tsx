@@ -21,6 +21,7 @@ import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/execut
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
+import { SpritesConnectionCard, SpritesInstancesCard } from "@/components/settings/sprites-settings";
 import type { Executor } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
@@ -60,6 +61,7 @@ function getExecutorDescription(type: string): string {
   if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
   if (type === "local_docker") return "Runs Docker containers on this machine.";
   if (type === "remote_docker") return "Connects to a remote Docker host.";
+  if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
   return "Custom executor.";
 }
 
@@ -456,6 +458,12 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
 
   const isSystem = draft.is_system ?? false;
   const isDockerType = draft.type === "local_docker" || draft.type === "remote_docker";
+  const isSprites = draft.type === "sprites";
+  const spritesSecretId = useMemo(() => {
+    const defaultProfile = draft.profiles?.find((p) => p.is_default) ?? draft.profiles?.[0];
+    const tokenVar = defaultProfile?.env_vars?.find((ev) => ev.key === "SPRITES_API_TOKEN");
+    return tokenVar?.secret_id;
+  }, [draft.profiles]);
   const mcpPolicyError = useMemo(
     () => validateMcpPolicy(draft.config?.mcp_policy),
     [draft.config?.mcp_policy],
@@ -499,6 +507,12 @@ function ExecutorEditForm({ executor }: ExecutorEditFormProps) {
         onNameChange={(value) => setDraft({ ...draft, name: value })}
       />
       <ExecutorProfilesCard executorId={executor.id} profiles={draft.profiles ?? []} />
+      {isSprites && (
+        <>
+          <SpritesConnectionCard secretId={spritesSecretId} />
+          <SpritesInstancesCard secretId={spritesSecretId} />
+        </>
+      )}
       {isDockerType && <DockerConfigCard draft={draft} onDraftChange={setDraft} />}
       <McpPolicyCard
         mcpPolicy={draft.config?.mcp_policy ?? ""}

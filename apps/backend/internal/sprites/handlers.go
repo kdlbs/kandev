@@ -100,12 +100,14 @@ type SpritesTestStep struct {
 // --- HTTP handlers ---
 
 func (h *Handler) httpStatus(c *gin.Context) {
-	status := h.getStatus(c.Request.Context())
+	secretID := c.Query("secret_id")
+	status := h.getStatus(c.Request.Context(), secretID)
 	c.JSON(http.StatusOK, status)
 }
 
 func (h *Handler) httpListInstances(c *gin.Context) {
-	instances, err := h.listInstances(c.Request.Context())
+	secretID := c.Query("secret_id")
+	instances, err := h.listInstances(c.Request.Context(), secretID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -114,8 +116,9 @@ func (h *Handler) httpListInstances(c *gin.Context) {
 }
 
 func (h *Handler) httpDestroyInstance(c *gin.Context) {
+	secretID := c.Query("secret_id")
 	name := c.Param("name")
-	if err := h.destroyInstance(c.Request.Context(), name); err != nil {
+	if err := h.destroyInstance(c.Request.Context(), secretID, name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -123,7 +126,8 @@ func (h *Handler) httpDestroyInstance(c *gin.Context) {
 }
 
 func (h *Handler) httpDestroyAll(c *gin.Context) {
-	count, err := h.destroyAll(c.Request.Context())
+	secretID := c.Query("secret_id")
+	count, err := h.destroyAll(c.Request.Context(), secretID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -132,18 +136,27 @@ func (h *Handler) httpDestroyAll(c *gin.Context) {
 }
 
 func (h *Handler) httpTest(c *gin.Context) {
-	result := h.testConnection(c.Request.Context())
+	secretID := c.Query("secret_id")
+	result := h.testConnection(c.Request.Context(), secretID)
 	c.JSON(http.StatusOK, result)
 }
 
 // --- WS handlers ---
 
 func (h *Handler) wsStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return ws.NewResponse(msg.ID, msg.Action, h.getStatus(ctx))
+	var payload struct {
+		SecretID string `json:"secret_id"`
+	}
+	_ = msg.ParsePayload(&payload)
+	return ws.NewResponse(msg.ID, msg.Action, h.getStatus(ctx, payload.SecretID))
 }
 
 func (h *Handler) wsListInstances(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	instances, err := h.listInstances(ctx)
+	var payload struct {
+		SecretID string `json:"secret_id"`
+	}
+	_ = msg.ParsePayload(&payload)
+	instances, err := h.listInstances(ctx, payload.SecretID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -152,32 +165,40 @@ func (h *Handler) wsListInstances(ctx context.Context, msg *ws.Message) (*ws.Mes
 
 func (h *Handler) wsDestroyInstance(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var payload struct {
-		Name string `json:"name"`
+		SecretID string `json:"secret_id"`
+		Name     string `json:"name"`
 	}
 	if err := msg.ParsePayload(&payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
 	}
-	if err := h.destroyInstance(ctx, payload.Name); err != nil {
+	if err := h.destroyInstance(ctx, payload.SecretID, payload.Name); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})
 }
 
 func (h *Handler) wsTest(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return ws.NewResponse(msg.ID, msg.Action, h.testConnection(ctx))
+	var payload struct {
+		SecretID string `json:"secret_id"`
+	}
+	_ = msg.ParsePayload(&payload)
+	return ws.NewResponse(msg.ID, msg.Action, h.testConnection(ctx, payload.SecretID))
 }
 
 // --- Business logic ---
 
-func (h *Handler) getToken(ctx context.Context) (string, error) {
+func (h *Handler) getToken(ctx context.Context, secretID string) (string, error) {
 	if h.secretStore == nil {
 		return "", fmt.Errorf("secret store not available")
 	}
-	return h.secretStore.RevealByEnvKey(ctx, "SPRITES_API_TOKEN")
+	if secretID == "" {
+		return "", fmt.Errorf("secret_id is required")
+	}
+	return h.secretStore.Reveal(ctx, secretID)
 }
 
-func (h *Handler) getStatus(ctx context.Context) *SpritesStatus {
-	token, err := h.getToken(ctx)
+func (h *Handler) getStatus(ctx context.Context, secretID string) *SpritesStatus {
+	token, err := h.getToken(ctx, secretID)
 	if err != nil {
 		return &SpritesStatus{TokenConfigured: false}
 	}
@@ -185,7 +206,7 @@ func (h *Handler) getStatus(ctx context.Context) *SpritesStatus {
 		return &SpritesStatus{TokenConfigured: false}
 	}
 
-	instances, err := h.listInstances(ctx)
+	instances, err := h.listInstances(ctx, secretID)
 	if err != nil {
 		return &SpritesStatus{
 			TokenConfigured: true,
@@ -201,8 +222,8 @@ func (h *Handler) getStatus(ctx context.Context) *SpritesStatus {
 	}
 }
 
-func (h *Handler) listInstances(ctx context.Context) ([]*SpritesInstance, error) {
-	token, err := h.getToken(ctx)
+func (h *Handler) listInstances(ctx context.Context, secretID string) ([]*SpritesInstance, error) {
+	token, err := h.getToken(ctx, secretID)
 	if err != nil {
 		return nil, fmt.Errorf("API token not configured: %w", err)
 	}
@@ -251,8 +272,8 @@ func (h *Handler) listInstances(ctx context.Context) ([]*SpritesInstance, error)
 	return result, nil
 }
 
-func (h *Handler) destroyInstance(ctx context.Context, name string) error {
-	token, err := h.getToken(ctx)
+func (h *Handler) destroyInstance(ctx context.Context, secretID, name string) error {
+	token, err := h.getToken(ctx, secretID)
 	if err != nil {
 		return fmt.Errorf("API token not configured: %w", err)
 	}
@@ -266,13 +287,13 @@ func (h *Handler) destroyInstance(ctx context.Context, name string) error {
 	return nil
 }
 
-func (h *Handler) destroyAll(ctx context.Context) (int, error) {
-	instances, err := h.listInstances(ctx)
+func (h *Handler) destroyAll(ctx context.Context, secretID string) (int, error) {
+	instances, err := h.listInstances(ctx, secretID)
 	if err != nil {
 		return 0, err
 	}
 
-	token, err := h.getToken(ctx)
+	token, err := h.getToken(ctx, secretID)
 	if err != nil {
 		return 0, err
 	}
@@ -291,14 +312,14 @@ func (h *Handler) destroyAll(ctx context.Context) (int, error) {
 	return destroyed, nil
 }
 
-func (h *Handler) testConnection(ctx context.Context) *SpritesTestResult {
+func (h *Handler) testConnection(ctx context.Context, secretID string) *SpritesTestResult {
 	start := time.Now()
 	spriteName := fmt.Sprintf("kandev-test-%d", time.Now().UnixMilli())
 	result := &SpritesTestResult{SpriteName: spriteName}
 
 	// Step 1: Get token
 	tokenStep := h.runTestStep("Get API token", func() error {
-		_, err := h.getToken(ctx)
+		_, err := h.getToken(ctx, secretID)
 		return err
 	})
 	result.Steps = append(result.Steps, tokenStep)
@@ -308,7 +329,7 @@ func (h *Handler) testConnection(ctx context.Context) *SpritesTestResult {
 		return result
 	}
 
-	token, _ := h.getToken(ctx)
+	token, _ := h.getToken(ctx, secretID)
 	client := sprites.New(token)
 	sprite := client.Sprite(spriteName)
 

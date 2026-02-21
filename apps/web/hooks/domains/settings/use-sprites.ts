@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { getSpritesStatus, listSpritesInstances } from "@/lib/api/domains/sprites-api";
 import { useAppStore } from "@/components/state-provider";
 
-export function useSprites() {
+export function useSprites(secretId?: string) {
   const status = useAppStore((state) => state.sprites.status);
   const instances = useAppStore((state) => state.sprites.instances);
   const loaded = useAppStore((state) => state.sprites.loaded);
@@ -18,8 +18,8 @@ export function useSprites() {
     setSpritesLoading(true);
 
     Promise.all([
-      getSpritesStatus({ cache: "no-store" }),
-      listSpritesInstances({ cache: "no-store" }),
+      getSpritesStatus(secretId, { cache: "no-store" }),
+      listSpritesInstances(secretId, { cache: "no-store" }),
     ])
       .then(([statusRes, instancesRes]) => {
         setSpritesStatus(statusRes);
@@ -32,7 +32,7 @@ export function useSprites() {
       .finally(() => {
         setSpritesLoading(false);
       });
-  }, [loaded, loading, setSpritesStatus, setSpritesInstances, setSpritesLoading]);
+  }, [loaded, loading, secretId, setSpritesStatus, setSpritesInstances, setSpritesLoading]);
 
   return { status, instances, loaded, loading };
 }

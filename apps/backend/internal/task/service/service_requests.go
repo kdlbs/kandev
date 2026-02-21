@@ -131,19 +131,21 @@ type UpdateExecutorRequest struct {
 
 // CreateExecutorProfileRequest contains the data for creating an executor profile
 type CreateExecutorProfileRequest struct {
-	ExecutorID  string            `json:"executor_id"`
-	Name        string            `json:"name"`
-	IsDefault   bool              `json:"is_default"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript string            `json:"setup_script"`
+	ExecutorID  string                 `json:"executor_id"`
+	Name        string                 `json:"name"`
+	IsDefault   bool                   `json:"is_default"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript string                 `json:"setup_script"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
-	Name        *string           `json:"name,omitempty"`
-	IsDefault   *bool             `json:"is_default,omitempty"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript *string           `json:"setup_script,omitempty"`
+	Name        *string                `json:"name,omitempty"`
+	IsDefault   *bool                  `json:"is_default,omitempty"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript *string                `json:"setup_script,omitempty"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment

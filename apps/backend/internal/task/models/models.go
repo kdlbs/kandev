@@ -380,6 +380,14 @@ type ExecutorRunning struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
+// ProfileEnvVar represents an environment variable for an executor profile.
+// Either Value (plain text) or SecretID (reference to a secret) should be set, not both.
+type ProfileEnvVar struct {
+	Key      string `json:"key"`
+	Value    string `json:"value,omitempty"`
+	SecretID string `json:"secret_id,omitempty"`
+}
+
 // ExecutorProfile represents a named configuration preset for an executor.
 type ExecutorProfile struct {
 	ID          string            `json:"id"`
@@ -388,6 +396,7 @@ type ExecutorProfile struct {
 	IsDefault   bool              `json:"is_default"`
 	Config      map[string]string `json:"config,omitempty"`
 	SetupScript string            `json:"setup_script,omitempty"`
+	EnvVars     []ProfileEnvVar   `json:"env_vars,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }

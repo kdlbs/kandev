@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -64,10 +65,11 @@ func (h *ExecutorProfileHandlers) httpListProfiles(c *gin.Context) {
 }
 
 type httpCreateProfileRequest struct {
-	Name        string            `json:"name"`
-	IsDefault   bool              `json:"is_default"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript string            `json:"setup_script"`
+	Name        string                 `json:"name"`
+	IsDefault   bool                   `json:"is_default"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript string                 `json:"setup_script"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
@@ -86,6 +88,7 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		IsDefault:   body.IsDefault,
 		Config:      body.Config,
 		SetupScript: body.SetupScript,
+		EnvVars:     body.EnvVars,
 	})
 	if err != nil {
 		h.logger.Error("failed to create executor profile", zap.Error(err))
@@ -105,10 +108,11 @@ func (h *ExecutorProfileHandlers) httpGetProfile(c *gin.Context) {
 }
 
 type httpUpdateProfileRequest struct {
-	Name        *string           `json:"name,omitempty"`
-	IsDefault   *bool             `json:"is_default,omitempty"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript *string           `json:"setup_script,omitempty"`
+	Name        *string                `json:"name,omitempty"`
+	IsDefault   *bool                  `json:"is_default,omitempty"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript *string                `json:"setup_script,omitempty"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
@@ -122,6 +126,7 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		IsDefault:   body.IsDefault,
 		Config:      body.Config,
 		SetupScript: body.SetupScript,
+		EnvVars:     body.EnvVars,
 	})
 	if err != nil {
 		h.logger.Error("failed to update executor profile", zap.Error(err))
@@ -170,11 +175,12 @@ func (h *ExecutorProfileHandlers) wsListProfiles(ctx context.Context, msg *ws.Me
 }
 
 type wsCreateProfileRequest struct {
-	ExecutorID  string            `json:"executor_id"`
-	Name        string            `json:"name"`
-	IsDefault   bool              `json:"is_default"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript string            `json:"setup_script"`
+	ExecutorID  string                 `json:"executor_id"`
+	Name        string                 `json:"name"`
+	IsDefault   bool                   `json:"is_default"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript string                 `json:"setup_script"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -191,6 +197,7 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		IsDefault:   req.IsDefault,
 		Config:      req.Config,
 		SetupScript: req.SetupScript,
+		EnvVars:     req.EnvVars,
 	})
 	if err != nil {
 		h.logger.Error("failed to create executor profile", zap.Error(err))
@@ -219,11 +226,12 @@ func (h *ExecutorProfileHandlers) wsGetProfile(ctx context.Context, msg *ws.Mess
 }
 
 type wsUpdateProfileRequest struct {
-	ID          string            `json:"id"`
-	Name        *string           `json:"name,omitempty"`
-	IsDefault   *bool             `json:"is_default,omitempty"`
-	Config      map[string]string `json:"config,omitempty"`
-	SetupScript *string           `json:"setup_script,omitempty"`
+	ID          string                 `json:"id"`
+	Name        *string                `json:"name,omitempty"`
+	IsDefault   *bool                  `json:"is_default,omitempty"`
+	Config      map[string]string      `json:"config,omitempty"`
+	SetupScript *string                `json:"setup_script,omitempty"`
+	EnvVars     []models.ProfileEnvVar `json:"env_vars,omitempty"`
 }
 
 func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -239,6 +247,7 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		IsDefault:   req.IsDefault,
 		Config:      req.Config,
 		SetupScript: req.SetupScript,
+		EnvVars:     req.EnvVars,
 	})
 	if err != nil {
 		h.logger.Error("failed to update executor profile", zap.Error(err))

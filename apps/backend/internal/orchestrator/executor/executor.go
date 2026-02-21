@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -98,6 +99,9 @@ type LaunchAgentRequest struct {
 	ExecutorType    string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig  map[string]string // Executor config (docker_host, git_token, etc.)
 
+	// Setup script from executor profile (runs in execution environment before agent starts)
+	SetupScript string
+
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
 	RepositoryID         string // Repository ID for worktree tracking
@@ -164,6 +168,7 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 type Executor struct {
 	agentManager AgentManagerClient
 	repo         repository.Repository
+	secretStore  secrets.SecretStore
 	shellPrefs   ShellPreferenceProvider
 	logger       *logger.Logger
 
@@ -183,7 +188,8 @@ type Executor struct {
 
 // ExecutorConfig holds configuration for the Executor
 type ExecutorConfig struct {
-	ShellPrefs ShellPreferenceProvider
+	ShellPrefs  ShellPreferenceProvider
+	SecretStore secrets.SecretStore
 }
 
 type ShellPreferenceProvider interface {
@@ -195,6 +201,7 @@ func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, lo
 	return &Executor{
 		agentManager: agentManager,
 		repo:         repo,
+		secretStore:  cfg.SecretStore,
 		shellPrefs:   cfg.ShellPrefs,
 		logger:       log.WithFields(zap.String("component", "executor")),
 		retryLimit:   3,

@@ -9,6 +9,7 @@ import type {
   ListExecutorsResponse,
   ListExecutorProfilesResponse,
   ExecutorProfile,
+  ProfileEnvVar,
   NotificationProvidersResponse,
   NotificationProvider,
   EditorsResponse,
@@ -72,6 +73,7 @@ export async function createExecutorProfile(
     is_default?: boolean;
     config?: Record<string, string>;
     setup_script?: string;
+    env_vars?: ProfileEnvVar[];
   },
   options?: ApiRequestOptions,
 ): Promise<ExecutorProfile> {
@@ -89,6 +91,7 @@ export async function updateExecutorProfile(
     is_default?: boolean;
     config?: Record<string, string>;
     setup_script?: string;
+    env_vars?: ProfileEnvVar[];
   },
   options?: ApiRequestOptions,
 ): Promise<ExecutorProfile> {

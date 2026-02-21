@@ -46,6 +46,7 @@ type SpritesExecutor struct {
 	agentctlPort     int
 	mu               sync.RWMutex
 	proxies          map[string]*SpritesProxySession
+	tokens           map[string]string // cached API tokens per instance
 }
 
 // NewSpritesExecutor creates a new Sprites runtime.
@@ -61,6 +62,7 @@ func NewSpritesExecutor(
 		logger:           log.WithFields(zap.String("runtime", "sprites")),
 		agentctlPort:     agentctlPort,
 		proxies:          make(map[string]*SpritesProxySession),
+		tokens:           make(map[string]string),
 	}
 }
 
@@ -68,19 +70,20 @@ func (r *SpritesExecutor) Name() executor.Name {
 	return executor.NameSprites
 }
 
-func (r *SpritesExecutor) HealthCheck(ctx context.Context) error {
-	_, err := r.getAPIToken(ctx)
-	if err != nil {
-		return fmt.Errorf("sprites API token not configured: %w", err)
-	}
+func (r *SpritesExecutor) HealthCheck(_ context.Context) error {
 	return nil
 }
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
-	token, err := r.getAPIToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("sprites API token: %w", err)
+	token := req.Env["SPRITES_API_TOKEN"]
+	if token == "" {
+		return nil, fmt.Errorf("SPRITES_API_TOKEN not set in execution environment (configure it in the executor profile)")
 	}
+
+	// Cache the token for later use (e.g., StopInstance)
+	r.mu.Lock()
+	r.tokens[req.InstanceID] = token
+	r.mu.Unlock()
 
 	spriteName := spritesNamePrefix + req.InstanceID[:12]
 	client := sprites.New(token)
@@ -166,10 +169,13 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	}
 	r.mu.Unlock()
 
-	// Destroy the sprite
-	token, err := r.getAPIToken(ctx)
-	if err != nil {
-		return fmt.Errorf("cannot get token to destroy sprite: %w", err)
+	// Get cached token for this instance
+	r.mu.RLock()
+	token := r.tokens[instance.InstanceID]
+	r.mu.RUnlock()
+	if token == "" {
+		r.logger.Warn("no cached API token for sprite instance, cannot destroy", zap.String("instance_id", instance.InstanceID))
+		return nil
 	}
 	client := sprites.New(token)
 	sprite := client.Sprite(spriteName)
@@ -179,6 +185,11 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 			zap.Error(err))
 		return fmt.Errorf("failed to destroy sprite: %w", err)
 	}
+
+	// Clean up cached token
+	r.mu.Lock()
+	delete(r.tokens, instance.InstanceID)
+	r.mu.Unlock()
 
 	r.logger.Info("sprite destroyed", zap.String("sprite_name", spriteName))
 	return nil
@@ -194,13 +205,6 @@ func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 }
 
 // --- helper methods ---
-
-func (r *SpritesExecutor) getAPIToken(ctx context.Context) (string, error) {
-	if r.secretStore == nil {
-		return "", fmt.Errorf("secret store not available")
-	}
-	return r.secretStore.RevealByEnvKey(ctx, "SPRITES_API_TOKEN")
-}
 
 func (r *SpritesExecutor) initializeSprite(ctx context.Context, sprite *sprites.Sprite, name string) error {
 	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)

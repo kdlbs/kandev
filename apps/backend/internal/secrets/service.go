@@ -3,7 +3,6 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -23,23 +22,14 @@ func NewService(store SecretStore, log *logger.Logger) *Service {
 	}
 }
 
-var envKeyRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-
 func (s *Service) validateCreate(req *CreateSecretRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
-	req.EnvKey = strings.TrimSpace(req.EnvKey)
 
 	if req.Name == "" || len(req.Name) > 100 {
 		return fmt.Errorf("name must be 1-100 characters")
 	}
-	if !envKeyRegex.MatchString(req.EnvKey) {
-		return fmt.Errorf("env_key must be uppercase letters, digits, and underscores (e.g., MY_API_KEY)")
-	}
 	if req.Value == "" || len(req.Value) > 10000 {
 		return fmt.Errorf("value must be 1-10000 characters")
-	}
-	if req.Category != "" && !ValidCategories[req.Category] {
-		return fmt.Errorf("invalid category: %s", req.Category)
 	}
 	return nil
 }
@@ -55,9 +45,6 @@ func (s *Service) validateUpdate(req *UpdateSecretRequest) error {
 	if req.Value != nil && (len(*req.Value) == 0 || len(*req.Value) > 10000) {
 		return fmt.Errorf("value must be 1-10000 characters")
 	}
-	if req.Category != nil && !ValidCategories[*req.Category] {
-		return fmt.Errorf("invalid category: %s", *req.Category)
-	}
 	return nil
 }
 
@@ -67,17 +54,9 @@ func (s *Service) Create(ctx context.Context, req *CreateSecretRequest) (*Secret
 		return nil, fmt.Errorf("validation: %w", err)
 	}
 
-	category := req.Category
-	if category == "" {
-		category = CategoryCustom
-	}
-
 	secret := &SecretWithValue{
 		Secret: Secret{
-			Name:     req.Name,
-			EnvKey:   req.EnvKey,
-			Category: category,
-			Metadata: req.Metadata,
+			Name: req.Name,
 		},
 		Value: req.Value,
 	}
@@ -89,9 +68,6 @@ func (s *Service) Create(ctx context.Context, req *CreateSecretRequest) (*Secret
 	return &SecretListItem{
 		ID:        secret.ID,
 		Name:      secret.Name,
-		EnvKey:    secret.EnvKey,
-		Category:  secret.Category,
-		Metadata:  secret.Metadata,
 		HasValue:  true,
 		CreatedAt: secret.CreatedAt,
 		UpdatedAt: secret.UpdatedAt,
@@ -126,9 +102,6 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateSecretReques
 	return &SecretListItem{
 		ID:        secret.ID,
 		Name:      secret.Name,
-		EnvKey:    secret.EnvKey,
-		Category:  secret.Category,
-		Metadata:  secret.Metadata,
 		HasValue:  true,
 		CreatedAt: secret.CreatedAt,
 		UpdatedAt: secret.UpdatedAt,
@@ -143,9 +116,4 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // List returns all secrets without values.
 func (s *Service) List(ctx context.Context) ([]*SecretListItem, error) {
 	return s.store.List(ctx)
-}
-
-// ListByCategory returns secrets filtered by category.
-func (s *Service) ListByCategory(ctx context.Context, category SecretCategory) ([]*SecretListItem, error) {
-	return s.store.ListByCategory(ctx, category)
 }

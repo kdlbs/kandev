@@ -354,6 +354,16 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
+		req.SetupScript = execConfig.SetupScript
+		// Merge profile env vars into request env
+		if len(execConfig.ProfileEnv) > 0 {
+			if req.Env == nil {
+				req.Env = make(map[string]string)
+			}
+			for k, v := range execConfig.ProfileEnv {
+				req.Env[k] = v
+			}
+		}
 	}
 
 	if repoInfo.RepositoryPath != "" {

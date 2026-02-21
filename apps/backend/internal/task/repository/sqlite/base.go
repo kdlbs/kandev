@@ -160,6 +160,7 @@ func (r *Repository) initInfraSchema() error {
 		is_default INTEGER NOT NULL DEFAULT 0,
 		config TEXT DEFAULT '{}',
 		setup_script TEXT DEFAULT '',
+		env_vars TEXT DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (executor_id) REFERENCES executors(id)

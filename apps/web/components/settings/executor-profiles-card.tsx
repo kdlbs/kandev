@@ -5,8 +5,9 @@ import { IconTrash, IconPlus, IconPencil, IconStar } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
-import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
+import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/settings-api";
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
+import { useAppStore } from "@/components/state-provider";
 import type { ExecutorProfile } from "@/lib/types/http";
 
 type ExecutorProfilesCardProps = {
@@ -17,6 +18,21 @@ type ExecutorProfilesCardProps = {
 export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesCardProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<ExecutorProfile | null>(null);
+  const executors = useAppStore((state) => state.executors.items);
+  const setExecutors = useAppStore((state) => state.setExecutors);
+
+  const refreshProfiles = useCallback(async () => {
+    try {
+      const resp = await listExecutorProfiles(executorId, { cache: "no-store" });
+      setExecutors(
+        executors.map((e) =>
+          e.id === executorId ? { ...e, profiles: resp.profiles } : e,
+        ),
+      );
+    } catch {
+      // ignore refresh failure
+    }
+  }, [executorId, executors, setExecutors]);
 
   const handleCreate = useCallback(() => {
     setEditingProfile(null);
@@ -30,9 +46,14 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
 
   const handleDelete = useCallback(
     async (profileId: string) => {
-      await deleteExecutorProfile(executorId, profileId);
+      try {
+        await deleteExecutorProfile(executorId, profileId);
+        await refreshProfiles();
+      } catch {
+        // ignore delete failure
+      }
     },
-    [executorId],
+    [executorId, refreshProfiles],
   );
 
   return (
@@ -106,6 +127,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
         onOpenChange={setDialogOpen}
         executorId={executorId}
         profile={editingProfile}
+        onSaved={refreshProfiles}
       />
     </>
   );

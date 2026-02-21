@@ -97,8 +97,10 @@ func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) st
 type executorConfig struct {
 	ExecutorID   string
 	ExecutorType string
-	ExecutorCfg  map[string]string // The executor record's Config map (docker_host, etc.)
+	ExecutorCfg  map[string]string      // The executor record's Config map (docker_host, etc.)
 	Metadata     map[string]interface{}
+	SetupScript  string            // Setup script from default profile
+	ProfileEnv   map[string]string // Resolved env vars from default profile (secrets decrypted)
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
@@ -133,12 +135,50 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		metadata["executor_mcp_policy"] = policyJSON
 	}
 
-	return executorConfig{
+	cfg := executorConfig{
 		ExecutorID:   resolved,
 		ExecutorType: string(executor.Type),
 		ExecutorCfg:  executor.Config,
 		Metadata:     metadata,
 	}
+
+	// Load default profile for setup script and env vars
+	profile, err := e.repo.GetDefaultExecutorProfile(ctx, resolved)
+	if err != nil {
+		e.logger.Warn("failed to load default executor profile",
+			zap.String("executor_id", resolved),
+			zap.Error(err))
+	}
+	if profile != nil {
+		cfg.SetupScript = profile.SetupScript
+		cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	}
+
+	return cfg
+}
+
+// resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.
+func (e *Executor) resolveProfileEnvVars(ctx context.Context, envVars []models.ProfileEnvVar) map[string]string {
+	if len(envVars) == 0 {
+		return nil
+	}
+	resolved := make(map[string]string, len(envVars))
+	for _, ev := range envVars {
+		if ev.SecretID != "" && e.secretStore != nil {
+			value, err := e.secretStore.Reveal(ctx, ev.SecretID)
+			if err != nil {
+				e.logger.Warn("failed to resolve secret for profile env var",
+					zap.String("key", ev.Key),
+					zap.String("secret_id", ev.SecretID),
+					zap.Error(err))
+				continue
+			}
+			resolved[ev.Key] = value
+		} else if ev.Value != "" {
+			resolved[ev.Key] = ev.Value
+		}
+	}
+	return resolved
 }
 
 func cloneMetadata(src map[string]interface{}) map[string]interface{} {

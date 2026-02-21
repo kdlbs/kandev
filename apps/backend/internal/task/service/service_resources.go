@@ -537,6 +537,7 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		IsDefault:   req.IsDefault,
 		Config:      req.Config,
 		SetupScript: req.SetupScript,
+		EnvVars:     req.EnvVars,
 	}
 	if err := s.repo.CreateExecutorProfile(ctx, profile); err != nil {
 		return nil, err
@@ -565,6 +566,9 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	}
 	if req.SetupScript != nil {
 		profile.SetupScript = *req.SetupScript
+	}
+	if req.EnvVars != nil {
+		profile.EnvVars = req.EnvVars
 	}
 	if err := s.repo.UpdateExecutorProfile(ctx, profile); err != nil {
 		return nil, err

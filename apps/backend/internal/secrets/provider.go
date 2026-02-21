@@ -24,9 +24,9 @@ func (p *SecretStoreProvider) Name() string {
 	return "secret_store"
 }
 
-// GetCredential retrieves a credential by env key from the encrypted store.
+// GetCredential retrieves a credential by secret ID from the encrypted store.
 func (p *SecretStoreProvider) GetCredential(ctx context.Context, key string) (*credentials.Credential, error) {
-	value, err := p.store.RevealByEnvKey(ctx, key)
+	value, err := p.store.Reveal(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -37,15 +37,15 @@ func (p *SecretStoreProvider) GetCredential(ctx context.Context, key string) (*c
 	}, nil
 }
 
-// ListAvailable returns all env keys that have stored secrets.
+// ListAvailable returns all secret IDs that have stored values.
 func (p *SecretStoreProvider) ListAvailable(ctx context.Context) ([]string, error) {
 	items, err := p.store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]string, len(items))
+	ids := make([]string, len(items))
 	for i, item := range items {
-		keys[i] = item.EnvKey
+		ids[i] = item.ID
 	}
-	return keys, nil
+	return ids, nil
 }

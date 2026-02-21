@@ -6,8 +6,8 @@ export default async function GeneralSpritesPage() {
   let initialState = {};
   try {
     const [status, instances] = await Promise.all([
-      getSpritesStatus({ cache: "no-store" }),
-      listSpritesInstances({ cache: "no-store" }),
+      getSpritesStatus(undefined, { cache: "no-store" }),
+      listSpritesInstances(undefined, { cache: "no-store" }),
     ]);
     initialState = {
       sprites: {

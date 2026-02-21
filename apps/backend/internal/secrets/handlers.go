@@ -66,15 +66,7 @@ func (h *Handler) httpCreateSecret(c *gin.Context) {
 }
 
 func (h *Handler) httpListSecrets(c *gin.Context) {
-	category := c.Query("category")
-	var items []*SecretListItem
-	var err error
-
-	if category != "" {
-		items, err = h.service.ListByCategory(c.Request.Context(), SecretCategory(category))
-	} else {
-		items, err = h.service.List(c.Request.Context())
-	}
+	items, err := h.service.List(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list secrets", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list secrets"})
