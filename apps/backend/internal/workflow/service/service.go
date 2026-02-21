@@ -89,6 +89,16 @@ func (s *Service) ListStepsByWorkflow(ctx context.Context, workflowID string) ([
 	return steps, nil
 }
 
+// ListStepsByWorkspaceID returns all workflow steps for all workflows in a workspace.
+func (s *Service) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
+	steps, err := s.repo.ListStepsByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		s.logger.Error("failed to list steps by workspace", zap.String("workspace_id", workspaceID), zap.Error(err))
+		return nil, err
+	}
+	return steps, nil
+}
+
 // GetStep retrieves a workflow step by ID.
 func (s *Service) GetStep(ctx context.Context, stepID string) (*models.WorkflowStep, error) {
 	step, err := s.repo.GetStep(ctx, stepID)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -119,6 +120,9 @@ func (r *Repository) ListMessages(ctx context.Context, sessionID string) ([]*mod
 
 // ListMessagesPaginated returns messages for a session ordered by creation time with pagination.
 func (r *Repository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListMessagesPaginated")
+	defer span.End()
+
 	limit := opts.Limit
 	if limit < 0 {
 		limit = 0

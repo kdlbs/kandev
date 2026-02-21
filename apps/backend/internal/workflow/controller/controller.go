@@ -70,6 +70,15 @@ func (c *Controller) ListStepsByWorkflow(ctx context.Context, req ListStepsReque
 	return &ListStepsResponse{Steps: steps}, nil
 }
 
+// ListStepsByWorkspace returns all workflow steps for all workflows in a workspace.
+func (c *Controller) ListStepsByWorkspace(ctx context.Context, workspaceID string) (*ListStepsResponse, error) {
+	steps, err := c.svc.ListStepsByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &ListStepsResponse{Steps: steps}, nil
+}
+
 func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, error) {
 	step, err := c.svc.GetStep(ctx, id)
 	if err != nil {

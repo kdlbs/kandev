@@ -3,7 +3,7 @@ import {
   listWorkflowsAction,
   listTasksByWorkspaceAction,
   listRepositoriesAction,
-  listWorkflowStepsAction,
+  listWorkspaceWorkflowStepsAction,
 } from "@/app/actions/workspaces";
 import { TasksPageClient } from "./tasks-page-client";
 import type { Workflow, Task, WorkflowStep, Repository, Workspace } from "@/lib/types/http";
@@ -33,23 +33,20 @@ export default async function TasksPage({
     }
 
     if (workspaceId) {
-      // Fetch all data in parallel
-      const [workflowsResponse, repositoriesResponse, tasksResponse] = await Promise.all([
-        listWorkflowsAction(workspaceId),
-        listRepositoriesAction(workspaceId),
-        listTasksByWorkspaceAction(workspaceId, 1, 25),
-      ]);
+      // Fetch all data in parallel (including steps via single batch endpoint)
+      const [workflowsResponse, repositoriesResponse, tasksResponse, stepsResponse] =
+        await Promise.all([
+          listWorkflowsAction(workspaceId),
+          listRepositoriesAction(workspaceId),
+          listTasksByWorkspaceAction(workspaceId, 1, 25),
+          listWorkspaceWorkflowStepsAction(workspaceId),
+        ]);
 
       workflows = workflowsResponse.workflows;
       repositories = repositoriesResponse.repositories;
       tasks = tasksResponse.tasks;
       total = tasksResponse.total;
-
-      // Fetch workflow steps for each workflow
-      const stepsResponses = await Promise.all(
-        workflows.map((workflow) => listWorkflowStepsAction(workflow.id)),
-      );
-      steps = stepsResponses.flatMap((r) => r.steps);
+      steps = stepsResponse.steps;
     }
   } catch (error) {
     console.error("Failed to load tasks page data:", error);

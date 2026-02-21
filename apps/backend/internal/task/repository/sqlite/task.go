@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -111,6 +112,8 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 
 // ListTasks returns all non-archived tasks for a workflow
 func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasks")
+	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
 		FROM tasks
@@ -164,6 +167,8 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded
 func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
+	defer span.End()
 	// Calculate offset
 	offset := (page - 1) * pageSize
 	if offset < 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -199,6 +200,8 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 		return
 	}
 
+	tasks = applyTaskLimit(c, tasks)
+
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
@@ -259,6 +262,8 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		return
 	}
 
+	tasks = applyTaskLimit(c, tasks)
+
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
@@ -270,6 +275,16 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		Steps:    steps,
 		Tasks:    taskDTOs,
 	})
+}
+
+// applyTaskLimit truncates tasks if a task_limit query param is set.
+func applyTaskLimit(c *gin.Context, tasks []*models.Task) []*models.Task {
+	if limitStr := c.Query("task_limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit < len(tasks) {
+			return tasks[:limit]
+		}
+	}
+	return tasks
 }
 
 // WS handlers

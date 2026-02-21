@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,6 +178,45 @@ func (r *Repository) DeleteRepositoryScript(ctx context.Context, id string) erro
 		return fmt.Errorf("repository script not found: %s", id)
 	}
 	return nil
+}
+
+// ListScriptsByRepositoryIDs returns all scripts for the given repository IDs,
+// grouped by repository ID. This eliminates N+1 queries when loading scripts for multiple repos.
+func (r *Repository) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error) {
+	result := make(map[string][]*models.RepositoryScript, len(repoIDs))
+	if len(repoIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(repoIDs))
+	args := make([]interface{}, len(repoIDs))
+	for i, id := range repoIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, repository_id, name, command, position, created_at, updated_at
+		FROM repository_scripts
+		WHERE repository_id IN (%s)
+		ORDER BY position
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		script := &models.RepositoryScript{}
+		err := rows.Scan(&script.ID, &script.RepositoryID, &script.Name, &script.Command, &script.Position, &script.CreatedAt, &script.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		result[script.RepositoryID] = append(result[script.RepositoryID], script)
+	}
+	return result, rows.Err()
 }
 
 // ListRepositoryScripts returns all scripts for a repository

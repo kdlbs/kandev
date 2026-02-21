@@ -220,11 +220,33 @@ function useCreateProfileFormState(executorType: string) {
     : "Runs on the host machine before the agent starts.";
 
   return {
-    name, setName, mcpPolicy, setMcpPolicy, prepareScript, setPrepareScript,
-    cleanupScript, setCleanupScript, envVarRows, addEnvVar, removeEnvVar, updateEnvVar,
-    placeholders, spritesSecretId, setSpritesSecretId, networkPolicyRules, setNetworkPolicyRules,
-    dockerfile, setDockerfile, imageTag, setImageTag,
-    isRemote, isDocker, isSprites, mcpPolicyError, buildEnvVars, prepareDesc,
+    name,
+    setName,
+    mcpPolicy,
+    setMcpPolicy,
+    prepareScript,
+    setPrepareScript,
+    cleanupScript,
+    setCleanupScript,
+    envVarRows,
+    addEnvVar,
+    removeEnvVar,
+    updateEnvVar,
+    placeholders,
+    spritesSecretId,
+    setSpritesSecretId,
+    networkPolicyRules,
+    setNetworkPolicyRules,
+    dockerfile,
+    setDockerfile,
+    imageTag,
+    setImageTag,
+    isRemote,
+    isDocker,
+    isSprites,
+    mcpPolicyError,
+    buildEnvVars,
+    prepareDesc,
   };
 }
 
@@ -301,7 +323,10 @@ function CreateProfileForm({
         />
       )}
       {form.isSprites && (
-        <NetworkPoliciesCard rules={form.networkPolicyRules} onRulesChange={form.setNetworkPolicyRules} />
+        <NetworkPoliciesCard
+          rules={form.networkPolicyRules}
+          onRulesChange={form.setNetworkPolicyRules}
+        />
       )}
       <EnvVarsCard
         rows={form.envVarRows}

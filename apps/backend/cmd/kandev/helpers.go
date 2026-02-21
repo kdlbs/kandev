@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
@@ -391,6 +392,13 @@ func runGracefulShutdown(
 
 	stopLifecycleManager(lifecycleMgr, log)
 	runCleanups()
+
+	// Flush pending OTel spans before exit
+	traceCtx, traceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := tracing.Shutdown(traceCtx); err != nil {
+		log.Error("Tracer shutdown error", zap.Error(err))
+	}
+	traceCancel()
 
 	log.Info("Kandev stopped")
 	_ = log.Sync()

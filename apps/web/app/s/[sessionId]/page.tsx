@@ -240,6 +240,7 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     turnsResponse,
     userSettingsResponse,
     terminalsResponse,
+    messagesResponse,
   ] = await Promise.all([
     fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" }),
     listAgents({ cache: "no-store" }),
@@ -251,6 +252,11 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     listSessionTurns(paramSessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     fetchTerminals(paramSessionId).catch(() => []),
+    listTaskSessionMessages(
+      paramSessionId,
+      { limit: 50, sort: "desc" },
+      { cache: "no-store" },
+    ).catch(() => null as ListMessagesResponse | null),
   ]);
 
   const repositories = repositoriesResponse.repositories ?? [];
@@ -266,20 +272,6 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     label: t.label,
     closable: t.closable,
   }));
-
-  let messagesResponse: ListMessagesResponse | null = null;
-  try {
-    messagesResponse = await listTaskSessionMessages(
-      paramSessionId,
-      { limit: 50, sort: "desc" },
-      { cache: "no-store" },
-    );
-  } catch (error) {
-    console.warn(
-      "Could not load session messages for SSR:",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 
   const initialState = buildSessionPageState({
     task,

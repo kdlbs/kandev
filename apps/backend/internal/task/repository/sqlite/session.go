@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -122,6 +123,8 @@ func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
+	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
@@ -421,6 +424,8 @@ func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) err
 
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")
+	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
@@ -438,18 +443,13 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	if err != nil {
 		return nil, err
 	}
-	for _, session := range sessions {
-		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
-		}
-		session.Worktrees = worktrees
-	}
-	return sessions, nil
+	return r.loadWorktreesBatch(ctx, sessions)
 }
 
 // ListActiveTaskSessions returns all active agent sessions across all tasks
 func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListActiveTaskSessions")
+	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
 		       repository_id, base_branch,
@@ -467,14 +467,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 	if err != nil {
 		return nil, err
 	}
-	for _, session := range sessions {
-		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
-		}
-		session.Worktrees = worktrees
-	}
-	return sessions, nil
+	return r.loadWorktreesBatch(ctx, sessions)
 }
 
 // ListActiveTaskSessionsByTaskID returns all active agent sessions for a specific task
@@ -496,12 +489,24 @@ func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID 
 	if err != nil {
 		return nil, err
 	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
+// loadWorktreesBatch loads worktrees for multiple sessions in a single query.
+func (r *Repository) loadWorktreesBatch(ctx context.Context, sessions []*models.TaskSession) ([]*models.TaskSession, error) {
+	if len(sessions) == 0 {
+		return sessions, nil
+	}
+	sessionIDs := make([]string, len(sessions))
+	for i, s := range sessions {
+		sessionIDs[i] = s.ID
+	}
+	worktreeMap, err := r.ListWorktreesBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch-load session worktrees: %w", err)
+	}
 	for _, session := range sessions {
-		worktrees, err := r.ListTaskSessionWorktrees(ctx, session.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load session worktrees: %w", err)
-		}
-		session.Worktrees = worktrees
+		session.Worktrees = worktreeMap[session.ID]
 	}
 	return sessions, nil
 }
@@ -711,6 +716,47 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 		worktrees = append(worktrees, &wt)
 	}
 	return worktrees, rows.Err()
+}
+
+// ListWorktreesBySessionIDs returns all worktrees for the given session IDs,
+// grouped by session ID. This eliminates N+1 queries when loading worktrees for multiple sessions.
+func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error) {
+	result := make(map[string][]*models.TaskSessionWorktree, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(sessionIDs))
+	args := make([]interface{}, len(sessionIDs))
+	for i, id := range sessionIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
+			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
+		FROM task_session_worktrees tsw
+		WHERE tsw.session_id IN (%s)
+		ORDER BY tsw.position ASC, tsw.created_at ASC
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var wt models.TaskSessionWorktree
+		err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
+			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		result[wt.SessionID] = append(result[wt.SessionID], &wt)
+	}
+	return result, rows.Err()
 }
 
 func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
