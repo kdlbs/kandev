@@ -1,6 +1,6 @@
 # Kandev
 
-Manage tasks. Orchestrate agents. Review changes. Ship value.
+Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value.
 
 [Workflows](docs/workflow-tips.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md)
 
@@ -9,7 +9,7 @@ Manage tasks. Orchestrate agents. Review changes. Ship value.
 ## What
 
 
-Organize work across kanban and pipeline views with opinionated workflows. Assign agents from any provider, and review their output in an integrated workspace - file editor, file tree, terminal, browser preview, and git changes in one place. Terminal agent TUIs are great for running agents, but reviewing and iterating on changes there doesn't scale.
+Organize work across kanban and pipeline views with opinionated workflows and execute multiple tasks in parallel. Assign agents from any provider, and review their output in an integrated workspace - file editor, file tree, terminal, browser preview, and git changes in one place. Terminal agent TUIs are great for running agents, but reviewing and iterating on changes there doesn't scale.
 
 Run it locally or self-host it on your own infrastructure and access it from anywhere via [Tailscale](https://tailscale.com/) or any VPN.
 
@@ -33,6 +33,7 @@ While agents can already plan, implement, test, and deploy autonomously with the
 ## Features
 
 - **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode
+- **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting efficiency and productivity with AI agents.
 - **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
 - **Agentic workflows** - Multi-step pipelines that chain agents through automated task routing. See [docs/workflows.md](docs/workflow-tips.md)
@@ -45,7 +46,7 @@ While agents can already plan, implement, test, and deploy autonomously with the
 ## Supported Agents
 
 | Agent | Default Model | Other Models | Protocol |
-|-------|--------------|--------------|----------|
+|:-------:|:--------------:|--------------|:----------:|
 | **Claude Code** | Sonnet 4.5 | Opus 4.6, Opus 4.5, Haiku 4.5 | stream-json |
 | **Codex** | GPT-5.2 Codex | GPT-5.1 Codex Max, GPT-5.1 Codex Mini, GPT-5.2 | Codex |
 | **GitHub Copilot** | GPT-4.1 | GPT-5.2, Claude Sonnet 4.5, Gemini 3 Pro, +10 more | Copilot SDK |
@@ -66,7 +67,7 @@ While agents can already plan, implement, test, and deploy autonomously with the
 npx kandev
 ```
 
-This downloads prebuilt backend + frontend bundles and starts them locally. The worktrees and sqlite db will be created in `~/.kandev` by default. Should work on macOS, Linux, and Windows (WSL or native).
+This downloads pre-built backend + frontend bundles and starts them locally. The worktrees and sqlite db will be created in `~/.kandev` by default. Should work on macOS, Linux, and Windows (WSL or native).
 
 ### From Source
 
@@ -160,7 +161,7 @@ pre-commit install
 
 ## Comparison to Other Tools
 
-There are a couple similar tools in this space, and new ones appearing everyday. Here's what sets this one apart:
+There are a few similar tools in this space, and new ones appearing everyday. Here's what sets this one apart:
 
 - **Server-first architecture** - Not a desktop app. Runs as a server you can access from any device, including your phone. Start a task away from your computer and check in on it later.
 - **Remote runtimes** - Run agents on remote servers and Docker hosts, not just your local machine.
