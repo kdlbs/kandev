@@ -73,6 +73,9 @@ type AmpAdapter struct {
 	// (to avoid duplicates from both stop_reason=end_turn and result message)
 	completeSent bool
 
+	// Track whether text was streamed this turn to prevent duplicates from result.text
+	streamingTextSentThisTurn bool
+
 	// lastRawData holds the raw JSON of the current message being processed.
 	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
@@ -195,7 +198,8 @@ func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageA
 	operationID := uuid.New().String()
 	a.operationID = operationID
 	a.resultCh = make(chan resultComplete, 1)
-	a.completeSent = false // Reset completion flag for new operation
+	a.completeSent = false              // Reset completion flag for new operation
+	a.streamingTextSentThisTurn = false // Reset text dedup flag for new prompt
 	a.mu.Unlock()
 
 	if a.client == nil {
@@ -348,6 +352,9 @@ func (a *AmpAdapter) handleMessage(msg *amp.Message) {
 	case amp.MessageTypeResult:
 		a.handleResultMessage(msg, sessionID, operationID)
 
+	case amp.MessageTypeRateLimit:
+		a.handleRateLimitMessage(msg, sessionID, operationID)
+
 	default:
 		a.logger.Debug("unhandled message type", zap.String("type", msg.Type))
 	}
@@ -447,13 +454,13 @@ func (a *AmpAdapter) trackUsageAndEmitContextWindow(usage *amp.TokenUsage, sessi
 }
 
 // processAssistantContentBlock processes a single content block from an assistant message.
-func (a *AmpAdapter) processAssistantContentBlock(block *amp.ContentBlock, sessionID, operationID string) {
+func (a *AmpAdapter) processAssistantContentBlock(block *amp.ContentBlock, sessionID, operationID, parentToolUseID string) {
 	switch block.Type {
 	case amp.ContentTypeText:
 		if block.Text != "" {
-			// Accumulate text locally to include in complete event
-			// This bypasses the race condition with the manager's buffer
+			// Mark that text was streamed this turn (prevents duplicate from result.text)
 			a.mu.Lock()
+			a.streamingTextSentThisTurn = true
 			a.textAccumulator.WriteString(block.Text)
 			a.mu.Unlock()
 
@@ -476,7 +483,7 @@ func (a *AmpAdapter) processAssistantContentBlock(block *amp.ContentBlock, sessi
 		}
 
 	case amp.ContentTypeToolUse:
-		a.handleToolUse(block, sessionID, operationID)
+		a.handleToolUse(block, sessionID, operationID, parentToolUseID)
 
 	case amp.ContentTypeToolResult:
 		a.handleToolResult(block, sessionID, operationID)
@@ -489,6 +496,9 @@ func (a *AmpAdapter) handleAssistantMessage(msg *amp.Message, sessionID, operati
 		return
 	}
 
+	// Extract parent tool use ID for subagent nesting
+	parentToolUseID := msg.ParentToolUseID
+
 	// Log content block types for debugging
 	blockTypes := make([]string, 0, len(msg.Message.Content))
 	for _, block := range msg.Message.Content {
@@ -496,14 +506,15 @@ func (a *AmpAdapter) handleAssistantMessage(msg *amp.Message, sessionID, operati
 	}
 	a.logger.Debug("processing assistant message",
 		zap.Int("num_blocks", len(msg.Message.Content)),
-		zap.Strings("block_types", blockTypes))
+		zap.Strings("block_types", blockTypes),
+		zap.String("parent_tool_use_id", parentToolUseID))
 
 	// Update agent version and track main model
 	a.updateMainModel(msg.Message.Model)
 
 	// Process content blocks
 	for i := range msg.Message.Content {
-		a.processAssistantContentBlock(&msg.Message.Content[i], sessionID, operationID)
+		a.processAssistantContentBlock(&msg.Message.Content[i], sessionID, operationID, parentToolUseID)
 	}
 
 	// Calculate and emit token usage
@@ -517,7 +528,7 @@ func (a *AmpAdapter) handleAssistantMessage(msg *amp.Message, sessionID, operati
 }
 
 // handleToolUse processes a tool_use content block.
-func (a *AmpAdapter) handleToolUse(block *amp.ContentBlock, sessionID, operationID string) {
+func (a *AmpAdapter) handleToolUse(block *amp.ContentBlock, sessionID, operationID, parentToolUseID string) {
 	// Generate normalized payload using the normalizer
 	normalizedPayload := a.normalizer.NormalizeToolCall(block.Name, block.Input)
 
@@ -552,6 +563,7 @@ func (a *AmpAdapter) handleToolUse(block *amp.ContentBlock, sessionID, operation
 		SessionID:         sessionID,
 		OperationID:       operationID,
 		ToolCallID:        block.ID,
+		ParentToolCallID:  parentToolUseID,
 		ToolName:          block.Name,
 		ToolTitle:         toolTitle,
 		ToolStatus:        "running",
@@ -669,6 +681,10 @@ func (a *AmpAdapter) extractResultErrorMsg(msg *amp.Message) string {
 	if !msg.IsError {
 		return ""
 	}
+	// Check errors array first (Claude Code format, most specific)
+	if len(msg.Errors) > 0 {
+		return strings.Join(msg.Errors, "; ")
+	}
 	if msg.Error != "" {
 		return msg.Error
 	}
@@ -679,6 +695,36 @@ func (a *AmpAdapter) extractResultErrorMsg(msg *amp.Message) string {
 		return resultData.Text
 	}
 	return "prompt failed"
+}
+
+// extractResultText extracts text from the result message for non-streamed responses.
+func (a *AmpAdapter) extractResultText(msg *amp.Message) string {
+	if resultData := msg.GetResultData(); resultData != nil && resultData.Text != "" {
+		return resultData.Text
+	}
+	if resultStr := msg.GetResultString(); resultStr != "" {
+		return resultStr
+	}
+	return ""
+}
+
+// handleRateLimitMessage processes rate limit notifications.
+func (a *AmpAdapter) handleRateLimitMessage(msg *amp.Message, sessionID, operationID string) {
+	message := "Rate limited by API"
+	if len(msg.RateLimitInfo) > 0 {
+		message = string(msg.RateLimitInfo)
+	}
+
+	a.logger.Warn("rate limit event received",
+		zap.String("session_id", sessionID),
+		zap.String("message", message))
+
+	a.sendUpdate(AgentEvent{
+		Type:             EventTypeRateLimit,
+		SessionID:        sessionID,
+		OperationID:      operationID,
+		RateLimitMessage: message,
+	})
 }
 
 // signalResultCompletion sends the result to the result channel.
@@ -780,24 +826,52 @@ func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationI
 
 	// Only send completion event if not already sent by handleTurnComplete
 	if !alreadyCompleted {
-		// Clear the text accumulator (text was already sent via message_chunk events)
+		// Check if text was already streamed this turn
+		a.mu.RLock()
+		textWasStreamed := a.streamingTextSentThisTurn
+		a.mu.RUnlock()
+
+		// Emit result.text as message_chunk if no text was streamed this turn
+		// (e.g. slash commands or very short responses)
+		if !textWasStreamed {
+			if resultText := a.extractResultText(msg); resultText != "" {
+				a.logger.Debug("sending result text as message_chunk (no streaming text this turn)",
+					zap.Int("text_length", len(resultText)))
+				a.sendUpdate(AgentEvent{
+					Type:        EventTypeMessageChunk,
+					SessionID:   sessionID,
+					OperationID: operationID,
+					Text:        resultText,
+				})
+			}
+		} else {
+			a.logger.Debug("skipping result text (streaming text already sent this turn)")
+		}
+
+		// Reset text dedup flag and accumulator
 		a.mu.Lock()
+		a.streamingTextSentThisTurn = false
 		a.textAccumulator.Reset()
 		a.mu.Unlock()
 
-		// Send complete event WITHOUT text to avoid duplicates
+		// Use GetCostUSD() to handle both cost_usd and total_cost_usd field names
+		completeData := map[string]any{
+			"cost_usd":      msg.GetCostUSD(),
+			"duration_ms":   msg.DurationMS,
+			"num_turns":     msg.NumTurns,
+			"input_tokens":  msg.TotalInputTokens,
+			"output_tokens": msg.TotalOutputTokens,
+			"is_error":      msg.IsError,
+		}
+		if len(msg.Errors) > 0 {
+			completeData["errors"] = msg.Errors
+		}
+
 		a.sendUpdate(AgentEvent{
 			Type:        EventTypeComplete,
 			SessionID:   sessionID,
 			OperationID: operationID,
-			Data: map[string]any{
-				"cost_usd":      msg.CostUSD,
-				"duration_ms":   msg.DurationMS,
-				"num_turns":     msg.NumTurns,
-				"input_tokens":  msg.TotalInputTokens,
-				"output_tokens": msg.TotalOutputTokens,
-				"is_error":      msg.IsError,
-			},
+			Data:        completeData,
 		})
 	}
 

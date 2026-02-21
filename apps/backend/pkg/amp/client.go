@@ -15,11 +15,13 @@ import (
 )
 
 // Message types for Amp stream-json protocol.
+// Amp claims Claude Code compatibility via --stream-json, so these match Claude Code's types.
 const (
 	MessageTypeSystem    = "system"
 	MessageTypeAssistant = "assistant"
 	MessageTypeResult    = "result"
 	MessageTypeUser      = "user"
+	MessageTypeRateLimit = "rate_limit_event"
 )
 
 // Content block types.
@@ -53,22 +55,38 @@ type Client struct {
 }
 
 // Message represents a message from Amp.
+// Amp uses Claude Code-compatible stream-json format, so fields match both protocols.
 type Message struct {
-	Type     string   `json:"type"`
-	ThreadID string   `json:"thread_id,omitempty"`
-	Message  *Content `json:"message,omitempty"`
+	Type            string   `json:"type"`
+	ThreadID        string   `json:"thread_id,omitempty"`
+	Message         *Content `json:"message,omitempty"`
+	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 
 	// Result fields (when Type == "result")
 	IsError           bool              `json:"is_error,omitempty"`
-	Error             string            `json:"error,omitempty"`   // Error message when is_error is true
+	Error             string            `json:"error,omitempty"`   // Single error message
+	Errors            []string          `json:"errors,omitempty"`  // Multiple errors (Claude Code format)
 	Subtype           string            `json:"subtype,omitempty"` // e.g., "error_during_execution"
 	CostUSD           float64           `json:"cost_usd,omitempty"`
+	TotalCostUSD      float64           `json:"total_cost_usd,omitempty"` // Claude Code uses this field name
 	DurationMS        int64             `json:"duration_ms,omitempty"`
 	NumTurns          int               `json:"num_turns,omitempty"`
 	TotalInputTokens  int64             `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens int64             `json:"total_output_tokens,omitempty"`
 	Result            json.RawMessage   `json:"result,omitempty"`
 	ModelUsage        map[string]*Usage `json:"model_usage,omitempty"`
+
+	// Rate limit fields (when Type == "rate_limit_event")
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
+}
+
+// GetCostUSD returns the cost, checking both total_cost_usd (Claude Code format)
+// and cost_usd (Amp format).
+func (m *Message) GetCostUSD() float64 {
+	if m.TotalCostUSD != 0 {
+		return m.TotalCostUSD
+	}
+	return m.CostUSD
 }
 
 // Content represents the message content.

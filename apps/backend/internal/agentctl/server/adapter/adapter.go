@@ -48,6 +48,7 @@ const (
 	EventTypePermissionCancelled = streams.EventTypePermissionCancelled
 	EventTypeContextWindow       = streams.EventTypeContextWindow
 	EventTypeSessionStatus       = streams.EventTypeSessionStatus
+	EventTypeRateLimit           = streams.EventTypeRateLimit
 )
 
 // StderrProvider provides access to recent stderr output for error context.

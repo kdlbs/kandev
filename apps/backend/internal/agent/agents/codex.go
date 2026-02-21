@@ -73,7 +73,7 @@ func (a *Codex) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Codex) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@openai/codex@0.98.0", "app-server").
+	return Cmd("npx", "-y", "@openai/codex@0.104.0", "app-server").
 		Model(NewParam("-c", "model=\"{model}\""), opts.Model).
 		Settings(codexPermSettings, opts.PermissionValues).
 		Build()
@@ -84,7 +84,7 @@ func (a *Codex) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:      "kandev/multi-agent",
 		Tag:        "latest",
-		Cmd:        Cmd("npx", "-y", "@openai/codex@0.98.0", "app-server").Build(),
+		Cmd:        Cmd("npx", "-y", "@openai/codex@0.104.0", "app-server").Build(),
 		WorkingDir: "/workspace",
 		Env:        map[string]string{},
 		Mounts: []MountTemplate{
@@ -106,8 +106,10 @@ func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 }
 
 var codexPermSettings = map[string]PermissionSetting{
-	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Skip approval requests from Codex",
-		ApplyMethod: "acp", CLIFlag: "--full-auto"},
+	"auto_approve": {
+		Supported: true, Default: true, Label: "Auto-approve", Description: "Skip approval requests from Codex",
+		ApplyMethod: "acp", CLIFlag: "--full-auto",
+	},
 }
 
 func codexStaticModels() []Model {

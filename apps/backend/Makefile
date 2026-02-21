@@ -25,7 +25,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-mock-agent clean run dev test lint fmt vet help
+.PHONY: all build build-all build-agentctl build-mock-agent clean run dev test test-e2e lint fmt vet help
 
 ## Default target
 all: build
@@ -73,6 +73,13 @@ dev: build
 test:
 	@echo "Running tests..."
 	$(GO) test ./...
+
+## Run E2E tests (real agents, costs money — manual only)
+## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
+## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
+test-e2e:
+	@echo "Running E2E adapter tests..."
+	$(GO) test -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
 
 ## Run tests with coverage
 test-coverage:
@@ -130,6 +137,7 @@ help:
 	@echo "  run           Build and run the application"
 	@echo "  dev           Run in development mode with a local database"
 	@echo "  test          Run tests"
+	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"
 	@echo "  fmt           Format code"
