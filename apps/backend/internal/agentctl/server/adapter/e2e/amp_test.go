@@ -12,13 +12,18 @@ import (
 // Derived from internal/agent/agents/amp.go.
 const ampCommand = "amp --execute --stream-json --stream-json-input"
 
+// ampContinueCommand is the command for follow-up prompts (thread ID appended at runtime).
+// Amp is one-shot: each process exits after responding, so a new process must be spawned.
+const ampContinueCommand = "amp threads continue --execute --stream-json --stream-json-input"
+
 func TestAmp_BasicPrompt(t *testing.T) {
 	result := RunAgent(t, AgentSpec{
-		Name:          "amp",
-		Command:       ampCommand,
-		Protocol:      agent.ProtocolAmp,
-		DefaultPrompt: "What is 2 + 2? Reply with just the number.",
-		AutoApprove:   true,
+		Name:            "amp",
+		Command:         ampCommand,
+		ContinueCommand: ampContinueCommand,
+		Protocol:        agent.ProtocolAmp,
+		DefaultPrompt:   "What is 2 + 2? Reply with just the number.",
+		AutoApprove:     true,
 	})
 	defer DumpEventsOnFailure(t, result)
 

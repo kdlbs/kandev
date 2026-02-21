@@ -57,6 +57,10 @@ type AgentSpec struct {
 
 	// AutoApprove enables auto-approval of permission requests.
 	AutoApprove bool
+
+	// ContinueCommand is the command for follow-up prompts (one-shot agents like Amp).
+	// When set, the adapter spawns a new subprocess per prompt.
+	ContinueCommand string
 }
 
 // TestResult holds collected events and metadata from a test run.
@@ -110,7 +114,7 @@ func runAgentLifecycle(t *testing.T, spec AgentSpec, command string) *TestResult
 	workDir := setupWorkspace(t)
 
 	// Build config and create process manager
-	cfg := buildInstanceConfig(command, spec.Protocol, workDir, spec.AutoApprove)
+	cfg := buildInstanceConfig(command, spec.Protocol, workDir, spec.AutoApprove, spec.ContinueCommand)
 	log := newTestLogger(t)
 	mgr := process.NewManager(cfg, log)
 
@@ -236,7 +240,7 @@ func setupWorkspace(t *testing.T) string {
 }
 
 // buildInstanceConfig creates a config.InstanceConfig from the test parameters.
-func buildInstanceConfig(command string, protocol agent.Protocol, workDir string, autoApprove bool) *config.InstanceConfig {
+func buildInstanceConfig(command string, protocol agent.Protocol, workDir string, autoApprove bool, continueCommand string) *config.InstanceConfig {
 	args := config.ParseCommand(command)
 	env := config.CollectAgentEnv(nil)
 
@@ -252,6 +256,7 @@ func buildInstanceConfig(command string, protocol agent.Protocol, workDir string
 		LogLevel:               "debug",
 		LogFormat:              "console",
 		AgentType:              string(protocol),
+		ContinueCommand:        continueCommand,
 	}
 }
 

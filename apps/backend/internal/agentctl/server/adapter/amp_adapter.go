@@ -1,10 +1,12 @@
 package adapter
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -19,7 +21,9 @@ import (
 )
 
 // AmpAdapter implements AgentAdapter for Sourcegraph Amp CLI.
-// It uses the stream-json protocol over stdin/stdout, similar to Claude Code.
+// Amp is a one-shot CLI: each prompt spawns a new process that reads stdin
+// until EOF, processes the prompt, writes stream-json to stdout, and exits.
+// For multi-turn conversations, follow-up prompts use "threads continue <id>".
 type AmpAdapter struct {
 	cfg    *Config
 	logger *logger.Logger
@@ -27,7 +31,14 @@ type AmpAdapter struct {
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *AmpNormalizer
 
-	// Subprocess stdin/stdout (set via Connect)
+	// One-shot subprocess management.
+	// When oneShotCfg is set, the adapter spawns a new process per prompt
+	// instead of using externally-provided stdin/stdout pipes.
+	oneShotCfg *OneShotConfig
+	process    *exec.Cmd  // Current subprocess (nil between prompts)
+	processMu  sync.Mutex // Guards subprocess lifecycle
+
+	// Subprocess stdin/stdout (set via Connect for non-one-shot, or per-prompt for one-shot)
 	stdin  io.Writer
 	stdout io.Reader
 
@@ -42,6 +53,7 @@ type AmpAdapter struct {
 	sessionID         string // Thread ID in Amp terminology
 	operationID       string
 	sessionStatusSent bool
+	hasAmpThreadID    bool // True when sessionID contains a real Amp thread ID (T-xxx), not a placeholder
 
 	// Track pending tool calls and their normalized payloads
 	pendingToolCalls    map[string]bool
@@ -96,6 +108,7 @@ func NewAmpAdapter(cfg *Config, log *logger.Logger) *AmpAdapter {
 		cfg:                    cfg,
 		logger:                 log.WithFields(zap.String("adapter", "amp")),
 		normalizer:             NewAmpNormalizer(),
+		oneShotCfg:             cfg.OneShotConfig,
 		ctx:                    ctx,
 		cancel:                 cancel,
 		updatesCh:              make(chan AgentEvent, 100),
@@ -119,7 +132,12 @@ func (a *AmpAdapter) PrepareCommandArgs() []string {
 }
 
 // Connect wires up the stdin/stdout pipes from the running agent subprocess.
+// For one-shot adapters, this is a no-op — the adapter manages its own subprocess.
 func (a *AmpAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
+	if a.oneShotCfg != nil {
+		return nil // One-shot adapter manages its own subprocess per prompt
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -133,22 +151,29 @@ func (a *AmpAdapter) Connect(stdin io.Writer, stdout io.Reader) error {
 }
 
 // Initialize establishes the Amp connection with the agent subprocess.
+// For one-shot adapters, this only sets up agent info — the actual client
+// is created per-prompt in Prompt().
 func (a *AmpAdapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing Amp adapter",
-		zap.String("workdir", a.cfg.WorkDir))
-
-	// Create Amp client
-	a.client = amp.NewClient(a.stdin, a.stdout, a.logger)
-	a.client.SetMessageHandler(a.handleMessage)
-
-	// Start reading from stdout
-	a.client.Start(a.ctx)
+		zap.String("workdir", a.cfg.WorkDir),
+		zap.Bool("one_shot", a.oneShotCfg != nil))
 
 	// Store agent info
 	a.agentInfo = &AgentInfo{
 		Name:    "amp",
 		Version: "unknown",
 	}
+
+	// For one-shot mode, skip client creation — it happens per-prompt
+	if a.oneShotCfg != nil {
+		a.logger.Info("Amp adapter initialized (one-shot mode)")
+		return nil
+	}
+
+	// Legacy: create persistent client for non-one-shot mode
+	a.client = amp.NewClient(a.stdin, a.stdout, a.logger)
+	a.client.SetMessageHandler(a.handleMessage)
+	a.client.Start(a.ctx)
 
 	a.logger.Info("Amp adapter initialized")
 	return nil
@@ -175,15 +200,17 @@ func (a *AmpAdapter) NewSession(ctx context.Context, _ []types.McpServer) (strin
 }
 
 // LoadSession resumes an existing Amp session (thread).
-// The thread ID will be passed to Amp via the process manager which handles
-// the "threads fork" and "threads continue" commands.
+// For one-shot mode, the session ID is used to build the "threads continue" command.
 func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.hasAmpThreadID = sessionID != "" // LoadSession always receives a real Amp thread ID
 	a.mu.Unlock()
 
-	// Set thread ID in client for tracking
-	a.client.SetThreadID(sessionID)
+	// Set thread ID in client for tracking (only for non-one-shot)
+	if a.client != nil {
+		a.client.SetThreadID(sessionID)
+	}
 
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
 
@@ -191,15 +218,184 @@ func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 // Prompt sends a prompt to Amp and waits for completion.
+// In one-shot mode, this spawns a new subprocess per prompt.
 // Note: attachments are not yet supported in Amp protocol - they are ignored.
 func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
+	if a.oneShotCfg != nil {
+		return a.promptOneShot(ctx, message)
+	}
+	return a.promptLongLived(ctx, message)
+}
+
+// oneShotProcess holds the state of a one-shot subprocess spawned for a single prompt.
+type oneShotProcess struct {
+	cmd    *exec.Cmd
+	client *amp.Client
+	stdin  io.WriteCloser
+}
+
+// promptOneShot spawns a new Amp subprocess for each prompt.
+// The process reads stdin until EOF, processes the prompt, writes stream-json
+// to stdout, and exits. For follow-up prompts, "threads continue <id>" is used.
+func (a *AmpAdapter) promptOneShot(ctx context.Context, message string) error {
+	operationID := a.resetOneShotState()
+
+	proc, err := a.spawnOneShotProcess(ctx)
+	if err != nil {
+		return err
+	}
+	defer a.clearOneShotProcess()
+
+	// Send user message, then close stdin to signal EOF
+	if err := proc.client.SendUserMessage(message); err != nil {
+		proc.client.Stop()
+		return fmt.Errorf("failed to send user message: %w", err)
+	}
+	if err := proc.stdin.Close(); err != nil {
+		a.logger.Debug("failed to close stdin pipe", zap.Error(err))
+	}
+
+	// Wait for result message or context cancellation
+	result, err := a.awaitOneShotResult(ctx, proc)
+	if err != nil {
+		return err
+	}
+
+	if !result.success && result.err != "" {
+		return fmt.Errorf("prompt failed: %s", result.err)
+	}
+
+	a.logger.Info("one-shot prompt completed",
+		zap.String("operation_id", operationID),
+		zap.Bool("success", result.success))
+	return nil
+}
+
+// resetOneShotState resets per-prompt state and returns the new operation ID.
+func (a *AmpAdapter) resetOneShotState() string {
 	a.mu.Lock()
-	sessionID := a.sessionID
+	defer a.mu.Unlock()
 	operationID := uuid.New().String()
 	a.operationID = operationID
 	a.resultCh = make(chan resultComplete, 1)
-	a.completeSent = false              // Reset completion flag for new operation
-	a.streamingTextSentThisTurn = false // Reset text dedup flag for new prompt
+	a.completeSent = false
+	a.streamingTextSentThisTurn = false
+	return operationID
+}
+
+// spawnOneShotProcess creates and starts a subprocess for a single prompt.
+func (a *AmpAdapter) spawnOneShotProcess(ctx context.Context) (*oneShotProcess, error) {
+	args := a.buildOneShotArgs()
+	a.logger.Info("spawning one-shot Amp process", zap.Strings("args", args))
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = a.oneShotCfg.WorkDir
+	cmd.Env = a.oneShotCfg.Env
+	setProcGroup(cmd)
+
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start Amp process: %w", err)
+	}
+
+	a.processMu.Lock()
+	a.process = cmd
+	a.processMu.Unlock()
+
+	client := amp.NewClient(stdinPipe, stdoutPipe, a.logger)
+	client.SetMessageHandler(a.handleMessage)
+	client.Start(ctx)
+
+	go a.readOneShotStderr(stderrPipe)
+
+	return &oneShotProcess{cmd: cmd, client: client, stdin: stdinPipe}, nil
+}
+
+// clearOneShotProcess clears the tracked subprocess after a prompt completes.
+func (a *AmpAdapter) clearOneShotProcess() {
+	a.processMu.Lock()
+	a.process = nil
+	a.processMu.Unlock()
+}
+
+// awaitOneShotResult waits for the result message, then cleans up the subprocess.
+func (a *AmpAdapter) awaitOneShotResult(ctx context.Context, proc *oneShotProcess) (resultComplete, error) {
+	a.mu.RLock()
+	resultCh := a.resultCh
+	a.mu.RUnlock()
+
+	var result resultComplete
+	select {
+	case <-ctx.Done():
+		a.mu.Lock()
+		a.resultCh = nil
+		a.mu.Unlock()
+		proc.client.Stop()
+		return result, ctx.Err()
+	case result = <-resultCh:
+		a.mu.Lock()
+		a.resultCh = nil
+		a.mu.Unlock()
+	}
+
+	proc.client.Stop()
+	if waitErr := proc.cmd.Wait(); waitErr != nil {
+		a.logger.Debug("Amp process exited", zap.Error(waitErr))
+	}
+	return result, nil
+}
+
+// buildOneShotArgs builds the command arguments for a one-shot prompt.
+// Uses the continue command with thread ID for follow-up prompts.
+func (a *AmpAdapter) buildOneShotArgs() []string {
+	a.mu.RLock()
+	threadID := a.sessionID
+	hasRealThread := a.hasAmpThreadID
+	a.mu.RUnlock()
+
+	// Use continue command only when we have a real Amp thread ID (T-xxx),
+	// not a UUID placeholder from NewSession().
+	if hasRealThread && threadID != "" && len(a.oneShotCfg.ContinueArgs) > 0 {
+		args := make([]string, len(a.oneShotCfg.ContinueArgs), len(a.oneShotCfg.ContinueArgs)+1)
+		copy(args, a.oneShotCfg.ContinueArgs)
+		args = append(args, threadID)
+		return args
+	}
+
+	// First prompt: use initial command
+	args := make([]string, len(a.oneShotCfg.InitialArgs))
+	copy(args, a.oneShotCfg.InitialArgs)
+	return args
+}
+
+// readOneShotStderr reads stderr from the one-shot subprocess for logging.
+func (a *AmpAdapter) readOneShotStderr(stderr io.ReadCloser) {
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		a.logger.Debug("amp stderr", zap.String("line", scanner.Text()))
+	}
+}
+
+// promptLongLived sends a prompt to a long-lived Amp process (legacy mode).
+func (a *AmpAdapter) promptLongLived(ctx context.Context, message string) error {
+	a.mu.Lock()
+	operationID := uuid.New().String()
+	a.operationID = operationID
+	a.resultCh = make(chan resultComplete, 1)
+	a.completeSent = false
+	a.streamingTextSentThisTurn = false
 	a.mu.Unlock()
 
 	if a.client == nil {
@@ -207,10 +403,8 @@ func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageA
 	}
 
 	a.logger.Info("sending prompt",
-		zap.String("session_id", sessionID),
 		zap.String("operation_id", operationID))
 
-	// Send user message
 	if err := a.client.SendUserMessage(message); err != nil {
 		a.mu.Lock()
 		a.resultCh = nil
@@ -218,7 +412,6 @@ func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageA
 		return fmt.Errorf("failed to send user message: %w", err)
 	}
 
-	// Wait for result or context cancellation
 	a.mu.RLock()
 	resultCh := a.resultCh
 	a.mu.RUnlock()
@@ -244,10 +437,23 @@ func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageA
 }
 
 // Cancel interrupts the current operation.
+// For one-shot mode, this kills the running subprocess.
 func (a *AmpAdapter) Cancel(ctx context.Context) error {
-	// Amp doesn't have a cancel command in stream-json mode
-	// Cancellation is handled by killing the process
-	a.logger.Info("cancel requested (not supported in stream-json mode)")
+	a.processMu.Lock()
+	cmd := a.process
+	a.processMu.Unlock()
+
+	if cmd != nil && cmd.Process != nil {
+		a.logger.Info("cancelling one-shot Amp process", zap.Int("pid", cmd.Process.Pid))
+		if err := killProcessGroup(cmd.Process.Pid); err != nil {
+			// Fallback to direct kill if process group kill fails
+			a.logger.Debug("process group kill failed, trying direct kill", zap.Error(err))
+			_ = cmd.Process.Kill()
+		}
+		return nil
+	}
+
+	a.logger.Info("cancel requested (no running process)")
 	return nil
 }
 
@@ -294,7 +500,14 @@ func (a *AmpAdapter) Close() error {
 		a.cancel()
 	}
 
-	// Stop the client
+	// Kill any running one-shot subprocess
+	a.processMu.Lock()
+	if a.process != nil && a.process.Process != nil {
+		_ = killProcessGroup(a.process.Process.Pid)
+	}
+	a.processMu.Unlock()
+
+	// Stop the client (for non-one-shot mode)
 	if a.client != nil {
 		a.client.Stop()
 	}
@@ -330,10 +543,11 @@ func (a *AmpAdapter) handleMessage(msg *amp.Message) {
 	operationID := a.operationID
 	a.mu.RUnlock()
 
-	// Update session ID from thread ID if provided
+	// Update session ID from thread ID if provided by Amp
 	if msg.ThreadID != "" {
 		a.mu.Lock()
 		a.sessionID = msg.ThreadID
+		a.hasAmpThreadID = true
 		sessionID = msg.ThreadID
 		a.mu.Unlock()
 	}
@@ -788,6 +1002,7 @@ func (a *AmpAdapter) handleResultMessage(msg *amp.Message, sessionID, operationI
 		if resultData.ThreadID != "" {
 			a.mu.Lock()
 			a.sessionID = resultData.ThreadID
+			a.hasAmpThreadID = true
 			sessionID = resultData.ThreadID
 			a.mu.Unlock()
 		}
@@ -897,5 +1112,13 @@ func (a *AmpAdapter) RequiresProcessKill() bool {
 	return false
 }
 
-// Verify interface implementation
-var _ AgentAdapter = (*AmpAdapter)(nil)
+// IsOneShot returns true — Amp spawns a new process per prompt.
+func (a *AmpAdapter) IsOneShot() bool {
+	return a.oneShotCfg != nil
+}
+
+// Verify interface implementation.
+var (
+	_ AgentAdapter  = (*AmpAdapter)(nil)
+	_ OneShotAdapter = (*AmpAdapter)(nil)
+)

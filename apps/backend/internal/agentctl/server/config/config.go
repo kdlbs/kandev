@@ -144,6 +144,11 @@ type InstanceConfig struct {
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
+	// ContinueCommand is the command template for follow-up prompts in one-shot agents.
+	// When set, the adapter spawns a new process per prompt using this command for
+	// continuation (thread ID appended at runtime). Only used by Amp.
+	ContinueCommand string
+
 	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
 	VscodeCommand string
 }

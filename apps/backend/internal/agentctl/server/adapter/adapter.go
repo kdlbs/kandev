@@ -51,6 +51,28 @@ const (
 	EventTypeRateLimit           = streams.EventTypeRateLimit
 )
 
+// OneShotAdapter is an optional interface implemented by adapters that spawn
+// a new process per prompt (e.g., Amp). When an adapter is one-shot, the
+// process manager skips subprocess creation and the adapter manages its own
+// subprocess lifecycle internally.
+type OneShotAdapter interface {
+	IsOneShot() bool
+}
+
+// OneShotConfig holds command configuration for one-shot adapters that manage
+// their own subprocess lifecycle. The adapter spawns a new process per prompt.
+type OneShotConfig struct {
+	// InitialArgs is the command for the first prompt in a new session.
+	InitialArgs []string
+	// ContinueArgs is the command for follow-up prompts.
+	// The thread/session ID is appended at runtime.
+	ContinueArgs []string
+	// Env is the environment variables for the subprocess.
+	Env []string
+	// WorkDir is the working directory for the subprocess.
+	WorkDir string
+}
+
 // StderrProvider provides access to recent stderr output for error context.
 // This is used by adapters to include stderr in error events when the agent
 // reports an error without a detailed message (e.g., rate limit errors).
@@ -198,6 +220,10 @@ type Config struct {
 
 	// Protocol-specific configuration
 	Extra map[string]string
+
+	// OneShotConfig is set for one-shot adapters that manage their own subprocess.
+	// When non-nil, the process manager skips subprocess creation.
+	OneShotConfig *OneShotConfig
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.

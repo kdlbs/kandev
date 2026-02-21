@@ -51,8 +51,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
-// buildAgentCommand builds the agent command string for the execution.
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent) string {
+// agentCommands holds the initial and continue command strings for an agent execution.
+type agentCommands struct {
+	initial  string
+	continue_ string // continue command for one-shot agents (empty if not applicable)
+}
+
+// buildAgentCommand builds the agent command strings for the execution.
+// Returns both the initial command and the continue command (for one-shot agents like Amp).
+func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent) agentCommands {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -73,7 +80,10 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
 	}
-	return m.commandBuilder.BuildCommandString(agentConfig, cmdOpts)
+	return agentCommands{
+		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
+		continue_: m.commandBuilder.BuildContinueCommandString(agentConfig, cmdOpts),
+	}
 }
 
 // launchResolveWorkspacePath resolves the effective workspace path, handling worktree
@@ -229,7 +239,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
-	execution.AgentCommand = m.buildAgentCommand(req, profileInfo, agentConfig)
+	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
+	execution.AgentCommand = cmds.initial
+	execution.ContinueCommand = cmds.continue_
 
 	// 8. Track the execution
 	m.executionStore.Add(execution)
@@ -341,7 +353,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		env["TASK_DESCRIPTION"] = taskDescription
 	}
 
-	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy); err != nil {
+	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy, execution.ContinueCommand); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

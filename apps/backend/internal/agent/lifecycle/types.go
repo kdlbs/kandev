@@ -29,8 +29,9 @@ type AgentExecution struct {
 	ContainerIP    string // IP address of the container for agentctl communication
 	WorkspacePath  string // Path to the workspace (worktree or repository path)
 	ACPSessionID   string // ACP session ID to resume, if available
-	AgentCommand   string // Command to start the agent subprocess
-	RuntimeName    string // Name of the runtime used (e.g., "docker", "standalone")
+	AgentCommand    string // Command to start the agent subprocess
+	ContinueCommand string // Command for follow-up prompts (one-shot agents like Amp)
+	RuntimeName     string // Name of the runtime used (e.g., "docker", "standalone")
 	Status         v1.AgentStatus
 	StartedAt      time.Time
 	FinishedAt     *time.Time

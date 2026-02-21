@@ -235,6 +235,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// One-shot adapters manage their own subprocess per prompt.
+	// Skip process creation — the adapter spawns processes in Prompt().
+	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		return m.startOneShot()
+	}
+
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
@@ -283,6 +289,27 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
+// startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
+// The adapter manages its own per-prompt subprocess lifecycle internally.
+func (m *Manager) startOneShot() error {
+	m.stopCh = make(chan struct{})
+	m.doneCh = make(chan struct{})
+
+	// Forward adapter updates to our channel
+	m.wg.Add(1)
+	go m.forwardUpdates()
+
+	// Start workspace tracker with background context (not tied to HTTP request)
+	m.workspaceTracker.Start(context.Background())
+
+	// Auto-create shell session if enabled
+	m.startAgentShell()
+
+	m.status.Store(StatusRunning)
+	m.logger.Info("one-shot adapter started (no persistent subprocess)")
+	return nil
+}
+
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
@@ -302,6 +329,17 @@ func (m *Manager) buildAdapterConfig() error {
 		ApprovalPolicy: m.cfg.ApprovalPolicy,
 		McpServers:     mcpServers,
 		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+	}
+
+	// Configure one-shot mode when a continue command is provided.
+	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	if m.cfg.ContinueCommand != "" {
+		m.adapterCfg.OneShotConfig = &adapter.OneShotConfig{
+			InitialArgs:  m.cfg.AgentArgs,
+			ContinueArgs: config.ParseCommand(m.cfg.ContinueCommand),
+			Env:          m.cfg.AgentEnv,
+			WorkDir:      m.cfg.WorkDir,
+		}
 	}
 
 	for i, srv := range mcpServers {
@@ -418,7 +456,8 @@ func lookupEnvValue(env []string, key string) string {
 
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
-func (m *Manager) Configure(command string, env map[string]string, approvalPolicy string) error {
+// continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
+func (m *Manager) Configure(command string, env map[string]string, approvalPolicy, continueCommand string) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -444,6 +483,11 @@ func (m *Manager) Configure(command string, env map[string]string, approvalPolic
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
 
+	// Store continue command for one-shot adapters (e.g., Amp)
+	if continueCommand != "" {
+		m.cfg.ContinueCommand = continueCommand
+	}
+
 	// Merge additional env vars
 	if len(env) > 0 {
 		for k, v := range env {
@@ -455,6 +499,7 @@ func (m *Manager) Configure(command string, env map[string]string, approvalPolic
 		zap.String("command", command),
 		zap.Strings("args", args),
 		zap.String("approval_policy", m.cfg.ApprovalPolicy),
+		zap.String("continue_command", continueCommand),
 		zap.Int("env_count", len(env)))
 
 	return nil

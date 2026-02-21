@@ -201,9 +201,10 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	Command        string            `json:"command"`
-	Env            map[string]string `json:"env,omitempty"`
-	ApprovalPolicy string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	Command         string            `json:"command"`
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	Env             map[string]string `json:"env,omitempty"`
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
 }
 
 type AgentConfigureResponse struct {
@@ -230,7 +231,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if err := s.procMgr.Configure(req.Command, req.Env, req.ApprovalPolicy); err != nil {
+	if err := s.procMgr.Configure(req.Command, req.Env, req.ApprovalPolicy, req.ContinueCommand); err != nil {
 		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,

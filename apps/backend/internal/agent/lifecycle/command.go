@@ -30,6 +30,25 @@ func (cb *CommandBuilder) BuildCommandString(ag agents.Agent, opts agents.Comman
 	return strings.Join(cmd.Args(), " ")
 }
 
+// BuildContinueCommandString builds the continue command with the same model/permission
+// flags as the initial command. Used by one-shot agents (Amp) where each follow-up prompt
+// needs a separate "threads continue" command. Returns empty string if the agent has no
+// ContinueSessionCmd configured.
+func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agents.CommandOptions) string {
+	sessionCfg := ag.Runtime().SessionConfig
+	if sessionCfg.ContinueSessionCmd.IsEmpty() {
+		return ""
+	}
+
+	// Start from the continue command base and apply the same flags as BuildCommand
+	cmd := sessionCfg.ContinueSessionCmd.With().
+		Model(ag.Runtime().ModelFlag, opts.Model).
+		Settings(ag.PermissionSettings(), opts.PermissionValues).
+		Build()
+
+	return strings.Join(cmd.Args(), " ")
+}
+
 // ExpandSessionDir expands the session directory template from SessionConfig.
 // Replaces {home} with the user's home directory.
 // Returns empty string if no session directory is configured.
