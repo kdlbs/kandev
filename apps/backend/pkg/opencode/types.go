@@ -253,6 +253,19 @@ type SDKTodo struct {
 	Priority string `json:"priority"`
 }
 
+// CommandInfo represents a slash command from GET /command.
+type CommandInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Some commands have structured input
+	Input *CommandInputInfo `json:"input,omitempty"`
+}
+
+// CommandInputInfo describes command input expectations.
+type CommandInputInfo struct {
+	Hint string `json:"hint,omitempty"`
+}
+
 // ProviderListResponse from GET /provider
 type ProviderListResponse struct {
 	All []ProviderInfo `json:"all"`
@@ -272,6 +285,29 @@ type ProviderModelInfo struct {
 // ProviderModelLimit contains model limits
 type ProviderModelLimit struct {
 	Context int `json:"context"`
+}
+
+// SessionCompactedProperties for session.compacted events
+type SessionCompactedProperties struct {
+	SessionID string `json:"sessionID"`
+}
+
+// ParseSessionCompacted parses session.compacted properties
+func ParseSessionCompacted(data json.RawMessage) (*SessionCompactedProperties, error) {
+	var props SessionCompactedProperties
+	if err := json.Unmarshal(data, &props); err != nil {
+		return nil, err
+	}
+	return &props, nil
+}
+
+// ParseTodoUpdated parses todo.updated properties
+func ParseTodoUpdated(data json.RawMessage) (*TodoUpdatedProperties, error) {
+	var props TodoUpdatedProperties
+	if err := json.Unmarshal(data, &props); err != nil {
+		return nil, err
+	}
+	return &props, nil
 }
 
 // ParseSDKEvent parses an SDK event from JSON

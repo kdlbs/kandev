@@ -86,6 +86,9 @@ type Adapter struct {
 	// Result completion signaling
 	resultCh chan resultComplete
 
+	// Model selection (parsed from AGENT_MODEL env var, format: "provider/model")
+	model *opencode.ModelSpec
+
 	// Token tracking
 	totalTokens        int
 	modelContextWindow int
@@ -140,11 +143,19 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	if agentID == "" {
 		agentID = "opencode" // Fallback for unknown agents using this protocol
 	}
+	// Parse model from AGENT_MODEL env var (format: "provider/model")
+	var modelSpec *opencode.ModelSpec
+	if modelStr := os.Getenv("AGENT_MODEL"); modelStr != "" {
+		modelSpec = parseModelSpec(modelStr)
+		log.Info("parsed model from AGENT_MODEL", zap.String("model", modelStr))
+	}
+
 	return &Adapter{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("adapter", "opencode"), zap.String("agent_id", agentID)),
 		agentID:            agentID,
 		normalizer:         NewNormalizer(),
+		model:              modelSpec,
 		ctx:                ctx,
 		cancel:             cancel,
 		updatesCh:          make(chan AgentEvent, 100),
@@ -181,14 +192,21 @@ func (a *Adapter) PrepareEnvironment() (map[string]string, error) {
 		"OPENCODE_SERVER_PASSWORD": a.password,
 	}
 
-	// Set up permissions based on config
-	if a.cfg.AutoApprove {
-		env["OPENCODE_PERMISSION"] = `{"question":"deny"}`
-	} else {
-		env["OPENCODE_PERMISSION"] = `{"edit":"ask","bash":"ask","webfetch":"ask","doom_loop":"ask","external_directory":"ask","question":"deny"}`
-	}
+	// Set up permissions based on config with per-permission rules
+	env["OPENCODE_PERMISSION"] = buildPermissionJSON(a.cfg.AutoApprove)
+
+	// Inject runtime config for auto-compaction
+	env["OPENCODE_CONFIG_CONTENT"] = `{"compaction":{"auto":true}}`
 
 	return env, nil
+}
+
+// buildPermissionJSON builds the OPENCODE_PERMISSION JSON value.
+func buildPermissionJSON(autoApprove bool) string {
+	if autoApprove {
+		return `{"rules":[{"permission":"bash","grant":"always"},{"permission":"write","grant":"always"},{"permission":"read","grant":"always"},{"permission":"edit","grant":"always"},{"permission":"glob","grant":"always"},{"permission":"grep","grant":"always"},{"permission":"webfetch","grant":"always"}],"question":"deny"}`
+	}
+	return `{"rules":[{"permission":"bash","grant":"ask"},{"permission":"write","grant":"ask"},{"permission":"read","grant":"ask"},{"permission":"edit","grant":"ask"}],"question":"deny"}`
 }
 
 // PrepareCommandArgs returns extra command-line arguments for the agent process.
@@ -247,6 +265,9 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		Name:    a.agentID,
 		Version: "unknown",
 	}
+
+	// Fetch providers and commands in the background — don't block initialization
+	go a.fetchPostInitData()
 
 	a.logger.Info("OpenCode adapter initialized")
 
@@ -325,12 +346,13 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
 
-	// Emit session status event for resume token storage
+	// Emit session status event
 	a.sendUpdate(AgentEvent{
-		Type:      streams.EventTypeSessionStatus,
-		SessionID: sessionID,
+		Type:          streams.EventTypeSessionStatus,
+		SessionID:     sessionID,
+		SessionStatus: streams.SessionStatusNew,
 		Data: map[string]any{
-			"session_status": "active",
+			"session_status": streams.SessionStatusNew,
 			"init":           true,
 		},
 	})
@@ -356,6 +378,17 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.logger.Info("loaded session (forked)",
 		zap.String("original_session_id", sessionID),
 		zap.String("new_session_id", newSessionID))
+
+	// Emit session status event for resumed session
+	a.sendUpdate(AgentEvent{
+		Type:          streams.EventTypeSessionStatus,
+		SessionID:     newSessionID,
+		SessionStatus: streams.SessionStatusResumed,
+		Data: map[string]any{
+			"session_status": streams.SessionStatusResumed,
+			"init":           true,
+		},
+	})
 
 	return nil
 }
@@ -397,14 +430,16 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 		a.logger.Warn("failed to start event stream", zap.Error(err))
 	}
 
-	// Send prompt
-	// TODO: Support model selection from config
-	if err := client.SendPrompt(ctx, sessionID, message, nil, "", ""); err != nil {
+	// Send prompt with model selection (blocks until OpenCode finishes)
+	if err := client.SendPrompt(ctx, sessionID, message, a.model, "", ""); err != nil {
 		a.mu.Lock()
 		a.resultCh = nil
 		a.mu.Unlock()
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
+
+	a.logger.Info("prompt HTTP request completed, waiting for SSE idle signal",
+		zap.String("session_id", sessionID))
 
 	// Wait for result via control channel or context cancellation
 	controlCh := client.ControlChannel()
@@ -616,6 +651,17 @@ func (a *Adapter) handleSDKEvent(event *opencode.SDKEventEnvelope) {
 
 	case opencode.SDKEventPermissionAsked:
 		a.handlePermissionAsked(event.Properties, sessionID)
+
+	case opencode.SDKEventSessionCompacted:
+		a.handleSessionCompacted(event.Properties, sessionID)
+
+	case opencode.SDKEventTodoUpdated:
+		// Log but don't emit — todo tracking is informational
+		a.logger.Debug("todo.updated event received")
+
+	case opencode.SDKEventMessageRemoved, opencode.SDKEventMessagePartRemoved:
+		// Log message/part removal — these occur during compaction
+		a.logger.Debug("message removal event", zap.String("event_type", event.Type))
 
 	case opencode.SDKEventSessionError:
 		props, err := opencode.ParseSessionError(event.Properties)
@@ -872,6 +918,27 @@ func deriveToolTitle(toolName string, input map[string]any) string {
 	return ""
 }
 
+// handleSessionCompacted processes session.compacted events from auto-compaction.
+func (a *Adapter) handleSessionCompacted(props json.RawMessage, sessionID string) {
+	a.logger.Info("session compacted", zap.String("session_id", sessionID))
+
+	// Reset token tracking since compaction changes the context window usage
+	a.mu.Lock()
+	a.totalTokens = 0
+	// Clear text part state since message IDs may have changed
+	a.textParts = make(map[string]*textPartState)
+	a.messageRoles = make(map[string]string)
+	a.mu.Unlock()
+
+	// Emit a context window update showing reset usage
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeContextWindow,
+		SessionID:         sessionID,
+		ContextWindowUsed: 0,
+		ContextWindowSize: int64(a.modelContextWindow),
+	})
+}
+
 // handleMessageUpdated processes message.updated events (for token tracking)
 func (a *Adapter) handleMessageUpdated(props json.RawMessage, sessionID string) {
 	parsed, err := opencode.ParseMessageUpdated(props)
@@ -996,6 +1063,20 @@ func (a *Adapter) handlePermissionAsked(props json.RawMessage, sessionID string)
 	}
 }
 
+// parseModelSpec parses a "providerID/modelID" string into a ModelSpec.
+// If no "/" is found, the whole string is used as modelID with empty providerID.
+func parseModelSpec(model string) *opencode.ModelSpec {
+	if idx := strings.Index(model, "/"); idx > 0 {
+		return &opencode.ModelSpec{
+			ProviderID: model[:idx],
+			ModelID:    model[idx+1:],
+		}
+	}
+	return &opencode.ModelSpec{
+		ModelID: model,
+	}
+}
+
 // formatPermissionTitle builds a display title for a permission request.
 func formatPermissionTitle(permission string, metadata map[string]any) string {
 	if metadata != nil {
@@ -1026,6 +1107,87 @@ func (a *Adapter) RespondToPermission(ctx context.Context, requestID string, app
 	}
 
 	return a.client.ReplyPermission(ctx, requestID, reply, msg)
+}
+
+// fetchPostInitData fetches providers and commands after initialization.
+// Runs in a goroutine with a timeout so it never blocks the main flow.
+func (a *Adapter) fetchPostInitData() {
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+
+	a.fetchContextWindow(ctx)
+	a.discoverCommands(ctx)
+}
+
+// fetchContextWindow queries the /provider endpoint and updates the model context window.
+func (a *Adapter) fetchContextWindow(ctx context.Context) {
+	providers, err := a.client.ListProviders(ctx)
+	if err != nil {
+		a.logger.Debug("failed to fetch providers for context window", zap.Error(err))
+		return
+	}
+
+	// Look up the context window for our configured model
+	a.mu.RLock()
+	model := a.model
+	a.mu.RUnlock()
+
+	if model == nil {
+		return
+	}
+
+	for _, p := range providers.All {
+		if p.ID != model.ProviderID {
+			continue
+		}
+		if modelInfo, ok := p.Models[model.ModelID]; ok && modelInfo.Limit.Context > 0 {
+			a.mu.Lock()
+			a.modelContextWindow = modelInfo.Limit.Context
+			a.mu.Unlock()
+			a.logger.Info("updated context window from provider",
+				zap.String("provider", model.ProviderID),
+				zap.String("model", model.ModelID),
+				zap.Int("context_window", modelInfo.Limit.Context))
+			return
+		}
+	}
+}
+
+// discoverCommands queries the /command endpoint and emits available commands.
+func (a *Adapter) discoverCommands(ctx context.Context) {
+	commands, err := a.client.ListCommands(ctx)
+	if err != nil {
+		a.logger.Debug("failed to discover commands", zap.Error(err))
+		return
+	}
+
+	if len(commands) == 0 {
+		return
+	}
+
+	a.mu.RLock()
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	available := make([]streams.AvailableCommand, 0, len(commands))
+	for _, cmd := range commands {
+		ac := streams.AvailableCommand{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+		}
+		if cmd.Input != nil {
+			ac.InputHint = cmd.Input.Hint
+		}
+		available = append(available, ac)
+	}
+
+	a.sendUpdate(AgentEvent{
+		Type:              streams.EventTypeAvailableCommands,
+		SessionID:         sessionID,
+		AvailableCommands: available,
+	})
+
+	a.logger.Info("discovered slash commands", zap.Int("count", len(available)))
 }
 
 // openCodeConfigPath returns the path to the OpenCode config file.

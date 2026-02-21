@@ -18,6 +18,13 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// SSE reconnection constants
+const (
+	sseReconnectBaseDelay = 3 * time.Second
+	sseReconnectMaxDelay  = 30 * time.Second
+	sseMaxRetries         = 20
+)
+
 // Client manages HTTP communication with OpenCode server
 type Client struct {
 	baseURL    string
@@ -31,8 +38,9 @@ type Client struct {
 	controlCh    chan ControlEvent
 
 	// SSE connection tracking - prevents multiple concurrent connections
-	sseCancel context.CancelFunc
-	sseActive bool
+	sseCancel    context.CancelFunc
+	sseActive    bool
+	lastEventID  string // Last-Event-ID for reconnection
 
 	mu     sync.RWMutex
 	closed bool
@@ -245,7 +253,8 @@ func (c *Client) ForkSession(ctx context.Context, sessionID string) (string, err
 	return session.ID, nil
 }
 
-// SendPrompt sends a prompt to the session
+// SendPrompt sends a prompt to the session.
+// This call blocks until OpenCode finishes processing the prompt.
 func (c *Client) SendPrompt(ctx context.Context, sessionID, prompt string, model *ModelSpec, agent, variant string) error {
 	req := PromptRequest{
 		Model:   model,
@@ -261,25 +270,30 @@ func (c *Client) SendPrompt(ctx context.Context, sessionID, prompt string, model
 		return fmt.Errorf("marshal prompt request: %w", err)
 	}
 
+	c.logger.Debug("sending prompt HTTP request",
+		zap.String("session_id", sessionID),
+		zap.Int("body_len", len(body)))
+
 	path := fmt.Sprintf("/session/%s/message", sessionID)
-	// Use a dedicated client with long timeout for prompts - they can take minutes
 	resp, err := c.doPromptRequest(ctx, http.MethodPost, path, strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("send prompt request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read and validate response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read prompt response: %w", err)
 	}
 
+	c.logger.Debug("prompt HTTP response received",
+		zap.Int("status", resp.StatusCode),
+		zap.Int("body_len", len(respBody)))
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("prompt failed: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Validate response structure
 	trimmed := strings.TrimSpace(string(respBody))
 	if trimmed == "" {
 		return fmt.Errorf("prompt returned empty response")
@@ -290,14 +304,12 @@ func (c *Client) SendPrompt(ctx context.Context, sessionID, prompt string, model
 		return fmt.Errorf("parse prompt response: %w", err)
 	}
 
-	// Check for success response: { info, parts }
 	if _, hasInfo := parsed["info"]; hasInfo {
 		if _, hasParts := parsed["parts"]; hasParts {
 			return nil
 		}
 	}
 
-	// Check for error response: { name, data }
 	if name, ok := parsed["name"].(string); ok {
 		message := "unknown error"
 		if data, ok := parsed["data"].(map[string]any); ok {
@@ -359,12 +371,101 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, reply string, m
 	return nil
 }
 
+// Summarize triggers compaction/summarization for a session.
+func (c *Client) Summarize(ctx context.Context, sessionID string, model *ModelSpec) error {
+	payload := map[string]any{}
+	if model != nil {
+		payload["model"] = model
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal summarize request: %w", err)
+	}
+
+	path := fmt.Sprintf("/session/%s/summarize", sessionID)
+	resp, err := c.doPromptRequest(ctx, http.MethodPost, path, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("summarize request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("summarize failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+	_, _ = io.ReadAll(resp.Body)
+	return nil
+}
+
+// ListProviders fetches provider information including model context windows.
+func (c *Client) ListProviders(ctx context.Context) (*ProviderListResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/provider", nil)
+	if err != nil {
+		return nil, fmt.Errorf("list providers request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list providers failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result ProviderListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse providers response: %w", err)
+	}
+	return &result, nil
+}
+
+// ListCommands fetches available slash commands from the server.
+func (c *Client) ListCommands(ctx context.Context) ([]CommandInfo, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/command", nil)
+	if err != nil {
+		return nil, fmt.Errorf("list commands request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list commands failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result []CommandInfo
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse commands response: %w", err)
+	}
+	return result, nil
+}
+
+// RunSessionCommand executes a slash command in a session.
+func (c *Client) RunSessionCommand(ctx context.Context, sessionID, command string) error {
+	payload := map[string]string{"command": command}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal command request: %w", err)
+	}
+
+	path := fmt.Sprintf("/session/%s/command", sessionID)
+	resp, err := c.doPromptRequest(ctx, http.MethodPost, path, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("run command request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("run command failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+	_, _ = io.ReadAll(resp.Body)
+	return nil
+}
+
 // StartEventStream starts the SSE event stream and processes events.
 // It ensures only one SSE connection is active at a time to prevent duplicate events.
+// Supports automatic reconnection with Last-Event-ID for event resumption.
 func (c *Client) StartEventStream(ctx context.Context, sessionID string) error {
 	c.mu.Lock()
-	// Check if already connected - prevent multiple concurrent SSE connections
-	// which would cause duplicate event processing
 	if c.sseActive {
 		c.mu.Unlock()
 		c.logger.Debug("SSE stream already active, skipping duplicate connection",
@@ -374,127 +475,173 @@ func (c *Client) StartEventStream(ctx context.Context, sessionID string) error {
 	c.sseActive = true
 	c.mu.Unlock()
 
-	url := c.baseURL + "/event?directory=" + c.directory
-
-	// Create a cancellable context for this SSE connection
 	sseCtx, sseCancel := context.WithCancel(ctx)
 
-	// Store the cancel function so we can close this connection later if needed
 	c.mu.Lock()
 	c.sseCancel = sseCancel
 	c.mu.Unlock()
 
-	req, err := http.NewRequestWithContext(sseCtx, http.MethodGet, url, nil)
-	if err != nil {
+	// Connect and start processing with reconnect support
+	if err := c.connectSSE(sseCtx, sessionID); err != nil {
 		c.mu.Lock()
 		c.sseActive = false
 		c.sseCancel = nil
 		c.mu.Unlock()
 		sseCancel()
-		return fmt.Errorf("create event stream request: %w", err)
+		return err
+	}
+
+	return nil
+}
+
+// connectSSE establishes the SSE connection and starts the event loop.
+func (c *Client) connectSSE(ctx context.Context, sessionID string) error {
+	resp, err := c.dialSSE(ctx)
+	if err != nil {
+		return err
+	}
+	c.logger.Debug("SSE stream connected", zap.String("session_id", sessionID))
+	go c.sseEventLoop(ctx, sessionID, resp.Body)
+	return nil
+}
+
+// dialSSE creates and executes an SSE HTTP request, including Last-Event-ID if available.
+func (c *Client) dialSSE(ctx context.Context) (*http.Response, error) {
+	url := c.baseURL + "/event?directory=" + c.directory
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create event stream request: %w", err)
 	}
 
 	req.Header.Set("Authorization", c.buildAuthHeader())
 	req.Header.Set("X-OpenCode-Directory", c.directory)
 	req.Header.Set("Accept", "text/event-stream")
 
-	// Use a client without timeout for SSE
+	c.mu.RLock()
+	lastID := c.lastEventID
+	c.mu.RUnlock()
+	if lastID != "" {
+		req.Header.Set("Last-Event-ID", lastID)
+	}
+
 	sseClient := &http.Client{}
 	resp, err := sseClient.Do(req)
 	if err != nil {
-		c.mu.Lock()
-		c.sseActive = false
-		c.sseCancel = nil
-		c.mu.Unlock()
-		sseCancel()
-		return fmt.Errorf("connect event stream: %w", err)
+		return nil, fmt.Errorf("connect event stream: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		c.mu.Lock()
-		c.sseActive = false
-		c.sseCancel = nil
-		c.mu.Unlock()
-		sseCancel()
-		return fmt.Errorf("event stream failed: HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("event stream failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	c.logger.Debug("SSE stream connected",
-		zap.String("session_id", sessionID))
-
-	// Process events in background
-	go c.processEventStream(sseCtx, sessionID, resp.Body)
-
-	return nil
+	return resp, nil
 }
 
-// processEventStream reads and processes SSE events
-func (c *Client) processEventStream(ctx context.Context, sessionID string, body io.ReadCloser) {
+// sseEventLoop reads SSE events, dispatches them, and reconnects on disconnect.
+func (c *Client) sseEventLoop(ctx context.Context, sessionID string, body io.ReadCloser) {
 	defer func() {
-		_ = body.Close()
-		// Mark SSE as inactive when stream ends
 		c.mu.Lock()
 		c.sseActive = false
 		c.sseCancel = nil
 		c.mu.Unlock()
-		c.logger.Debug("SSE stream ended", zap.String("session_id", sessionID))
 	}()
 
+	for attempt := 0; ; attempt++ {
+		disconnectReason := c.readSSEStream(ctx, sessionID, body)
+		_ = body.Close()
+
+		if disconnectReason == sseDisconnectCancelled || disconnectReason == sseDisconnectClosed {
+			return
+		}
+
+		// Attempt reconnection with exponential backoff
+		if attempt >= sseMaxRetries {
+			c.logger.Warn("SSE max retries reached, giving up",
+				zap.Int("retries", attempt))
+			c.sendControlEvent("disconnected")
+			return
+		}
+
+		delay := sseBackoff(attempt)
+		c.logger.Info("SSE stream disconnected, reconnecting",
+			zap.Int("attempt", attempt+1),
+			zap.Duration("delay", delay))
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		resp, err := c.dialSSE(ctx)
+		if err != nil {
+			c.logger.Warn("SSE reconnect failed", zap.Error(err), zap.Int("attempt", attempt+1))
+			continue
+		}
+
+		body = resp.Body
+		c.logger.Info("SSE stream reconnected", zap.Int("attempt", attempt+1))
+	}
+}
+
+// sseDisconnectReason indicates why the SSE stream ended.
+type sseDisconnectReason int
+
+const (
+	sseDisconnectError     sseDisconnectReason = iota // network/scan error, should reconnect
+	sseDisconnectCancelled                            // context cancelled, no reconnect
+	sseDisconnectClosed                               // client closed, no reconnect
+)
+
+// readSSEStream reads events from a single SSE connection until it ends.
+func (c *Client) readSSEStream(ctx context.Context, sessionID string, body io.Reader) sseDisconnectReason {
 	scanner := bufio.NewScanner(body)
-	// Increase buffer size for potentially large events
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
 	var dataBuffer strings.Builder
+	var currentID string
 
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return
+			return sseDisconnectCancelled
 		default:
 		}
 
 		line := scanner.Text()
 
-		// SSE format: "data: {...}"
+		// Track event ID for reconnection
+		if strings.HasPrefix(line, "id: ") {
+			currentID = strings.TrimPrefix(line, "id: ")
+			continue
+		}
+
 		if strings.HasPrefix(line, "data: ") {
 			dataBuffer.WriteString(strings.TrimPrefix(line, "data: "))
 			continue
 		}
 
-		// Empty line signals end of event
 		if line == "" && dataBuffer.Len() > 0 {
 			data := strings.TrimSpace(dataBuffer.String())
 			dataBuffer.Reset()
+
+			// Update Last-Event-ID
+			if currentID != "" {
+				c.mu.Lock()
+				c.lastEventID = currentID
+				c.mu.Unlock()
+				currentID = ""
+			}
 
 			if data == "" {
 				continue
 			}
 
-			event, err := ParseSDKEvent([]byte(data))
-			if err != nil {
-				c.logger.Warn("failed to parse SDK event", zap.Error(err))
-				continue
-			}
-
-			// Filter events for this session
-			if !c.eventMatchesSession(event, sessionID) {
-				continue
-			}
-
-			// Process control events
-			c.processControlEvent(event, sessionID)
-
-			// Call event handler
-			c.mu.RLock()
-			handler := c.eventHandler
-			c.mu.RUnlock()
-
-			if handler != nil {
-				handler(event)
-			}
+			c.dispatchSSEEvent(data, sessionID)
 		}
 	}
 
@@ -502,16 +649,67 @@ func (c *Client) processEventStream(ctx context.Context, sessionID string, body 
 		c.logger.Error("event stream error", zap.Error(err))
 	}
 
-	// Notify disconnection (check if closed first to avoid panic)
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	if closed {
+		return sseDisconnectClosed
+	}
+	return sseDisconnectError
+}
+
+// dispatchSSEEvent parses and dispatches a single SSE event.
+func (c *Client) dispatchSSEEvent(data, sessionID string) {
+	event, err := ParseSDKEvent([]byte(data))
+	if err != nil {
+		c.logger.Warn("failed to parse SDK event", zap.Error(err))
+		return
+	}
+
+	c.logger.Debug("SSE event received",
+		zap.String("type", event.Type),
+		zap.String("session_id", sessionID))
+
+	if !c.eventMatchesSession(event, sessionID) {
+		c.logger.Debug("SSE event filtered (session mismatch)", zap.String("type", event.Type))
+		return
+	}
+
+	c.processControlEvent(event, sessionID)
+
+	c.mu.RLock()
+	handler := c.eventHandler
+	c.mu.RUnlock()
+
+	if handler != nil {
+		handler(event)
+	}
+}
+
+// sendControlEvent sends a control event if the client is not closed.
+func (c *Client) sendControlEvent(eventType string) {
 	c.mu.RLock()
 	closed := c.closed
 	c.mu.RUnlock()
 	if !closed {
 		select {
-		case c.controlCh <- ControlEvent{Type: "disconnected"}:
+		case c.controlCh <- ControlEvent{Type: eventType}:
 		default:
 		}
 	}
+}
+
+// sseBackoff computes exponential backoff delay for SSE reconnection.
+func sseBackoff(attempt int) time.Duration {
+	delay := sseReconnectBaseDelay
+	for i := 0; i < attempt; i++ {
+		delay *= 2
+		if delay > sseReconnectMaxDelay {
+			delay = sseReconnectMaxDelay
+			break
+		}
+	}
+	return delay
 }
 
 // eventMatchesSession checks if an event belongs to the specified session
