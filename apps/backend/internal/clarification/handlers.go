@@ -9,10 +9,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/task/repository"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wsmsg "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+// messageStore is the minimal task repository interface required by clarification handlers.
+type messageStore interface {
+	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
+	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
+	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
+}
 
 // Broadcaster interface for sending WebSocket notifications
 type Broadcaster interface {
@@ -32,12 +39,12 @@ type Handlers struct {
 	store          *Store
 	hub            Broadcaster
 	messageCreator MessageCreator
-	repo           repository.Repository
+	repo           messageStore
 	logger         *logger.Logger
 }
 
 // NewHandlers creates new clarification handlers.
-func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo repository.Repository, log *logger.Logger) *Handlers {
+func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, log *logger.Logger) *Handlers {
 	return &Handlers{
 		store:          store,
 		hub:            hub,
@@ -48,7 +55,7 @@ func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, r
 }
 
 // RegisterRoutes registers clarification HTTP routes.
-func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo repository.Repository, log *logger.Logger) {
+func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, log *logger.Logger) {
 	h := NewHandlers(store, hub, messageCreator, repo, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)

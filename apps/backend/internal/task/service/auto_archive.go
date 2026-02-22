@@ -26,7 +26,7 @@ func (s *Service) StartAutoArchiveLoop(ctx context.Context) {
 }
 
 func (s *Service) runAutoArchive(ctx context.Context) {
-	tasks, err := s.repo.ListTasksForAutoArchive(ctx)
+	tasks, err := s.tasks.ListTasksForAutoArchive(ctx)
 	if err != nil {
 		s.logger.Error("auto-archive: failed to list candidates", zap.Error(err))
 		return

@@ -295,7 +295,20 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 	})
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	eventBus := bus.NewMemoryEventBus(log)
-	return NewService(repo, eventBus, log, RepositoryDiscoveryConfig{
+	return NewService(Repos{
+		Workspaces:   repo,
+		Tasks:        repo,
+		TaskRepos:    repo,
+		Workflows:    repo,
+		Messages:     repo,
+		Turns:        repo,
+		Sessions:     repo,
+		GitSnapshots: repo,
+		RepoEntities: repo,
+		Executors:    repo,
+		Environments: repo,
+		Reviews:      repo,
+	}, eventBus, log, RepositoryDiscoveryConfig{
 		Roots:    []string{root},
 		MaxDepth: 6,
 	})

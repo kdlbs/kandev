@@ -24,13 +24,13 @@ const createdByAgent = "agent"
 
 // PlanService provides task plan business logic.
 type PlanService struct {
-	repo     repository.Repository
+	repo     repository.PlanRepository
 	eventBus bus.EventBus
 	logger   *logger.Logger
 }
 
 // NewPlanService creates a new task plan service.
-func NewPlanService(repo repository.Repository, eventBus bus.EventBus, log *logger.Logger) *PlanService {
+func NewPlanService(repo repository.PlanRepository, eventBus bus.EventBus, log *logger.Logger) *PlanService {
 	return &PlanService{
 		repo:     repo,
 		eventBus: eventBus,

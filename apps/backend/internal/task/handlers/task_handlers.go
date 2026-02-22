@@ -8,16 +8,24 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/dto"
-	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
+// handlerRepo is the minimal repository interface needed by task handlers.
+type handlerRepo interface {
+	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error
+	GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error)
+	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
+	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
 type TaskHandlers struct {
 	service      *service.Service
 	orchestrator OrchestratorStarter
-	repo         repository.Repository
+	repo         handlerRepo
 	planService  *service.PlanService
 	logger       *logger.Logger
 }
@@ -31,7 +39,7 @@ type OrchestratorStarter interface {
 	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }
 
-func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
+func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	return &TaskHandlers{
 		service:      svc,
 		orchestrator: orchestrator,
@@ -41,7 +49,7 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo repository.Repository, planService *service.PlanService, log *logger.Logger) {
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) {
 	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)

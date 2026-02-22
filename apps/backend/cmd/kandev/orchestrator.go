@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/secrets"
-	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -21,7 +21,7 @@ import (
 func provideOrchestrator(
 	log *logger.Logger,
 	eventBus bus.EventBus,
-	taskRepo repository.Repository,
+	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	userSvc *userservice.Service,
 	lifecycleMgr *lifecycle.Manager,

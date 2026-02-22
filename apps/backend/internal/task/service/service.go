@@ -83,9 +83,36 @@ func validateExecutorConfig(config map[string]string) error {
 	return nil
 }
 
+// Repos holds the repository sub-interfaces used by the task service.
+type Repos struct {
+	Workspaces   repository.WorkspaceRepository
+	Tasks        repository.TaskRepository
+	TaskRepos    repository.TaskRepoRepository
+	Workflows    repository.WorkflowRepository
+	Messages     repository.MessageRepository
+	Turns        repository.TurnRepository
+	Sessions     repository.SessionRepository
+	GitSnapshots repository.GitSnapshotRepository
+	RepoEntities repository.RepositoryEntityRepository
+	Executors    repository.ExecutorRepository
+	Environments repository.EnvironmentRepository
+	Reviews      repository.ReviewRepository
+}
+
 // Service provides task business logic
 type Service struct {
-	repo                repository.Repository
+	workspaces          repository.WorkspaceRepository
+	tasks               repository.TaskRepository
+	taskRepos           repository.TaskRepoRepository
+	workflows           repository.WorkflowRepository
+	messages            repository.MessageRepository
+	turns               repository.TurnRepository
+	sessions            repository.SessionRepository
+	gitSnapshots        repository.GitSnapshotRepository
+	repoEntities        repository.RepositoryEntityRepository
+	executors           repository.ExecutorRepository
+	environments        repository.EnvironmentRepository
+	reviews             repository.ReviewRepository
 	eventBus            bus.EventBus
 	logger              *logger.Logger
 	discoveryConfig     RepositoryDiscoveryConfig
@@ -97,9 +124,20 @@ type Service struct {
 }
 
 // NewService creates a new task service
-func NewService(repo repository.Repository, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
+func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		repo:            repo,
+		workspaces:      repos.Workspaces,
+		tasks:           repos.Tasks,
+		taskRepos:       repos.TaskRepos,
+		workflows:       repos.Workflows,
+		messages:        repos.Messages,
+		turns:           repos.Turns,
+		sessions:        repos.Sessions,
+		gitSnapshots:    repos.GitSnapshots,
+		repoEntities:    repos.RepoEntities,
+		executors:       repos.Executors,
+		environments:    repos.Environments,
+		reviews:         repos.Reviews,
 		eventBus:        eventBus,
 		logger:          log,
 		discoveryConfig: discoveryConfig,

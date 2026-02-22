@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -126,7 +127,7 @@ func testLogger() *logger.Logger {
 func strPtr(s string) *string { return &s }
 
 // setupTestRepo creates a real in-memory SQLite repository for testing.
-func setupTestRepo(t *testing.T) repository.Repository {
+func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
@@ -146,7 +147,7 @@ func setupTestRepo(t *testing.T) repository.Repository {
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
-func seedSession(t *testing.T, repo repository.Repository, taskID, sessionID, workflowStepID string) {
+func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -194,11 +195,11 @@ func seedSession(t *testing.T, repo repository.Repository, taskID, sessionID, wo
 }
 
 // createTestService creates a Service with minimal dependencies for event handler testing.
-func createTestService(repo repository.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo) *Service {
+func createTestService(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo) *Service {
 	return createTestServiceWithAgent(repo, stepGetter, taskRepo, &mockAgentManager{})
 }
 
-func createTestServiceWithAgent(repo repository.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
+func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	return &Service{
 		logger:             testLogger(),
 		repo:               repo,

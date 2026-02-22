@@ -28,7 +28,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -99,6 +98,52 @@ type WorktreeRecreator interface {
 	RecreateWorktree(ctx context.Context, req WorktreeRecreateRequest) (*WorktreeRecreateResult, error)
 }
 
+// repoStore is the repository interface accepted by NewService.
+// It covers both the orchestrator's own needs (sessionExecutorStore) and
+// the executor package's needs (executor.executorStore).
+type repoStore interface {
+	sessionExecutorStore
+	// Additional methods needed by executor
+	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	SetSessionPrimary(ctx context.Context, sessionID string) error
+	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	GetRepository(ctx context.Context, id string) (*models.Repository, error)
+	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
+	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+}
+
+// sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
+type sessionExecutorStore interface {
+	// Session
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	ClearSessionExecutionID(ctx context.Context, id string) error
+	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
+	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
+	// Executor running state
+	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
+	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+	// Executor
+	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
+	// Task
+	GetTask(ctx context.Context, id string) (*models.Task, error)
+	UpdateTask(ctx context.Context, task *models.Task) error
+	// Git snapshots and commits
+	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
+	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
+	DeleteSessionCommit(ctx context.Context, id string) error
+}
+
 // WorktreeRecreateRequest contains parameters for recreating a worktree.
 type WorktreeRecreateRequest struct {
 	SessionID    string
@@ -121,7 +166,7 @@ type Service struct {
 	logger       *logger.Logger
 	eventBus     bus.EventBus
 	taskRepo     scheduler.TaskRepository
-	repo         repository.Repository // Full repository for agent sessions
+	repo         sessionExecutorStore
 	agentManager executor.AgentManagerClient
 
 	// Components
@@ -171,7 +216,7 @@ func NewService(
 	eventBus bus.EventBus,
 	agentManager executor.AgentManagerClient,
 	taskRepo scheduler.TaskRepository,
-	repo repository.Repository,
+	repo repoStore,
 	shellPrefs executor.ShellPreferenceProvider,
 	secretStore secrets.SecretStore,
 	log *logger.Logger,

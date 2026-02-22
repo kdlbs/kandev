@@ -21,7 +21,7 @@ import (
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
@@ -35,7 +35,7 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		UpdatedAt:     time.Now().UTC(),
 	}
 
-	if err := s.repo.CreateTurn(ctx, turn); err != nil {
+	if err := s.turns.CreateTurn(ctx, turn); err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
 	}
@@ -56,13 +56,13 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil // No active turn to complete
 	}
 
-	if err := s.repo.CompleteTurn(ctx, turnID); err != nil {
+	if err := s.turns.CompleteTurn(ctx, turnID); err != nil {
 		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
 		return err
 	}
 
 	// Safety net: mark any tool calls still in "running" state as "complete"
-	if affected, err := s.repo.CompleteRunningToolCallsForTurn(ctx, turnID); err != nil {
+	if affected, err := s.turns.CompleteRunningToolCallsForTurn(ctx, turnID); err != nil {
 		s.logger.Warn("failed to complete running tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
 	} else if affected > 0 {
 		s.logger.Info("completed stale running tool calls on turn end",
@@ -71,7 +71,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	}
 
 	// Fetch the completed turn to get the completed_at timestamp
-	turn, err := s.repo.GetTurn(ctx, turnID)
+	turn, err := s.turns.GetTurn(ctx, turnID)
 	if err != nil {
 		s.logger.Warn("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
 		// Turn was likely deleted (task deletion race), skip publishing
@@ -90,14 +90,14 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 
 // GetActiveTurn returns the currently active (non-completed) turn for a session.
 func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	return s.turns.GetActiveTurnBySessionID(ctx, sessionID)
 }
 
 // getOrStartTurn returns the active turn for a session, or starts a new one if none exists.
 // This is used to ensure messages always have a valid turn ID.
 func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	// First try to get an active turn
-	turn, err := s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.turns.GetActiveTurnBySessionID(ctx, sessionID)
 	if err == nil && turn != nil {
 		return turn, nil
 	}
@@ -129,34 +129,34 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 
 // GetGitSnapshots retrieves git snapshots for a session
 func (s *Service) GetGitSnapshots(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
-	return s.repo.GetGitSnapshotsBySession(ctx, sessionID, limit)
+	return s.gitSnapshots.GetGitSnapshotsBySession(ctx, sessionID, limit)
 }
 
 // GetLatestGitSnapshot retrieves the latest git snapshot for a session
 func (s *Service) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
-	return s.repo.GetLatestGitSnapshot(ctx, sessionID)
+	return s.gitSnapshots.GetLatestGitSnapshot(ctx, sessionID)
 }
 
 // GetFirstGitSnapshot retrieves the first git snapshot for a session (oldest)
 func (s *Service) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
-	return s.repo.GetFirstGitSnapshot(ctx, sessionID)
+	return s.gitSnapshots.GetFirstGitSnapshot(ctx, sessionID)
 }
 
 // GetSessionCommits retrieves commits for a session
 func (s *Service) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
-	return s.repo.GetSessionCommits(ctx, sessionID)
+	return s.gitSnapshots.GetSessionCommits(ctx, sessionID)
 }
 
 // GetLatestSessionCommit retrieves the latest commit for a session
 func (s *Service) GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error) {
-	return s.repo.GetLatestSessionCommit(ctx, sessionID)
+	return s.gitSnapshots.GetLatestSessionCommit(ctx, sessionID)
 }
 
 // GetCumulativeDiff computes the cumulative diff from base commit to current HEAD
 // by using the first snapshot's base_commit and the latest snapshot's files
 func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*models.CumulativeDiff, error) {
 	// Get the first snapshot to find the base commit
-	firstSnapshot, err := s.repo.GetFirstGitSnapshot(ctx, sessionID)
+	firstSnapshot, err := s.gitSnapshots.GetFirstGitSnapshot(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil // No snapshots yet — valid state for fresh tasks
@@ -165,13 +165,13 @@ func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*mod
 	}
 
 	// Get the latest snapshot for current state
-	latestSnapshot, err := s.repo.GetLatestGitSnapshot(ctx, sessionID)
+	latestSnapshot, err := s.gitSnapshots.GetLatestGitSnapshot(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest git snapshot: %w", err)
 	}
 
 	// Count total commits for this session
-	commits, err := s.repo.GetSessionCommits(ctx, sessionID)
+	commits, err := s.gitSnapshots.GetSessionCommits(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session commits: %w", err)
 	}
@@ -189,7 +189,7 @@ func (s *Service) GetCumulativeDiff(ctx context.Context, sessionID string) (*mod
 // This implements the lifecycle.WorkspaceInfoProvider interface.
 // The taskID parameter is optional - if empty, it will be looked up from the session.
 func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*lifecycle.WorkspaceInfo, error) {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session %s: %w", sessionID, err)
 	}
