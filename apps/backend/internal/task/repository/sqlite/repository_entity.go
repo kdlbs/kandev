@@ -121,6 +121,26 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 	return result, rows.Err()
 }
 
+// GetRepositoryByProviderInfo finds a repository by workspace, provider, owner, and name.
+// Returns nil, nil if not found.
+func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, owner, name string) (*models.Repository, error) {
+	repository := &models.Repository{}
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
+		       provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script, created_at, updated_at, deleted_at
+		FROM repositories
+		WHERE workspace_id = ? AND provider = ? AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL
+	`), workspaceID, provider, owner, name).Scan(
+		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return repository, err
+}
+
 // CreateRepositoryScript creates a new repository script
 func (r *Repository) CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error {
 	if script.ID == "" {

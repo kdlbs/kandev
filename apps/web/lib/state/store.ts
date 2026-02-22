@@ -9,6 +9,12 @@ import type {
   Turn,
   TaskSession,
 } from "@/lib/types/http";
+import type {
+  GitHubStatus,
+  TaskPR,
+  PRWatch,
+  ReviewWatch as GitHubReviewWatch,
+} from "@/lib/types/github";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -16,12 +22,14 @@ import {
   createSessionSlice,
   createSessionRuntimeSlice,
   createUISlice,
+  createGitHubSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
   defaultSessionState,
   defaultSessionRuntimeState,
   defaultUIState,
+  defaultGitHubState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -102,6 +110,13 @@ export type {
   DiffState,
   ConnectionState,
   MobileKanbanState,
+  GitHubSlice,
+  GitHubSliceState,
+  GitHubSliceActions,
+  GitHubStatusState,
+  TaskPRsState,
+  PRWatchesState,
+  ReviewWatchesState,
 } from "./slices";
 
 // Combined AppState type
@@ -159,6 +174,12 @@ export type AppState = {
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
   prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
 
+  // GitHub slice
+  githubStatus: (typeof defaultGitHubState)["githubStatus"];
+  taskPRs: (typeof defaultGitHubState)["taskPRs"];
+  prWatches: (typeof defaultGitHubState)["prWatches"];
+  reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -168,6 +189,22 @@ export type AppState = {
   mobileSession: (typeof defaultUIState)["mobileSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
+
+  // GitHub actions
+  setGitHubStatus: (status: GitHubStatus | null) => void;
+  setGitHubStatusLoading: (loading: boolean) => void;
+  setTaskPRs: (prs: Record<string, TaskPR>) => void;
+  setTaskPR: (taskId: string, pr: TaskPR) => void;
+  removeTaskPR: (taskId: string) => void;
+  setTaskPRsLoading: (loading: boolean) => void;
+  setPRWatches: (watches: PRWatch[]) => void;
+  setPRWatchesLoading: (loading: boolean) => void;
+  removePRWatch: (id: string) => void;
+  setReviewWatches: (watches: GitHubReviewWatch[]) => void;
+  setReviewWatchesLoading: (loading: boolean) => void;
+  addReviewWatch: (watch: GitHubReviewWatch) => void;
+  updateReviewWatch: (watch: GitHubReviewWatch) => void;
+  removeReviewWatch: (id: string) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -367,6 +404,10 @@ const defaultState = {
   sessionMode: defaultSessionRuntimeState.sessionMode,
   userShells: defaultSessionRuntimeState.userShells,
   prepareProgress: defaultSessionRuntimeState.prepareProgress,
+  githubStatus: defaultGitHubState.githubStatus,
+  taskPRs: defaultGitHubState.taskPRs,
+  prWatches: defaultGitHubState.prWatches,
+  reviewWatches: defaultGitHubState.reviewWatches,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -430,6 +471,10 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
     userShells: { ...defaultState.userShells, ...initialState.userShells },
     prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
+    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
+    prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
+    reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
@@ -457,6 +502,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createSessionSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSessionRuntimeSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
@@ -498,6 +545,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       sessionMode: merged.sessionMode,
       userShells: merged.userShells,
       prepareProgress: merged.prepareProgress,
+      githubStatus: merged.githubStatus,
+      taskPRs: merged.taskPRs,
+      prWatches: merged.prWatches,
+      reviewWatches: merged.reviewWatches,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

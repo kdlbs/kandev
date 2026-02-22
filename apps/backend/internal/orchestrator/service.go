@@ -190,6 +190,18 @@ type Service struct {
 	// Worktree recreator for recreating missing worktrees on resume
 	worktreeRecreator WorktreeRecreator
 
+	// GitHub service for PR auto-detection on push
+	githubService GitHubService
+
+	// Review task creator for auto-creating tasks from review watch PRs
+	reviewTaskCreator ReviewTaskCreator
+
+	// Repository resolver for cloning + finding/creating repos for review tasks
+	repositoryResolver RepositoryResolver
+
+	// Push tracker: sessionID -> last known ahead count
+	pushTracker sync.Map
+
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
@@ -431,6 +443,9 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return err
 	}
+
+	// Subscribe to GitHub integration events
+	s.subscribeGitHubEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

@@ -7,6 +7,7 @@ import { PromptItem } from "./prompt-item";
 import { CommentItem } from "./comment-item";
 import { PlanCommentItem } from "./plan-comment-item";
 import { ImageItem } from "./image-item";
+import { PRFeedbackItem } from "./pr-feedback-item";
 
 export function ContextItemRenderer({
   item,
@@ -28,5 +29,7 @@ export function ContextItemRenderer({
       return <PlanCommentItem item={item} />;
     case "image":
       return <ImageItem item={item} />;
+    case "pr-feedback":
+      return <PRFeedbackItem item={item} />;
   }
 }

@@ -24,6 +24,9 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 
+	// GitHub integration
+	githubpkg "github.com/kandev/kandev/internal/github"
+
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -40,6 +43,9 @@ import (
 
 	// Orchestrator
 	"github.com/kandev/kandev/internal/orchestrator"
+
+	// Repository cloning
+	"github.com/kandev/kandev/internal/repoclone"
 
 	// Secrets
 	"github.com/kandev/kandev/internal/secrets"
@@ -201,7 +207,7 @@ func startServices( //nolint:cyclop
 		return false
 	}
 
-	services, agentSettingsController, err := provideServices(cfg, log, repos, eventBus, agentRegistry)
+	services, agentSettingsController, err := provideServices(cfg, log, repos, dbPool, eventBus, agentRegistry)
 	if err != nil {
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
@@ -281,15 +287,36 @@ func startAgentInfrastructure(
 	log.Info("Workspace info provider configured for session recovery")
 
 	// ============================================
+	// REPO CLONER
+	// ============================================
+	repoCloner := repoclone.NewCloner(repoclone.Config{
+		BasePath: cfg.RepoClone.BasePath,
+	}, repoclone.DetectGitProtocol(), log)
+	log.Info("Repository cloner configured",
+		zap.String("base_path", cfg.RepoClone.BasePath))
+
+	// ============================================
 	// ORCHESTRATOR
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(log, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator, repos.Secrets)
+		lifecycleMgr, agentRegistry, services.Workflow, worktreeRecreator, repos.Secrets, repoCloner)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
+	}
+
+	// Wire GitHub service into orchestrator for PR auto-detection on push
+	if services.GitHub != nil {
+		orchestratorSvc.SetGitHubService(services.GitHub)
+		log.Info("GitHub service configured for orchestrator (PR auto-detection enabled)")
+
+		// Start GitHub background poller
+		ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
+		ghPoller.Start(ctx)
+		addCleanup(func() error { ghPoller.Stop(); return nil })
+		log.Info("GitHub poller started")
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, dockerClient, repos, services,
@@ -320,7 +347,7 @@ func startGatewayAndServe(
 	gateway, _, notificationCtrl, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
-		repos.Notification, repos.Task,
+		repos.Notification, repos.Task, services.GitHub,
 	)
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
@@ -443,6 +470,13 @@ func subscribeEventBusHandlers(eventBus bus.EventBus, gateway *gateways.Gateway,
 		log.Error("Failed to subscribe to task_session.state_changed events", zap.Error(err))
 	} else {
 		log.Debug("Subscribed to task_session.state_changed events for WebSocket broadcasting")
+	}
+
+	// GitHub task-PR update broadcasts
+	if _, err := eventBus.Subscribe(events.GitHubTaskPRUpdated, newGitHubTaskPRUpdatedHandler(gateway, log)); err != nil {
+		log.Error("Failed to subscribe to github.task_pr.updated events", zap.Error(err))
+	} else {
+		log.Debug("Subscribed to github.task_pr.updated events for WebSocket broadcasting")
 	}
 }
 

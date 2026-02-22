@@ -12,13 +12,16 @@ import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
-import { useCommentsStore, isPlanComment } from "@/lib/state/slices/comments";
+import { useCommentsStore, isPlanComment, isPRFeedbackComment } from "@/lib/state/slices/comments";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
-import { usePendingPlanComments } from "@/hooks/domains/comments/use-pending-comments";
+import {
+  usePendingPlanComments,
+  usePendingPRFeedback,
+} from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
-import type { PlanComment } from "@/lib/state/slices/comments";
+import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -26,9 +29,12 @@ const PLAN_CONTEXT_PATH = "plan:context";
 export type CommentsState = {
   planComments: PlanComment[];
   pendingCommentsByFile: Record<string, DiffComment[]>;
+  pendingPRFeedback: PRFeedbackComment[];
   markCommentsSent: (ids: string[]) => void;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
+  handleRemovePRFeedback: (commentId: string) => void;
+  handleClearPRFeedback: () => void;
   clearSessionPlanComments: () => void;
 };
 
@@ -137,6 +143,7 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
   }, [resolvedSessionId, hydrateComments]);
   const planComments = usePendingPlanComments();
   const pendingCommentsByFile = usePendingDiffCommentsByFile();
+  const pendingPRFeedback = usePendingPRFeedback();
   const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const clearSessionPlanComments = useCallback(() => {
@@ -159,12 +166,27 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
     (commentId: string) => removeComment(commentId),
     [removeComment],
   );
+  const handleRemovePRFeedback = useCallback(
+    (commentId: string) => removeComment(commentId),
+    [removeComment],
+  );
+  const handleClearPRFeedback = useCallback(() => {
+    const state = useCommentsStore.getState();
+    const allPending = [...state.pendingForChat];
+    for (const id of allPending) {
+      const c = state.byId[id];
+      if (c && isPRFeedbackComment(c)) state.removeComment(id);
+    }
+  }, []);
   return {
     planComments,
     pendingCommentsByFile,
+    pendingPRFeedback,
     markCommentsSent,
     handleRemoveCommentFile,
     handleRemoveComment,
+    handleRemovePRFeedback,
+    handleClearPRFeedback,
     clearSessionPlanComments,
   };
 }
@@ -219,6 +241,9 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
         onOpenFileAtLine,
         planComments: comments.planComments,
         handleClearPlanComments: comments.clearSessionPlanComments,
+        pendingPRFeedback: comments.pendingPRFeedback,
+        handleRemovePRFeedback: comments.handleRemovePRFeedback,
+        handleClearPRFeedback: comments.handleClearPRFeedback,
         taskId,
       }),
     [
@@ -236,6 +261,9 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
       onOpenFileAtLine,
       comments.planComments,
       comments.clearSessionPlanComments,
+      comments.pendingPRFeedback,
+      comments.handleRemovePRFeedback,
+      comments.handleClearPRFeedback,
       taskId,
     ],
   );

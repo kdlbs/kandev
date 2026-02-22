@@ -9,6 +9,7 @@ import {
   IconFileText,
   IconFolder,
   IconGitBranch,
+  IconGitPullRequest,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
   IconLayoutColumns,
@@ -26,6 +27,8 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { prPanelLabel } from "@/components/github/pr-utils";
 import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
@@ -66,6 +69,8 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
+  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const pr = useActiveTaskPR();
 
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
@@ -135,6 +140,12 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             >
               <IconFolder className="h-3.5 w-3.5 mr-1.5" />
               Files
+            </DropdownMenuItem>
+          )}
+          {pr && (
+            <DropdownMenuItem onClick={() => addPRPanel()} className="cursor-pointer text-xs">
+              <IconGitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+              {prPanelLabel(pr.pr_number)}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

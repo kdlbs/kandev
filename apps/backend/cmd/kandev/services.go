@@ -10,9 +10,12 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/github"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/secrets"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -20,7 +23,7 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, eventBus bus.EventBus, agentRegistry *registry.Registry) (*Services, *agentsettingscontroller.Controller, error) {
+func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry) (*Services, *agentsettingscontroller.Controller, error) {
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
@@ -69,12 +72,20 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 
+	// Initialize GitHub service
+	secretsAdapter := &githubSecretAdapter{store: repos.Secrets}
+	githubSvc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), secretsAdapter, eventBus, log)
+	if err != nil {
+		log.Warn("GitHub service initialization failed (non-fatal)", zap.Error(err))
+	}
+
 	return &Services{
 		Task:     taskSvc,
 		User:     userSvc,
 		Editor:   editorSvc,
 		Prompts:  promptSvc,
 		Workflow: workflowSvc,
+		GitHub:   githubSvc,
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
@@ -130,6 +141,31 @@ func (a *startStepResolverAdapter) ResolveStartStep(ctx context.Context, workflo
 		return "", err
 	}
 	return step.ID, nil
+}
+
+// githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider.
+type githubSecretAdapter struct {
+	store secrets.SecretStore
+}
+
+func (a *githubSecretAdapter) List(ctx context.Context) ([]*github.SecretListItem, error) {
+	items, err := a.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*github.SecretListItem, len(items))
+	for i, item := range items {
+		result[i] = &github.SecretListItem{
+			ID:       item.ID,
+			Name:     item.Name,
+			HasValue: item.HasValue,
+		}
+	}
+	return result, nil
+}
+
+func (a *githubSecretAdapter) Reveal(ctx context.Context, id string) (string, error) {
+	return a.store.Reveal(ctx, id)
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

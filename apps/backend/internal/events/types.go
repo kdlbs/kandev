@@ -156,6 +156,15 @@ const (
 	SessionModeChanged = "session_mode.changed" // Agent session mode changed
 )
 
+// Event types for GitHub integration
+const (
+	GitHubPRFeedback     = "github.pr_feedback"      // PR has new feedback (UI notification only)
+	GitHubPRStateChanged = "github.pr_state_changed" // PR state changed (merged, closed, etc.)
+	GitHubNewReviewPR    = "github.new_pr_to_review" // New PR found needing review
+	GitHubTaskPRUpdated  = "github.task_pr.updated"  // TaskPR record updated (for UI refresh)
+	GitHubWatchEvent     = "github.watch.event"      // Watch created/deleted
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID

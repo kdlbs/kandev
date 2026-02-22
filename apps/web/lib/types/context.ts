@@ -1,4 +1,4 @@
-import type { DiffComment, PlanComment } from "@/lib/state/slices/comments";
+import type { DiffComment, PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
 import type { ImageAttachment } from "@/components/task/chat/image-attachment-preview";
 
 type ContextItemBase = {
@@ -46,12 +46,19 @@ export type ImageContextItem = ContextItemBase & {
   attachment: ImageAttachment;
 };
 
+export type PRFeedbackContextItem = ContextItemBase & {
+  kind: "pr-feedback";
+  comments: PRFeedbackComment[];
+  onRemoveComment: (id: string) => void;
+};
+
 export type ContextItem =
   | PlanContextItem
   | FileContextItem
   | PromptContextItem
   | CommentContextItem
   | PlanCommentContextItem
-  | ImageContextItem;
+  | ImageContextItem
+  | PRFeedbackContextItem;
 
 export type ContextItemKind = ContextItem["kind"];

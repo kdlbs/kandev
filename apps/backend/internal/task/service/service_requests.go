@@ -75,6 +75,16 @@ type UpdateWorkspaceRequest struct {
 	DefaultAgentProfileID *string `json:"default_agent_profile_id,omitempty"`
 }
 
+// FindOrCreateRepositoryRequest contains the data for finding or creating a repository by provider info.
+type FindOrCreateRepositoryRequest struct {
+	WorkspaceID   string `json:"workspace_id"`
+	Provider      string `json:"provider"`
+	ProviderOwner string `json:"provider_owner"`
+	ProviderName  string `json:"provider_name"`
+	DefaultBranch string `json:"default_branch"`
+	LocalPath     string `json:"local_path"`
+}
+
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
 	WorkspaceID          string `json:"workspace_id"`

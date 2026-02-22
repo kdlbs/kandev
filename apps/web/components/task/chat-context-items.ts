@@ -2,7 +2,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import { getFileName } from "@/lib/utils/file-path";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
-import type { PlanComment } from "@/lib/state/slices/comments";
+import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -21,6 +21,9 @@ export type BuildContextItemsParams = {
   onOpenFileAtLine?: (filePath: string) => void;
   planComments: PlanComment[];
   handleClearPlanComments: () => void;
+  pendingPRFeedback: PRFeedbackComment[];
+  handleRemovePRFeedback: (commentId: string) => void;
+  handleClearPRFeedback: () => void;
   taskId: string | null;
 };
 
@@ -151,6 +154,21 @@ function buildCommentItems(params: BuildContextItemsParams): ContextItem[] {
   return items;
 }
 
+function buildPRFeedbackItems(params: BuildContextItemsParams): ContextItem[] {
+  const { pendingPRFeedback, handleRemovePRFeedback, handleClearPRFeedback } = params;
+  if (!pendingPRFeedback || pendingPRFeedback.length === 0) return [];
+  return [
+    {
+      kind: "pr-feedback" as const,
+      id: "pr-feedback",
+      label: `${pendingPRFeedback.length} PR feedback`,
+      comments: pendingPRFeedback,
+      onRemove: handleClearPRFeedback,
+      onRemoveComment: (id: string) => handleRemovePRFeedback(id),
+    },
+  ];
+}
+
 /** Sort: pinned first, then by kind order, then by label */
 const KIND_ORDER: Record<string, number> = {
   plan: 0,
@@ -159,6 +177,7 @@ const KIND_ORDER: Record<string, number> = {
   comment: 3,
   "plan-comment": 4,
   image: 5,
+  "pr-feedback": 6,
 };
 
 export function contextItemSortFn(a: ContextItem, b: ContextItem): number {
@@ -177,6 +196,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
   if (planItem) items.push(planItem);
   items.push(...buildFileAndPromptItems(params));
   items.push(...buildCommentItems(params));
+  items.push(...buildPRFeedbackItems(params));
 
   if (params.planComments.length > 0) {
     items.push({

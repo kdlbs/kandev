@@ -12,7 +12,10 @@ import {
   type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
 import { type QueuedMessageIndicatorHandle } from "@/components/task/chat/queued-message-indicator";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
+import {
+  formatReviewCommentsAsMarkdown,
+  formatPRFeedbackAsMarkdown,
+} from "@/lib/state/slices/comments/format";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
@@ -40,10 +43,12 @@ export function useSubmitHandler(
     isAgentBusy,
     activeDocument,
     planComments,
+    pendingPRFeedback,
     contextFiles,
     prompts,
     markCommentsSent,
     clearSessionPlanComments,
+    handleClearPRFeedback,
     clearEphemeral,
   } = panelState;
   const { handleSendMessage } = useMessageHandler({
@@ -74,6 +79,10 @@ export function useSubmitHandler(
           const reviewMarkdown = formatReviewCommentsAsMarkdown(reviewComments);
           finalMessage = reviewMarkdown + (message ? message : "");
         }
+        if (pendingPRFeedback.length > 0) {
+          const prMarkdown = formatPRFeedbackAsMarkdown(pendingPRFeedback);
+          finalMessage = prMarkdown + finalMessage;
+        }
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
           await onSend(finalMessage);
@@ -82,6 +91,7 @@ export function useSubmitHandler(
         }
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
+        if (pendingPRFeedback.length > 0) handleClearPRFeedback();
         if (planComments.length > 0) clearSessionPlanComments();
         if (resolvedSessionId) clearEphemeral(resolvedSessionId);
       } finally {
@@ -95,6 +105,8 @@ export function useSubmitHandler(
       markCommentsSent,
       planComments.length,
       clearSessionPlanComments,
+      pendingPRFeedback,
+      handleClearPRFeedback,
       resolvedSessionId,
       clearEphemeral,
     ],

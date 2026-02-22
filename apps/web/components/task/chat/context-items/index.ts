@@ -6,5 +6,6 @@ export { FileItem } from "./file-item";
 export { PromptItem } from "./prompt-item";
 export { CommentItem } from "./comment-item";
 export { PlanCommentItem } from "./plan-comment-item";
+export { PRFeedbackItem } from "./pr-feedback-item";
 export { ImageItem } from "./image-item";
 export { LazyFilePreview } from "./lazy-file-preview";

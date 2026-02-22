@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
@@ -12,11 +13,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// PRCreatedCallback is called after a PR is successfully created.
+// Parameters: ctx, sessionID, taskID, prURL, branch.
+type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch string)
+
 // GitHandlers provides WebSocket handlers for git worktree operations.
 // Operations are executed via agentctl which runs in the worktree context.
 type GitHandlers struct {
 	lifecycleMgr *lifecycle.Manager
 	logger       *logger.Logger
+	onPRCreated  PRCreatedCallback
 }
 
 // NewGitHandlers creates a new GitHandlers instance
@@ -25,6 +31,11 @@ func NewGitHandlers(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *GitHan
 		lifecycleMgr: lifecycleMgr,
 		logger:       log.WithFields(zap.String("component", "git_handlers")),
 	}
+}
+
+// SetOnPRCreated sets a callback invoked after a PR is successfully created.
+func (h *GitHandlers) SetOnPRCreated(cb PRCreatedCallback) {
+	h.onPRCreated = cb
 }
 
 // RegisterHandlers registers git handlers with the WebSocket dispatcher
@@ -367,6 +378,22 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft)
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
+	}
+
+	// On success, notify callback to associate PR with task.
+	// Use a timeout-bound context so a stuck callback doesn't leak the goroutine.
+	if result.Success && result.PRURL != "" && h.onPRCreated != nil {
+		execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
+		if ok && execution.TaskID != "" {
+			sessionID := req.SessionID
+			taskID := execution.TaskID
+			prURL := result.PRURL
+			go func() {
+				callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				h.onPRCreated(callbackCtx, sessionID, taskID, prURL, "")
+			}()
+		}
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)

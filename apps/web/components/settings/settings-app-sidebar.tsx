@@ -12,6 +12,7 @@ import {
   IconCpu,
   IconKey,
   IconMessageCircle,
+  IconBrandGithub,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -99,6 +100,7 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
             const workspacePath = `/settings/workspace/${workspace.id}`;
             const workflowsPath = `${workspacePath}/workflows`;
             const repositoriesPath = `${workspacePath}/repositories`;
+            const githubPath = `${workspacePath}/github`;
 
             return (
               <SidebarMenuSubItem key={workspace.id}>
@@ -123,6 +125,14 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
                     <SidebarMenuSubButton asChild size="sm" isActive={pathname === workflowsPath}>
                       <Link href={workflowsPath}>
                         <span>Workflows</span>
+                      </Link>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                  <SidebarMenuSubItem>
+                    <SidebarMenuSubButton asChild size="sm" isActive={pathname === githubPath}>
+                      <Link href={githubPath}>
+                        <IconBrandGithub className="h-3.5 w-3.5" />
+                        <span>GitHub</span>
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>

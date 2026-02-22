@@ -55,7 +55,8 @@ export type BackendMessageType =
   | "secrets.created"
   | "secrets.updated"
   | "secrets.deleted"
-  | "message.queue.status_changed";
+  | "message.queue.status_changed"
+  | "github.task_pr.updated";
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -68,6 +69,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
 import type { AvailableAgent, SavedLayout, StepEvents, TaskState } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
+import type { TaskPR } from "@/lib/types/github";
 
 export type KanbanUpdatePayload = {
   workflowId: string;
@@ -495,6 +497,7 @@ export type BackendMessageMap = {
     "message.queue.status_changed",
     QueueStatusChangedPayload
   >;
+  "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
 };
 
 // Workspace file types

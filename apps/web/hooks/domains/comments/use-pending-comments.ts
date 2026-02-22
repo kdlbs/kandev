@@ -1,11 +1,17 @@
 import { useMemo } from "react";
 import { useCommentsStore } from "@/lib/state/slices/comments";
-import type { Comment, DiffComment, PlanComment } from "@/lib/state/slices/comments";
-import { isDiffComment, isPlanComment } from "@/lib/state/slices/comments";
+import type {
+  Comment,
+  DiffComment,
+  PlanComment,
+  PRFeedbackComment,
+} from "@/lib/state/slices/comments";
+import { isDiffComment, isPlanComment, isPRFeedbackComment } from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: Comment[] = [];
 const EMPTY_DIFF_COMMENTS: DiffComment[] = [];
 const EMPTY_PLAN_COMMENTS: PlanComment[] = [];
+const EMPTY_PR_FEEDBACK_COMMENTS: PRFeedbackComment[] = [];
 
 /**
  * Get all pending comments (any source).
@@ -58,5 +64,23 @@ export function usePendingPlanComments(): PlanComment[] {
       if (comment && isPlanComment(comment)) pending.push(comment);
     }
     return pending.length === 0 ? EMPTY_PLAN_COMMENTS : pending;
+  }, [byId, pendingForChat]);
+}
+
+/**
+ * Get all pending PR feedback comments.
+ */
+export function usePendingPRFeedback(): PRFeedbackComment[] {
+  const byId = useCommentsStore((state) => state.byId);
+  const pendingForChat = useCommentsStore((state) => state.pendingForChat);
+
+  return useMemo(() => {
+    if (pendingForChat.length === 0) return EMPTY_PR_FEEDBACK_COMMENTS;
+    const pending: PRFeedbackComment[] = [];
+    for (const id of pendingForChat) {
+      const comment = byId[id];
+      if (comment && isPRFeedbackComment(comment)) pending.push(comment);
+    }
+    return pending.length === 0 ? EMPTY_PR_FEEDBACK_COMMENTS : pending;
   }, [byId, pendingForChat]);
 }

@@ -24,6 +24,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/github"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
@@ -246,6 +247,20 @@ func newSessionStateChangedHandler(gateway *gateways.Gateway, log *logger.Logger
 	}
 }
 
+// newGitHubTaskPRUpdatedHandler returns an event bus handler that broadcasts
+// github.task_pr.updated events to all WebSocket clients.
+func newGitHubTaskPRUpdatedHandler(gateway *gateways.Gateway, log *logger.Logger) func(context.Context, *bus.Event) error {
+	return func(_ context.Context, event *bus.Event) error {
+		notification, err := ws.NewNotification(ws.ActionGitHubTaskPRUpdated, event.Data)
+		if err != nil {
+			log.Error("Failed to create github.task_pr.updated notification", zap.Error(err))
+			return nil
+		}
+		gateway.Hub.Broadcast(notification)
+		return nil
+	}
+}
+
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
 	router                  *gin.Engine
@@ -340,6 +355,11 @@ func registerSecondaryRoutes(
 	if p.secretStore != nil {
 		spriteshandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.secretStore, p.log)
 		p.log.Debug("Registered Sprites handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.GitHub != nil {
+		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
+		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
 	}
 
 	docker.RegisterDockerRoutes(p.router, p.dockerClient, p.log)

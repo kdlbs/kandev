@@ -91,6 +91,31 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 
 	go s.persistGitSnapshot(data.SessionID, data.TaskID, snapshot)
+
+	// Push detection: when ahead goes from >0 to 0, a push happened
+	s.trackPushAndAssociatePR(ctx, data)
+}
+
+// trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
+// When ahead transitions from >0 to 0 with a remote branch set, a push occurred.
+func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitEventData) {
+	prevAheadVal, loaded := s.pushTracker.Swap(data.SessionID, data.Status.Ahead)
+	if !loaded {
+		return // first status update for this session, skip
+	}
+	prevAhead, ok := prevAheadVal.(int)
+	if !ok || prevAhead <= 0 {
+		return
+	}
+	// Push detected: ahead went from >0 to 0
+	if data.Status.Ahead == 0 && data.Status.RemoteBranch != "" {
+		go s.detectPushAndAssociatePR(
+			context.Background(),
+			data.SessionID,
+			data.TaskID,
+			data.Status.Branch,
+		)
+	}
 }
 
 func (s *Service) persistGitSnapshot(sessionID, taskID string, snapshot *models.GitSnapshot) {

@@ -24,6 +24,7 @@ type Config struct {
 	Logging             LoggingConfig             `mapstructure:"logging"`
 	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
 	Worktree            WorktreeConfig            `mapstructure:"worktree"`
+	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -94,6 +95,11 @@ type WorktreeConfig struct {
 	BasePath        string `mapstructure:"basePath"`        // Base directory for worktrees (default: ~/.kandev/worktrees)
 	DefaultBranch   string `mapstructure:"defaultBranch"`   // Default base branch (default: main)
 	CleanupOnRemove bool   `mapstructure:"cleanupOnRemove"` // Remove worktree directory on task deletion
+}
+
+// RepoCloneConfig holds configuration for automatic repository cloning.
+type RepoCloneConfig struct {
+	BasePath string `mapstructure:"basePath"` // Base directory for cloned repos (default: ~/.kandev/repos)
 }
 
 // AgentConfig holds agent runtime configuration.
@@ -213,6 +219,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("worktree.basePath", "~/.kandev/worktrees")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
+
+	// RepoClone defaults
+	v.SetDefault("repoClone.basePath", "~/.kandev/repos")
 }
 
 // DefaultDockerHost returns the platform-appropriate Docker socket path.

@@ -8,6 +8,7 @@ export {
   defaultSessionRuntimeState,
 } from "./session-runtime/session-runtime-slice";
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
+export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -20,6 +21,7 @@ export type {
   SessionRuntimeSliceActions,
 } from "./session-runtime/types";
 export type { UISlice, UISliceState, UISliceActions } from "./ui/types";
+export type { GitHubSlice, GitHubSliceState, GitHubSliceActions } from "./github/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -105,4 +107,10 @@ export type {
   ActiveDocument,
   DocumentPanelState,
 } from "./ui/types";
+export type {
+  GitHubStatusState,
+  TaskPRsState,
+  PRWatchesState,
+  ReviewWatchesState,
+} from "./github/types";
 export type { Repository, Branch } from "@/lib/types/http";

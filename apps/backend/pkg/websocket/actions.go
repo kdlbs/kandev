@@ -278,6 +278,26 @@ const (
 	ActionMCPDeleteTaskPlan    = "mcp.delete_task_plan"
 )
 
+// GitHub integration actions
+const (
+	ActionGitHubStatus            = "github.status"
+	ActionGitHubTaskPRsList       = "github.task_prs.list"
+	ActionGitHubTaskPRGet         = "github.task_pr.get"
+	ActionGitHubPRFeedbackGet     = "github.pr_feedback.get"
+	ActionGitHubReviewWatchesList = "github.review_watches.list"
+	ActionGitHubReviewWatchCreate = "github.review_watches.create"
+	ActionGitHubReviewWatchUpdate = "github.review_watches.update"
+	ActionGitHubReviewWatchDelete = "github.review_watches.delete"
+	ActionGitHubReviewTrigger     = "github.review_watches.trigger"
+	ActionGitHubReviewTriggerAll  = "github.review_watches.trigger_all"
+	ActionGitHubPRWatchesList     = "github.pr_watches.list"
+	ActionGitHubPRWatchDelete     = "github.pr_watches.delete"
+	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
+	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
+	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
+	ActionGitHubStats             = "github.stats"
+)
+
 // Error codes
 const (
 	ErrorCodeBadRequest    = "BAD_REQUEST"

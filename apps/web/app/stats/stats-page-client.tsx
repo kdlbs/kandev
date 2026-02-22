@@ -21,6 +21,7 @@ import {
   CompletedTasksChart,
   MostProductiveSummary,
 } from "./stats-charts";
+import { PRStatsPanel } from "@/components/github/pr-stats";
 
 interface StatsPageClientProps {
   stats: StatsResponse | null;
@@ -157,7 +158,7 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
   );
 }
 
-type StatsContentProps = { resolvedStats: StatsResponse; rangeLabel: string };
+type StatsContentProps = { resolvedStats: StatsResponse; rangeLabel: string; workspaceId?: string };
 
 function SectionDivider({ id, label }: { id: string; label: string }) {
   return (
@@ -168,12 +169,73 @@ function SectionDivider({ id, label }: { id: string; label: string }) {
   );
 }
 
-function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
+function TelemetrySection({
+  completedActivity,
+  dailyActivity,
+  agentUsage,
+  rangeLabel,
+}: {
+  completedActivity: StatsResponse["completed_activity"];
+  dailyActivity: StatsResponse["daily_activity"];
+  agentUsage: StatsResponse["agent_usage"];
+  rangeLabel: string;
+}) {
+  return (
+    <>
+      <div id="completed" className="scroll-mt-24">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="rounded-sm lg:col-span-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Completed Tasks Over Time
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CompletedTasksChart completedActivity={completedActivity} />
+            </CardContent>
+          </Card>
+          <Card className="rounded-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Most Productive
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <MostProductiveSummary completedActivity={completedActivity} />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+      <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
+        <Card className="rounded-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Activity ({rangeLabel.toLowerCase()})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ActivityHeatmap dailyActivity={dailyActivity} />
+          </CardContent>
+        </Card>
+        <Card className="rounded-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Top Agents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AgentUsageList agentUsage={agentUsage} />
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+function StatsContent({ resolvedStats, rangeLabel, workspaceId }: StatsContentProps) {
   const {
     global,
     task_stats,
-    daily_activity,
     completed_activity,
+    daily_activity,
     agent_usage,
     repository_stats,
     git_stats,
@@ -184,52 +246,12 @@ function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
         <div className="space-y-5">
           <OverviewCards global={global} git_stats={git_stats} />
           <SectionDivider id="telemetry" label="Telemetry" />
-          <div id="completed" className="scroll-mt-24">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <Card className="rounded-sm lg:col-span-2">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Completed Tasks Over Time
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <CompletedTasksChart completedActivity={completed_activity} />
-                </CardContent>
-              </Card>
-              <Card className="rounded-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Most Productive
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <MostProductiveSummary completedActivity={completed_activity} />
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-          <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
-            <Card className="rounded-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Activity ({rangeLabel.toLowerCase()})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ActivityHeatmap dailyActivity={daily_activity} />
-              </CardContent>
-            </Card>
-            <Card className="rounded-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Top Agents
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <AgentUsageList agentUsage={agent_usage} />
-              </CardContent>
-            </Card>
-          </div>
+          <TelemetrySection
+            completedActivity={completed_activity}
+            dailyActivity={daily_activity}
+            agentUsage={agent_usage}
+            rangeLabel={rangeLabel}
+          />
           <Card id="repositories" className="rounded-sm scroll-mt-24">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -260,6 +282,8 @@ function StatsContent({ resolvedStats, rangeLabel }: StatsContentProps) {
               <RepoLeaders repositoryStats={repository_stats} />
             </CardContent>
           </Card>
+          <SectionDivider id="github" label="GitHub" />
+          <PRStatsPanel workspaceId={workspaceId ?? null} />
           <SectionDivider id="workload" label="Workload" />
           <WorkloadSection task_stats={task_stats} />
         </div>
@@ -358,7 +382,11 @@ export function StatsPageClient({ stats, error, workspaceId, activeRange }: Stat
         onRangeChange={handleRangeChange}
         onCopy={handleCopyStats}
       />
-      <StatsContent resolvedStats={resolvedStats} rangeLabel={rangeLabel} />
+      <StatsContent
+        resolvedStats={resolvedStats}
+        rangeLabel={rangeLabel}
+        workspaceId={workspaceId}
+      />
     </div>
   );
 }

@@ -83,6 +83,7 @@ type DockviewStore = {
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (groupId?: string) => void;
+  addPRPanel: () => void;
   addTerminalPanel: (terminalId?: string, groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
@@ -509,6 +510,16 @@ function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
         ? { referenceGroup: groupId }
         : { referencePanel: "chat" as const, direction: "right" as const };
       focusOrAddPanel(api, { id: "plan", component: "plan", title: "Plan", position });
+    },
+    addPRPanel: () => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      focusOrAddPanel(api, {
+        id: "pr-detail",
+        component: "pr-detail",
+        title: "Pull Request",
+        position: { referenceGroup: centerGroupId },
+      });
     },
     addTerminalPanel: (terminalId?: string, groupId?: string) => {
       const { api, rightBottomGroupId } = get();
