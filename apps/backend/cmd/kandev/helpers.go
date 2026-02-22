@@ -34,7 +34,7 @@ import (
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
@@ -62,7 +62,7 @@ func initDockerClient(ctx context.Context, cfg *config.Config, log *logger.Logge
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
-func buildSessionDataProvider(taskRepo repository.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 		session, err := taskRepo.GetTaskSession(ctx, sessionID)
 		if err != nil {
@@ -78,7 +78,7 @@ func buildSessionDataProvider(taskRepo repository.Repository, lifecycleMgr *life
 }
 
 // appendGitStatusMessage adds a git status notification from the latest snapshot to result.
-func appendGitStatusMessage(ctx context.Context, taskRepo repository.Repository, sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
+func appendGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
 	if err != nil || latestSnapshot == nil {
 		return result
@@ -252,7 +252,7 @@ type routeParams struct {
 	gateway                 *gateways.Gateway
 	dockerClient            *docker.Client
 	taskSvc                 *taskservice.Service
-	taskRepo                repository.Repository
+	taskRepo                *sqliterepo.Repository
 	analyticsRepo           analyticsrepository.Repository
 	orchestratorSvc         *orchestrator.Service
 	lifecycleMgr            *lifecycle.Manager

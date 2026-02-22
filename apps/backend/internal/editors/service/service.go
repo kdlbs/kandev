@@ -17,9 +17,14 @@ import (
 	"github.com/kandev/kandev/internal/editors/models"
 	"github.com/kandev/kandev/internal/editors/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+// taskSessionReader is the minimal task repository interface required by the editors service.
+type taskSessionReader interface {
+	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
+	GetRepository(ctx context.Context, id string) (*taskmodels.Repository, error)
+}
 
 var (
 	ErrEditorNotFound      = errors.New("editor not found")
@@ -43,11 +48,11 @@ type UserSettingsProvider interface {
 
 type Service struct {
 	repo         store.Repository
-	taskRepo     repository.Repository
+	taskRepo     taskSessionReader
 	userSettings UserSettingsProvider
 }
 
-func NewService(repo store.Repository, taskRepo repository.Repository, userSettings UserSettingsProvider) *Service {
+func NewService(repo store.Repository, taskRepo taskSessionReader, userSettings UserSettingsProvider) *Service {
 	return &Service{
 		repo:         repo,
 		taskRepo:     taskRepo,

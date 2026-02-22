@@ -10,10 +10,37 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+// executorStore is the minimal repository interface required by the Executor.
+type executorStore interface {
+	// Task
+	GetTask(ctx context.Context, id string) (*models.Task, error)
+	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// Task↔repo junction
+	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+	// Session
+	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	SetSessionPrimary(ctx context.Context, sessionID string) error
+	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// Session worktree
+	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	// Repository entity
+	GetRepository(ctx context.Context, id string) (*models.Repository, error)
+	// Executor
+	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
+	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
+	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
+	// Workspace
+	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+}
 
 // Common errors
 const defaultBaseBranch = "main"
@@ -167,7 +194,7 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager AgentManagerClient
-	repo         repository.Repository
+	repo         executorStore
 	secretStore  secrets.SecretStore
 	shellPrefs   ShellPreferenceProvider
 	logger       *logger.Logger
@@ -197,7 +224,7 @@ type ShellPreferenceProvider interface {
 }
 
 // NewExecutor creates a new executor
-func NewExecutor(agentManager AgentManagerClient, repo repository.Repository, log *logger.Logger, cfg ExecutorConfig) *Executor {
+func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logger.Logger, cfg ExecutorConfig) *Executor {
 	return &Executor{
 		agentManager: agentManager,
 		repo:         repo,

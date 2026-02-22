@@ -10,7 +10,7 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/secrets"
-	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
@@ -19,7 +19,7 @@ import (
 )
 
 type Repositories struct {
-	Task          repository.Repository
+	Task          *sqliterepo.Repository
 	Analytics     analyticsrepository.Repository
 	AgentSettings settingsstore.Repository
 	User          userstore.Repository

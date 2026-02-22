@@ -20,7 +20,7 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
-	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 )
@@ -52,7 +52,7 @@ func provideGateway(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 	notificationRepo notificationstore.Repository,
-	taskRepo repository.Repository,
+	taskRepo *sqliterepo.Repository,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {

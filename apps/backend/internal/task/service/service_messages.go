@@ -14,7 +14,7 @@ import (
 
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
-	session, err := s.repo.GetTaskSession(ctx, req.TaskSessionID)
+	session, err := s.sessions.GetTaskSession(ctx, req.TaskSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		CreatedAt:     time.Now().UTC(),
 	}
 
-	if err := s.repo.CreateMessage(ctx, message); err != nil {
+	if err := s.messages.CreateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *Service) getSessionWithRetry(ctx context.Context, sessionID, messageID 
 	var session *models.TaskSession
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		session, err = s.repo.GetTaskSession(ctx, sessionID)
+		session, err = s.sessions.GetTaskSession(ctx, sessionID)
 		if err == nil {
 			return session, nil
 		}
@@ -184,7 +184,7 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Message, maxRetries int, retryDelay time.Duration) error {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		err = s.repo.CreateMessage(ctx, message)
+		err = s.messages.CreateMessage(ctx, message)
 		if err == nil {
 			return nil
 		}
@@ -209,12 +209,12 @@ func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Me
 
 // GetMessage retrieves a message by ID
 func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, error) {
-	return s.repo.GetMessage(ctx, id)
+	return s.messages.GetMessage(ctx, id)
 }
 
 // ListMessages returns all messages for a session.
 func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
-	return s.repo.ListMessages(ctx, sessionID)
+	return s.messages.ListMessages(ctx, sessionID)
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
@@ -226,7 +226,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.repo.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
+	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:  limit,
 		Before: req.Before,
 		After:  req.After,
@@ -236,7 +236,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
-	if err := s.repo.DeleteMessage(ctx, id); err != nil {
+	if err := s.messages.DeleteMessage(ctx, id); err != nil {
 		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
@@ -247,7 +247,7 @@ func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 
 // UpdateMessage updates an existing message and publishes an event.
 func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) error {
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update message",
 			zap.String("message_id", message.ID),
 			zap.Error(err))
@@ -263,7 +263,7 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {
-	message, err := s.repo.GetMessage(ctx, messageID)
+	message, err := s.messages.GetMessage(ctx, messageID)
 	if err != nil {
 		s.logger.Warn("message not found for append",
 			zap.String("message_id", messageID),
@@ -274,7 +274,7 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	// Append the new content
 	message.Content += additionalContent
 
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to append message content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -295,7 +295,7 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 // AppendThinkingContent appends additional thinking content to an existing thinking message.
 // This updates the metadata.thinking field for streaming agent reasoning.
 func (s *Service) AppendThinkingContent(ctx context.Context, messageID, additionalContent string) error {
-	message, err := s.repo.GetMessage(ctx, messageID)
+	message, err := s.messages.GetMessage(ctx, messageID)
 	if err != nil {
 		s.logger.Warn("thinking message not found for append",
 			zap.String("message_id", messageID),
@@ -315,7 +315,7 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	}
 	message.Metadata["thinking"] = existingThinking + additionalContent
 
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to append thinking content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -366,7 +366,7 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 
 	s.applyToolCallMessageUpdate(message, status, result, title, normalized)
 
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update tool call message",
 			zap.String("message_id", message.ID),
 			zap.String("tool_call_id", toolCallID),
@@ -390,7 +390,7 @@ func (s *Service) getToolCallMessageWithRetry(ctx context.Context, sessionID, to
 	var message *models.Message
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.repo.GetMessageByToolCallID(ctx, sessionID, toolCallID)
+		message, err = s.messages.GetMessageByToolCallID(ctx, sessionID, toolCallID)
 		if err == nil {
 			return message, nil
 		}
@@ -496,7 +496,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.repo.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
 		if err == nil {
 			break
 		}
@@ -529,7 +529,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	}
 	message.Metadata["status"] = status
 
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update permission message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
@@ -573,7 +573,7 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.repo.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
 		if err == nil {
 			break
 		}
@@ -609,7 +609,7 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 		message.Metadata["response"] = answers
 	}
 
-	if err := s.repo.UpdateMessage(ctx, message); err != nil {
+	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update clarification message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),

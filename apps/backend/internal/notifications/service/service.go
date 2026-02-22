@@ -13,7 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/providers"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
-	"github.com/kandev/kandev/internal/task/repository"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	"go.uber.org/zap"
 )
@@ -24,15 +24,20 @@ const (
 
 var ErrProviderNotFound = errors.New("notification provider not found")
 
+// taskGetter is the minimal repository interface needed by the notification service.
+type taskGetter interface {
+	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+}
+
 type Service struct {
 	repo      notificationstore.Repository
-	taskRepo  repository.Repository
+	taskRepo  taskGetter
 	hub       *gatewayws.Hub
 	logger    *logger.Logger
 	providers map[models.ProviderType]providers.Provider
 }
 
-func NewService(repo notificationstore.Repository, taskRepo repository.Repository, hub *gatewayws.Hub, log *logger.Logger) *Service {
+func NewService(repo notificationstore.Repository, taskRepo taskGetter, hub *gatewayws.Hub, log *logger.Logger) *Service {
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),

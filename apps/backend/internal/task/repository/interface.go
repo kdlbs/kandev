@@ -7,16 +7,18 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// Repository defines the interface for task storage operations
-type Repository interface {
-	// Workspace operations
+// WorkspaceRepository handles workspace CRUD.
+type WorkspaceRepository interface {
 	CreateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	DeleteWorkspace(ctx context.Context, id string) error
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
+}
 
-	// Task operations
+// TaskRepository handles task CRUD and workflow placement.
+// Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
+type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
@@ -31,8 +33,11 @@ type Repository interface {
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
 	RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error
+}
 
-	// TaskRepository operations
+// TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
+// Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
+type TaskRepoRepository interface {
 	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
 	GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
@@ -41,15 +46,19 @@ type Repository interface {
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+}
 
-	// Workflow operations
+// WorkflowRepository handles workflow CRUD.
+type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	GetWorkflow(ctx context.Context, id string) (*models.Workflow, error)
 	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	DeleteWorkflow(ctx context.Context, id string) error
 	ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error)
+}
 
-	// Message operations
+// MessageRepository handles message persistence and lookups.
+type MessageRepository interface {
 	CreateMessage(ctx context.Context, message *models.Message) error
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
 	GetMessageByToolCallID(ctx context.Context, sessionID, toolCallID string) (*models.Message, error)
@@ -59,8 +68,10 @@ type Repository interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	DeleteMessage(ctx context.Context, id string) error
+}
 
-	// Turn operations
+// TurnRepository handles conversation turn persistence.
+type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
@@ -68,8 +79,10 @@ type Repository interface {
 	CompleteTurn(ctx context.Context, id string) error
 	CompleteRunningToolCallsForTurn(ctx context.Context, turnID string) (int64, error)
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
 
-	// Task Session operations
+// SessionRepository handles task session lifecycle and workflow-session relationships.
+type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
@@ -85,8 +98,6 @@ type Repository interface {
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
 	DeleteTaskSession(ctx context.Context, id string) error
-
-	// Workflow-related session operations
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
@@ -94,80 +105,85 @@ type Repository interface {
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
+}
 
-	// Task Session Worktree operations
+// SessionWorktreeRepository handles the task session↔worktree association.
+type SessionWorktreeRepository interface {
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error)
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error
 	DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error
+}
 
-	// Git Snapshot operations
+// GitSnapshotRepository handles git snapshots and session commit records.
+type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
-
-	// Session Commit operations
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
+}
 
-	// Repository operations
+// RepositoryEntityRepository handles git repository entity CRUD and repository scripts.
+// Named RepositoryEntityRepository to avoid conflation with the Repository interface itself;
+// mirrors the sqlite/repository_entity.go implementation file.
+type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
-
-	// Repository script operations
 	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
 	GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error)
 	UpdateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
 	DeleteRepositoryScript(ctx context.Context, id string) error
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
 	ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error)
+}
 
-	// Executor operations
+// ExecutorRepository handles executor CRUD, executor profiles, and running state.
+type ExecutorRepository interface {
 	CreateExecutor(ctx context.Context, executor *models.Executor) error
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	UpdateExecutor(ctx context.Context, executor *models.Executor) error
 	DeleteExecutor(ctx context.Context, id string) error
 	ListExecutors(ctx context.Context) ([]*models.Executor, error)
-
-	// Executor profile operations
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
-
-	// Executor running operations
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+}
 
-	// Environment operations
+// EnvironmentRepository handles environment CRUD.
+type EnvironmentRepository interface {
 	CreateEnvironment(ctx context.Context, environment *models.Environment) error
 	GetEnvironment(ctx context.Context, id string) (*models.Environment, error)
 	UpdateEnvironment(ctx context.Context, environment *models.Environment) error
 	DeleteEnvironment(ctx context.Context, id string) error
 	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
+}
 
-	// Session File Review operations
+// ReviewRepository handles session file review records.
+type ReviewRepository interface {
 	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error
 	GetSessionFileReviews(ctx context.Context, sessionID string) ([]*models.SessionFileReview, error)
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
+}
 
-	// Task Plan operations
+// PlanRepository handles task plan CRUD.
+type PlanRepository interface {
 	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	DeleteTaskPlan(ctx context.Context, taskID string) error
-
-	// Close closes the repository (for database connections)
-	Close() error
 }

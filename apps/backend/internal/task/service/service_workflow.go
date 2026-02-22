@@ -26,14 +26,14 @@ type ApproveSessionResult struct {
 // If no transition actions are configured, it falls back to the next step by position.
 func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*ApproveSessionResult, error) {
 	// Update review status to approved
-	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
+	if err := s.sessions.UpdateSessionReviewStatus(ctx, sessionID, "approved"); err != nil {
 		return nil, fmt.Errorf("failed to update review status: %w", err)
 	}
 
 	result := &ApproveSessionResult{}
 
 	// Reload session to get updated review status
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
@@ -66,7 +66,7 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 		return
 	}
 
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
+	if err := s.sessions.UpdateSessionWorkflowStep(ctx, sessionID, newStepID); err != nil {
 		s.logger.Error("failed to move session to next step after approval",
 			zap.String("session_id", sessionID),
 			zap.String("step_id", newStepID),
@@ -75,14 +75,14 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 	}
 
 	// Also move the task to the new step
-	if task, err := s.repo.GetTask(ctx, result.Session.TaskID); err != nil {
+	if task, err := s.tasks.GetTask(ctx, result.Session.TaskID); err != nil {
 		s.logger.Error("failed to get task for approval transition",
 			zap.String("task_id", result.Session.TaskID),
 			zap.Error(err))
 	} else {
 		task.WorkflowStepID = newStepID
 		task.UpdatedAt = time.Now().UTC()
-		if err := s.repo.UpdateTask(ctx, task); err != nil {
+		if err := s.tasks.UpdateTask(ctx, task); err != nil {
 			s.logger.Error("failed to move task to next step after approval",
 				zap.String("task_id", result.Session.TaskID),
 				zap.String("step_id", newStepID),
@@ -94,7 +94,7 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 	}
 
 	// Reload session with new step
-	result.Session, _ = s.repo.GetTaskSession(ctx, sessionID)
+	result.Session, _ = s.sessions.GetTaskSession(ctx, sessionID)
 
 	// Get the new workflow step for the response
 	if newStep, err := s.workflowStepGetter.GetStep(ctx, newStepID); err == nil {
@@ -155,20 +155,20 @@ func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.Wo
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	oldState := task.State
 
-	if err := s.repo.UpdateTaskState(ctx, id, state); err != nil {
+	if err := s.tasks.UpdateTaskState(ctx, id, state); err != nil {
 		s.logger.Error("failed to update task state", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
 
 	// Reload task to get updated state
-	task, err = s.repo.GetTask(ctx, id)
+	task, err = s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 
 // UpdateTaskMetadata updates only the metadata of a task (merges with existing)
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -220,7 +220,7 @@ type MoveTaskResult struct {
 
 // MoveTask moves a task to a different workflow step and position
 func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, workflowStepID string, position int) (*MoveTaskResult, error) {
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 	task.Position = position
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -279,7 +279,7 @@ func (s *Service) checkMoveTaskApproval(ctx context.Context, taskID, currentStep
 	if currentStepID == targetStepID {
 		return nil
 	}
-	primarySession, err := s.repo.GetPrimarySessionByTaskID(ctx, taskID)
+	primarySession, err := s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
 	if err != nil || primarySession == nil {
 		return nil
 	}
@@ -295,14 +295,14 @@ func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, wor
 	if workflowStepID == "" {
 		return
 	}
-	activeSession, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+	activeSession, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err != nil || activeSession == nil {
 		return
 	}
 	if activeSession.WorkflowStepID != nil && *activeSession.WorkflowStepID == workflowStepID {
 		return
 	}
-	if err := s.repo.UpdateSessionWorkflowStep(ctx, activeSession.ID, workflowStepID); err != nil {
+	if err := s.sessions.UpdateSessionWorkflowStep(ctx, activeSession.ID, workflowStepID); err != nil {
 		s.logger.Warn("failed to update session workflow step after task move",
 			zap.String("task_id", taskID),
 			zap.String("session_id", activeSession.ID),
@@ -318,12 +318,12 @@ func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, wor
 
 // CountTasksByWorkflow returns the number of tasks in a workflow
 func (s *Service) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
-	return s.repo.CountTasksByWorkflow(ctx, workflowID)
+	return s.tasks.CountTasksByWorkflow(ctx, workflowID)
 }
 
 // CountTasksByWorkflowStep returns the number of tasks in a workflow step
 func (s *Service) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
-	return s.repo.CountTasksByWorkflowStep(ctx, stepID)
+	return s.tasks.CountTasksByWorkflowStep(ctx, stepID)
 }
 
 // BulkMoveTasksResult contains the result of a BulkMoveTasks operation.
@@ -338,9 +338,9 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	var tasks []*models.Task
 	var err error
 	if sourceStepID != "" {
-		tasks, err = s.repo.ListTasksByWorkflowStep(ctx, sourceStepID)
+		tasks, err = s.tasks.ListTasksByWorkflowStep(ctx, sourceStepID)
 	} else {
-		tasks, err = s.repo.ListTasks(ctx, sourceWorkflowID)
+		tasks, err = s.tasks.ListTasks(ctx, sourceWorkflowID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks for bulk move: %w", err)
@@ -357,7 +357,7 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		task.Position = i
 		task.UpdatedAt = now
 
-		if err := s.repo.UpdateTask(ctx, task); err != nil {
+		if err := s.tasks.UpdateTask(ctx, task); err != nil {
 			s.logger.Error("failed to move task in bulk move",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
@@ -365,10 +365,10 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		}
 
 		// Update active session's workflow_step_id
-		activeSession, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+		activeSession, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, task.ID)
 		if err == nil && activeSession != nil {
 			if activeSession.WorkflowStepID == nil || *activeSession.WorkflowStepID != targetStepID {
-				if err := s.repo.UpdateSessionWorkflowStep(ctx, activeSession.ID, targetStepID); err != nil {
+				if err := s.sessions.UpdateSessionWorkflowStep(ctx, activeSession.ID, targetStepID); err != nil {
 					s.logger.Warn("failed to update session workflow step during bulk move",
 						zap.String("task_id", task.ID),
 						zap.String("session_id", activeSession.ID),

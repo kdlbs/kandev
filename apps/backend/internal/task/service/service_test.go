@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -71,7 +72,7 @@ func (m *MockEventBus) ClearEvents() {
 	m.publishedEvents = make([]*bus.Event, 0)
 }
 
-func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Repository) {
+func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
@@ -79,11 +80,10 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 		t.Fatalf("failed to open test database: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repoImpl, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("failed to create test repository: %v", err)
 	}
-	repo := repoImpl
 	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("failed to init worktree store: %v", err)
 	}
@@ -97,7 +97,20 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, repository.Reposi
 	})
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
-	svc := NewService(repo, eventBus, log, RepositoryDiscoveryConfig{})
+	svc := NewService(Repos{
+		Workspaces:   repo,
+		Tasks:        repo,
+		TaskRepos:    repo,
+		Workflows:    repo,
+		Messages:     repo,
+		Turns:        repo,
+		Sessions:     repo,
+		GitSnapshots: repo,
+		RepoEntities: repo,
+		Executors:    repo,
+		Environments: repo,
+		Reviews:      repo,
+	}, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }
 
@@ -462,7 +475,7 @@ func TestService_ListWorkflows(t *testing.T) {
 
 // Message tests
 
-func setupTestTask(t *testing.T, repo repository.Repository) {
+func setupTestTask(t *testing.T, repo *sqliterepo.Repository) {
 	t.Helper()
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
@@ -470,7 +483,7 @@ func setupTestTask(t *testing.T, repo repository.Repository) {
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"})
 }
 
-func setupTestSession(t *testing.T, repo repository.Repository) string {
+func setupTestSession(t *testing.T, repo *sqliterepo.Repository) string {
 	t.Helper()
 	ctx := context.Background()
 	session := &models.TaskSession{
@@ -483,7 +496,7 @@ func setupTestSession(t *testing.T, repo repository.Repository) string {
 	return session.ID
 }
 
-func setupTestTurn(t *testing.T, repo repository.Repository, sessionID, taskID, turnID string) string {
+func setupTestTurn(t *testing.T, repo *sqliterepo.Repository, sessionID, taskID, turnID string) string {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()

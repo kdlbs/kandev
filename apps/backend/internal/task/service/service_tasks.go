@@ -50,7 +50,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		Metadata:       req.Metadata,
 	}
 
-	if err := s.repo.CreateTask(ctx, task); err != nil {
+	if err := s.tasks.CreateTask(ctx, task); err != nil {
 		s.logger.Error("failed to create task", zap.Error(err))
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	}
 
 	// Load repositories into task for response
-	repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		s.logger.Error("failed to list task repositories", zap.Error(err))
 	} else {
@@ -78,7 +78,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 	var repoByPath map[string]*models.Repository
 	for _, repoInput := range repositories {
 		if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
-			repos, err := s.repo.ListRepositories(ctx, workspaceID)
+			repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
 			if err != nil {
 				s.logger.Error("failed to list repositories", zap.Error(err))
 				return err
@@ -109,7 +109,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			Position:     i,
 			Metadata:     make(map[string]interface{}),
 		}
-		if err := s.repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
 			return err
 		}
@@ -159,7 +159,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
-	if err := s.repo.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
+	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete task repositories", zap.Error(err))
 		return err
 	}
@@ -168,13 +168,13 @@ func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // GetTask retrieves a task by ID and populates repositories
 func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) {
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	// Load task repositories
-	repos, err := s.repo.ListTaskRepositories(ctx, id)
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to list task repositories", zap.Error(err))
 	} else {
@@ -186,7 +186,7 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 
 	// Load repositories into task for response
-	repos, err := s.repo.ListTaskRepositories(ctx, task.ID)
+	repos, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		s.logger.Error("failed to list task repositories", zap.Error(err))
 	} else {
@@ -252,7 +252,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
 	// 1. Get task and verify it exists
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// 2. Gather data needed for cleanup BEFORE archive
 	var activeSessionIDs []string
 	if s.executionStopper != nil {
-		activeSessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, id)
+		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 		if err != nil {
 			s.logger.Warn("failed to list active sessions for archive",
 				zap.String("task_id", id),
@@ -275,7 +275,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		}
 	}
 
-	sessions, err := s.repo.ListTaskSessions(ctx, id)
+	sessions, err := s.sessions.ListTaskSessions(ctx, id)
 	if err != nil {
 		s.logger.Warn("failed to list task sessions for archive",
 			zap.String("task_id", id),
@@ -295,12 +295,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	// 3. Set archived_at in DB
-	if err := s.repo.ArchiveTask(ctx, id); err != nil {
+	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
 		return err
 	}
 
 	// 4. Re-read task for updated archived_at field
-	task, err = s.repo.GetTask(ctx, id)
+	task, err = s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -327,13 +327,13 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
-	task, err := s.repo.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
-	sessions, err := s.repo.ListTaskSessions(ctx, id)
+	sessions, err := s.sessions.ListTaskSessions(ctx, id)
 	if err != nil {
 		s.logger.Warn("failed to list task sessions for delete",
 			zap.String("task_id", id),
@@ -346,7 +346,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	// Must query before delete since DB records will be gone
 	var activeSessionIDs []string
 	if s.executionStopper != nil {
-		activeSessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, id)
+		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 		if err != nil {
 			s.logger.Warn("failed to list active sessions for delete",
 				zap.String("task_id", id),
@@ -358,7 +358,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	}
 
 	// 4. Delete from DB (sync, fast)
-	if err := s.repo.DeleteTask(ctx, id); err != nil {
+	if err := s.tasks.DeleteTask(ctx, id); err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return err
 	}
@@ -473,7 +473,7 @@ func (s *Service) performTaskCleanup(
 		if session == nil || session.ID == "" {
 			continue
 		}
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
 			s.logger.Debug("failed to delete executor runtime for session",
 				zap.String("task_id", taskID),
 				zap.String("session_id", session.ID),
@@ -487,7 +487,7 @@ func (s *Service) performTaskCleanup(
 
 // ListTasks returns all tasks for a workflow
 func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
-	tasks, err := s.repo.ListTasks(ctx, workflowID)
+	tasks, err := s.tasks.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -502,7 +502,7 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
-	tasks, total, err := s.repo.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize, includeArchived)
+	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize, includeArchived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -523,7 +523,7 @@ func (s *Service) loadTaskRepositoriesBatch(ctx context.Context, tasks []*models
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	repoMap, err := s.repo.ListTaskRepositoriesByTaskIDs(ctx, taskIDs)
+	repoMap, err := s.taskRepos.ListTaskRepositoriesByTaskIDs(ctx, taskIDs)
 	if err != nil {
 		return err
 	}

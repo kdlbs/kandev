@@ -26,6 +26,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
@@ -38,7 +39,7 @@ import (
 type TestServer struct {
 	Server     *httptest.Server
 	Gateway    *gateways.Gateway
-	TaskRepo   repository.Repository
+	TaskRepo   *sqliterepo.Repository
 	TaskSvc    *taskservice.Service
 	EventBus   bus.EventBus
 	Logger     *logger.Logger
@@ -88,7 +89,12 @@ func NewTestServer(t *testing.T) *TestServer {
 	require.NoError(t, err)
 
 	// Initialize task service and wire workflow step creator
-	taskSvc := taskservice.NewService(taskRepo, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc := taskservice.NewService(taskservice.Repos{
+		Workspaces: taskRepo, Tasks: taskRepo, TaskRepos: taskRepo,
+		Workflows: taskRepo, Messages: taskRepo, Turns: taskRepo,
+		Sessions: taskRepo, GitSnapshots: taskRepo, RepoEntities: taskRepo,
+		Executors: taskRepo, Environments: taskRepo, Reviews: taskRepo,
+	}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
 
 	// Create WebSocket gateway

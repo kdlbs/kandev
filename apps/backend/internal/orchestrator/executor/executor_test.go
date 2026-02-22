@@ -81,7 +81,7 @@ func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID st
 	}, nil
 }
 
-// mockRepository implements repository.Repository for testing
+// mockRepository implements executorStore for testing
 type mockRepository struct {
 	sessions         map[string]*models.TaskSession
 	taskRepositories map[string]*models.TaskRepository
@@ -181,7 +181,7 @@ func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.W
 	return nil, nil
 }
 
-// Stub implementations for other repository methods (matching repository.Repository interface)
+// Stub implementations for additional repository methods
 
 // Workspace operations
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {

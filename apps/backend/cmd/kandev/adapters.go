@@ -16,15 +16,19 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
 
+// taskGetterRepo is the minimal interface needed by the scheduler adapter.
+type taskGetterRepo interface {
+	GetTask(ctx context.Context, id string) (*models.Task, error)
+}
+
 // taskRepositoryAdapter adapts the task repository for the orchestrator's scheduler
 type taskRepositoryAdapter struct {
-	repo repository.Repository
+	repo taskGetterRepo
 	svc  *taskservice.Service
 }
 

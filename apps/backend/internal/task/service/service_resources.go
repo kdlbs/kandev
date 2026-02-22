@@ -28,7 +28,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultAgentProfileID: normalizeOptionalID(req.DefaultAgentProfileID),
 	}
 
-	if err := s.repo.CreateWorkspace(ctx, workspace); err != nil {
+	if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
 		s.logger.Error("failed to create workspace", zap.Error(err))
 		return nil, err
 	}
@@ -40,12 +40,12 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 
 // GetWorkspace retrieves a workspace by ID
 func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
-	return s.repo.GetWorkspace(ctx, id)
+	return s.workspaces.GetWorkspace(ctx, id)
 }
 
 // UpdateWorkspace updates an existing workspace
 func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWorkspaceRequest) (*models.Workspace, error) {
-	workspace, err := s.repo.GetWorkspace(ctx, id)
+	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	workspace.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateWorkspace(ctx, workspace); err != nil {
+	if err := s.workspaces.UpdateWorkspace(ctx, workspace); err != nil {
 		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -79,11 +79,11 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 
 // DeleteWorkspace deletes a workspace
 func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
-	workspace, err := s.repo.GetWorkspace(ctx, id)
+	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteWorkspace(ctx, id); err != nil {
+	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
 		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 		return err
 	}
@@ -105,7 +105,7 @@ func normalizeOptionalID(value *string) *string {
 
 // ListWorkspaces returns all workspaces
 func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
-	return s.repo.ListWorkspaces(ctx)
+	return s.workspaces.ListWorkspaces(ctx)
 }
 
 // Workflow operations
@@ -120,7 +120,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		WorkflowTemplateID: req.WorkflowTemplateID,
 	}
 
-	if err := s.repo.CreateWorkflow(ctx, workflow); err != nil {
+	if err := s.workflows.CreateWorkflow(ctx, workflow); err != nil {
 		s.logger.Error("failed to create workflow", zap.Error(err))
 		return nil, err
 	}
@@ -143,12 +143,12 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 
 // GetWorkflow retrieves a workflow by ID
 func (s *Service) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
-	return s.repo.GetWorkflow(ctx, id)
+	return s.workflows.GetWorkflow(ctx, id)
 }
 
 // UpdateWorkflow updates an existing workflow
 func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWorkflowRequest) (*models.Workflow, error) {
-	workflow, err := s.repo.GetWorkflow(ctx, id)
+	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	workflow.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateWorkflow(ctx, workflow); err != nil {
+	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
 		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -173,11 +173,11 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 
 // DeleteWorkflow deletes a workflow
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
-	workflow, err := s.repo.GetWorkflow(ctx, id)
+	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteWorkflow(ctx, id); err != nil {
+	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
 		s.logger.Error("failed to delete workflow", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -189,7 +189,7 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 
 // ListWorkflows returns all workflows for a workspace (or all if empty)
 func (s *Service) ListWorkflows(ctx context.Context, workspaceID string) ([]*models.Workflow, error) {
-	return s.repo.ListWorkflows(ctx, workspaceID)
+	return s.workflows.ListWorkflows(ctx, workspaceID)
 }
 
 // Repository operations
@@ -228,7 +228,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		DevScript:            req.DevScript,
 	}
 
-	if err := s.repo.CreateRepository(ctx, repository); err != nil {
+	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
 		return nil, err
 	}
@@ -239,11 +239,11 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 }
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
-	return s.repo.GetRepository(ctx, id)
+	return s.repoEntities.GetRepository(ctx, id)
 }
 
 func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRepositoryRequest) (*models.Repository, error) {
-	repository, err := s.repo.GetRepository(ctx, id)
+	repository, err := s.repoEntities.GetRepository(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	}
 	repository.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateRepository(ctx, repository); err != nil {
+	if err := s.repoEntities.UpdateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -312,11 +312,11 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 }
 
 func (s *Service) DeleteRepository(ctx context.Context, id string) error {
-	repository, err := s.repo.GetRepository(ctx, id)
+	repository, err := s.repoEntities.GetRepository(ctx, id)
 	if err != nil {
 		return err
 	}
-	active, err := s.repo.HasActiveTaskSessionsByRepository(ctx, id)
+	active, err := s.sessions.HasActiveTaskSessionsByRepository(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for repository", zap.String("repository_id", id), zap.Error(err))
 		return err
@@ -324,7 +324,7 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if err := s.repo.DeleteRepository(ctx, id); err != nil {
+	if err := s.repoEntities.DeleteRepository(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository", zap.String("repository_id", id), zap.Error(err))
 		return err
 	}
@@ -334,7 +334,7 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
-	return s.repo.ListRepositories(ctx, workspaceID)
+	return s.repoEntities.ListRepositories(ctx, workspaceID)
 }
 
 // Repository script operations
@@ -347,7 +347,7 @@ func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateReposit
 		Command:      req.Command,
 		Position:     req.Position,
 	}
-	if err := s.repo.CreateRepositoryScript(ctx, script); err != nil {
+	if err := s.repoEntities.CreateRepositoryScript(ctx, script); err != nil {
 		s.logger.Error("failed to create repository script", zap.Error(err))
 		return nil, err
 	}
@@ -357,11 +357,11 @@ func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateReposit
 }
 
 func (s *Service) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
-	return s.repo.GetRepositoryScript(ctx, id)
+	return s.repoEntities.GetRepositoryScript(ctx, id)
 }
 
 func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *UpdateRepositoryScriptRequest) (*models.RepositoryScript, error) {
-	script, err := s.repo.GetRepositoryScript(ctx, id)
+	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *Up
 	}
 	script.UpdatedAt = time.Now().UTC()
 
-	if err := s.repo.UpdateRepositoryScript(ctx, script); err != nil {
+	if err := s.repoEntities.UpdateRepositoryScript(ctx, script); err != nil {
 		s.logger.Error("failed to update repository script", zap.String("script_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -386,11 +386,11 @@ func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *Up
 }
 
 func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
-	script, err := s.repo.GetRepositoryScript(ctx, id)
+	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteRepositoryScript(ctx, id); err != nil {
+	if err := s.repoEntities.DeleteRepositoryScript(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository script", zap.String("script_id", id), zap.Error(err))
 		return err
 	}
@@ -400,12 +400,12 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
-	return s.repo.ListRepositoryScripts(ctx, repositoryID)
+	return s.repoEntities.ListRepositoryScripts(ctx, repositoryID)
 }
 
 // ListScriptsByRepositoryIDs returns scripts for multiple repositories in a single query.
 func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error) {
-	return s.repo.ListScriptsByRepositoryIDs(ctx, repoIDs)
+	return s.repoEntities.ListScriptsByRepositoryIDs(ctx, repoIDs)
 }
 
 // Executor operations
@@ -424,7 +424,7 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 		Config:    req.Config,
 	}
 
-	if err := s.repo.CreateExecutor(ctx, executor); err != nil {
+	if err := s.executors.CreateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorCreated, executor)
@@ -432,11 +432,11 @@ func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest
 }
 
 func (s *Service) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
-	return s.repo.GetExecutor(ctx, id)
+	return s.executors.GetExecutor(ctx, id)
 }
 
 func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExecutorRequest) (*models.Executor, error) {
-	executor, err := s.repo.GetExecutor(ctx, id)
+	executor, err := s.executors.GetExecutor(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,7 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateExecutor(ctx, executor); err != nil {
+	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
 		return nil, err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorUpdated, executor)
@@ -497,14 +497,14 @@ func applyExecutorUpdates(executor *models.Executor, req *UpdateExecutorRequest)
 }
 
 func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
-	executor, err := s.repo.GetExecutor(ctx, id)
+	executor, err := s.executors.GetExecutor(ctx, id)
 	if err != nil {
 		return err
 	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
-	active, err := s.repo.HasActiveTaskSessionsByExecutor(ctx, id)
+	active, err := s.sessions.HasActiveTaskSessionsByExecutor(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for executor", zap.String("executor_id", id), zap.Error(err))
 		return err
@@ -512,7 +512,7 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if err := s.repo.DeleteExecutor(ctx, id); err != nil {
+	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
@@ -520,7 +520,7 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
-	return s.repo.ListExecutors(ctx)
+	return s.executors.ListExecutors(ctx)
 }
 
 // Executor Profile operations
@@ -533,7 +533,7 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		return nil, fmt.Errorf("executor_id is required")
 	}
 	// Verify executor exists
-	if _, err := s.repo.GetExecutor(ctx, req.ExecutorID); err != nil {
+	if _, err := s.executors.GetExecutor(ctx, req.ExecutorID); err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
 	profile := &models.ExecutorProfile{
@@ -545,7 +545,7 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 		CleanupScript: req.CleanupScript,
 		EnvVars:       req.EnvVars,
 	}
-	if err := s.repo.CreateExecutorProfile(ctx, profile); err != nil {
+	if err := s.executors.CreateExecutorProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileCreated, profile)
@@ -553,11 +553,11 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 }
 
 func (s *Service) GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error) {
-	return s.repo.GetExecutorProfile(ctx, id)
+	return s.executors.GetExecutorProfile(ctx, id)
 }
 
 func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *UpdateExecutorProfileRequest) (*models.ExecutorProfile, error) {
-	profile, err := s.repo.GetExecutorProfile(ctx, id)
+	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +579,7 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if req.EnvVars != nil {
 		profile.EnvVars = req.EnvVars
 	}
-	if err := s.repo.UpdateExecutorProfile(ctx, profile); err != nil {
+	if err := s.executors.UpdateExecutorProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
@@ -587,11 +587,11 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 }
 
 func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
-	profile, err := s.repo.GetExecutorProfile(ctx, id)
+	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteExecutorProfile(ctx, id); err != nil {
+	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileDeleted, profile)
@@ -599,11 +599,11 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error) {
-	return s.repo.ListExecutorProfiles(ctx, executorID)
+	return s.executors.ListExecutorProfiles(ctx, executorID)
 }
 
 func (s *Service) ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error) {
-	return s.repo.ListAllExecutorProfiles(ctx)
+	return s.executors.ListAllExecutorProfiles(ctx)
 }
 
 // Environment operations
@@ -619,7 +619,7 @@ func (s *Service) CreateEnvironment(ctx context.Context, req *CreateEnvironmentR
 		Dockerfile:   req.Dockerfile,
 		BuildConfig:  req.BuildConfig,
 	}
-	if err := s.repo.CreateEnvironment(ctx, environment); err != nil {
+	if err := s.environments.CreateEnvironment(ctx, environment); err != nil {
 		return nil, err
 	}
 	s.publishEnvironmentEvent(ctx, events.EnvironmentCreated, environment)
@@ -627,11 +627,11 @@ func (s *Service) CreateEnvironment(ctx context.Context, req *CreateEnvironmentR
 }
 
 func (s *Service) GetEnvironment(ctx context.Context, id string) (*models.Environment, error) {
-	return s.repo.GetEnvironment(ctx, id)
+	return s.environments.GetEnvironment(ctx, id)
 }
 
 func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateEnvironmentRequest) (*models.Environment, error) {
-	environment, err := s.repo.GetEnvironment(ctx, id)
+	environment, err := s.environments.GetEnvironment(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -659,7 +659,7 @@ func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateE
 		environment.BuildConfig = req.BuildConfig
 	}
 	environment.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateEnvironment(ctx, environment); err != nil {
+	if err := s.environments.UpdateEnvironment(ctx, environment); err != nil {
 		return nil, err
 	}
 	s.publishEnvironmentEvent(ctx, events.EnvironmentUpdated, environment)
@@ -667,14 +667,14 @@ func (s *Service) UpdateEnvironment(ctx context.Context, id string, req *UpdateE
 }
 
 func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
-	environment, err := s.repo.GetEnvironment(ctx, id)
+	environment, err := s.environments.GetEnvironment(ctx, id)
 	if err != nil {
 		return err
 	}
 	if environment.IsSystem {
 		return fmt.Errorf("system environments cannot be deleted")
 	}
-	active, err := s.repo.HasActiveTaskSessionsByEnvironment(ctx, id)
+	active, err := s.sessions.HasActiveTaskSessionsByEnvironment(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for environment", zap.String("environment_id", id), zap.Error(err))
 		return err
@@ -682,7 +682,7 @@ func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if err := s.repo.DeleteEnvironment(ctx, id); err != nil {
+	if err := s.environments.DeleteEnvironment(ctx, id); err != nil {
 		return err
 	}
 	s.publishEnvironmentEvent(ctx, events.EnvironmentDeleted, environment)
@@ -690,5 +690,5 @@ func (s *Service) DeleteEnvironment(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListEnvironments(ctx context.Context) ([]*models.Environment, error) {
-	return s.repo.ListEnvironments(ctx)
+	return s.environments.ListEnvironments(ctx)
 }

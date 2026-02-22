@@ -35,7 +35,20 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	promptSvc := promptservice.NewService(repos.Prompts)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	taskSvc := taskservice.NewService(
-		repos.Task,
+		taskservice.Repos{
+			Workspaces:   repos.Task,
+			Tasks:        repos.Task,
+			TaskRepos:    repos.Task,
+			Workflows:    repos.Task,
+			Messages:     repos.Task,
+			Turns:        repos.Task,
+			Sessions:     repos.Task,
+			GitSnapshots: repos.Task,
+			RepoEntities: repos.Task,
+			Executors:    repos.Task,
+			Environments: repos.Task,
+			Reviews:      repos.Task,
+		},
 		eventBus,
 		log,
 		taskservice.RepositoryDiscoveryConfig{

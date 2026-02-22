@@ -128,7 +128,7 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 }
 
 func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]Branch, error) {
-	repo, err := s.repo.GetRepository(ctx, repoID)
+	repo, err := s.repoEntities.GetRepository(ctx, repoID)
 	if err != nil {
 		return nil, err
 	}

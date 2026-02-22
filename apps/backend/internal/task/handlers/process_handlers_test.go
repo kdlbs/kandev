@@ -425,7 +425,12 @@ func newTestService(t *testing.T, scripts map[string][]*models.RepositoryScript)
 		t.Fatalf("failed to create logger: %v", err)
 	}
 	repo := &mockRepository{scriptsByRepo: scripts}
-	return service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+	return service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
 }
 
 func addExecution(t *testing.T, mgr *lifecycle.Manager, exec *lifecycle.AgentExecution) {
@@ -572,7 +577,12 @@ func TestStopProcessRejectsDifferentSession(t *testing.T) {
 			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
-	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)
 	exec := (&lifecycle.ExecutorInstance{
@@ -631,7 +641,12 @@ func TestStopProcessAgentctlUnavailable(t *testing.T) {
 			"exec-1": {ID: "exec-1", Type: models.ExecutorTypeLocal},
 		},
 	}
-	svc := service.NewService(repo, nil, log, service.RepositoryDiscoveryConfig{})
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
 	lifecycleMgr := newLifecycleManager(t, log)
 	client := newAgentctlClient(t, server.URL, log)
 	exec := (&lifecycle.ExecutorInstance{
