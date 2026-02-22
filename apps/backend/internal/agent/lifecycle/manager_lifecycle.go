@@ -87,18 +87,6 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
 
-	// Start cleanup loop when container manager is available (Docker mode)
-	if m.containerManager != nil {
-		m.wg.Add(1)
-		go m.cleanupLoop(ctx)
-		m.logger.Info("cleanup loop started")
-	}
-
-	// Start health check loop for registered executor backends
-	m.wg.Add(1)
-	go m.healthCheckLoop(ctx)
-	m.logger.Info("health check loop started")
-
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
@@ -151,39 +139,6 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-// healthCheckLoop periodically checks the health of all registered executor backends.
-func (m *Manager) healthCheckLoop(ctx context.Context) {
-	defer m.wg.Done()
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.stopCh:
-			return
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			m.runHealthChecks(ctx)
-		}
-	}
-}
-
-// runHealthChecks runs health checks on all registered executor backends.
-func (m *Manager) runHealthChecks(ctx context.Context) {
-	if m.executorRegistry == nil {
-		return
-	}
-	results := m.executorRegistry.HealthCheckAll(ctx)
-	for name, err := range results {
-		if err != nil {
-			m.logger.Warn("executor backend health check failed",
-				zap.String("executor", string(name)),
-				zap.Error(err))
-		}
-	}
-}
-
 // StopAllAgents attempts a graceful shutdown of all active agents concurrently.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
 	executions := m.executionStore.List()
@@ -215,51 +170,6 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
-}
-
-// cleanupLoop runs periodic cleanup of stale containers
-func (m *Manager) cleanupLoop(ctx context.Context) {
-	defer m.wg.Done()
-
-	ticker := time.NewTicker(m.cleanupInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			m.logger.Info("cleanup loop stopped (context cancelled)")
-			return
-		case <-m.stopCh:
-			m.logger.Info("cleanup loop stopped")
-			return
-		case <-ticker.C:
-			m.performCleanup(ctx)
-		}
-	}
-}
-
-// performCleanup checks for and cleans up stale containers (Docker mode only)
-func (m *Manager) performCleanup(ctx context.Context) {
-	m.logger.Debug("running cleanup check")
-
-	// Skip cleanup if container manager is not available
-	if m.containerManager == nil {
-		m.logger.Debug("skipping cleanup - no container manager")
-		return
-	}
-
-	// List all kandev-managed containers
-	containers, err := m.containerManager.ListManagedContainers(ctx)
-	if err != nil {
-		m.logger.Error("failed to list containers for cleanup", zap.Error(err))
-		return
-	}
-
-	for _, container := range containers {
-		if container.State == containerStateExited {
-			m.cleanupExitedContainer(ctx, container.ID)
-		}
-	}
 }
 
 // cleanupExitedContainer handles cleanup for a single exited container.

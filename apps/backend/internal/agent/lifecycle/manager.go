@@ -4,7 +4,6 @@ package lifecycle
 
 import (
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -66,10 +65,9 @@ type Manager struct {
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
 
-	// Background cleanup
-	cleanupInterval time.Duration
-	stopCh          chan struct{}
-	wg              sync.WaitGroup
+	// Background goroutine coordination
+	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
 // NewManager creates a new lifecycle manager.
@@ -125,7 +123,6 @@ func NewManager(
 		eventPublisher:         eventPublisher,
 		containerManager:       containerManager,
 		historyManager:         historyManager,
-		cleanupInterval:        30 * time.Second,
 		stopCh:                 stopCh,
 	}
 
