@@ -2,7 +2,7 @@
 
 Kandev ships with four workflow templates. Each defines a sequence of steps with automated transitions - agents start, stop, and move between steps based on events like entering a step, sending a message, or an agent completing its turn.
 
-You can use these as-is or **create custom workflows** tailored to your or your team.
+You can use these as-is or **create custom workflows** tailored to you or your team.
 
 ## Default Workflows
 
@@ -13,9 +13,9 @@ Classic kanban board with automated agent execution. Good for straightforward ta
 **Steps:** Backlog → In Progress → Review → Done
 
 | Step | What happens |
-|------|-------------|
-| **Backlog** | Tasks wait here. Sending a message moves the task to In Progress. |
-| **In Progress** | Agent starts automatically. When it completes, the task moves to Review. |
+|:------:|-------------|
+| **Backlog** | Backlog of tasks not yet started. Sending a message moves the task to In Progress. |
+| **In Progress** | Agent starts the work automatically. When it completes, the task moves to Review. |
 | **Review** | You review the agent's work. Sending a message moves it back to In Progress for another iteration. |
 | **Done** | Final state. Sending a message reopens the task in In Progress. |
 
@@ -34,8 +34,8 @@ Two-phase workflow where the agent first creates a plan for your review, then im
 **Steps:** Todo → Plan → Implementation → Done
 
 | Step | What happens |
-|------|-------------|
-| **Todo** | Backlog. Move tasks here when they're ready to be planned. |
+|:------:|-------------|
+| **Todo** | Tasks ready to be planned. |
 | **Plan** | Agent analyzes the task and creates a detailed implementation plan - requirements, files to modify, step-by-step approach, risks. Supports mermaid diagrams. The plan is saved via MCP tool and the agent stops for your review. You can edit the plan in the UI before moving forward. |
 | **Implementation** | Agent retrieves the plan (including your edits), acknowledges modifications, and implements step-by-step. Moves to Done on completion. |
 | **Done** | Final state. |
@@ -50,12 +50,12 @@ Two-phase workflow where the agent first creates a plan for your review, then im
 
 ### Architecture
 
-Focused on design and architecture. The agent creates technical designs for your review - no implementation happens in this workflow. Useful for capturing architectural decisions before any code is written.
+Focused on design and architecture. The agent creates technical designs for you to review - no implementation happens in this workflow. Useful for capturing architectural decisions before any code is written.
 
 **Steps:** Ideas → Planning → Review → Approved
 
 | Step | What happens |
-|------|-------------|
+|:------:|-------------|
 | **Ideas** | Backlog of architectural ideas and proposals. |
 | **Planning** | Agent analyzes the task, asks clarifying questions, and produces an architectural design with mermaid diagrams. Saves the design and stops for your review. |
 | **Review** | You review the design. Sending a message moves it back to Planning for revisions. |
@@ -76,7 +76,7 @@ Track pull requests through automated code review. The agent reviews changed fil
 **Steps:** Waiting → Review → Done
 
 | Step | What happens |
-|------|-------------|
+|:------:|-------------|
 | **Waiting** | PR queue. Sending a message starts the review process. |
 | **Review** | Agent reviews the changed files in the git worktree. If there are uncommitted changes, it reviews those; otherwise, it reviews commits that diverged from the main branch. Findings are organized into four categories: **BUG**, **IMPROVEMENT**, **NITPICK**, **PERFORMANCE** - each with file:line references. |
 | **Done** | Review complete. Sending a message moves it back to Review for another pass. |
