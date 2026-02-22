@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
@@ -23,6 +24,22 @@ export function ScriptCard({
   placeholders,
   executorType,
 }: ScriptCardProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [editorHeight, setEditorHeight] = useState(height);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setEditorHeight(`${entry.contentRect.height}px`);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <Card>
       <CardHeader>
@@ -30,11 +47,15 @@ export function ScriptCard({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="overflow-hidden rounded-md border">
+        <div
+          ref={containerRef}
+          className="overflow-hidden rounded-md border resize-y"
+          style={{ height, minHeight: "120px", maxHeight: "80vh" }}
+        >
           <ScriptEditor
             value={value}
             onChange={onChange}
-            height={height}
+            height={editorHeight}
             placeholders={placeholders}
             executorType={executorType}
           />

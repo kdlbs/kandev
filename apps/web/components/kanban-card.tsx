@@ -22,6 +22,7 @@ import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 
 export interface Task {
   id: string;
@@ -36,6 +37,10 @@ export interface Task {
   sessionCount?: number | null;
   primarySessionId?: string | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
+  primaryExecutorId?: string | null;
+  primaryExecutorType?: string | null;
+  primaryExecutorName?: string | null;
+  isRemoteExecutor?: boolean;
   updatedAt?: string;
 }
 
@@ -81,6 +86,13 @@ function KanbanCardBody({
             <PRTaskIcon taskId={task.id} />
           </div>
         </div>
+        {task.isRemoteExecutor && (
+          <RemoteCloudTooltip
+            taskId={task.id}
+            sessionId={task.primarySessionId ?? null}
+            fallbackName={task.primaryExecutorName ?? task.primaryExecutorType}
+          />
+        )}
         {actions}
       </div>
       {task.description && (
@@ -154,11 +166,15 @@ function KanbanCardActions({
   const [menuOpen, setMenuOpen] = useState(false);
   const effectiveMenuOpen = menuOpen || isDeleting;
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4");
+  const hasKnownSession =
+    Boolean(task.primarySessionId) ||
+    Boolean(task.sessionCount && task.sessionCount > 0) ||
+    task.hasSession === true;
 
   return (
     <div className="flex items-center gap-2">
       {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING") && statusIcon}
-      {showMaximizeButton && onOpenFullPage && task.hasSession !== false && (
+      {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <button
           type="button"
           className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
@@ -288,7 +304,7 @@ export function KanbanCard({
   onOpenFullPage,
   onMove,
   steps,
-  showMaximizeButton = true,
+  showMaximizeButton = false,
   isDeleting,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({

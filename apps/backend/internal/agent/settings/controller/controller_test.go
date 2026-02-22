@@ -93,6 +93,7 @@ func (a *testAgent) PermissionSettings() map[string]agents.PermissionSetting {
 func (a *testAgent) Runtime() *agents.RuntimeConfig {
 	return a.runtime
 }
+func (a *testAgent) RemoteAuth() *agents.RemoteAuth { return nil }
 
 func newTestController(agentList map[string]agents.Agent) *Controller {
 	log, _ := logger.NewLogger(logger.LoggingConfig{

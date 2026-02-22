@@ -17,6 +17,7 @@ export type ViewContentProps = {
   onMoveError?: (error: MoveTaskError) => void;
   onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   deletingTaskId?: string | null;
+  showMaximizeButton?: boolean;
 };
 
 export type ViewRegistryEntry = {

@@ -207,6 +207,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		},
 	}
 
+	if resumer, ok := rt.(RemoteSessionResumer); ok {
+		if err := resumer.ResumeRemoteInstance(ctx, execReq); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed remote resume preflight: %w", err)
+		}
+	}
+
 	execInstance, err := rt.CreateInstance(ctx, execReq)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
@@ -216,7 +222,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 
 // runEnvironmentPreparer runs the environment preparer for the executor type, if one is registered.
 // Preparation failures are non-fatal and logged as warnings.
-func (m *Manager) runEnvironmentPreparer(ctx context.Context, req *LaunchRequest, workspacePath string) {
+func (m *Manager) runEnvironmentPreparer(
+	ctx context.Context,
+	req *LaunchRequest,
+	workspacePath string,
+	worktreeID string,
+	worktreeBranch string,
+) {
 	if m.preparerRegistry == nil {
 		return
 	}
@@ -234,6 +246,9 @@ func (m *Manager) runEnvironmentPreparer(ctx context.Context, req *LaunchRequest
 		RepositoryPath: req.RepositoryPath,
 		UseWorktree:    req.UseWorktree,
 		SetupScript:    req.SetupScript,
+		BaseBranch:     req.BaseBranch,
+		WorktreeID:     worktreeID,
+		WorktreeBranch: worktreeBranch,
 		Env:            req.Env,
 	}
 
@@ -308,7 +323,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
 
 	// 4b. Run environment preparation (if preparer registered for this executor type)
-	m.runEnvironmentPreparer(ctx, req, workspacePath)
+	m.runEnvironmentPreparer(ctx, req, workspacePath, worktreeID, worktreeBranch)
 
 	// 5 & 6. Prepare the request copy with metadata and profile env
 	reqWithWorktree, executionID := m.launchPrepareRequest(req, profileInfo, workspacePath)
@@ -316,8 +331,20 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// 7. Build runtime request and create instance (agent not started yet)
 	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch)
 	if err != nil {
+		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
+			TaskID:       req.TaskID,
+			SessionID:    req.SessionID,
+			Success:      false,
+			ErrorMessage: err.Error(),
+		})
 		return nil, err
 	}
+	m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
+		TaskID:     req.TaskID,
+		SessionID:  req.SessionID,
+		Success:    true,
+		DurationMs: 0,
+	})
 
 	// Convert to AgentExecution and set the runtime name
 	execution := execInstance.ToAgentExecution(execReq)
@@ -332,6 +359,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 
 	// 8. Track the execution
 	m.executionStore.Add(execution)
+	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	// 9. Publish agent.started event
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStarted, execution)

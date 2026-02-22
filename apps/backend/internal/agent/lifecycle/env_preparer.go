@@ -29,6 +29,9 @@ type EnvPrepareRequest struct {
 	RepositoryPath string
 	UseWorktree    bool
 	SetupScript    string
+	BaseBranch     string
+	WorktreeID     string
+	WorktreeBranch string
 	Env            map[string]string
 }
 

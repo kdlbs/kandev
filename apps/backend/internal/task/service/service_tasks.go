@@ -16,6 +16,11 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+type taskStopTarget struct {
+	sessionID   string
+	executionID string
+}
+
 // Task operations
 
 // CreateTask creates a new task and publishes a task.created event
@@ -262,7 +267,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive
-	var activeSessionIDs []string
+	var stopTargets []taskStopTarget
 	if s.executionStopper != nil {
 		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 		if err != nil {
@@ -270,9 +275,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 				zap.String("task_id", id),
 				zap.Error(err))
 		}
-		for _, sess := range activeSessions {
-			activeSessionIDs = append(activeSessionIDs, sess.ID)
-		}
+		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
 	}
 
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)
@@ -312,8 +315,8 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
-	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, activeSessionIDs,
+	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -342,9 +345,9 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
 
-	// 3. Get active session IDs for stopping agents (sync, fast)
+	// 3. Get active sessions for stopping agents (sync, fast)
 	// Must query before delete since DB records will be gone
-	var activeSessionIDs []string
+	var stopTargets []taskStopTarget
 	if s.executionStopper != nil {
 		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
 		if err != nil {
@@ -352,9 +355,7 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 				zap.String("task_id", id),
 				zap.Error(err))
 		}
-		for _, sess := range activeSessions {
-			activeSessionIDs = append(activeSessionIDs, sess.ID)
-		}
+		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
 	}
 
 	// 4. Delete from DB (sync, fast)
@@ -372,8 +373,8 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	// 6. Return immediately - all remaining cleanup is async
 
 	// 7. Background: Stop agents and cleanup worktrees
-	if len(activeSessionIDs) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, activeSessionIDs,
+	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -410,7 +411,7 @@ func (s *Service) runAsyncTaskCleanup(
 	id string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
-	activeSessionIDs []string,
+	stopTargets []taskStopTarget,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
 	go func() {
@@ -418,12 +419,22 @@ func (s *Service) runAsyncTaskCleanup(
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		if s.executionStopper != nil && len(activeSessionIDs) > 0 {
-			for _, sessionID := range activeSessionIDs {
-				if err := s.executionStopper.StopSession(cleanupCtx, sessionID, stopReason, true); err != nil {
+		if s.executionStopper != nil && len(stopTargets) > 0 {
+			for _, target := range stopTargets {
+				if target.executionID != "" {
+					if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
+						s.logger.Warn(stopFailMsg,
+							zap.String("task_id", id),
+							zap.String("session_id", target.sessionID),
+							zap.String("execution_id", target.executionID),
+							zap.Error(err))
+					}
+					continue
+				}
+				if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
 					s.logger.Warn(stopFailMsg,
 						zap.String("task_id", id),
-						zap.String("session_id", sessionID),
+						zap.String("session_id", target.sessionID),
 						zap.Error(err))
 				}
 			}
@@ -442,6 +453,30 @@ func (s *Service) runAsyncTaskCleanup(
 				zap.Duration("duration", time.Since(cleanupStart)))
 		}
 	}()
+}
+
+func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) []taskStopTarget {
+	targets := make([]taskStopTarget, 0, len(activeSessions))
+	for _, sess := range activeSessions {
+		if sess == nil || sess.ID == "" {
+			continue
+		}
+		target := taskStopTarget{
+			sessionID:   sess.ID,
+			executionID: strings.TrimSpace(sess.AgentExecutionID),
+		}
+		if target.executionID == "" {
+			running, err := s.executors.GetExecutorRunningBySessionID(ctx, sess.ID)
+			if err == nil && running != nil {
+				target.executionID = strings.TrimSpace(running.AgentExecutionID)
+			}
+		}
+		targets = append(targets, target)
+	}
+	s.logger.Debug("prepared task cleanup stop targets",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(targets)))
+	return targets
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.

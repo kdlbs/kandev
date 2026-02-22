@@ -20,6 +20,7 @@ export type SwimlaneContainerProps = {
   onMoveError?: (error: MoveTaskError) => void;
   onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   deletingTaskId?: string | null;
+  showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
 };
@@ -60,6 +61,7 @@ export function SwimlaneContainer({
   onMoveError,
   onWorkflowAutomation,
   deletingTaskId,
+  showMaximizeButton,
   searchQuery,
   selectedRepositoryIds = [],
 }: SwimlaneContainerProps) {
@@ -155,6 +157,7 @@ export function SwimlaneContainer({
               onMoveError={onMoveError}
               onWorkflowAutomation={onWorkflowAutomation}
               deletingTaskId={deletingTaskId}
+              showMaximizeButton={showMaximizeButton}
             />
           </SwimlaneSection>
         );

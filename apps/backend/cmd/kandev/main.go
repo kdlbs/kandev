@@ -373,7 +373,7 @@ func startGatewayAndServe(
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, dockerClient, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -410,6 +410,7 @@ func buildHTTPServer(
 	orchestratorSvc *orchestrator.Service,
 	notificationCtrl *notificationcontroller.Controller,
 	msgCreator *messageCreatorAdapter,
+	agentRegistry *registry.Registry,
 ) *http.Server {
 	if cfg.Logging.Level != "debug" {
 		gin.SetMode(gin.ReleaseMode)
@@ -432,6 +433,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		agentSettingsController: agentSettingsController,
+		agentList:               agentRegistry,
 		userCtrl:                usercontroller.NewController(services.User),
 		notificationCtrl:        notificationCtrl,
 		editorCtrl:              editorcontroller.NewController(services.Editor),

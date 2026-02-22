@@ -406,6 +406,47 @@ export async function removeDockerContainer(
   });
 }
 
+// Remote auth methods (for remote executors like Sprites)
+
+export type RemoteAuthMethod = {
+  method_id: string;
+  type: "env" | "files" | "gh_cli_token";
+  env_var?: string;
+  setup_hint?: string;
+  source_files?: string[];
+  target_rel_dir?: string;
+  label?: string;
+  has_local_files?: boolean;
+};
+
+export type RemoteAuthSpec = {
+  id: string;
+  display_name: string;
+  methods: RemoteAuthMethod[];
+};
+
+export type ListRemoteCredentialsResponse = {
+  auth_specs: RemoteAuthSpec[];
+};
+
+export async function listRemoteCredentials(
+  options?: ApiRequestOptions,
+): Promise<ListRemoteCredentialsResponse> {
+  return fetchJson<ListRemoteCredentialsResponse>("/api/v1/remote-credentials", options);
+}
+
+export type LocalGitIdentityResponse = {
+  user_name: string;
+  user_email: string;
+  detected: boolean;
+};
+
+export async function fetchLocalGitIdentity(
+  options?: ApiRequestOptions,
+): Promise<LocalGitIdentityResponse> {
+  return fetchJson<LocalGitIdentityResponse>("/api/v1/git/identity", options);
+}
+
 // Sprites network policies
 
 export type NetworkPolicyRule = {

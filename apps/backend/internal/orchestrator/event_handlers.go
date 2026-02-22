@@ -48,9 +48,11 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 	}
 
 	resumable := true
+	runtimeName := ""
 	if session.ExecutorID != "" {
 		if executor, err := s.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
 			resumable = executor.Resumable
+			runtimeName = string(executor.Type)
 		}
 	}
 
@@ -59,6 +61,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 		SessionID:        session.ID,
 		TaskID:           session.TaskID,
 		ExecutorID:       session.ExecutorID,
+		Runtime:          runtimeName,
 		Status:           "ready",
 		Resumable:        resumable,
 		ResumeToken:      acpSessionID,

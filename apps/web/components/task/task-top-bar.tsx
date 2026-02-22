@@ -8,6 +8,8 @@ import {
   IconCopy,
   IconGitBranch,
   IconCheck,
+  IconCloud,
+  IconCloudOff,
   IconHome,
   IconSettings,
 } from "@tabler/icons-react";
@@ -53,6 +55,13 @@ type TaskTopBarProps = {
   currentStepId?: string | null;
   workflowId?: string | null;
   isArchived?: boolean;
+  isRemoteExecutor?: boolean;
+  remoteExecutorName?: string | null;
+  remoteExecutorType?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -70,6 +79,13 @@ const TaskTopBar = memo(function TaskTopBar({
   currentStepId,
   workflowId,
   isArchived,
+  isRemoteExecutor,
+  remoteExecutorName,
+  remoteExecutorType,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
 }: TaskTopBarProps) {
   const router = useRouter();
   const gitStatus = useSessionGitStatus(activeSessionId ?? null);
@@ -84,6 +100,13 @@ const TaskTopBar = memo(function TaskTopBar({
         repositoryPath={repositoryPath}
         worktreePath={worktreePath}
         gitStatus={gitStatus}
+        isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorName={remoteExecutorName}
+        remoteExecutorType={remoteExecutorType}
+        remoteState={remoteState}
+        remoteCreatedAt={remoteCreatedAt}
+        remoteCheckedAt={remoteCheckedAt}
+        remoteStatusError={remoteStatusError}
       />
       {workflowSteps && workflowSteps.length > 0 && (
         <WorkflowStepper
@@ -161,6 +184,92 @@ function PathRow({ label, path }: { label: string; path: string }) {
   );
 }
 
+function BranchPathPopover({
+  displayBranch,
+  repositoryPath,
+  worktreePath,
+}: {
+  displayBranch?: string;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+}) {
+  const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  if (!displayBranch) return null;
+
+  return (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors">
+              <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">{displayBranch}</span>
+              <CopyIconButton
+                copied={copiedBranch}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCopyBranch(displayBranch);
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ml-0.5"
+              />
+            </div>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">Current branch</TooltipContent>
+      </Tooltip>
+      <PopoverContent side="bottom" sideOffset={5} className="p-0 w-auto max-w-[600px] gap-1">
+        <div className="px-2 pt-1 pb-2 space-y-1.5">
+          {repositoryPath && <PathRow label="Repository" path={repositoryPath} />}
+          {worktreePath && <PathRow label="Worktree" path={worktreePath} />}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function RemoteExecutorIndicator({
+  isRemoteExecutor,
+  remoteExecutorName,
+  remoteExecutorType,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
+}: {
+  isRemoteExecutor?: boolean;
+  remoteExecutorName?: string | null;
+  remoteExecutorType?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
+}) {
+  if (!isRemoteExecutor) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center">
+          {remoteStatusError ? (
+            <IconCloudOff className="h-4 w-4 text-destructive" />
+          ) : (
+            <IconCloud className="h-4 w-4 text-muted-foreground" />
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="space-y-0.5">
+        <div className="font-medium">{remoteExecutorName ?? remoteExecutorType ?? "Remote"}</div>
+        {remoteState && <div>State: {remoteState}</div>}
+        {remoteCreatedAt && <div>Created: {new Date(remoteCreatedAt).toLocaleString()}</div>}
+        {remoteCheckedAt && <div>Last check: {new Date(remoteCheckedAt).toLocaleString()}</div>}
+        {remoteStatusError && (
+          <div className="text-destructive">Status failed: {remoteStatusError}</div>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Left section: breadcrumbs, branch pill, git status badges */
 function TopBarLeft({
   taskTitle,
@@ -169,6 +278,13 @@ function TopBarLeft({
   repositoryPath,
   worktreePath,
   gitStatus,
+  isRemoteExecutor,
+  remoteExecutorName,
+  remoteExecutorType,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
 }: {
   taskTitle?: string;
   repositoryName?: string | null;
@@ -176,10 +292,14 @@ function TopBarLeft({
   repositoryPath?: string | null;
   worktreePath?: string | null;
   gitStatus: ReturnType<typeof useSessionGitStatus>;
+  isRemoteExecutor?: boolean;
+  remoteExecutorName?: string | null;
+  remoteExecutorType?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
 }) {
-  const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
-  const [popoverOpen, setPopoverOpen] = useState(false);
-
   return (
     <div className="flex items-center gap-2.5 min-w-0">
       <Breadcrumb>
@@ -209,37 +329,22 @@ function TopBarLeft({
         </BreadcrumbList>
       </Breadcrumb>
 
-      {displayBranch && (
-        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <PopoverTrigger asChild>
-                <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors">
-                  <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{displayBranch}</span>
-                  <CopyIconButton
-                    copied={copiedBranch}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopyBranch(displayBranch);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ml-0.5"
-                  />
-                </div>
-              </PopoverTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="right">Current branch</TooltipContent>
-          </Tooltip>
-          <PopoverContent side="bottom" sideOffset={5} className="p-0 w-auto max-w-[600px] gap-1">
-            <div className="px-2 pt-1 pb-2 space-y-1.5">
-              {repositoryPath && <PathRow label="Repository" path={repositoryPath} />}
-              {worktreePath && <PathRow label="Worktree" path={worktreePath} />}
-            </div>
-          </PopoverContent>
-        </Popover>
-      )}
+      <BranchPathPopover
+        displayBranch={displayBranch}
+        repositoryPath={repositoryPath}
+        worktreePath={worktreePath}
+      />
 
       <GitAheadBehindBadges gitStatus={gitStatus} />
+      <RemoteExecutorIndicator
+        isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorName={remoteExecutorName}
+        remoteExecutorType={remoteExecutorType}
+        remoteState={remoteState}
+        remoteCreatedAt={remoteCreatedAt}
+        remoteCheckedAt={remoteCheckedAt}
+        remoteStatusError={remoteStatusError}
+      />
     </div>
   );
 }

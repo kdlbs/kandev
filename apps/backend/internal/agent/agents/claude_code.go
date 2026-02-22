@@ -125,6 +125,18 @@ func (a *ClaudeCode) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *ClaudeCode) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:      "env",
+				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
+				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
+			},
+		},
+	}
+}
+
 func (a *ClaudeCode) PermissionSettings() map[string]PermissionSetting {
 	return claudeCodePermSettings
 }

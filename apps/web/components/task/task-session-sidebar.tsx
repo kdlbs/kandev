@@ -156,6 +156,10 @@ function useSidebarData(workspaceId: string | null) {
         workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
         diffStats: sessionInfo.diffStats,
+        isRemoteExecutor: task.isRemoteExecutor,
+        remoteExecutorType: task.primaryExecutorType ?? undefined,
+        remoteExecutorName: task.primaryExecutorName ?? undefined,
+        primarySessionId: task.primarySessionId ?? null,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
         isArchived: false as boolean,
       };
@@ -173,6 +177,10 @@ function useSidebarData(workspaceId: string | null) {
         workflowStepId: undefined,
         repositoryPath: archivedState.archivedTaskRepositoryPath,
         diffStats: undefined,
+        isRemoteExecutor: false,
+        remoteExecutorType: undefined,
+        remoteExecutorName: undefined,
+        primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
         isArchived: true,
       });

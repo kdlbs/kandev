@@ -53,6 +53,10 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       primarySessionId: task.primary_session_id ?? undefined,
       sessionCount: task.session_count ?? undefined,
       reviewStatus: task.review_status ?? undefined,
+      primaryExecutorId: task.primary_executor_id ?? undefined,
+      primaryExecutorType: task.primary_executor_type ?? undefined,
+      primaryExecutorName: task.primary_executor_name ?? undefined,
+      isRemoteExecutor: task.is_remote_executor ?? false,
       updatedAt: task.updated_at,
     })),
   };
@@ -122,6 +126,10 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
         diffStats: sessionInfo.diffStats,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
+        isRemoteExecutor: task.isRemoteExecutor,
+        remoteExecutorType: task.primaryExecutorType ?? undefined,
+        remoteExecutorName: task.primaryExecutorName ?? undefined,
+        primarySessionId: task.primarySessionId ?? null,
       };
     });
   }, [repositoriesByWorkspace, tasks, workspaceId, getSessionInfoForTask]);
@@ -239,6 +247,10 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
           state: task.state,
           repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
           updatedAt: task.updated_at,
+          primaryExecutorId: task.primary_executor_id ?? undefined,
+          primaryExecutorType: task.primary_executor_type ?? undefined,
+          primaryExecutorName: task.primary_executor_name ?? undefined,
+          isRemoteExecutor: task.is_remote_executor ?? false,
         };
         return {
           ...state,

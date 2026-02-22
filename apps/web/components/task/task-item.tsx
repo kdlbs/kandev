@@ -5,6 +5,7 @@ import { IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { TaskState } from "@/lib/types/http";
 import { TaskItemMenu } from "./task-item-menu";
+import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 
 type DiffStats = {
   additions: number;
@@ -20,6 +21,9 @@ type TaskItemProps = {
   isSelected?: boolean;
   onClick?: () => void;
   diffStats?: DiffStats;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string;
+  remoteExecutorName?: string;
   updatedAt?: string;
   onRename?: () => void;
   onDuplicate?: () => void;
@@ -27,6 +31,8 @@ type TaskItemProps = {
   onArchive?: () => void;
   onDelete?: () => void;
   isDeleting?: boolean;
+  taskId?: string;
+  primarySessionId?: string | null;
 };
 
 // Helper to format relative time
@@ -46,6 +52,60 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  onClick?.();
+}
+
+function TaskItemMeta({
+  effectiveMenuOpen,
+  isRemoteExecutor,
+  taskId,
+  primarySessionId,
+  remoteExecutorName,
+  remoteExecutorType,
+  isArchived,
+  stepName,
+  isInProgress,
+  diffStats,
+  updatedAt,
+}: {
+  effectiveMenuOpen: boolean;
+  isRemoteExecutor?: boolean;
+  taskId?: string;
+  primarySessionId?: string | null;
+  remoteExecutorName?: string;
+  remoteExecutorType?: string;
+  isArchived?: boolean;
+  stepName?: string;
+  isInProgress: boolean;
+  diffStats?: DiffStats;
+  updatedAt?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-end gap-0.5 transition-opacity duration-100",
+        effectiveMenuOpen ? "opacity-0" : "group-hover:opacity-0",
+      )}
+    >
+      <div className="flex items-center gap-1">
+        {isRemoteExecutor && (
+          <RemoteCloudTooltip
+            taskId={taskId ?? ""}
+            sessionId={primarySessionId ?? null}
+            fallbackName={remoteExecutorName ?? remoteExecutorType}
+            iconClassName="h-3.5 w-3.5 text-muted-foreground/80"
+          />
+        )}
+        <TaskItemStepBadge isArchived={isArchived} stepName={stepName} />
+      </div>
+      <TaskItemRightMeta isInProgress={isInProgress} diffStats={diffStats} updatedAt={updatedAt} />
+    </div>
+  );
+}
+
 export const TaskItem = memo(function TaskItem({
   title,
   description,
@@ -55,6 +115,9 @@ export const TaskItem = memo(function TaskItem({
   isSelected = false,
   onClick,
   diffStats,
+  isRemoteExecutor,
+  remoteExecutorType,
+  remoteExecutorName,
   updatedAt,
   onRename,
   onDuplicate,
@@ -62,12 +125,12 @@ export const TaskItem = memo(function TaskItem({
   onArchive,
   onDelete,
   isDeleting,
+  taskId,
+  primarySessionId,
 }: TaskItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Effective open state: keep menu open while deleting
-  const effectiveMenuOpen = menuOpen || isDeleting;
-
+  const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = state === "IN_PROGRESS" || state === "SCHEDULING";
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
@@ -76,12 +139,7 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick?.();
-        }
-      }}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
       className={cn(
         "group relative flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none cursor-pointer",
         "transition-colors duration-75",
@@ -109,21 +167,20 @@ export const TaskItem = memo(function TaskItem({
 
       {/* Right side: step name + meta, or action buttons on hover */}
       <div className="relative flex items-center shrink-0">
-        <div
-          className={cn(
-            "flex flex-col items-end gap-0.5 transition-opacity duration-100",
-            effectiveMenuOpen ? "opacity-0" : "group-hover:opacity-0",
-          )}
-        >
-          <TaskItemStepBadge isArchived={isArchived} stepName={stepName} />
-          <TaskItemRightMeta
-            isInProgress={isInProgress}
-            diffStats={hasDiffStats ? diffStats : undefined}
-            updatedAt={updatedAt}
-          />
-        </div>
+        <TaskItemMeta
+          effectiveMenuOpen={effectiveMenuOpen}
+          isRemoteExecutor={isRemoteExecutor}
+          taskId={taskId}
+          primarySessionId={primarySessionId}
+          remoteExecutorName={remoteExecutorName}
+          remoteExecutorType={remoteExecutorType}
+          isArchived={isArchived}
+          stepName={stepName}
+          isInProgress={isInProgress}
+          diffStats={hasDiffStats ? diffStats : undefined}
+          updatedAt={updatedAt}
+        />
 
-        {/* Action buttons - hidden by default, visible on hover */}
         <div
           className={cn(
             "absolute right-0 flex items-center gap-0.5",

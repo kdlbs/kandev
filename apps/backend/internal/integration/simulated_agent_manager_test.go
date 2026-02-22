@@ -272,6 +272,10 @@ func (s *SimulatedAgentManagerClient) StopAgent(ctx context.Context, agentExecut
 	return nil
 }
 
+func (s *SimulatedAgentManagerClient) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
+	return s.StopAgent(ctx, agentExecutionID, force)
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Note: attachments parameter is accepted but not used in simulation
 func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
@@ -397,4 +401,8 @@ func (s *SimulatedAgentManagerClient) ResolveAgentProfile(ctx context.Context, p
 
 func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
+}
+
+func (s *SimulatedAgentManagerClient) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
+	return nil, nil
 }

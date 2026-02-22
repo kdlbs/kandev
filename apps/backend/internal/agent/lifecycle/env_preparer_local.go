@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -31,8 +32,14 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	start := time.Now()
 	var steps []PrepareStep
 
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+
 	totalSteps := 1 // validate workspace
-	if req.SetupScript != "" {
+	if resolvedScript != "" {
 		totalSteps++
 	}
 
@@ -49,10 +56,10 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	reportProgress(onProgress, step, 0, totalSteps)
 
 	// Step 2: Run setup script (if provided)
-	if req.SetupScript != "" {
+	if resolvedScript != "" {
 		step = beginStep("Run setup script")
 		reportProgress(onProgress, step, 1, totalSteps)
-		output, err := runSetupScript(ctx, req.SetupScript, req.WorkspacePath, req.Env)
+		output, err := runSetupScript(ctx, resolvedScript, workspacePath, req.Env)
 		if err != nil {
 			completeStepError(&step, err.Error())
 			step.Output = output
@@ -71,7 +78,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	return &EnvPrepareResult{
 		Success:       true,
 		Steps:         steps,
-		WorkspacePath: req.WorkspacePath,
+		WorkspacePath: workspacePath,
 		Duration:      time.Since(start),
 	}, nil
 }
@@ -89,10 +96,12 @@ func runSetupScript(ctx context.Context, script, workDir string, env map[string]
 
 // buildEnvSlice converts a map to os.Environ format (KEY=VALUE).
 func buildEnvSlice(env map[string]string) []string {
+	base := os.Environ()
 	if len(env) == 0 {
-		return nil
+		return base
 	}
-	result := make([]string, 0, len(env))
+	result := make([]string, 0, len(base)+len(env))
+	result = append(result, base...)
 	for k, v := range env {
 		result = append(result, k+"="+v)
 	}

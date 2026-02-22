@@ -171,6 +171,7 @@ type MessageListBodyProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   sessionId: string | null;
+  sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   isInitialLoading: boolean;
@@ -187,6 +188,7 @@ function MessageListBody({
   childrenByParentToolCallId,
   taskId,
   sessionId,
+  sessionState,
   worktreePath,
   onOpenFile,
   isInitialLoading,
@@ -228,6 +230,7 @@ function MessageListBody({
                 <MessageRenderer
                   comment={item.message}
                   isTaskDescription={item.message.id === "task-description"}
+                  sessionState={sessionState}
                   taskId={taskId}
                   permissionsByToolCallId={permissionsByToolCallId}
                   childrenByParentToolCallId={childrenByParentToolCallId}
@@ -258,6 +261,43 @@ function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+function MessageListStatus({
+  isLoadingMore,
+  hasMore,
+  showLoadingState,
+  messagesLoading,
+  isInitialLoading,
+  messagesCount,
+}: {
+  isLoadingMore: boolean;
+  hasMore: boolean;
+  showLoadingState: boolean;
+  messagesLoading: boolean;
+  isInitialLoading: boolean;
+  messagesCount: number;
+}) {
+  return (
+    <>
+      {isLoadingMore && hasMore && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
+          Loading older messages...
+        </div>
+      )}
+      {showLoadingState && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <GridSpinner className="text-primary mr-2" />
+          <span>Loading messages...</span>
+        </div>
+      )}
+      {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <span>No messages yet. Start the conversation!</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   items,
   messages,
@@ -273,8 +313,10 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
 }: VirtualizedMessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isInitialLoading = messagesLoading && messages.length === 0;
-  const isCreatedSession = sessionState === "CREATED";
-  const showLoadingState = (messagesLoading || isInitialLoading) && !isWorking && !isCreatedSession;
+  const isNonLoadableSession =
+    !sessionState || ["CREATED", "FAILED", "COMPLETED", "CANCELLED"].includes(sessionState);
+  const showLoadingState =
+    (messagesLoading || isInitialLoading) && !isWorking && !isNonLoadableSession;
   const itemCount = items.length;
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -328,22 +370,14 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
 
   return (
     <SessionPanelContent ref={messagesContainerRef} className="relative p-4">
-      {isLoadingMore && hasMore && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
-          Loading older messages...
-        </div>
-      )}
-      {showLoadingState && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <GridSpinner className="text-primary mr-2" />
-          <span>Loading messages...</span>
-        </div>
-      )}
-      {!messagesLoading && !isInitialLoading && messages.length === 0 && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>No messages yet. Start the conversation!</span>
-        </div>
-      )}
+      <MessageListStatus
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMore}
+        showLoadingState={showLoadingState}
+        messagesLoading={messagesLoading}
+        isInitialLoading={isInitialLoading}
+        messagesCount={messages.length}
+      />
       <MessageListBody
         items={items}
         messages={messages}
@@ -351,6 +385,7 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
         childrenByParentToolCallId={childrenByParentToolCallId}
         taskId={taskId}
         sessionId={sessionId}
+        sessionState={sessionState}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
         isInitialLoading={isInitialLoading}

@@ -7,22 +7,29 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 
 type KanbanTask = KanbanState["tasks"][number];
 
+function withFallback<T>(value: T | null | undefined, fallback: T | undefined): T | undefined {
+  return value ?? fallback;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
-  const task = {
+  return {
     id: payload.task_id,
     workflowStepId: payload.workflow_step_id,
     title: payload.title,
     description: payload.description,
     position: payload.position ?? 0,
     state: payload.state,
-    repositoryId: payload.repository_id ?? existing?.repositoryId,
-    primarySessionId: payload.primary_session_id ?? existing?.primarySessionId,
-    sessionCount: payload.session_count ?? existing?.sessionCount,
-    reviewStatus: payload.review_status ?? existing?.reviewStatus,
-    updatedAt: payload.updated_at ?? existing?.updatedAt,
+    repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
+    primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
+    sessionCount: withFallback(payload.session_count, existing?.sessionCount),
+    reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
+    primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
+    primaryExecutorType: withFallback(payload.primary_executor_type, existing?.primaryExecutorType),
+    primaryExecutorName: withFallback(payload.primary_executor_name, existing?.primaryExecutorName),
+    isRemoteExecutor: payload.is_remote_executor ?? existing?.isRemoteExecutor ?? false,
+    updatedAt: withFallback(payload.updated_at, existing?.updatedAt),
   };
-  return task;
 }
 
 function upsertTask(tasks: KanbanTask[], nextTask: KanbanTask): KanbanTask[] {

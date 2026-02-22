@@ -39,6 +39,7 @@ type WorktreeBatchCleaner interface {
 type TaskExecutionStopper interface {
 	StopTask(ctx context.Context, taskID, reason string, force bool) error
 	StopSession(ctx context.Context, sessionID, reason string, force bool) error
+	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
 // WorkflowStepCreator creates workflow steps from a template for a workflow.

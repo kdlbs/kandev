@@ -229,6 +229,10 @@ export type Task = {
   primary_session_id?: string | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
+  primary_executor_id?: string | null;
+  primary_executor_type?: string | null;
+  primary_executor_name?: string | null;
+  is_remote_executor?: boolean;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;

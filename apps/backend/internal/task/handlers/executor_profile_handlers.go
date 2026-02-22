@@ -3,29 +3,39 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"os/exec"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/remoteauth"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// AgentLister provides access to enabled agents for building remote auth specs.
+type AgentLister interface {
+	ListEnabled() []agents.Agent
+}
+
 type ExecutorProfileHandlers struct {
-	service *service.Service
-	logger  *logger.Logger
+	service   *service.Service
+	agentList AgentLister
+	logger    *logger.Logger
 }
 
-func NewExecutorProfileHandlers(svc *service.Service, log *logger.Logger) *ExecutorProfileHandlers {
-	return &ExecutorProfileHandlers{service: svc, logger: log}
+func NewExecutorProfileHandlers(svc *service.Service, agentList AgentLister, log *logger.Logger) *ExecutorProfileHandlers {
+	return &ExecutorProfileHandlers{service: svc, agentList: agentList, logger: log}
 }
 
-func RegisterExecutorProfileRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, log *logger.Logger) {
-	handlers := NewExecutorProfileHandlers(svc, log)
+func RegisterExecutorProfileRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, agentList AgentLister, log *logger.Logger) {
+	handlers := NewExecutorProfileHandlers(svc, agentList, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 }
@@ -34,6 +44,8 @@ func (h *ExecutorProfileHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/executor-profiles", h.httpListAllProfiles)
 	api.GET("/executor-profiles/default-script", h.httpGetDefaultScript)
+	api.GET("/remote-credentials", h.httpListRemoteCredentials)
+	api.GET("/git/identity", h.httpGetGitIdentity)
 	api.GET("/script-placeholders", h.httpListScriptPlaceholders)
 	api.GET("/executors/:id/profiles", h.httpListProfiles)
 	api.POST("/executors/:id/profiles", h.httpCreateProfile)
@@ -90,9 +102,50 @@ func (h *ExecutorProfileHandlers) httpGetDefaultScript(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"prepare_script": scriptengine.DefaultPrepareScript(executorType),
+		"prepare_script": lifecycle.DefaultPrepareScript(executorType),
 		"cleanup_script": "",
 	})
+}
+
+func (h *ExecutorProfileHandlers) httpListRemoteCredentials(c *gin.Context) {
+	specs := h.buildRemoteAuthSpecs()
+	c.JSON(http.StatusOK, gin.H{
+		"auth_specs": specs,
+	})
+}
+
+func (h *ExecutorProfileHandlers) httpGetGitIdentity(c *gin.Context) {
+	name := firstNonEmptyGitConfig("user.name")
+	email := firstNonEmptyGitConfig("user.email")
+	detected := name != "" && email != ""
+	c.JSON(http.StatusOK, gin.H{
+		"user_name":  name,
+		"user_email": email,
+		"detected":   detected,
+	})
+}
+
+func firstNonEmptyGitConfig(key string) string {
+	if value := runGitConfig("config", "--get", key); value != "" {
+		return value
+	}
+	return runGitConfig("config", "--global", "--get", key)
+}
+
+func runGitConfig(args ...string) string {
+	cmd := exec.Command("git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (h *ExecutorProfileHandlers) buildRemoteAuthSpecs() []remoteauth.Spec {
+	if h.agentList == nil {
+		return remoteauth.BuildCatalog(nil).Specs
+	}
+	return remoteauth.BuildCatalog(h.agentList.ListEnabled()).Specs
 }
 
 func (h *ExecutorProfileHandlers) httpListProfiles(c *gin.Context) {

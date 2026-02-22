@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -65,9 +66,12 @@ type Manager struct {
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
 
-	// Background goroutine coordination
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	// Background remote status polling
+	remoteStatusPollInterval time.Duration
+	remoteStatusMu           sync.RWMutex
+	remoteStatusBySession    map[string]*RemoteStatus
+	stopCh                   chan struct{}
+	wg                       sync.WaitGroup
 }
 
 // NewManager creates a new lifecycle manager.
@@ -109,21 +113,23 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:               reg,
-		eventBus:               eventBus,
-		executorRegistry:       executorRegistry,
-		executorFallbackPolicy: fallbackPolicy,
-		credsMgr:               credsMgr,
-		profileResolver:        profileResolver,
-		mcpProvider:            mcpProvider,
-		logger:                 componentLogger,
-		executionStore:         executionStore,
-		commandBuilder:         commandBuilder,
-		sessionManager:         sessionManager,
-		eventPublisher:         eventPublisher,
-		containerManager:       containerManager,
-		historyManager:         historyManager,
-		stopCh:                 stopCh,
+		registry:                 reg,
+		eventBus:                 eventBus,
+		executorRegistry:         executorRegistry,
+		executorFallbackPolicy:   fallbackPolicy,
+		credsMgr:                 credsMgr,
+		profileResolver:          profileResolver,
+		mcpProvider:              mcpProvider,
+		logger:                   componentLogger,
+		executionStore:           executionStore,
+		commandBuilder:           commandBuilder,
+		sessionManager:           sessionManager,
+		eventPublisher:           eventPublisher,
+		containerManager:         containerManager,
+		historyManager:           historyManager,
+		remoteStatusPollInterval: 60 * time.Second,
+		remoteStatusBySession:    make(map[string]*RemoteStatus),
+		stopCh:                   stopCh,
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods

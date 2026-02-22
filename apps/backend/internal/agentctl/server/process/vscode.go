@@ -157,6 +157,7 @@ func allocatePort() (int, error) {
 
 // startProcess creates and starts the code-server subprocess.
 func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) error {
+	workDir := resolveExistingWorkDir(v.workDir, v.logger)
 	bindAddr := fmt.Sprintf("0.0.0.0:%d", v.port)
 	args := []string{
 		"--bind-addr", bindAddr,
@@ -166,11 +167,12 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 		"--user-data-dir", v.userDataDir(),
 	}
 	// Append workDir as positional argument so code-server opens the folder.
-	args = append(args, v.workDir)
+	args = append(args, workDir)
 
 	v.mu.Lock()
 	v.cmd = exec.Command(binaryPath, args...)
-	v.cmd.Dir = v.workDir
+	v.cmd.Dir = workDir
+	v.workDir = workDir
 	setProcGroup(v.cmd)
 
 	stderr, err := v.cmd.StderrPipe()
@@ -221,6 +223,54 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 	}
 
 	return nil
+}
+
+func resolveExistingWorkDir(workDir string, log *logger.Logger) string {
+	candidate := strings.TrimSpace(workDir)
+	if candidate == "" {
+		if cwd, err := os.Getwd(); err == nil && cwd != "" {
+			return cwd
+		}
+		return "."
+	}
+
+	info, err := os.Stat(candidate)
+	if err == nil && info.IsDir() {
+		return candidate
+	}
+
+	// Walk up to the nearest existing parent directory.
+	current := candidate
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		info, statErr := os.Stat(parent)
+		if statErr == nil && info.IsDir() {
+			if log != nil {
+				log.Warn("vscode workdir missing; using nearest existing parent directory",
+					zap.String("requested_workdir", candidate),
+					zap.String("fallback_workdir", parent))
+			}
+			return parent
+		}
+		current = parent
+	}
+
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil && cwd != "" {
+		if log != nil {
+			log.Warn("vscode workdir missing; using current directory fallback",
+				zap.String("requested_workdir", candidate),
+				zap.String("fallback_workdir", cwd))
+		}
+		return cwd
+	}
+	if log != nil {
+		log.Warn("vscode workdir missing; using relative dot fallback",
+			zap.String("requested_workdir", candidate))
+	}
+	return "."
 }
 
 // waitForReady polls the code-server port until it accepts connections.

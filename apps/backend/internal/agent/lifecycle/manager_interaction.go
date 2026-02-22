@@ -71,6 +71,11 @@ func (m *Manager) CancelAgentBySessionID(ctx context.Context, sessionID string) 
 
 // StopAgent stops an agent execution
 func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool) error {
+	return m.StopAgentWithReason(ctx, executionID, "", force)
+}
+
+// StopAgentWithReason stops an agent execution and passes a semantic reason to runtime teardown.
+func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -78,6 +83,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 
 	m.logger.Info("stopping agent",
 		zap.String("execution_id", executionID),
+		zap.String("reason", reason),
 		zap.Bool("force", force),
 		zap.String("runtime", execution.RuntimeName))
 
@@ -92,7 +98,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 	}
 
 	// Stop the agent execution via the runtime that created it
-	m.stopAgentViaBackend(ctx, executionID, execution, force)
+	m.stopAgentViaBackend(ctx, executionID, execution, reason, force)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -105,6 +111,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 	execution.EndSessionSpan()
 
 	m.executionStore.Remove(executionID)
+	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
 		zap.String("execution_id", executionID),
@@ -391,7 +398,7 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
-func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, force bool) {
+func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool) {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
 		return
 	}
@@ -410,6 +417,8 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
+		Metadata:             execution.Metadata,
+		StopReason:           reason,
 	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
 		m.logger.Warn("failed to stop runtime instance, continuing with cleanup",

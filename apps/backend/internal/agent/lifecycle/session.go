@@ -535,6 +535,17 @@ func (sm *SessionManager) SendPrompt(
 
 	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
 	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
+		if isAgentStreamNotConnectedErr(err) && sm.streamManager != nil {
+			sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
+				zap.String("execution_id", execution.ID))
+			retryErr := sm.retryPromptAfterReconnect(ctx, execution, effectivePrompt, attachments)
+			if retryErr == nil {
+				return sm.waitForPromptDone(ctx, execution)
+			}
+			sm.logger.Warn("prompt retry after stream reconnect failed",
+				zap.String("execution_id", execution.ID),
+				zap.Error(retryErr))
+		}
 		sm.logger.Error("failed to trigger prompt",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -543,6 +554,26 @@ func (sm *SessionManager) SendPrompt(
 
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
 	return sm.waitForPromptDone(ctx, execution)
+}
+
+func (sm *SessionManager) retryPromptAfterReconnect(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+) error {
+	ready := make(chan struct{})
+	go sm.streamManager.connectUpdatesStream(execution, ready)
+
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("timed out waiting for updates stream reconnect")
+	}
+
+	return execution.agentctl.Prompt(ctx, prompt, attachments)
 }
 
 // jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".
@@ -555,4 +586,11 @@ func isMethodNotFoundErr(err error) bool {
 		return reqErr.Code == jsonRPCMethodNotFound
 	}
 	return false
+}
+
+func isAgentStreamNotConnectedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "agent stream not connected")
 }

@@ -28,6 +28,13 @@ type TaskLayoutProps = {
   taskTitle?: string;
   baseBranch?: string;
   worktreeBranch?: string | null;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string | null;
+  remoteExecutorName?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
 };
 
 export const TaskLayout = memo(function TaskLayout({
@@ -41,6 +48,13 @@ export const TaskLayout = memo(function TaskLayout({
   taskTitle,
   baseBranch,
   worktreeBranch,
+  isRemoteExecutor,
+  remoteExecutorType,
+  remoteExecutorName,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
 }: TaskLayoutProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
 
@@ -54,6 +68,13 @@ export const TaskLayout = memo(function TaskLayout({
         baseBranch={baseBranch}
         worktreeBranch={worktreeBranch}
         taskTitle={taskTitle}
+        isRemoteExecutor={isRemoteExecutor}
+        remoteExecutorType={remoteExecutorType}
+        remoteExecutorName={remoteExecutorName}
+        remoteState={remoteState}
+        remoteCreatedAt={remoteCreatedAt}
+        remoteCheckedAt={remoteCheckedAt}
+        remoteStatusError={remoteStatusError}
       />
     );
   }

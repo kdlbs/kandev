@@ -40,23 +40,12 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 }
 
 // ConnectAll connects to all streams for an execution.
-// If ready is non-nil, it will be closed when both streams are connected.
+// If ready is non-nil, it is closed when the updates stream connection attempt
+// completes (success or failure). Agent operations require the updates stream;
+// workspace stream readiness is handled independently.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
-	// Create channels to track when each stream is connected
-	updatesReady := make(chan struct{})
-	workspaceReady := make(chan struct{})
-
-	go sm.connectUpdatesStream(execution, updatesReady)
-	go sm.connectWorkspaceStream(execution, workspaceReady)
-
-	// If caller wants to know when streams are ready, wait for both
-	if ready != nil {
-		go func() {
-			<-updatesReady
-			<-workspaceReady
-			close(ready)
-		}()
-	}
+	go sm.connectUpdatesStream(execution, ready)
+	go sm.connectWorkspaceStream(execution, nil)
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).

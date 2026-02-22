@@ -244,6 +244,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 
 	m.executionStore.Add(execution)
+	go m.pollOneRemoteStatus(context.Background(), execution)
 
 	go m.waitForAgentctlReady(execution)
 

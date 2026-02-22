@@ -110,6 +110,26 @@ func (a *Gemini) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *Gemini) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:  "files",
+				Label: "Copy auth files",
+				SourceFiles: map[string][]string{
+					"darwin": {".gemini/oauth_creds.json", ".gemini/settings.json", ".gemini/google_accounts.json"},
+					"linux":  {".gemini/oauth_creds.json", ".gemini/settings.json", ".gemini/google_accounts.json"},
+				},
+				TargetRelDir: ".gemini",
+			},
+			{
+				Type:   "env",
+				EnvVar: "GEMINI_API_KEY",
+			},
+		},
+	}
+}
+
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 	return geminiPermSettings
 }

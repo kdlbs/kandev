@@ -1,6 +1,9 @@
 package scriptengine
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // RepositoryProvider returns git-related placeholders from metadata and environment.
 // Parameters:
@@ -29,7 +32,7 @@ func RepositoryProvider(
 		}
 		vars["repository.branch"] = branch
 
-		setupScript := getMetaString(metadata, "setup_script")
+		setupScript := getMetaString(metadata, "repository_setup_script")
 		vars["repository.setup_script"] = setupScript
 
 		// Clone URL: prefer explicit metadata, fall back to resolving from local repo
@@ -72,6 +75,43 @@ func WorkspaceProvider(workspacePath string) PlaceholderProvider {
 	}
 }
 
+// WorktreeProvider returns placeholders that describe the selected worktree context.
+func WorktreeProvider(basePath, path, id, branch, baseBranch string) PlaceholderProvider {
+	return func() map[string]string {
+		return map[string]string{
+			"worktree.base_path":   basePath,
+			"worktree.path":        path,
+			"worktree.id":          id,
+			"worktree.branch":      branch,
+			"worktree.base_branch": baseBranch,
+		}
+	}
+}
+
+// GitIdentityProvider returns placeholders for git identity setup in remote executors.
+func GitIdentityProvider(metadata map[string]any) PlaceholderProvider {
+	return func() map[string]string {
+		name := getMetaString(metadata, "git_user_name")
+		email := getMetaString(metadata, "git_user_email")
+
+		vars := map[string]string{
+			"git.user_name":      name,
+			"git.user_email":     email,
+			"git.identity_setup": "",
+		}
+		if name == "" || email == "" {
+			return vars
+		}
+
+		lines := []string{
+			fmt.Sprintf("git config --global user.name '%s'", shellSingleQuote(name)),
+			fmt.Sprintf("git config --global user.email '%s'", shellSingleQuote(email)),
+		}
+		vars["git.identity_setup"] = strings.Join(lines, "\n")
+		return vars
+	}
+}
+
 // injectToken applies token injection to a URL if an injector is provided.
 func injectToken(url string, env map[string]string, injector func(string, map[string]string) string) string {
 	if injector != nil {
@@ -103,4 +143,8 @@ func repoNameFromPath(repoPath string) string {
 		}
 	}
 	return repoPath
+}
+
+func shellSingleQuote(value string) string {
+	return strings.ReplaceAll(value, "'", `'"'"'`)
 }

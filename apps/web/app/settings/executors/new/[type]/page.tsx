@@ -10,6 +10,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   createExecutorProfile,
+  fetchLocalGitIdentity,
   fetchDefaultScripts,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
@@ -29,6 +30,11 @@ import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import { DockerfileBuildCard } from "@/components/settings/profile-edit/docker-sections";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
+import {
+  RemoteCredentialsCard,
+  type GitIdentityMode,
+  type GitIdentityState,
+} from "@/components/settings/profile-edit/remote-credentials-card";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ProfileEnvVar } from "@/lib/types/http";
 
@@ -161,12 +167,56 @@ function CreateFormActions({
   );
 }
 
-function buildProfileConfig(
-  isSprites: boolean,
-  networkPolicyRules: NetworkPolicyRule[],
-): Record<string, string> | undefined {
-  if (!isSprites || networkPolicyRules.length === 0) return undefined;
-  return { sprites_network_policy_rules: JSON.stringify(networkPolicyRules) };
+type BuildProfileConfigInput = {
+  isRemote: boolean;
+  isSprites: boolean;
+  networkPolicyRules: NetworkPolicyRule[];
+  remoteCredentials: string[];
+  agentEnvVars: Record<string, string | null>;
+  gitIdentityMode: GitIdentityMode;
+  localGitIdentity: GitIdentityState;
+  gitUserName: string;
+  gitUserEmail: string;
+};
+
+function buildProfileConfig(input: BuildProfileConfigInput): Record<string, string> | undefined {
+  const {
+    isRemote,
+    isSprites,
+    networkPolicyRules,
+    remoteCredentials,
+    agentEnvVars,
+    gitIdentityMode,
+    localGitIdentity,
+    gitUserName,
+    gitUserEmail,
+  } = input;
+  const config: Record<string, string> = {};
+  if (isSprites && networkPolicyRules.length > 0) {
+    config.sprites_network_policy_rules = JSON.stringify(networkPolicyRules);
+  }
+  if (isSprites && remoteCredentials.length > 0) {
+    config.remote_credentials = JSON.stringify(remoteCredentials);
+  }
+  const nonNullEnvVars = Object.fromEntries(
+    Object.entries(agentEnvVars).filter(([, v]) => v != null),
+  );
+  if (isSprites && Object.keys(nonNullEnvVars).length > 0) {
+    config.remote_auth_secrets = JSON.stringify(nonNullEnvVars);
+  }
+  if (isRemote) {
+    const effectiveName =
+      gitIdentityMode === "local" ? localGitIdentity.userName.trim() : gitUserName.trim();
+    const effectiveEmail =
+      gitIdentityMode === "local" ? localGitIdentity.userEmail.trim() : gitUserEmail.trim();
+    if (effectiveName) {
+      config.git_user_name = effectiveName;
+    }
+    if (effectiveEmail) {
+      config.git_user_email = effectiveEmail;
+    }
+  }
+  return Object.keys(config).length > 0 ? config : undefined;
 }
 
 function useDefaultScripts(executorType: string, setPrepareScript: (v: string) => void) {
@@ -179,6 +229,81 @@ function useDefaultScripts(executorType: string, setPrepareScript: (v: string) =
   }, [executorType, setPrepareScript]);
 }
 
+function useCreateRemoteFlags(executorType: string) {
+  const isRemote =
+    executorType === "local_docker" ||
+    executorType === "remote_docker" ||
+    executorType === "sprites";
+  return {
+    isRemote,
+    isDocker: executorType === "local_docker" || executorType === "remote_docker",
+    isSprites: executorType === "sprites",
+  };
+}
+
+function useCreateRemoteAuthState(executorType: string) {
+  const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
+    executorType === "sprites" ? ["gh_cli_token"] : [],
+  );
+  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>({});
+  const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
+
+  const handleAgentEnvVarChange = useCallback((agentId: string, secretId: string | null) => {
+    setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
+  }, []);
+
+  return {
+    remoteCredentials,
+    setRemoteCredentials,
+    agentEnvVars,
+    handleAgentEnvVarChange,
+    networkPolicyRules,
+    setNetworkPolicyRules,
+  };
+}
+
+function useCreateGitIdentityState(isRemote: boolean) {
+  const [localGitIdentity, setLocalGitIdentity] = useState<GitIdentityState>({
+    userName: "",
+    userEmail: "",
+    detected: false,
+  });
+  const [gitIdentityMode, setGitIdentityMode] = useState<GitIdentityMode>("override");
+  const [gitUserName, setGitUserName] = useState("");
+  const [gitUserEmail, setGitUserEmail] = useState("");
+
+  useEffect(() => {
+    if (!isRemote) return;
+    fetchLocalGitIdentity()
+      .then((identity) => {
+        const resolved: GitIdentityState = {
+          userName: identity.user_name ?? "",
+          userEmail: identity.user_email ?? "",
+          detected: Boolean(identity.detected),
+        };
+        setLocalGitIdentity(resolved);
+        if (resolved.detected) {
+          setGitIdentityMode("local");
+          setGitUserName(resolved.userName);
+          setGitUserEmail(resolved.userEmail);
+        } else {
+          setGitIdentityMode("override");
+        }
+      })
+      .catch(() => {});
+  }, [isRemote]);
+
+  return {
+    localGitIdentity,
+    gitIdentityMode,
+    setGitIdentityMode,
+    gitUserName,
+    setGitUserName,
+    gitUserEmail,
+    setGitUserEmail,
+  };
+}
+
 function useCreateProfileFormState(executorType: string) {
   const [name, setName] = useState("");
   const [mcpPolicy, setMcpPolicy] = useState("");
@@ -187,16 +312,11 @@ function useCreateProfileFormState(executorType: string) {
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
-  const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
+  const remoteAuth = useCreateRemoteAuthState(executorType);
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
-
-  const isRemote =
-    executorType === "local_docker" ||
-    executorType === "remote_docker" ||
-    executorType === "sprites";
-  const isDocker = executorType === "local_docker" || executorType === "remote_docker";
-  const isSprites = executorType === "sprites";
+  const flags = useCreateRemoteFlags(executorType);
+  const gitIdentity = useCreateGitIdentityState(flags.isRemote);
   const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
   useEffect(() => {
@@ -209,13 +329,13 @@ function useCreateProfileFormState(executorType: string) {
 
   const buildEnvVars = useCallback((): ProfileEnvVar[] => {
     const vars = rowsToEnvVars(envVarRows).filter((ev) => ev.key !== SPRITES_TOKEN_KEY);
-    if (isSprites && spritesSecretId) {
+    if (flags.isSprites && spritesSecretId) {
       vars.push({ key: SPRITES_TOKEN_KEY, secret_id: spritesSecretId });
     }
     return vars;
-  }, [envVarRows, isSprites, spritesSecretId]);
+  }, [envVarRows, flags.isSprites, spritesSecretId]);
 
-  const prepareDesc = isRemote
+  const prepareDesc = flags.isRemote
     ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
     : "Runs on the host machine before the agent starts.";
 
@@ -235,15 +355,26 @@ function useCreateProfileFormState(executorType: string) {
     placeholders,
     spritesSecretId,
     setSpritesSecretId,
-    networkPolicyRules,
-    setNetworkPolicyRules,
+    networkPolicyRules: remoteAuth.networkPolicyRules,
+    setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
+    remoteCredentials: remoteAuth.remoteCredentials,
+    setRemoteCredentials: remoteAuth.setRemoteCredentials,
+    agentEnvVars: remoteAuth.agentEnvVars,
+    handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
+    localGitIdentity: gitIdentity.localGitIdentity,
+    gitIdentityMode: gitIdentity.gitIdentityMode,
+    setGitIdentityMode: gitIdentity.setGitIdentityMode,
     dockerfile,
     setDockerfile,
     imageTag,
     setImageTag,
-    isRemote,
-    isDocker,
-    isSprites,
+    gitUserName: gitIdentity.gitUserName,
+    setGitUserName: gitIdentity.setGitUserName,
+    gitUserEmail: gitIdentity.gitUserEmail,
+    setGitUserEmail: gitIdentity.setGitUserEmail,
+    isRemote: flags.isRemote,
+    isDocker: flags.isDocker,
+    isSprites: flags.isSprites,
     mcpPolicyError,
     buildEnvVars,
     prepareDesc,
@@ -262,13 +393,27 @@ function useCreateProfileSave(
 
   const handleSave = useCallback(async () => {
     if (!form.name.trim() || form.mcpPolicyError) return;
+    if (form.isSprites && !form.spritesSecretId) {
+      setError("Sprites API key is required.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const profile = await createExecutorProfile(executorId, {
         name: form.name.trim(),
         mcp_policy: form.mcpPolicy || undefined,
-        config: buildProfileConfig(form.isSprites, form.networkPolicyRules),
+        config: buildProfileConfig({
+          isRemote: form.isRemote,
+          isSprites: form.isSprites,
+          networkPolicyRules: form.networkPolicyRules,
+          remoteCredentials: form.remoteCredentials,
+          agentEnvVars: form.agentEnvVars,
+          gitIdentityMode: form.gitIdentityMode,
+          localGitIdentity: form.localGitIdentity,
+          gitUserName: form.gitUserName,
+          gitUserEmail: form.gitUserEmail,
+        }),
         prepare_script: form.prepareScript,
         cleanup_script: form.cleanupScript,
         env_vars: form.buildEnvVars(),
@@ -288,24 +433,17 @@ function useCreateProfileSave(
   return { saving, error, handleSave };
 }
 
-function CreateProfileForm({
+function CreateProfileSections({
   executorType,
-  typeInfo,
+  form,
+  secrets,
 }: {
   executorType: string;
-  typeInfo: { executorId: string; label: string; description: string };
+  form: ReturnType<typeof useCreateProfileFormState>;
+  secrets: ReturnType<typeof useSecrets>["items"];
 }) {
-  const { items: secrets } = useSecrets();
-  const form = useCreateProfileFormState(executorType);
-  const { saving, error, handleSave } = useCreateProfileSave(form, typeInfo.executorId);
-
   return (
-    <div className="space-y-8">
-      <CreateProfileHeader
-        type={executorType}
-        label={typeInfo.label}
-        description={typeInfo.description}
-      />
+    <>
       <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
       {form.isSprites && (
         <SpritesApiKeyCard
@@ -320,6 +458,23 @@ function CreateProfileForm({
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+        />
+      )}
+      {form.isRemote && (
+        <RemoteCredentialsCard
+          isRemote={form.isRemote}
+          selectedIds={form.remoteCredentials}
+          onChange={form.setRemoteCredentials}
+          agentEnvVars={form.agentEnvVars}
+          onAgentEnvVarChange={form.handleAgentEnvVarChange}
+          secrets={secrets}
+          gitIdentityMode={form.gitIdentityMode}
+          onGitIdentityModeChange={form.setGitIdentityMode}
+          gitUserName={form.gitUserName}
+          gitUserEmail={form.gitUserEmail}
+          onGitUserNameChange={form.setGitUserName}
+          onGitUserEmailChange={form.setGitUserEmail}
+          localGitIdentity={form.localGitIdentity}
         />
       )}
       {form.isSprites && (
@@ -360,10 +515,39 @@ function CreateProfileForm({
         mcpPolicyError={form.mcpPolicyError}
         onPolicyChange={form.setMcpPolicy}
       />
+    </>
+  );
+}
+
+function CreateProfileForm({
+  executorType,
+  typeInfo,
+}: {
+  executorType: string;
+  typeInfo: { executorId: string; label: string; description: string };
+}) {
+  const { items: secrets } = useSecrets();
+  const form = useCreateProfileFormState(executorType);
+  const { saving, error, handleSave } = useCreateProfileSave(form, typeInfo.executorId);
+  const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
+
+  return (
+    <div className="space-y-8">
+      <CreateProfileHeader
+        type={executorType}
+        label={typeInfo.label}
+        description={typeInfo.description}
+      />
+      <CreateProfileSections executorType={executorType} form={form} secrets={secrets} />
+      {spritesTokenMissing && (
+        <p className="text-sm text-destructive">Sprites API key is required.</p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <CreateFormActions
         saving={saving}
-        saveDisabled={!form.name.trim() || Boolean(form.mcpPolicyError) || saving}
+        saveDisabled={
+          !form.name.trim() || Boolean(form.mcpPolicyError) || spritesTokenMissing || saving
+        }
         onSave={handleSave}
       />
     </div>

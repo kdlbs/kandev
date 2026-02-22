@@ -103,6 +103,18 @@ type TaskSessionStatusResponse struct {
 	// ACP session info
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 
+	// Executor/runtime info
+	ExecutorID       string `json:"executor_id,omitempty"`
+	ExecutorType     string `json:"executor_type,omitempty"`
+	ExecutorName     string `json:"executor_name,omitempty"`
+	Runtime          string `json:"runtime,omitempty"`
+	IsRemoteExecutor bool   `json:"is_remote_executor"`
+	RemoteState      string `json:"remote_state,omitempty"`
+	RemoteName       string `json:"remote_name,omitempty"`
+	RemoteCreatedAt  string `json:"remote_created_at,omitempty"`
+	RemoteCheckedAt  string `json:"remote_checked_at,omitempty"`
+	RemoteStatusErr  string `json:"remote_status_error,omitempty"`
+
 	// Worktree info
 	WorktreePath   *string `json:"worktree_path,omitempty"`
 	WorktreeBranch *string `json:"worktree_branch,omitempty"`

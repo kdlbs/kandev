@@ -70,6 +70,7 @@ type AgentManagerClient interface {
 
 	// StopAgent stops a running agent
 	StopAgent(ctx context.Context, agentExecutionID string, force bool) error
+	StopAgentWithReason(ctx context.Context, agentExecutionID string, reason string, force bool) error
 
 	// PromptAgent sends a prompt to a running agent
 	// Returns PromptResult indicating if the agent needs input
@@ -95,6 +96,20 @@ type AgentManagerClient interface {
 
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
+
+	// GetRemoteRuntimeStatusBySession returns remote runtime status metadata for a session
+	// (used by UI cloud indicators). Returns nil,nil when unavailable.
+	GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error)
+}
+
+// RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
+type RemoteRuntimeStatus struct {
+	RuntimeName   string
+	RemoteName    string
+	State         string
+	CreatedAt     *time.Time
+	LastCheckedAt time.Time
+	ErrorMessage  string
 }
 
 // AgentProfileInfo contains resolved profile information
@@ -136,6 +151,15 @@ type LaunchAgentRequest struct {
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+}
+
+// LaunchOptions contains optional parameters for LaunchPreparedSession.
+type LaunchOptions struct {
+	AgentProfileID string
+	ExecutorID     string
+	Prompt         string
+	WorkflowStepID string
+	StartAgent     bool
 }
 
 // LaunchAgentResponse contains the result of launching an agent
@@ -191,6 +215,11 @@ func agentSessionStateToV1(state models.TaskSessionState) v1.TaskSessionState {
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskState) error
 
+// SessionStateChangeFunc is called when the executor needs to update a session's state.
+// When set, it replaces direct repo.UpdateTaskSessionState calls so the caller can
+// publish events (e.g. WebSocket notifications) alongside the DB update.
+type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager AgentManagerClient
@@ -206,6 +235,11 @@ type Executor struct {
 	// Callback for task state changes that need event publishing.
 	// Set by the orchestrator to route through the task service layer.
 	onTaskStateChange TaskStateChangeFunc
+
+	// Callback for session state changes that need event publishing.
+	// Set by the orchestrator to route through updateTaskSessionState which
+	// updates the DB and publishes WebSocket events.
+	onSessionStateChange SessionStateChangeFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -242,4 +276,11 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 // the database, leaving the frontend out of sync.
 func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 	e.onTaskStateChange = fn
+}
+
+// SetOnSessionStateChange sets a callback for session state changes.
+// This allows the orchestrator to route state changes through updateTaskSessionState
+// which updates the DB and publishes WebSocket events to the frontend.
+func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
+	e.onSessionStateChange = fn
 }

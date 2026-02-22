@@ -274,6 +274,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	agentSettingsController *agentsettingscontroller.Controller
+	agentList               taskhandlers.AgentLister
 	userCtrl                *usercontroller.Controller
 	notificationCtrl        *notificationcontroller.Controller
 	editorCtrl              *editorcontroller.Controller
@@ -306,7 +307,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService) {
 	taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
-	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,

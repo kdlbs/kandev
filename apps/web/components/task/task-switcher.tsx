@@ -18,8 +18,12 @@ type TaskSwitcherItem = {
   workflowStepId?: string;
   repositoryPath?: string;
   diffStats?: DiffStats;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string;
+  remoteExecutorName?: string;
   updatedAt?: string;
   isArchived?: boolean;
+  primarySessionId?: string | null;
 };
 
 type TaskSwitcherProps = {
@@ -99,6 +103,11 @@ export const TaskSwitcher = memo(function TaskSwitcher({
               isArchived={task.isArchived}
               isSelected={isSelected}
               diffStats={task.diffStats}
+              isRemoteExecutor={task.isRemoteExecutor}
+              remoteExecutorType={task.remoteExecutorType}
+              remoteExecutorName={task.remoteExecutorName}
+              taskId={task.id}
+              primarySessionId={task.primarySessionId ?? null}
               updatedAt={task.updatedAt}
               onClick={() => onSelectTask(task.id)}
               onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}

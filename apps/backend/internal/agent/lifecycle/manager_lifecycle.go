@@ -87,6 +87,10 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
 
+	// Start remote status polling loop for runtimes exposing remote status.
+	m.wg.Add(1)
+	go m.remoteStatusLoop(ctx)
+	m.logger.Info("remote status loop started")
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {

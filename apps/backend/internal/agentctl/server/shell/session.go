@@ -419,6 +419,8 @@ func buildShellEnv(workDir string) []string {
 
 	// Set terminal type
 	env = append(env, "TERM=xterm-256color")
+	env = append(env, "LANG=C.UTF-8")
+	env = append(env, "LC_ALL=C.UTF-8")
 
 	return env
 }

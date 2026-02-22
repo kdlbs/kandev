@@ -85,7 +85,6 @@ function ProfileCard({
         <ExecutorIconBadge type={profile.executor_type} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{profile.name}</p>
-          <p className="text-xs text-muted-foreground">{getExecutorLabel(profile.executor_type)}</p>
         </div>
         <Badge variant="outline" className="shrink-0 text-xs">
           {getExecutorLabel(profile.executor_type)}
@@ -114,7 +113,10 @@ function CreateTypeCard({
   onClick: () => void;
 }) {
   return (
-    <Card className="cursor-pointer transition-colors hover:bg-muted/50" onClick={onClick}>
+    <Card
+      className="cursor-pointer ring-primary/40 transition-colors hover:bg-muted/50"
+      onClick={onClick}
+    >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={execType.type} />
         <div className="min-w-0 flex-1">
@@ -207,19 +209,9 @@ export default function ExecutorsHubPage() {
         </p>
       </div>
       <Separator />
-      {allProfiles.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Profiles</h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {allProfiles.map((profile) => (
-              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
-            ))}
-          </div>
-        </div>
-      )}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Create New Profile</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {EXECUTOR_TYPES.map((execType) => (
             <CreateTypeCard
               key={execType.type}
@@ -229,6 +221,16 @@ export default function ExecutorsHubPage() {
           ))}
         </div>
       </div>
+      {allProfiles.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Profiles</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {allProfiles.map((profile) => (
+              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
+            ))}
+          </div>
+        </div>
+      )}
       <DeleteProfileDialog
         profileName={profileToDelete?.name}
         open={Boolean(deleteProfileId)}

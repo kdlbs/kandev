@@ -60,6 +60,7 @@ type WorkspaceTracker struct {
 
 // NewWorkspaceTracker creates a new workspace tracker
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
+	resolvedWorkDir := resolveExistingWorkDir(workDir, log.WithFields(zap.String("component", "workspace-tracker")))
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Error("failed to create filesystem watcher", zap.Error(err))
@@ -67,7 +68,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	}
 
 	return &WorkspaceTracker{
-		workDir:                    workDir,
+		workDir:                    resolvedWorkDir,
 		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		watcher:                    watcher,

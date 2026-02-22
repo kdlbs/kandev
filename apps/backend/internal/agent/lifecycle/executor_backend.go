@@ -55,11 +55,43 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath = "repository_path"
-	MetadataKeySetupScript    = "setup_script"
-	MetadataKeyBaseBranch     = "base_branch"
-	MetadataKeyIsRemote       = "is_remote"
+	MetadataKeyRepositoryPath  = "repository_path"
+	MetadataKeySetupScript     = "setup_script"
+	MetadataKeyCleanupScript   = "cleanup_script"
+	MetadataKeyRepoSetupScript = "repository_setup_script"
+	MetadataKeyBaseBranch      = "base_branch"
+	MetadataKeyIsRemote        = "is_remote"
+	MetadataKeyRemoteAuthHome  = "remote_auth_target_home"
+	MetadataKeyGitUserName     = "git_user_name"
+	MetadataKeyGitUserEmail    = "git_user_email"
+	MetadataKeyRemoteReconnect = "remote_reconnect_required"
+	MetadataKeyRemoteName      = "remote_reconnect_name"
+	MetadataKeyRemoteExecID    = "remote_previous_execution_id"
 )
+
+// RemoteStatus describes runtime health/details for remote executors.
+// It is intentionally generic so each executor can include extra details in Details.
+type RemoteStatus struct {
+	RuntimeName   string                 `json:"runtime_name"`
+	RemoteName    string                 `json:"remote_name,omitempty"`
+	State         string                 `json:"state,omitempty"`
+	CreatedAt     *time.Time             `json:"created_at,omitempty"`
+	LastCheckedAt time.Time              `json:"last_checked_at"`
+	ErrorMessage  string                 `json:"error_message,omitempty"`
+	Details       map[string]interface{} `json:"details,omitempty"`
+}
+
+// RemoteSessionResumer is an optional capability for remote runtimes that need
+// explicit reattachment logic on resume (e.g. reconnect to an existing sprite).
+type RemoteSessionResumer interface {
+	ResumeRemoteInstance(ctx context.Context, req *ExecutorCreateRequest) error
+}
+
+// RemoteStatusProvider is an optional capability for runtimes that can expose
+// remote environment status for UX (cloud icon tooltip, degraded state, etc.).
+type RemoteStatusProvider interface {
+	GetRemoteStatus(ctx context.Context, instance *ExecutorInstance) (*RemoteStatus, error)
+}
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
@@ -103,6 +135,7 @@ type ExecutorInstance struct {
 	// Common fields
 	WorkspacePath string
 	Metadata      map[string]interface{}
+	StopReason    string
 }
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.

@@ -122,6 +122,26 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *Auggie) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:  "files",
+				Label: "Copy session files",
+				SourceFiles: map[string][]string{
+					"darwin": {".augment/session.json"},
+					"linux":  {".augment/session.json"},
+				},
+				TargetRelDir: ".augment",
+			},
+			{
+				Type:   "env",
+				EnvVar: "AUGMENT_SESSION_AUTH",
+			},
+		},
+	}
+}
+
 func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 	return auggiePermSettings
 }
