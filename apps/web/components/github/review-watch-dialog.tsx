@@ -14,6 +14,7 @@ import {
   DialogFooter,
 } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Textarea } from "@kandev/ui/textarea";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -42,6 +43,11 @@ type ReviewWatchDialogProps = {
   onUpdate: (id: string, req: UpdateReviewWatchRequest) => Promise<void>;
 };
 
+const QUERY_TEMPLATES = {
+  meAndTeams: "type:pr state:open review-requested:@me",
+  me: "type:pr state:open user-review-requested:@me",
+} as const;
+
 type FormState = {
   selectedRepos: RepoFilter[];
   allRepos: boolean;
@@ -50,6 +56,7 @@ type FormState = {
   agentProfileId: string;
   executorProfileId: string;
   prompt: string;
+  customQuery: string;
   enabled: boolean;
   pollInterval: number;
 };
@@ -64,6 +71,7 @@ const defaultFormState: FormState = {
   agentProfileId: "",
   executorProfileId: "",
   prompt: DEFAULT_REVIEW_WATCH_PROMPT,
+  customQuery: QUERY_TEMPLATES.meAndTeams,
   enabled: true,
   pollInterval: 300,
 };
@@ -78,6 +86,7 @@ function formStateFromWatch(watch: ReviewWatch): FormState {
     agentProfileId: watch.agent_profile_id,
     executorProfileId: watch.executor_profile_id,
     prompt: watch.prompt || DEFAULT_REVIEW_WATCH_PROMPT,
+    customQuery: watch.custom_query || QUERY_TEMPLATES.meAndTeams,
     enabled: watch.enabled,
     pollInterval: watch.poll_interval_seconds,
   };
@@ -165,7 +174,90 @@ function useWatchFormData(workspaceId: string) {
   return { workflows, agentProfiles, allExecutorProfiles };
 }
 
+// --- Section header ---
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
+        {children}
+      </span>
+      <div className="flex-1 border-t border-border" />
+    </div>
+  );
+}
+
 // --- Form field groups ---
+
+function QueryField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  const current = form.customQuery.trim();
+  const isMeAndTeams = current === QUERY_TEMPLATES.meAndTeams;
+  const isMe = current === QUERY_TEMPLATES.me;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label>Search Query</Label>
+        <div className="flex items-center gap-1.5">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={isMeAndTeams ? "default" : "secondary"}
+                  size="sm"
+                  className="h-6 px-2 text-xs cursor-pointer"
+                  onClick={() =>
+                    setForm((prev) => ({ ...prev, customQuery: QUERY_TEMPLATES.meAndTeams }))
+                  }
+                >
+                  Me & my teams
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs">
+                PRs where you or any of your teams are requested as reviewers
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={isMe ? "default" : "secondary"}
+                  size="sm"
+                  className="h-6 px-2 text-xs cursor-pointer"
+                  onClick={() => setForm((prev) => ({ ...prev, customQuery: QUERY_TEMPLATES.me }))}
+                >
+                  Me
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs">
+                Only PRs where you are explicitly requested as a reviewer (not via team membership)
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      </div>
+      <Textarea
+        value={form.customQuery}
+        onChange={(e) => setForm((prev) => ({ ...prev, customQuery: e.target.value }))}
+        placeholder="e.g. type:pr state:open review-requested:@me"
+        rows={1}
+        className="font-mono text-xs resize-y"
+      />
+      <p className="text-xs text-muted-foreground">
+        GitHub search query. Supports full GitHub search syntax for maximum flexibility.
+      </p>
+    </div>
+  );
+}
 
 function WatchFormFields({
   form,
@@ -192,12 +284,15 @@ function WatchFormFields({
 
   return (
     <div className="space-y-5">
+      <SectionHeader>Filter</SectionHeader>
       <RepoFilterSelector
         allRepos={form.allRepos}
         selectedRepos={form.selectedRepos}
         onAllReposChange={onAllReposChange}
         onSelectedReposChange={onSelectedReposChange}
       />
+      <QueryField form={form} setForm={setForm} />
+      <SectionHeader>Automation</SectionHeader>
       <WorkflowFields
         form={form}
         setForm={setForm}
@@ -212,6 +307,7 @@ function WatchFormFields({
         executorProfiles={allExecutorProfiles}
       />
       <PromptField form={form} setForm={setForm} />
+      <SectionHeader>Settings</SectionHeader>
       <SettingsFields form={form} setForm={setForm} />
     </div>
   );
@@ -457,6 +553,7 @@ export function ReviewWatchDialog({
         agent_profile_id: form.agentProfileId,
         executor_profile_id: form.executorProfileId,
         prompt: form.prompt,
+        custom_query: form.customQuery,
         enabled: form.enabled,
         poll_interval_seconds: form.pollInterval,
       };
@@ -473,9 +570,11 @@ export function ReviewWatchDialog({
     }
   }, [form, watch, workspaceId, onCreate, onUpdate, onOpenChange]);
 
-  const hasValidRepos = form.allRepos || form.selectedRepos.length > 0;
   const canSave =
-    hasValidRepos && !!form.workflowId && !!form.workflowStepId && form.prompt.trim().length > 0;
+    form.customQuery.trim().length > 0 &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    form.prompt.trim().length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

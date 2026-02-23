@@ -114,11 +114,8 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 	return c.parsePRList(out, owner, repo)
 }
 
-func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, filter string) ([]*PR, error) {
-	query := "type:pr state:open review-requested:@me"
-	if filter != "" {
-		query += " " + filter
-	}
+func (c *GHClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
+	query := buildReviewSearchQuery(scope, filter, customQuery)
 	out, err := c.run(ctx, "api", "search/issues",
 		"-X", "GET",
 		"-f", "q="+query,

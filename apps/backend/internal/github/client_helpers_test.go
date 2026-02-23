@@ -5,6 +5,67 @@ import (
 	"time"
 )
 
+func TestBuildReviewSearchQuery(t *testing.T) {
+	tests := []struct {
+		name        string
+		scope       string
+		filter      string
+		customQuery string
+		want        string
+	}{
+		{
+			name:        "customQuery overrides everything",
+			scope:       ReviewScopeUser,
+			filter:      "repo:owner/name",
+			customQuery: "type:pr is:open assignee:@me",
+			want:        "type:pr is:open assignee:@me",
+		},
+		{
+			name:  "user scope without filter",
+			scope: ReviewScopeUser,
+			want:  "type:pr state:open user-review-requested:@me",
+		},
+		{
+			name:   "user scope with repo filter",
+			scope:  ReviewScopeUser,
+			filter: "repo:owner/repo",
+			want:   "type:pr state:open user-review-requested:@me repo:owner/repo",
+		},
+		{
+			name:  "user_and_teams scope without filter",
+			scope: ReviewScopeUserAndTeams,
+			want:  "type:pr state:open review-requested:@me",
+		},
+		{
+			name:   "user_and_teams scope with org filter",
+			scope:  ReviewScopeUserAndTeams,
+			filter: "org:myorg",
+			want:   "type:pr state:open review-requested:@me org:myorg",
+		},
+		{
+			name:  "empty scope defaults to user_and_teams",
+			scope: "",
+			want:  "type:pr state:open review-requested:@me",
+		},
+		{
+			name:        "empty customQuery falls through to scope logic",
+			scope:       ReviewScopeUserAndTeams,
+			customQuery: "",
+			want:        "type:pr state:open review-requested:@me",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildReviewSearchQuery(tt.scope, tt.filter, tt.customQuery)
+			if got != tt.want {
+				t.Errorf("buildReviewSearchQuery(%q, %q, %q) = %q, want %q",
+					tt.scope, tt.filter, tt.customQuery, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertRawCheckRuns(t *testing.T) {
 	conclusion := "success"
 	summary := "All tests passed"

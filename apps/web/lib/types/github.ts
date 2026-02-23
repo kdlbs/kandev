@@ -127,6 +127,8 @@ export type GitHubRepoInfo = {
   private: boolean;
 };
 
+export type ReviewScope = "user" | "user_and_teams";
+
 export type ReviewWatch = {
   id: string;
   workspace_id: string;
@@ -136,6 +138,8 @@ export type ReviewWatch = {
   agent_profile_id: string;
   executor_profile_id: string;
   prompt: string;
+  review_scope: ReviewScope;
+  custom_query: string;
   enabled: boolean;
   poll_interval_seconds: number;
   last_polled_at: string | null;
@@ -188,6 +192,8 @@ export type CreateReviewWatchRequest = {
   agent_profile_id: string;
   executor_profile_id: string;
   prompt?: string;
+  review_scope?: ReviewScope;
+  custom_query?: string;
   enabled?: boolean;
   poll_interval_seconds?: number;
 };

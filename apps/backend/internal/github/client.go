@@ -23,8 +23,11 @@ type Client interface {
 	ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error)
 
 	// ListReviewRequestedPRs lists open PRs where the user's review is requested.
-	// filter is an optional GitHub search qualifier (e.g. "repo:owner/name" or "org:myorg").
-	ListReviewRequestedPRs(ctx context.Context, filter string) ([]*PR, error)
+	// scope controls the search qualifier: ReviewScopeUser uses user-review-requested:@me,
+	// ReviewScopeUserAndTeams (or empty) uses review-requested:@me.
+	// filter is an optional additional search qualifier (e.g. "repo:owner/name" or "org:myorg").
+	// customQuery, when non-empty, replaces the entire generated query.
+	ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error)
 
 	// ListUserOrgs returns the GitHub organizations the authenticated user belongs to.
 	ListUserOrgs(ctx context.Context) ([]GitHubOrg, error)
