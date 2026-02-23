@@ -43,7 +43,15 @@ export type FileEditorComment = CommentBase & {
   endLine?: number;
 };
 
-export type Comment = DiffComment | PlanComment | FileEditorComment;
+export type PRFeedbackComment = CommentBase & {
+  source: "pr-feedback";
+  prNumber: number;
+  feedbackType: "check" | "review" | "comment";
+  /** Pre-formatted markdown text for display and sending */
+  content: string;
+};
+
+export type Comment = DiffComment | PlanComment | FileEditorComment | PRFeedbackComment;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -59,6 +67,10 @@ export function isPlanComment(c: Comment): c is PlanComment {
 
 export function isFileEditorComment(c: Comment): c is FileEditorComment {
   return c.source === "file-editor";
+}
+
+export function isPRFeedbackComment(c: Comment): c is PRFeedbackComment {
+  return c.source === "pr-feedback";
 }
 
 // ---------------------------------------------------------------------------

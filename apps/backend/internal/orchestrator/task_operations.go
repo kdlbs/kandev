@@ -78,12 +78,14 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 
 	// Launch workspace infrastructure (agentctl) without starting the agent subprocess.
 	// This enables file browsing, editing, etc. while the session is in CREATED state.
-	if _, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, "", workflowStepID, false); err != nil {
+	if prepExec, launchErr := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, "", workflowStepID, false); launchErr != nil {
 		s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(err))
+			zap.Error(launchErr))
 		// Non-fatal: session is still usable, workspace will be launched when agent starts
+	} else if prepExec != nil && prepExec.WorktreeBranch != "" {
+		go s.ensureSessionPRWatch(context.Background(), taskID, prepExec.SessionID, prepExec.WorktreeBranch)
 	}
 
 	s.logger.Info("task session prepared",
@@ -133,6 +135,9 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+	}
+	if execution.WorktreeBranch != "" {
+		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	}
 
 	return execution, nil
@@ -281,6 +286,9 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
 	}
+	if execution.WorktreeBranch != "" {
+		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
+	}
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
@@ -398,6 +406,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	s.logger.Debug("task session resumed and ready for input",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
+
+	if execution.WorktreeBranch != "" {
+		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
+	}
 
 	return execution, nil
 }

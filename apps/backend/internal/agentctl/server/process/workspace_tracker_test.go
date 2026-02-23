@@ -519,6 +519,180 @@ func TestFsOpToString(t *testing.T) {
 	}
 }
 
+func TestRewriteDiffPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		diff    string
+		oldPath string
+		newPath string
+		want    string
+	}{
+		{
+			name:    "p0 format (no a/ b/ prefix)",
+			diff:    "--- CLAUDE.md\n+++ CLAUDE.md\n@@ -1,2 +1,2 @@\n-old\n+new",
+			oldPath: "CLAUDE.md",
+			newPath: "real/CLAUDE.md",
+			want:    "--- real/CLAUDE.md\n+++ real/CLAUDE.md\n@@ -1,2 +1,2 @@\n-old\n+new",
+		},
+		{
+			name:    "with a/ b/ prefix",
+			diff:    "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-old\n+new",
+			oldPath: "CLAUDE.md",
+			newPath: "real/CLAUDE.md",
+			want:    "--- real/CLAUDE.md\n+++ real/CLAUDE.md\n@@ -1 +1 @@\n-old\n+new",
+		},
+		{
+			name:    "no match leaves diff unchanged",
+			diff:    "--- other.txt\n+++ other.txt\n@@ -1 +1 @@\n-old\n+new",
+			oldPath: "CLAUDE.md",
+			newPath: "real/CLAUDE.md",
+			want:    "--- other.txt\n+++ other.txt\n@@ -1 +1 @@\n-old\n+new",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriteDiffPaths(tt.diff, tt.oldPath, tt.newPath)
+			if got != tt.want {
+				t.Errorf("rewriteDiffPaths() =\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyFileDiff_RegularFile(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	// Resolve symlinks so workDir matches git's toplevel (macOS /var -> /private/var)
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create a tracked file and commit it (git apply needs the file in the index)
+	original := "line1\nline2\nline3\n"
+	writeFile(t, repoDir, "test.txt", original)
+	runGit(t, repoDir, "add", "test.txt")
+	runGit(t, repoDir, "commit", "-m", "add test.txt")
+
+	// Build a unified diff that changes line2 -> modified
+	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
+
+	hash, err := wt.ApplyFileDiff("test.txt", diff, "")
+	if err != nil {
+		t.Fatalf("ApplyFileDiff failed: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify file content
+	content, err := os.ReadFile(filepath.Join(repoDir, "test.txt"))
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	expected := "line1\nmodified\nline3\n"
+	if string(content) != expected {
+		t.Errorf("content = %q, want %q", string(content), expected)
+	}
+}
+
+func TestApplyFileDiff_Symlink(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	// Resolve symlinks so workDir matches git's toplevel (macOS /var -> /private/var)
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create a real file in a subdirectory
+	realDir := filepath.Join(repoDir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create real dir: %v", err)
+	}
+	original := "line1\nline2\nline3\n"
+	writeFile(t, repoDir, "real/target.md", original)
+
+	// Create a symlink at the repo root pointing to the real file
+	symlinkPath := filepath.Join(repoDir, "LINK.md")
+	if err := os.Symlink(filepath.Join(repoDir, "real", "target.md"), symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Commit both files so git apply works
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add real file and symlink")
+
+	// Build a diff targeting the symlink path
+	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
+
+	hash, err := wt.ApplyFileDiff("LINK.md", diff, "")
+	if err != nil {
+		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify the real file was patched (not replaced by a regular file)
+	realContent, err := os.ReadFile(filepath.Join(repoDir, "real", "target.md"))
+	if err != nil {
+		t.Fatalf("failed to read real file: %v", err)
+	}
+	expected := "line1\npatched\nline3\n"
+	if string(realContent) != expected {
+		t.Errorf("real file content = %q, want %q", string(realContent), expected)
+	}
+
+	// Verify the symlink still exists (not replaced)
+	linkInfo, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatalf("failed to lstat symlink: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("LINK.md is no longer a symlink after patching")
+	}
+
+	// Verify reading through the symlink gives the same content
+	symlinkContent, err := os.ReadFile(symlinkPath)
+	if err != nil {
+		t.Fatalf("failed to read symlink: %v", err)
+	}
+	if string(symlinkContent) != expected {
+		t.Errorf("symlink content = %q, want %q", string(symlinkContent), expected)
+	}
+}
+
+func TestApplyFileDiff_ConflictDetection(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	// Resolve symlinks so workDir matches git's toplevel (macOS /var -> /private/var)
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	writeFile(t, repoDir, "conflict.txt", "original\n")
+	runGit(t, repoDir, "add", "conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "add conflict.txt")
+
+	// Get hash of the original content
+	origHash := calculateSHA256("original\n")
+
+	// Now modify the file behind the diff's back
+	writeFile(t, repoDir, "conflict.txt", "modified-by-someone-else\n")
+
+	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
+
+	_, err := wt.ApplyFileDiff("conflict.txt", diff, origHash)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "conflict detected") {
+		t.Errorf("expected 'conflict detected' error, got: %v", err)
+	}
+}
+
 func TestEmitFileChanges(t *testing.T) {
 	t.Run("zero changes sends refresh", func(t *testing.T) {
 		_, wt := setupTestDir(t)

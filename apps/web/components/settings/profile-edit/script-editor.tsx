@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
-import type { OnMount } from "@monaco-editor/react";
+import type { BeforeMount, OnMount } from "@monaco-editor/react";
+import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
 import type { ScriptPlaceholder } from "./script-editor-completions";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), {
@@ -22,6 +23,7 @@ type ScriptEditorProps = {
   placeholders?: ScriptPlaceholder[];
   executorType?: string;
   readOnly?: boolean;
+  lineNumbers?: "on" | "off";
 };
 
 export function ScriptEditor({
@@ -32,6 +34,7 @@ export function ScriptEditor({
   placeholders,
   executorType,
   readOnly = false,
+  lineNumbers = "on",
 }: ScriptEditorProps) {
   const disposableRef = useRef<{ dispose: () => void } | null>(null);
 
@@ -40,6 +43,10 @@ export function ScriptEditor({
     return () => {
       disposableRef.current?.dispose();
     };
+  }, []);
+
+  const handleBeforeMount: BeforeMount = useCallback((monaco) => {
+    monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
   }, []);
 
   const handleMount: OnMount = useCallback(
@@ -66,11 +73,12 @@ export function ScriptEditor({
       language={language}
       value={value}
       onChange={(v) => onChange(v ?? "")}
+      beforeMount={handleBeforeMount}
       onMount={handleMount}
-      theme="vs-dark"
+      theme="kandev-dark"
       options={{
         minimap: { enabled: false },
-        lineNumbers: "on",
+        lineNumbers,
         wordWrap: "on",
         fontSize: 13,
         scrollBeyondLastLine: false,

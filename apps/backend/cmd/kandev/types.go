@@ -5,6 +5,7 @@ import (
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
+	"github.com/kandev/kandev/internal/github"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -37,4 +38,5 @@ type Services struct {
 	Notification *notificationservice.Service
 	Prompts      *promptservice.Service
 	Workflow     *workflowservice.Service
+	GitHub       *github.Service
 }

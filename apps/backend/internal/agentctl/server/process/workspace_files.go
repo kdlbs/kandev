@@ -202,7 +202,9 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 }
 
 // ApplyFileDiff applies a unified diff to a file with conflict detection
-// Uses git apply for reliable, battle-tested patch application
+// Uses git apply for reliable, battle-tested patch application.
+// For symlinked files, resolves to the real path and rewrites the diff header
+// so that git apply operates on the actual file.
 func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
 	fullPath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
@@ -223,9 +225,22 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 		return "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
 
+	// If the file is a symlink, resolve to the real path and rewrite the diff header.
+	// git apply cannot patch through symlinks — it needs the real file path.
+	applyPath := reqPath
+	realPath, evalErr := filepath.EvalSymlinks(fullPath)
+	if evalErr == nil && realPath != fullPath {
+		// File is a symlink. Compute the real path relative to workDir.
+		realRel, relErr := filepath.Rel(cleanWorkDir, realPath)
+		if relErr == nil {
+			unifiedDiff = rewriteDiffPaths(unifiedDiff, reqPath, realRel)
+			applyPath = realRel
+		}
+	}
+
 	// Write diff to a temporary patch file
 	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
-	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0644)
+	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0o644)
 	if err != nil {
 		return "", fmt.Errorf("failed to write patch file: %w", err)
 	}
@@ -234,7 +249,6 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	}()
 
 	// Use git apply to apply the patch directly to the file
-	// This is much more reliable than custom diff application
 	cmd := exec.Command("git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
 	cmd.Dir = wt.workDir
 
@@ -243,8 +257,9 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 		return "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
 	}
 
-	// Read the updated content
-	updatedContent, err := os.ReadFile(fullPath)
+	// Read the updated content (use the real file path for symlinks)
+	readPath := filepath.Join(cleanWorkDir, applyPath)
+	updatedContent, err := os.ReadFile(readPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read updated file: %w", err)
 	}
@@ -252,7 +267,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	// Calculate new hash
 	newHash := calculateSHA256(string(updatedContent))
 
-	// Notify with the relative path
+	// Notify with the original relative path (not the resolved symlink target)
 	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(relPath, types.FileOpWrite)
 
@@ -263,6 +278,33 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	)
 
 	return newHash, nil
+}
+
+// rewriteDiffPaths replaces file paths in unified diff headers.
+// Handles both "--- a/old" / "+++ b/new" (with strip prefix) and
+// "--- old" / "+++ new" (p0 mode) formats.
+func rewriteDiffPaths(diff, oldPath, newPath string) string {
+	lines := strings.Split(diff, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "--- ") {
+			lines[i] = replaceDiffPath(line, "--- ", oldPath, newPath)
+		} else if strings.HasPrefix(line, "+++ ") {
+			lines[i] = replaceDiffPath(line, "+++ ", oldPath, newPath)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// replaceDiffPath replaces oldPath with newPath in a diff header line.
+func replaceDiffPath(line, prefix, oldPath, newPath string) string {
+	rest := line[len(prefix):]
+	// Handle "--- a/path" or "--- path" formats
+	cleaned := strings.TrimPrefix(rest, "a/")
+	cleaned = strings.TrimPrefix(cleaned, "b/")
+	if cleaned == oldPath || filepath.Clean(cleaned) == filepath.Clean(oldPath) {
+		return prefix + newPath
+	}
+	return line
 }
 
 // CreateFile creates a new file in the workspace

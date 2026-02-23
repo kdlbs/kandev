@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/github"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
@@ -53,6 +54,7 @@ func provideGateway(
 	agentRegistry *registry.Registry,
 	notificationRepo notificationstore.Repository,
 	taskRepo *sqliterepo.Repository,
+	githubSvc *github.Service,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -86,6 +88,11 @@ func provideGateway(
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, log)
+		if githubSvc != nil {
+			gitHandlers.SetOnPRCreated(func(ctx context.Context, sessionID, taskID, prURL, branch string) {
+				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, prURL, branch)
+			})
+		}
 		gitHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		passthroughHandlers := agenthandlers.NewPassthroughHandlers(lifecycleMgr, log)

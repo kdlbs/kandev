@@ -21,6 +21,7 @@ import { cn, getRepositoryDisplayName } from "@/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useAppStore } from "@/components/state-provider";
+import { PRTaskIcon } from "@/components/github/pr-task-icon";
 
 export interface Task {
   id: string;
@@ -75,7 +76,10 @@ function KanbanCardBody({
               {repoName}
             </p>
           )}
-          <p className="text-sm font-medium leading-tight line-clamp-1">{task.title}</p>
+          <div className="flex items-center gap-1">
+            <p className="text-sm font-medium leading-tight line-clamp-1">{task.title}</p>
+            <PRTaskIcon taskId={task.id} />
+          </div>
         </div>
         {actions}
       </div>

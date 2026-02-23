@@ -8,3 +8,4 @@ export * from "./domains/workspace-api";
 export * from "./domains/settings-api";
 export * from "./domains/process-api";
 export * from "./domains/workflow-api";
+export * from "./domains/github-api";

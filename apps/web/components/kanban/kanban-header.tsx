@@ -15,6 +15,7 @@ import {
   IconTimeline,
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { RefreshReviewsButton } from "../github/refresh-reviews-button";
 import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
@@ -197,6 +198,7 @@ function DesktopHeader({
             <TooltipContent>Stats</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        <RefreshReviewsButton />
         <KanbanDisplayDropdown />
         <Link href="/settings" className="cursor-pointer">
           <Button variant="outline" className="cursor-pointer">

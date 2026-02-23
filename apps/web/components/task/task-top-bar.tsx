@@ -29,6 +29,7 @@ import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { VcsSplitButton } from "@/components/vcs-split-button";
+import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { DEBUG_UI } from "@/lib/config";
 
@@ -323,6 +324,7 @@ function TopBarRight({
         <>
           <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
+          <PRTopbarButton />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
         </>
       )}

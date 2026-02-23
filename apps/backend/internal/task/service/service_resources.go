@@ -242,6 +242,37 @@ func (s *Service) GetRepository(ctx context.Context, id string) (*models.Reposit
 	return s.repoEntities.GetRepository(ctx, id)
 }
 
+// FindOrCreateRepository looks up a repository by provider info, creating one if not found.
+// If the repository exists but has no LocalPath and the request provides one, updates LocalPath.
+func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, error) {
+	existing, err := s.repoEntities.GetRepositoryByProviderInfo(ctx, req.WorkspaceID, req.Provider, req.ProviderOwner, req.ProviderName)
+	if err != nil {
+		return nil, fmt.Errorf("lookup repository: %w", err)
+	}
+	if existing != nil {
+		if existing.LocalPath == "" && req.LocalPath != "" {
+			existing.LocalPath = req.LocalPath
+			if updateErr := s.repoEntities.UpdateRepository(ctx, existing); updateErr != nil {
+				s.logger.Warn("failed to update repository local path",
+					zap.String("repository_id", existing.ID), zap.Error(updateErr))
+			}
+		}
+		return existing, nil
+	}
+
+	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
+	return s.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   req.WorkspaceID,
+		Name:          name,
+		SourceType:    "provider",
+		LocalPath:     req.LocalPath,
+		Provider:      req.Provider,
+		ProviderOwner: req.ProviderOwner,
+		ProviderName:  req.ProviderName,
+		DefaultBranch: req.DefaultBranch,
+	})
+}
+
 func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRepositoryRequest) (*models.Repository, error) {
 	repository, err := s.repoEntities.GetRepository(ctx, id)
 	if err != nil {

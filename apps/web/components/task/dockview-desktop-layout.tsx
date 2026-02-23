@@ -36,6 +36,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
+import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
@@ -233,6 +234,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   browser: BrowserPanel,
   vscode: VscodePanel,
   plan: PlanPanelComponent,
+  "pr-detail": PRDetailPanelComponent,
   // Backwards compat aliases for saved layouts
   "diff-files": ChangesPanelWrapper,
   "all-files": FilesPanelWrapper,

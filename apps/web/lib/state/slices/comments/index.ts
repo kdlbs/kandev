@@ -4,6 +4,7 @@ export {
   type DiffComment,
   type PlanComment,
   type FileEditorComment,
+  type PRFeedbackComment,
   type AnnotationSide,
   type CommentsState,
   type CommentsActions,
@@ -11,10 +12,12 @@ export {
   isDiffComment,
   isPlanComment,
   isFileEditorComment,
+  isPRFeedbackComment,
 } from "./types";
 export {
   formatReviewCommentsAsMarkdown,
   formatPlanCommentsAsMarkdown,
+  formatPRFeedbackAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
 export {

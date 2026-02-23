@@ -7,6 +7,7 @@ import {
   IconMessageDots,
   IconPhoto,
   IconAt,
+  IconGitPullRequest,
   IconX,
   IconPinFilled,
 } from "@tabler/icons-react";
@@ -21,6 +22,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   "plan-comment": IconMessageDots,
   image: IconPhoto,
   prompt: IconAt,
+  "pr-feedback": IconGitPullRequest,
 };
 
 type ContextChipProps = {
@@ -102,6 +104,7 @@ function ControlledHoverChip({ preview, children }: { preview: ReactNode; childr
         setOpen(next);
       }}
       openDelay={300}
+      closeDelay={0}
     >
       <HoverCardTrigger
         asChild
