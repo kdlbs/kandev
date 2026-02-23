@@ -352,6 +352,10 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 	if repos == nil {
 		repos = []RepoFilter{}
 	}
+	reviewScope := req.ReviewScope
+	if reviewScope == "" {
+		reviewScope = ReviewScopeUserAndTeams
+	}
 	rw := &ReviewWatch{
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
@@ -360,6 +364,8 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
 		Prompt:              req.Prompt,
+		ReviewScope:         reviewScope,
+		CustomQuery:         req.CustomQuery,
 		Enabled:             true,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 	}
@@ -428,6 +434,12 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 	if req.Prompt != nil {
 		rw.Prompt = *req.Prompt
 	}
+	if req.ReviewScope != nil {
+		rw.ReviewScope = *req.ReviewScope
+	}
+	if req.CustomQuery != nil {
+		rw.CustomQuery = *req.CustomQuery
+	}
 	if req.Enabled != nil {
 		rw.Enabled = *req.Enabled
 	}
@@ -453,7 +465,7 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		zap.String("watch_id", watch.ID),
 		zap.Int("repo_filters", len(watch.Repos)))
 
-	prs, err := s.fetchReviewPRs(ctx, watch.Repos)
+	prs, err := s.fetchReviewPRs(ctx, watch)
 	if err != nil {
 		return nil, err
 	}
@@ -483,23 +495,31 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	return newPRs, nil
 }
 
-// fetchReviewPRs fetches PRs needing review for the given repo filters.
-// An empty repos slice means all repos. Entries with empty Name are org-level filters.
-func (s *Service) fetchReviewPRs(ctx context.Context, repos []RepoFilter) ([]*PR, error) {
-	if len(repos) == 0 {
-		return s.client.ListReviewRequestedPRs(ctx, "")
+// fetchReviewPRs fetches PRs needing review based on the watch configuration.
+// If CustomQuery is set, it is used as the full search query (bypassing scope and repo filters).
+// Otherwise, scope + repo filters determine the query.
+func (s *Service) fetchReviewPRs(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {
+	customQuery := watch.CustomQuery
+	scope := watch.ReviewScope
+
+	if customQuery != "" {
+		return s.client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+	}
+
+	if len(watch.Repos) == 0 {
+		return s.client.ListReviewRequestedPRs(ctx, scope, "", "")
 	}
 
 	var allPRs []*PR
 	seen := make(map[string]bool)
-	for _, repo := range repos {
+	for _, repo := range watch.Repos {
 		var filter string
 		if repo.Name == "" {
 			filter = "org:" + repo.Owner
 		} else {
 			filter = fmt.Sprintf("repo:%s/%s", repo.Owner, repo.Name)
 		}
-		prs, err := s.client.ListReviewRequestedPRs(ctx, filter)
+		prs, err := s.client.ListReviewRequestedPRs(ctx, scope, filter, "")
 		if err != nil {
 			s.logger.Error("failed to list review PRs",
 				zap.String("filter", filter), zap.Error(err))

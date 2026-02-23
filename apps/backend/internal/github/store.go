@@ -80,6 +80,8 @@ const createTablesSQL = `
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
 		prompt TEXT DEFAULT '',
+		review_scope TEXT NOT NULL DEFAULT 'user_and_teams',
+		custom_query TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
 		last_polled_at DATETIME,
@@ -246,11 +248,12 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	rw.ReposJSON = string(reposJSON)
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO github_review_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
-			agent_profile_id, executor_profile_id, prompt, enabled, poll_interval_seconds, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			agent_profile_id, executor_profile_id, prompt, review_scope, custom_query,
+			enabled, poll_interval_seconds, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rw.ID, rw.WorkspaceID, rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
-		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.Enabled, rw.PollIntervalSeconds,
-		rw.CreatedAt, rw.UpdatedAt)
+		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.ReviewScope, rw.CustomQuery,
+		rw.Enabled, rw.PollIntervalSeconds, rw.CreatedAt, rw.UpdatedAt)
 	return err
 }
 
@@ -320,11 +323,13 @@ func (s *Store) UpdateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE github_review_watches SET workflow_id = ?, workflow_step_id = ?, repos = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
-			prompt = ?, enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			prompt = ?, review_scope = ?, custom_query = ?,
+			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
 		rw.AgentProfileID, rw.ExecutorProfileID,
-		rw.Prompt, rw.Enabled, rw.PollIntervalSeconds, rw.LastPolledAt, rw.UpdatedAt, rw.ID)
+		rw.Prompt, rw.ReviewScope, rw.CustomQuery,
+		rw.Enabled, rw.PollIntervalSeconds, rw.LastPolledAt, rw.UpdatedAt, rw.ID)
 	return err
 }
 

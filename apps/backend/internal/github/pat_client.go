@@ -90,11 +90,8 @@ func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]
 	return result, nil
 }
 
-func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, filter string) ([]*PR, error) {
-	query := "type:pr state:open review-requested:@me"
-	if filter != "" {
-		query += " " + filter
-	}
+func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, customQuery string) ([]*PR, error) {
+	query := buildReviewSearchQuery(scope, filter, customQuery)
 	var result struct {
 		Items []patSearchItem `json:"items"`
 	}

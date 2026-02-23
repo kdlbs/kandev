@@ -5,6 +5,25 @@ import (
 	"time"
 )
 
+// buildReviewSearchQuery assembles the full GitHub search query.
+// When customQuery is non-empty, it is used verbatim as the entire query.
+// Otherwise a query is built from scope + optional filter qualifier.
+func buildReviewSearchQuery(scope, filter, customQuery string) string {
+	if customQuery != "" {
+		return customQuery
+	}
+	var base string
+	if scope == ReviewScopeUser {
+		base = "type:pr state:open user-review-requested:@me"
+	} else {
+		base = "type:pr state:open review-requested:@me"
+	}
+	if filter != "" {
+		base += " " + filter
+	}
+	return base
+}
+
 // getPRFeedback fetches aggregated feedback for a PR using any Client implementation.
 // This shared function eliminates duplication between GHClient and PATClient.
 func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int) (*PRFeedback, error) {

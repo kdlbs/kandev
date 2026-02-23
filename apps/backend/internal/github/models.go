@@ -119,6 +119,16 @@ type RepoFilter struct {
 	Name  string `json:"name"`
 }
 
+// ReviewScope controls which GitHub search qualifier is used for review-requested PRs.
+const (
+	// ReviewScopeUser matches only PRs where the user is explicitly requested
+	// (user-review-requested:@me).
+	ReviewScopeUser = "user"
+	// ReviewScopeUserAndTeams matches PRs requested from the user or any of their teams
+	// (review-requested:@me). This is the default for backwards compatibility.
+	ReviewScopeUserAndTeams = "user_and_teams"
+)
+
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
@@ -131,6 +141,8 @@ type ReviewWatch struct {
 	AgentProfileID      string       `json:"agent_profile_id" db:"agent_profile_id"`
 	ExecutorProfileID   string       `json:"executor_profile_id" db:"executor_profile_id"`
 	Prompt              string       `json:"prompt" db:"prompt"`
+	ReviewScope         string       `json:"review_scope" db:"review_scope"`
+	CustomQuery         string       `json:"custom_query" db:"custom_query"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
@@ -180,6 +192,8 @@ type CreateReviewWatchRequest struct {
 	AgentProfileID      string       `json:"agent_profile_id"`
 	ExecutorProfileID   string       `json:"executor_profile_id"`
 	Prompt              string       `json:"prompt"`
+	ReviewScope         string       `json:"review_scope"`
+	CustomQuery         string       `json:"custom_query"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
 }
 
@@ -191,6 +205,8 @@ type UpdateReviewWatchRequest struct {
 	AgentProfileID      *string       `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID   *string       `json:"executor_profile_id,omitempty"`
 	Prompt              *string       `json:"prompt,omitempty"`
+	ReviewScope         *string       `json:"review_scope,omitempty"`
+	CustomQuery         *string       `json:"custom_query,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
 }
