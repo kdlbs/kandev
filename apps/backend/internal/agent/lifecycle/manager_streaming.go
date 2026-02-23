@@ -78,6 +78,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 			// This happens when thinking content has no newlines (never triggered streaming)
 			m.publishStreamingThinking(execution, trimmedThinking)
 		}
+		// Clear the thinking ID that publishStreamingThinking may have set as a side effect.
+		// After a flush (tool call or complete), the next thinking segment must start a new message.
+		execution.messageMu.Lock()
+		execution.currentThinkingID = ""
+		execution.messageMu.Unlock()
 	}
 
 	// If we have remaining message content, publish it
@@ -91,6 +96,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 			// This happens when message content has no newlines (never triggered streaming)
 			m.publishStreamingMessage(execution, trimmedMessage)
 		}
+		// Clear the message ID that publishStreamingMessage may have set as a side effect.
+		// After a flush (tool call or complete), the next text segment must start a new message.
+		execution.messageMu.Lock()
+		execution.currentMessageID = ""
+		execution.messageMu.Unlock()
 		// Return empty since we've already handled it via streaming
 		return ""
 	}

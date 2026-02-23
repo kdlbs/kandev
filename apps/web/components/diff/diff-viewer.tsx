@@ -139,11 +139,7 @@ export const DiffViewer = memo(function DiffViewer({
   if (!state.fileDiffMetadata) {
     return (
       <div
-        className={cn(
-          "rounded-md border border-border/50 bg-muted/20 p-4 text-muted-foreground",
-          "text-xs",
-          className,
-        )}
+        className={cn("rounded-md  bg-muted/20 p-4 text-muted-foreground", "text-xs", className)}
       >
         No diff available
       </div>
@@ -160,7 +156,7 @@ export const DiffViewer = memo(function DiffViewer({
         renderAnnotation={renderAnnotation}
         renderHeaderMetadata={renderHeaderMetadata}
         renderHoverUtility={renderHoverUtility}
-        className={cn("rounded-md border border-border/50", "text-xs")}
+        className={cn("rounded-md ", "text-xs")}
       />
     </div>
   );

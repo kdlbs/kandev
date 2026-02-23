@@ -32,6 +32,7 @@ import { TaskPlanPanel } from "./task-plan-panel";
 import { FileEditorPanel } from "./file-editor-panel";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PanelRoot, PanelBody } from "./panel-primitives";
+import { ContextMenuTab } from "./tab-context-menu";
 import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
@@ -595,6 +596,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         theme={themeKandev}
         components={components}
         tabComponents={tabComponents}
+        defaultTabComponent={ContextMenuTab}
         leftHeaderActionsComponent={LeftHeaderActions}
         rightHeaderActionsComponent={RightHeaderActions}
         watermarkComponent={DockviewWatermark}

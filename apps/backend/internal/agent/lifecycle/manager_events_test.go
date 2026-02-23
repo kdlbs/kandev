@@ -558,3 +558,157 @@ func TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull(t *testing.T) {
 		t.Fatal("handleAgentEvent blocked when promptDoneCh was full")
 	}
 }
+
+// TestHandleAgentEvent_ReasoningThenToolCall tests the scenario where thinking content
+// accumulates without newlines (no streaming triggered), then a tool_call flushes the
+// thinking buffer. The fix in flushMessageBuffer must clear currentThinkingID after
+// publishStreamingThinking sets it as a side effect, so the next thinking segment starts fresh.
+func TestHandleAgentEvent_ReasoningThenToolCall(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Reasoning without newlines — stays in buffer, no streaming emitted yet
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:          "reasoning",
+		ReasoningText: "thinking without newline",
+	})
+
+	// currentThinkingID should still be empty (no streaming happened yet)
+	execution.messageMu.Lock()
+	idBeforeToolCall := execution.currentThinkingID
+	execution.messageMu.Unlock()
+	if idBeforeToolCall != "" {
+		t.Errorf("currentThinkingID should be empty before flush, got %q", idBeforeToolCall)
+	}
+
+	// Tool call flushes the thinking buffer via flushMessageBuffer;
+	// publishStreamingThinking will set currentThinkingID as a side effect,
+	// then the fix must clear it.
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "tool-1",
+		ToolName:   "read_file",
+	})
+
+	// After the tool_call flush, currentThinkingID must be empty
+	execution.messageMu.Lock()
+	idAfterToolCall := execution.currentThinkingID
+	execution.messageMu.Unlock()
+	if idAfterToolCall != "" {
+		t.Errorf("currentThinkingID should be cleared after tool_call flush, got %q", idAfterToolCall)
+	}
+
+	// A thinking_streaming event should have been published for the buffered content
+	events := eventBus.getStreamEvents()
+	var thinkingEvents []AgentStreamEventPayload
+	for _, e := range events {
+		if e.Data != nil && e.Data.Type == "thinking_streaming" {
+			thinkingEvents = append(thinkingEvents, e)
+		}
+	}
+	if len(thinkingEvents) == 0 {
+		t.Error("expected thinking_streaming event to be published during tool_call flush")
+	}
+}
+
+// TestHandleAgentEvent_ReasoningThenComplete tests that thinking content accumulated
+// without newlines is flushed on complete, and currentThinkingID is cleared afterwards
+// so a subsequent turn starts with a fresh thinking message.
+func TestHandleAgentEvent_ReasoningThenComplete(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Reasoning without newlines — no streaming
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:          "reasoning",
+		ReasoningText: "brief thought",
+	})
+
+	// Complete flushes the buffer
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "complete",
+	})
+
+	// currentThinkingID must be empty after flush
+	execution.messageMu.Lock()
+	idAfterComplete := execution.currentThinkingID
+	execution.messageMu.Unlock()
+	if idAfterComplete != "" {
+		t.Errorf("currentThinkingID should be cleared after complete flush, got %q", idAfterComplete)
+	}
+
+	// A thinking_streaming event should have been published
+	events := eventBus.getStreamEvents()
+	var thinkingEvents []AgentStreamEventPayload
+	for _, e := range events {
+		if e.Data != nil && e.Data.Type == "thinking_streaming" {
+			thinkingEvents = append(thinkingEvents, e)
+		}
+	}
+	if len(thinkingEvents) == 0 {
+		t.Error("expected thinking_streaming event to be published during complete flush")
+	}
+}
+
+// TestHandleAgentEvent_ReasoningWithNewlinesThenToolCall tests that reasoning content
+// with newlines triggers streaming (sets currentThinkingID), a tool_call then flushes
+// any remainder and clears currentThinkingID so the next thinking segment is a new message.
+func TestHandleAgentEvent_ReasoningWithNewlinesThenToolCall(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	// Reasoning with newline — triggers streaming, sets currentThinkingID
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:          "reasoning",
+		ReasoningText: "step one\n",
+	})
+
+	execution.messageMu.Lock()
+	idAfterStreaming := execution.currentThinkingID
+	execution.messageMu.Unlock()
+	if idAfterStreaming == "" {
+		t.Error("currentThinkingID should be set after streamed reasoning chunk")
+	}
+
+	// Tool call flushes (empty remainder) and clears the ID
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "tool-1",
+		ToolName:   "read_file",
+	})
+
+	execution.messageMu.Lock()
+	idAfterToolCall := execution.currentThinkingID
+	execution.messageMu.Unlock()
+	if idAfterToolCall != "" {
+		t.Errorf("currentThinkingID should be cleared after tool_call, got %q", idAfterToolCall)
+	}
+
+	// Now reasoning again after tool_call — should start a NEW thinking message (IsAppend=false)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:          "reasoning",
+		ReasoningText: "step two\n",
+	})
+
+	events := eventBus.getStreamEvents()
+	var thinkingEvents []AgentStreamEventPayload
+	for _, e := range events {
+		if e.Data != nil && e.Data.Type == "thinking_streaming" {
+			thinkingEvents = append(thinkingEvents, e)
+		}
+	}
+
+	// Should have at least 2 thinking_streaming events: one before and one after tool_call
+	if len(thinkingEvents) < 2 {
+		t.Errorf("expected at least 2 thinking_streaming events, got %d", len(thinkingEvents))
+	}
+
+	// The second thinking segment must start a new message (IsAppend=false)
+	lastEvent := thinkingEvents[len(thinkingEvents)-1]
+	if lastEvent.Data.IsAppend {
+		t.Errorf("reasoning chunk after tool_call should start a new thinking message, but got IsAppend=true")
+	}
+}

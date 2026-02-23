@@ -208,10 +208,16 @@ function useReviewDialogState(props: ReviewDialogProps) {
   }, [getStorePendingComments]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 
+  const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
     () => buildAllFiles(gitStatusFiles, cumulativeDiff),
     [gitStatusFiles, cumulativeDiff],
   );
+  const filteredFiles = useMemo(() => {
+    if (!filter.trim()) return allFiles;
+    const q = filter.toLowerCase();
+    return allFiles.filter((f) => f.path.toLowerCase().includes(q));
+  }, [allFiles, filter]);
   const { reviewedFiles, staleFiles } = useMemo(
     () => computeReviewSets(allFiles, reviews),
     [allFiles, reviews],
@@ -253,7 +259,10 @@ function useReviewDialogState(props: ReviewDialogProps) {
     wordWrap,
     setWordWrap,
     autoMarkOnScroll,
+    filter,
+    setFilter,
     allFiles,
+    filteredFiles,
     reviewedFiles,
     staleFiles,
     commentCountByFile,
@@ -279,9 +288,9 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-7xl max-w-[calc(100vw-2rem)] max-h-[85vh] w-full h-[85vh] p-0 gap-0 flex flex-col"
+        className="!max-w-[80vw] !w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
-        overlayClassName="backdrop-blur-none bg-black/40"
+        overlayClassName="bg-transparent"
       >
         <DialogTitle className="sr-only">Review Changes</DialogTitle>
         <ReviewTopBar
@@ -302,19 +311,22 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
         <div className="flex flex-1 min-h-0">
           <div className="w-[280px] min-w-[220px] border-r border-border flex-shrink-0 overflow-hidden">
             <ReviewFileTree
-              files={s.allFiles}
+              files={s.filteredFiles}
               reviewedFiles={s.reviewedFiles}
               staleFiles={s.staleFiles}
               commentCountByFile={s.commentCountByFile}
               selectedFile={s.selectedFile}
+              filter={s.filter}
+              onFilterChange={s.setFilter}
               onSelectFile={s.handleSelectFile}
               onToggleReviewed={s.handleToggleReviewed}
             />
           </div>
           <div className="flex-1 min-w-0 overflow-hidden">
-            {s.allFiles.length > 0 ? (
+            {s.filteredFiles.length > 0 ? (
               <ReviewDiffList
-                files={s.allFiles}
+                files={s.filteredFiles}
+                selectedFile={s.selectedFile}
                 reviewedFiles={s.reviewedFiles}
                 staleFiles={s.staleFiles}
                 sessionId={sessionId}
@@ -327,7 +339,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
               />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                No changes to review
+                {s.filter.trim() ? "No files match the filter" : "No changes to review"}
               </div>
             )}
           </div>
