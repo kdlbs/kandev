@@ -5,6 +5,7 @@ import {
   IconClipboard,
   IconDoorExit,
   IconMessageForward,
+  IconRefresh,
   IconRobot,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -43,6 +44,12 @@ const CAPABILITIES: CapabilityDef[] = [
     icon: IconClipboard,
     tooltip: "Plan mode",
     check: (e) => e.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false,
+  },
+  {
+    key: "resetContext",
+    icon: IconRefresh,
+    tooltip: "Reset agent context",
+    check: (e) => e.on_enter?.some((a) => a.type === "reset_agent_context") ?? false,
   },
   {
     key: "transition",

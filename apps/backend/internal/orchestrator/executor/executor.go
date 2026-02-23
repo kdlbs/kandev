@@ -94,12 +94,21 @@ type AgentManagerClient interface {
 	// Used when starting an agent on a session whose workspace was already launched.
 	SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error
 
+	// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session,
+	// clearing the agent's conversation context. The execution environment (container/agentctl) is preserved.
+	RestartAgentProcess(ctx context.Context, agentExecutionID string) error
+
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
 
 	// GetRemoteRuntimeStatusBySession returns remote runtime status metadata for a session
 	// (used by UI cloud indicators). Returns nil,nil when unavailable.
 	GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error)
+
+	// PollRemoteStatusForRecords performs a one-time remote status poll for the given
+	// executor records. Used during startup to populate remote status cache before any
+	// sessions are lazily resumed.
+	PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest)
 }
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
@@ -112,6 +121,14 @@ type RemoteRuntimeStatus struct {
 	ErrorMessage  string
 }
 
+// RemoteStatusPollRequest contains the fields from ExecutorRunning needed for remote status polling.
+type RemoteStatusPollRequest struct {
+	SessionID        string
+	Runtime          string
+	AgentExecutionID string
+	ContainerID      string
+}
+
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
 	ProfileID                  string
@@ -122,6 +139,7 @@ type AgentProfileInfo struct {
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	CLIPassthrough             bool
+	NativeSessionResume        bool // Agent supports ACP session/load for resume
 }
 
 // LaunchAgentRequest contains parameters for launching an agent

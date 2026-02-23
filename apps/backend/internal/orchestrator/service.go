@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -40,15 +41,17 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler scheduler.SchedulerConfig
-	QueueSize int
+	Scheduler  scheduler.SchedulerConfig
+	QueueSize  int
+	QueueGroup string
 }
 
 // DefaultServiceConfig returns default configuration
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		Scheduler: scheduler.DefaultSchedulerConfig(),
-		QueueSize: 1000,
+		Scheduler:  scheduler.DefaultSchedulerConfig(),
+		QueueSize:  1000,
+		QueueGroup: "orchestrator",
 	}
 }
 
@@ -90,12 +93,6 @@ type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
-}
-
-// WorktreeRecreator handles worktree recreation when the directory is missing.
-// This is used during session resume when the worktree was deleted (e.g., by the user).
-type WorktreeRecreator interface {
-	RecreateWorktree(ctx context.Context, req WorktreeRecreateRequest) (*WorktreeRecreateResult, error)
 }
 
 // repoStore is the repository interface accepted by NewService.
@@ -144,22 +141,6 @@ type sessionExecutorStore interface {
 	DeleteSessionCommit(ctx context.Context, id string) error
 }
 
-// WorktreeRecreateRequest contains parameters for recreating a worktree.
-type WorktreeRecreateRequest struct {
-	SessionID    string
-	TaskID       string
-	TaskTitle    string
-	RepositoryID string
-	BaseBranch   string
-	WorktreeID   string
-}
-
-// WorktreeRecreateResult contains the result of worktree recreation.
-type WorktreeRecreateResult struct {
-	WorktreePath   string
-	WorktreeBranch string
-}
-
 // Service is the main orchestrator service
 type Service struct {
 	config       ServiceConfig
@@ -187,8 +168,9 @@ type Service struct {
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
-	// Worktree recreator for recreating missing worktrees on resume
-	worktreeRecreator WorktreeRecreator
+	// Workflow engine for typed state-machine evaluation of step transitions
+	workflowEngine *engine.Engine
+	workflowStore  *workflowStore
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
@@ -204,6 +186,10 @@ type Service struct {
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
+
+	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
+	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
+	resetInProgressSessions sync.Map
 
 	// Service state
 	mu        sync.RWMutex
@@ -289,7 +275,7 @@ func NewService(
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 	}
-	s.watcher = watcher.NewWatcher(eventBus, handlers, log)
+	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
 	return s
 }
@@ -342,15 +328,19 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // If not set: workflow_step_id in StartTask is ignored and the prompt is used as-is.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+	s.initWorkflowEngine()
 }
 
-// SetWorktreeRecreator sets the worktree recreator for handling missing worktrees during resume.
-//
-// When resuming sessions on startup, if a worktree directory is missing, the orchestrator
-// will attempt to recreate it using this recreator. If recreation succeeds, the session
-// can be resumed normally. If not set, missing worktrees will cause session resume to fail.
-func (s *Service) SetWorktreeRecreator(wr WorktreeRecreator) {
-	s.worktreeRecreator = wr
+// initWorkflowEngine creates the workflow engine with store and callbacks.
+// Called after the workflow step getter is set. Safe to call multiple times.
+func (s *Service) initWorkflowEngine() {
+	if s.workflowStepGetter == nil {
+		return
+	}
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.eventBus, s.logger)
+	callbacks := buildWorkflowCallbacks(s)
+	s.workflowStore = store
+	s.workflowEngine = engine.New(store, callbacks)
 }
 
 // startTurnForSession starts a new turn for the session and stores it.
@@ -414,6 +404,29 @@ func (s *Service) getActiveTurnID(sessionID string) string {
 	return s.startTurnForSession(context.Background(), sessionID)
 }
 
+func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
+	if sessionID == "" {
+		return
+	}
+	if inProgress {
+		s.resetInProgressSessions.Store(sessionID, true)
+		return
+	}
+	s.resetInProgressSessions.Delete(sessionID)
+}
+
+func (s *Service) isSessionResetInProgress(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	v, ok := s.resetInProgressSessions.Load(sessionID)
+	if !ok {
+		return false
+	}
+	inProgress, _ := v.(bool)
+	return inProgress
+}
+
 // Start starts all orchestrator components
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -427,8 +440,10 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("starting orchestrator service")
 
-	// Resume executors from persisted runtime state on startup.
-	s.resumeExecutorsOnStartup(ctx)
+	// Reconcile session state from persisted runtime state on startup.
+	// This does NOT launch any agent processes — sessions are recovered lazily
+	// when the user opens them (via task.session.status → task.session.resume).
+	s.reconcileSessionsOnStartup(ctx)
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -489,73 +504,53 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-// resumeExecutorsOnStartup recovers agent sessions that were active before server restart.
+// reconcileSessionsOnStartup adjusts database state for sessions that were active before restart.
+// It does NOT launch any agent processes — sessions are recovered lazily when the user opens them
+// (via task.session.status → task.session.resume or by sending a prompt).
 //
-// This critical startup routine handles crash recovery and session persistence. When the server
-// starts, it queries the database for sessions that were "running" when the server stopped,
-// and attempts to restore them by relaunching agentctl and reconnecting to the workspace.
+// Strategy:
 //
-// Recovery Strategy:
-//
-//  1. Query database for sessions marked as "running" (persisted executor state)
-//
-//  2. For each session, determine recovery action based on previous state:
-//
-//     Terminal States (Completed/Failed/Cancelled):
-//     - Clean up stale executor record from database
-//     - Skip resume (session is already done)
-//
-//     Never-Started State (Created):
-//     - Clean up executor record (session never actually ran)
-//     - Skip resume (nothing to recover)
-//
-//     Active States (Starting/Running/WaitingForInput):
-//     - Validate workspace/worktree still exists
-//     - Launch new agentctl instance
-//     - Restore session via ACP session/load (if resumable)
-//     - Transition to WaitingForInput (ready for next prompt)
-//
-//  3. Handle resume failures gracefully:
-//     - Mark session as Failed in database
-//     - Clean up executor record
-//     - Continue with next session (don't block other recoveries)
-//
-// Agent Resume Behavior:
-//
-//   - startAgent = (ResumeToken != "" && Resumable) determines if agent process starts
-//   - If startAgent=true: Launches agent, loads conversation history via ACP
-//   - If startAgent=false: Only workspace access (shell) is restored, no agent
-//
-// State Transitions:
-//
-//   - Session resume does NOT process any prompt (just loads history)
-//   - No "complete" event is emitted after resume (only after prompt completion)
-//   - Final state is always WaitingForInput (ready for user's next prompt)
-//
-// This runs synchronously during Start() before accepting new requests, ensuring all
-// recoverable sessions are restored before the orchestrator begins processing new tasks.
+//  1. Terminal states (Completed/Cancelled/Failed) → clean up executor record
+//  2. Never-started (Created) → clean up executor record
+//  3. Active states (Starting/Running/WaitingForInput) → set session to WAITING_FOR_INPUT,
+//     clear stale execution IDs, fix task state, preserve ExecutorRunning record
+//  4. Pre-poll remote executor status for remote runtimes (sprites, remote_docker)
 //
 // Called by: Start() method during orchestrator initialization.
-func (s *Service) resumeExecutorsOnStartup(ctx context.Context) {
+func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))
 		return
 	}
 	if len(runningExecutors) == 0 {
-		s.logger.Info("no executors to resume on startup")
+		s.logger.Info("no executors to reconcile on startup")
 		return
 	}
 
-	s.logger.Info("resuming executors on startup", zap.Int("count", len(runningExecutors)))
+	s.logger.Info("reconciling sessions on startup (lazy recovery)", zap.Int("count", len(runningExecutors)))
 
+	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
-		s.resumeOneExecutorOnStartup(ctx, running)
+		if isRemoteRuntime(running.Runtime) {
+			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
+				SessionID:        running.SessionID,
+				Runtime:          running.Runtime,
+				AgentExecutionID: running.AgentExecutionID,
+				ContainerID:      running.ContainerID,
+			})
+		}
+		s.reconcileOneSessionOnStartup(ctx, running)
+	}
+
+	// Pre-poll remote executor status so task lists show accurate state
+	if len(remoteRecords) > 0 && s.agentManager != nil {
+		s.agentManager.PollRemoteStatusForRecords(ctx, remoteRecords)
 	}
 }
 
-// resumeOneExecutorOnStartup handles startup recovery for a single executor/session.
-func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+// reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.
+func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
 	sessionID := running.SessionID
 	if sessionID == "" {
 		return
@@ -563,7 +558,7 @@ func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *model
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("failed to load session for resume",
+		s.logger.Warn("failed to load session for reconciliation",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
@@ -571,13 +566,12 @@ func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *model
 
 	previousState := session.State
 
+	// Handle terminal and never-started states (reuse existing cleanup logic)
 	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState); skip {
 		return
 	}
-
-	// Handle sessions that never started - skip without failure
 	if previousState == models.TaskSessionStateCreated {
-		s.logger.Info("session was never started; skipping recovery",
+		s.logger.Info("session was never started; cleaning up",
 			zap.String("session_id", sessionID))
 		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 			s.logger.Warn("failed to remove executor record for unstarted session",
@@ -587,61 +581,45 @@ func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *model
 		return
 	}
 
-	startAgent := canResumeRunning(running)
-	if !startAgent {
-		s.logger.Debug("resuming workspace without agent session",
-			zap.String("session_id", sessionID),
-			zap.String("previous_state", string(previousState)),
-			zap.Bool("has_resume_token", running.ResumeToken != ""),
-			zap.Bool("resumable", running.Resumable))
-	}
-
-	// Validate worktree exists before resuming
-	if err := validateSessionWorktrees(session); err != nil {
-		if !s.handleWorktreeValidationFailure(ctx, session, sessionID, err) {
-			return
-		}
-	}
-
-	s.logger.Debug("resuming session on startup",
-		zap.String("session_id", sessionID),
-		zap.String("task_id", running.TaskID),
-		zap.String("previous_state", string(previousState)),
-		zap.String("resume_token", running.ResumeToken),
-		zap.Bool("start_agent", startAgent))
-
-	// Resume the session - this will:
-	// 1. Create a new agentctl instance
-	// 2. Start the agent process
-	// 3. Initialize and load the session via ACP/Codex protocol
-	if _, err := s.executor.ResumeSession(ctx, session, startAgent); err != nil {
-		s.logger.Warn("failed to resume executor on startup",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
-		_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
-		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-		return
-	}
-
-	if startAgent {
+	// Active states: STARTING, RUNNING, WAITING_FOR_INPUT
+	// Set session to WAITING_FOR_INPUT (idle, ready for lazy resume when user opens it)
+	if previousState != models.TaskSessionStateWaitingForInput {
 		if err := s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
-			s.logger.Warn("failed to set session state to WAITING_FOR_INPUT after resume",
+			s.logger.Warn("failed to set session to WAITING_FOR_INPUT on startup",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
-		if err := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Warn("failed to set task state to REVIEW after resume",
-				zap.String("task_id", running.TaskID),
-				zap.Error(err))
+	}
+
+	// Clear stale execution references (agent process is gone after restart)
+	_ = s.repo.ClearSessionExecutionID(ctx, sessionID)
+
+	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
+	if running.TaskID != "" {
+		task, taskErr := s.taskRepo.GetTask(ctx, running.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
+			if updateErr := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); updateErr != nil {
+				s.logger.Warn("failed to update task to REVIEW on startup",
+					zap.String("task_id", running.TaskID),
+					zap.Error(updateErr))
+			}
 		}
 	}
 
-	s.logger.Debug("session resumed successfully",
+	// PRESERVE the ExecutorRunning record — it holds the resume token and worktree info
+	// needed for lazy recovery when the user opens the session.
+
+	s.logger.Info("session reconciled for lazy recovery",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", running.TaskID),
-		zap.Bool("start_agent", startAgent),
-		zap.String("state", string(models.TaskSessionStateWaitingForInput)))
+		zap.String("previous_state", string(previousState)),
+		zap.Bool("has_resume_token", running.ResumeToken != ""),
+		zap.Bool("has_worktree", running.WorktreePath != ""))
+}
+
+// isRemoteRuntime checks if a runtime string corresponds to a remote executor type.
+func isRemoteRuntime(runtime string) bool {
+	return runtime == string(models.ExecutorTypeSprites) || runtime == string(models.ExecutorTypeRemoteDocker)
 }
 
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
@@ -708,121 +686,6 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 		return true
 	}
 	return running.Runtime == string(models.ExecutorTypeSprites)
-}
-
-// handleWorktreeValidationFailure attempts to recreate a missing worktree.
-// Returns true if recovery succeeded and resume should continue; false if the session should be skipped.
-func (s *Service) handleWorktreeValidationFailure(ctx context.Context, session *models.TaskSession, sessionID string, validationErr error) bool {
-	s.logger.Info("worktree not found, attempting recreation",
-		zap.String("session_id", sessionID),
-		zap.Error(validationErr))
-
-	if !s.tryRecreateWorktree(ctx, session) {
-		s.logger.Warn("worktree recreation failed; marking session as failed",
-			zap.String("session_id", sessionID))
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace not found and could not be restored")
-		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-		return false
-	}
-
-	s.logger.Info("worktree recreated successfully, continuing with resume",
-		zap.String("session_id", sessionID))
-	if err := validateSessionWorktrees(session); err != nil {
-		s.logger.Warn("worktree validation still failed after recreation",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, "workspace recreation failed: "+err.Error())
-		_ = s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
-		return false
-	}
-	return true
-}
-
-// tryRecreateWorktree attempts to recreate a missing worktree for a session.
-// On success, it updates the session's worktree info and creates an info message.
-// On failure, it marks the session as failed and creates an error message.
-// Returns true if recreation succeeded and session can be resumed.
-func (s *Service) tryRecreateWorktree(ctx context.Context, session *models.TaskSession) bool {
-	if s.worktreeRecreator == nil {
-		s.logger.Debug("worktree recreator not available, cannot recreate worktree",
-			zap.String("session_id", session.ID))
-		return false
-	}
-
-	if len(session.Worktrees) == 0 {
-		s.logger.Debug("session has no worktrees to recreate",
-			zap.String("session_id", session.ID))
-		return false
-	}
-
-	wt := session.Worktrees[0]
-
-	// Get task title for better branch naming
-	var taskTitle string
-	if task, err := s.taskRepo.GetTask(ctx, session.TaskID); err == nil {
-		taskTitle = task.Title
-	}
-
-	s.logger.Info("attempting to recreate worktree",
-		zap.String("session_id", session.ID),
-		zap.String("task_id", session.TaskID),
-		zap.String("worktree_id", wt.WorktreeID),
-		zap.String("repository_id", wt.RepositoryID))
-
-	req := WorktreeRecreateRequest{
-		SessionID:    session.ID,
-		TaskID:       session.TaskID,
-		TaskTitle:    taskTitle,
-		RepositoryID: wt.RepositoryID,
-		BaseBranch:   session.BaseBranch,
-		WorktreeID:   wt.WorktreeID,
-	}
-
-	result, err := s.worktreeRecreator.RecreateWorktree(ctx, req)
-	if err != nil {
-		s.logger.Warn("failed to recreate worktree",
-			zap.String("session_id", session.ID),
-			zap.String("worktree_id", wt.WorktreeID),
-			zap.Error(err))
-
-		s.sendWorktreeStatusMessage(ctx, session.TaskID, session.ID, "error",
-			"Workspace could not be restored. The workspace directory was deleted and recreation failed: "+err.Error())
-		return false
-	}
-
-	// Update session's worktree info
-	session.Worktrees[0].WorktreePath = result.WorktreePath
-	session.Worktrees[0].WorktreeBranch = result.WorktreeBranch
-
-	s.logger.Info("worktree recreated successfully",
-		zap.String("session_id", session.ID),
-		zap.String("worktree_id", wt.WorktreeID),
-		zap.String("new_path", result.WorktreePath))
-
-	s.sendWorktreeStatusMessage(ctx, session.TaskID, session.ID, "info",
-		"Workspace was automatically restored after server restart")
-
-	return true
-}
-
-// sendWorktreeStatusMessage creates a status message in the session chat if messageCreator is available.
-func (s *Service) sendWorktreeStatusMessage(ctx context.Context, taskID, sessionID, variant, content string) {
-	if s.messageCreator == nil {
-		return
-	}
-	metadata := map[string]interface{}{
-		"variant": variant,
-	}
-	_ = s.messageCreator.CreateSessionMessage(
-		ctx,
-		taskID,
-		content,
-		sessionID,
-		string(v1.MessageTypeStatus),
-		"", // no turn ID during startup
-		metadata,
-		false,
-	)
 }
 
 // IsRunning returns true if the service is running

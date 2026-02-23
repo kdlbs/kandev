@@ -122,3 +122,68 @@ func (m *Manager) GetRemoteStatusBySessionID(ctx context.Context, sessionID stri
 	}
 	return m.GetRemoteStatusBySession(sessionID)
 }
+
+// RemoteStatusPollRecord contains the minimal information needed to poll remote status
+// for a session that is not currently tracked in the in-memory execution store.
+type RemoteStatusPollRecord struct {
+	SessionID        string
+	Runtime          string
+	AgentExecutionID string
+	ContainerID      string
+}
+
+// PollRemoteStatusForRecords performs a one-time remote status poll for executor records
+// that are not in the in-memory execution store. Used during startup to populate the
+// remote status cache before any sessions are lazily resumed.
+func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRecord) {
+	if m.executorRegistry == nil {
+		return
+	}
+	for _, rec := range records {
+		if rec.SessionID == "" || rec.Runtime == "" {
+			continue
+		}
+		rt, err := m.executorRegistry.GetBackend(executor.Name(rec.Runtime))
+		if err != nil {
+			continue
+		}
+		provider, ok := rt.(RemoteStatusProvider)
+		if !ok {
+			continue
+		}
+
+		instance := &ExecutorInstance{
+			InstanceID:  rec.AgentExecutionID,
+			SessionID:   rec.SessionID,
+			RuntimeName: rec.Runtime,
+			ContainerID: rec.ContainerID,
+		}
+		status, statusErr := provider.GetRemoteStatus(ctx, instance)
+		if statusErr != nil {
+			m.storeRemoteStatus(rec.SessionID, &RemoteStatus{
+				RuntimeName:   rec.Runtime,
+				LastCheckedAt: time.Now().UTC(),
+				ErrorMessage:  statusErr.Error(),
+			})
+			m.logger.Debug("startup remote status poll failed",
+				zap.String("session_id", rec.SessionID),
+				zap.String("runtime", rec.Runtime),
+				zap.Error(statusErr))
+			continue
+		}
+		if status == nil {
+			continue
+		}
+		if status.RuntimeName == "" {
+			status.RuntimeName = rec.Runtime
+		}
+		if status.LastCheckedAt.IsZero() {
+			status.LastCheckedAt = time.Now().UTC()
+		}
+		m.storeRemoteStatus(rec.SessionID, status)
+		m.logger.Debug("startup remote status polled",
+			zap.String("session_id", rec.SessionID),
+			zap.String("runtime", rec.Runtime),
+			zap.String("state", status.State))
+	}
+}

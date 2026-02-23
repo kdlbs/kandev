@@ -154,6 +154,13 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		workspacePath = req.WorkspacePath
 	}
 
+	var historyEnabled bool
+	if req.AgentConfig != nil {
+		if rt := req.AgentConfig.Runtime(); rt != nil {
+			historyEnabled = rt.SessionConfig.HistoryContextInjection
+		}
+	}
+
 	return &AgentExecution{
 		ID:                   ri.InstanceID,
 		TaskID:               req.TaskID,
@@ -169,6 +176,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		agentctl:             ri.Client,
 		standaloneInstanceID: ri.StandaloneInstanceID,
 		standalonePort:       ri.StandalonePort,
+		historyEnabled:       historyEnabled,
 		promptDoneCh:         make(chan PromptCompletionSignal, 1),
 	}
 }

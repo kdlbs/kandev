@@ -3,8 +3,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -28,7 +26,7 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	// Process on_turn_start workflow events (step transitions).
 	// For ACP sessions this happens in the message handler before PromptTask;
 	// for passthrough it happens here when the PTY detects user input.
-	s.processOnTurnStart(ctx, data.TaskID, data.SessionID)
+	s.processOnTurnStartViaEngine(ctx, data.TaskID, data.SessionID)
 
 	// Move session to running and task to in progress
 	s.setSessionRunning(ctx, data.TaskID, data.SessionID)
@@ -58,26 +56,87 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 	))
 }
 
+// requeueMessage re-enqueues a message that could not be delivered, publishing a queue status event on success.
+func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy string) {
+	requeuedMsg, queueErr := s.messageQueue.QueueMessage(
+		ctx,
+		queuedMsg.SessionID,
+		queuedMsg.TaskID,
+		queuedMsg.Content,
+		queuedMsg.Model,
+		queuedBy,
+		queuedMsg.PlanMode,
+		queuedMsg.Attachments,
+	)
+	if queueErr != nil {
+		s.logger.Error("failed to requeue message",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.String("queued_by", queuedBy),
+			zap.Error(queueErr))
+		return
+	}
+	s.logger.Info("message requeued",
+		zap.String("session_id", queuedMsg.SessionID),
+		zap.String("task_id", queuedMsg.TaskID),
+		zap.String("old_queue_id", queuedMsg.ID),
+		zap.String("new_queue_id", requeuedMsg.ID),
+		zap.String("queued_by", queuedBy))
+	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+}
+
 // handleAgentReady handles agent ready events (turn complete in passthrough mode)
 // This is called when the agent finishes processing and is waiting for input.
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
+
 	if data.SessionID == "" {
 		s.logger.Warn("missing session_id for agent ready event",
 			zap.String("task_id", data.TaskID))
 		return
 	}
 
+	if s.isSessionResetInProgress(data.SessionID) {
+		s.logger.Debug("ignoring agent.ready while session reset is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for agent.ready",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	if data.AgentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID {
+		s.logger.Debug("ignoring stale agent.ready for non-active execution",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("event_execution_id", data.AgentExecutionID),
+			zap.String("active_execution_id", session.AgentExecutionID))
+		return
+	}
+
+	if session.State != models.TaskSessionStateRunning {
+		s.logger.Debug("ignoring agent.ready while session is not running",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return
+	}
+
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 
-	// Check for workflow transition based on session's current step
-	// This handles the case where the agent finishes a step and should move to the next
-	transitioned := s.processOnTurnComplete(ctx, data.TaskID, data.SessionID)
-
-	// If no workflow transition occurred, move session to waiting for input and task to review
-	if !transitioned {
-		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
-	}
+	// Check for workflow transition based on session's current step.
+	// Uses the engine when available; falls back to legacy evaluation.
+	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
+	s.processOnTurnCompleteViaEngine(ctx, data.TaskID, data.SessionID)
 
 	// ALWAYS check for queued messages after agent becomes ready, regardless of workflow transition
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
@@ -118,6 +177,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		zap.String("task_id", queuedMsg.TaskID),
 		zap.String("queue_id", queuedMsg.ID))
 
+	// PromptTask rejects while session is RUNNING; queued follow-ups should be
+	// treated like fresh user input after turn completion.
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
+
 	// Publish queue status changed event to notify frontend
 	s.publishQueueStatusEvent(ctx, data.SessionID)
 
@@ -127,6 +190,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
 	promptCtx := context.Background() // Use a fresh context for async execution
+
+	if s.isSessionResetInProgress(queuedMsg.SessionID) {
+		s.logger.Warn("queued message execution deferred due to context reset in progress",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-reset-retry")
+		return
+	}
 
 	// Create user message for the queued message (so it appears in chat history)
 	if s.messageCreator != nil {
@@ -168,6 +240,15 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 
+		if isAgentPromptInProgressError(err) || isTransientPromptError(err) || isSessionResetInProgressError(err) {
+			s.logger.Warn("queued message execution failed transiently; requeueing",
+				zap.String("session_id", callerSessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-retry")
+			return
+		}
+
 		// TODO: Implement dead letter queue for failed queued messages
 		// Currently, failed messages are lost. Consider:
 		// 1. Retry mechanism with exponential backoff
@@ -191,8 +272,8 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
 
-	// Check for workflow transition based on session's current step
-	transitioned := s.processOnTurnComplete(ctx, data.TaskID, data.SessionID)
+	// Check for workflow transition based on session's current step.
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, data.SessionID)
 
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {
@@ -215,14 +296,14 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
-	// Check if this was a resume failure (agent session no longer exists on the CLI side).
-	// If so, clear the resume token and re-launch a fresh session instead of failing.
-	// We do this BEFORE setting the session state to FAILED so the re-launch can proceed cleanly.
-	if data.SessionID != "" && isResumeFailure(data.ErrorMessage) {
+	// Check if the agent was started with a resume token (--resume). If so, any failure
+	// means the previous session couldn't be restored. Clear the token and let the user
+	// start a fresh session — don't treat this as a hard failure.
+	if data.SessionID != "" && s.wasResumeAttempt(ctx, data.SessionID) {
 		if s.handleResumeFailure(ctx, data) {
-			return // Successfully re-launched without resume
+			return // Resume token cleared, session set to WAITING_FOR_INPUT
 		}
-		// Fall through to normal failure handling if re-launch failed
+		// Fall through to normal failure handling if cleanup failed
 	}
 
 	// Update session state to FAILED
@@ -257,33 +338,31 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 }
 
-// isResumeFailure checks if the error message indicates a failed --resume attempt
-// (e.g., the Claude Code conversation was deleted or expired).
-func isResumeFailure(errorMsg string) bool {
-	lower := strings.ToLower(errorMsg)
-	return strings.Contains(lower, "no conversation found")
+// wasResumeAttempt checks whether the session's last execution used a resume token.
+// If the token is still present in the DB, the agent was started with --resume.
+func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil {
+		return false
+	}
+	return running.ResumeToken != ""
 }
 
-// handleResumeFailure handles the case where an agent failed because --resume pointed
-// to a non-existent conversation. It clears the resume token, sends a status message,
-// and schedules an asynchronous re-launch of the session without resume.
+// handleResumeFailure handles the case where an agent failed while using a resume token.
+// It clears the token so the next attempt starts fresh, and notifies the user.
 //
-// The re-launch must be async because this handler is called synchronously from
-// MarkCompleted → PublishAgentEvent, BEFORE RemoveExecution cleans up the failed
-// execution from the manager's store. Calling ResumeSession synchronously would
-// fail with ErrExecutionAlreadyRunning.
+// The session is set to WAITING_FOR_INPUT so the user can send a new message
+// (which triggers a fresh agent start without --resume).
 //
 // Returns true to signal that the caller should skip normal failure handling
-// (scheduler retry, FAILED state) since we're handling the retry ourselves.
+// (scheduler retry, FAILED state) since we've handled the state transition ourselves.
 func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	s.logger.Warn("detected resume failure, retrying without resume",
+	s.logger.Warn("detected resume failure, clearing token for fresh start on next user action",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("error", data.ErrorMessage))
 
 	// 1. Clear the resume token so the next attempt won't use --resume.
-	// Note: executor.ResumeSession already upserts a new ExecutorRunning without ResumeToken,
-	// but clear it explicitly to be safe against race conditions.
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, data.SessionID)
 	if err == nil && running != nil && running.ResumeToken != "" {
 		running.ResumeToken = ""
@@ -294,9 +373,9 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 		}
 	}
 
-	// 2. Send a status message about the failed resume
+	// 2. Send a status message about the failed resume.
 	if s.messageCreator != nil {
-		statusMsg := fmt.Sprintf("Session resume failed: %s. Starting a fresh session...", data.ErrorMessage)
+		statusMsg := fmt.Sprintf("Previous agent session could not be restored (%s). Send a new message to start a fresh session.", data.ErrorMessage)
 		if err := s.messageCreator.CreateSessionMessage(
 			ctx,
 			data.TaskID,
@@ -316,40 +395,15 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 		}
 	}
 
-	// 3. Schedule async re-launch. We use a goroutine because this handler runs
-	// synchronously inside the MarkCompleted → PublishAgentEvent call chain,
-	// before RemoveExecution clears the old execution from the manager's store.
-	// A synchronous ResumeSession call would fail with ErrExecutionAlreadyRunning.
-	taskID := data.TaskID
-	sessionID := data.SessionID
-	go func() {
-		// Brief delay to let RemoveExecution complete after event handler returns
-		time.Sleep(500 * time.Millisecond)
-		bgCtx := context.Background()
+	// 3. Set session to WAITING_FOR_INPUT (not FAILED) so the user can interact.
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
 
-		session, err := s.repo.GetTaskSession(bgCtx, sessionID)
-		if err != nil {
-			s.logger.Error("failed to get session for resume retry",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			_ = s.repo.UpdateTaskSessionState(bgCtx, sessionID, models.TaskSessionStateFailed, "re-launch failed: "+err.Error())
-			return
-		}
-
-		_, err = s.executor.ResumeSession(bgCtx, session, true)
-		if err != nil {
-			s.logger.Error("failed to re-launch session after resume failure",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			_ = s.repo.UpdateTaskSessionState(bgCtx, sessionID, models.TaskSessionStateFailed, "re-launch failed: "+err.Error())
-			return
-		}
-
-		s.logger.Info("session re-launched after resume failure (fresh session without --resume)",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-	}()
+	// 4. Ensure task is in REVIEW state.
+	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+		s.logger.Warn("failed to set task to REVIEW after resume failure",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+	}
 
 	return true
 }

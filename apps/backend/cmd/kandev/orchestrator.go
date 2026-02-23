@@ -2,11 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -18,10 +24,12 @@ import (
 	userservice "github.com/kandev/kandev/internal/user/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
-	"github.com/kandev/kandev/internal/worktree"
 )
 
+const defaultEventNamespace = "default"
+
 func provideOrchestrator(
+	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
@@ -30,7 +38,6 @@ func provideOrchestrator(
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
 	workflowSvc *workflowservice.Service,
-	worktreeRecreator *worktree.Recreator,
 	secretStore secrets.SecretStore,
 	repoCloner *repoclone.Cloner,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
@@ -42,6 +49,17 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	namespace := resolveEventNamespace(cfg)
+	serviceCfg.QueueGroup = "orchestrator." + namespace
+	busMode := "memory"
+	if cfg != nil && strings.TrimSpace(cfg.NATS.URL) != "" {
+		busMode = "nats"
+	}
+	log.Debug("orchestrator queue group resolved",
+		zap.String("event_bus", busMode),
+		zap.String("event_namespace", namespace),
+		zap.String("queue_group", serviceCfg.QueueGroup),
+		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 
@@ -53,11 +71,6 @@ func provideOrchestrator(
 	// Wire workflow step getter for prompt building
 	if workflowSvc != nil {
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
-	}
-
-	// Wire worktree recreator for handling missing worktrees during session resume
-	if worktreeRecreator != nil {
-		orchestratorSvc.SetWorktreeRecreator(newWorktreeRecreatorAdapter(worktreeRecreator))
 	}
 
 	// Wire review task creator for auto-creating tasks from review watch PRs
@@ -74,6 +87,62 @@ func provideOrchestrator(
 	}
 
 	return orchestratorSvc, msgCreator, nil
+}
+
+func resolveEventNamespace(cfg *config.Config) string {
+	if cfg == nil {
+		return defaultEventNamespace
+	}
+	if explicit := strings.TrimSpace(cfg.Events.Namespace); explicit != "" {
+		return sanitizeNamespace(explicit)
+	}
+	identity := resolveDatabaseIdentity(cfg)
+	if identity == "" {
+		return defaultEventNamespace
+	}
+	return hashNamespace(identity)
+}
+
+func resolveDatabaseIdentity(cfg *config.Config) string {
+	if strings.EqualFold(cfg.Database.Driver, "sqlite") {
+		path := cfg.Database.Path
+		if path == "" {
+			path = "./kandev.db"
+		}
+		absPath, err := filepath.Abs(path)
+		if err == nil {
+			return "sqlite:" + absPath
+		}
+		return "sqlite:" + path
+	}
+	return fmt.Sprintf("pg:%s:%d:%s:%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName, cfg.Database.User)
+}
+
+func hashNamespace(identity string) string {
+	sum := sha1.Sum([]byte(identity))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func sanitizeNamespace(namespace string) string {
+	lower := strings.ToLower(namespace)
+	var b strings.Builder
+	for _, r := range lower {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-._")
+	if out == "" {
+		return defaultEventNamespace
+	}
+	return out
 }
 
 // orchestratorWorkflowStepGetterAdapter adapts workflow service to orchestrator's WorkflowStepGetter interface.

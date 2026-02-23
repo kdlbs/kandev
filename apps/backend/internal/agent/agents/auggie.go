@@ -89,7 +89,7 @@ func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@augmentcode/auggie@0.15.0", "--acp").
+	return Cmd("npx", "-y", "@augmentcode/auggie@0.16.2", "--acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
 		Resume(NewParam("--resume"), opts.SessionID, false).
 		Permissions("--permission", auggiePermTools, opts).
@@ -102,7 +102,7 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", "@augmentcode/auggie@0.15.0", "--acp").Build(),
+		Cmd:         Cmd("npx", "-y", "@augmentcode/auggie@0.16.2", "--acp").Build(),
 		WorkingDir:  "/workspace",
 		RequiredEnv: []string{"AUGMENT_SESSION_AUTH"},
 		Env:         map[string]string{},
@@ -114,10 +114,11 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		ModelFlag:      NewParam("--model", "{model}"),
 		WorkspaceFlag:  "--workspace-root",
 		SessionConfig: SessionConfig{
-			ResumeFlag:         NewParam("--resume"),
-			CanRecover:         &canRecover,
-			SessionDirTemplate: "{home}/.augment/sessions",
-			SessionDirTarget:   "/root/.augment/sessions",
+			ResumeFlag:              NewParam("--resume"),
+			CanRecover:              &canRecover,
+			HistoryContextInjection: true,
+			SessionDirTemplate:      "{home}/.augment/sessions",
+			SessionDirTarget:        "/root/.augment/sessions",
 		},
 	}
 }
@@ -152,8 +153,10 @@ var auggiePermTools = []string{"launch-process", "save-file", "str-replace-edito
 
 var auggiePermSettings = map[string]PermissionSetting{
 	"auto_approve": {Supported: true, Default: true, Label: "Auto-approve", Description: "Automatically approve tool calls"},
-	"allow_indexing": {Supported: true, Default: true, Label: "Allow indexing", Description: "Enable workspace indexing without confirmation",
-		ApplyMethod: "cli_flag", CLIFlag: "--allow-indexing"},
+	"allow_indexing": {
+		Supported: true, Default: true, Label: "Allow indexing", Description: "Enable workspace indexing without confirmation",
+		ApplyMethod: "cli_flag", CLIFlag: "--allow-indexing",
+	},
 }
 
 func auggieStaticModels() []Model {

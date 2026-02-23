@@ -210,6 +210,21 @@ function StepBehaviorSection({
         </div>
         <div className="flex items-center gap-2">
           <Checkbox
+            id={`${step.id}-reset-context`}
+            checked={hasOnEnterAction(step, "reset_agent_context")}
+            onCheckedChange={() => {
+              if (readOnly) return;
+              toggleOnEnterAction("reset_agent_context");
+            }}
+            disabled={readOnly}
+          />
+          <Label htmlFor={`${step.id}-reset-context`} className="text-sm">
+            Reset agent context
+          </Label>
+          <HelpTip text="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective." />
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
             id={`${step.id}-manual-move`}
             checked={step.allow_manual_move !== false}
             onCheckedChange={(checked) => {

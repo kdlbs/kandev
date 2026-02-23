@@ -106,6 +106,7 @@ const (
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
 	AgentStopped           = "agent.stopped"
+	AgentContextReset      = "agent.context_reset" // Agent subprocess restarted with fresh ACP session
 	AgentACPSessionCreated = "agent.acp_session_created"
 	AgentctlStarting       = "agentctl.starting"
 	AgentctlReady          = "agentctl.ready"

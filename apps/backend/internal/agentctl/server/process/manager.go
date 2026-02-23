@@ -559,6 +559,19 @@ func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 	return m.updatesCh
 }
 
+// SendErrorEvent sends an error event on the updates channel so the
+// lifecycle manager (and ultimately the UI) learns about the failure.
+func (m *Manager) SendErrorEvent(errorMessage string) {
+	select {
+	case m.updatesCh <- adapter.AgentEvent{
+		Type:  adapter.EventTypeError,
+		Error: errorMessage,
+	}:
+	default:
+		m.logger.Warn("updates channel full, could not send error event")
+	}
+}
+
 // GetAdapter returns the protocol adapter
 func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()

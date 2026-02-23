@@ -63,9 +63,11 @@ type AgentExecution struct {
 	currentMessageID  string
 	currentThinkingID string
 
-	// Resume context tracking for fork_session pattern (ACP agents that don't support session/load)
-	// needsResumeContext is set to true when the session has history that should be injected
-	// resumeContextInjected is set to true after context has been injected into a prompt
+	// History-based context injection for agents without native session resume (e.g. Auggie).
+	// historyEnabled gates recording and injection; set from SessionConfig.HistoryContextInjection.
+	// needsResumeContext is set to true when the session has history that should be injected.
+	// resumeContextInjected is set to true after context has been injected into a prompt.
+	historyEnabled        bool
 	needsResumeContext    bool
 	resumeContextInjected bool
 
@@ -200,6 +202,7 @@ type AgentProfileInfo struct {
 	DangerouslySkipPermissions bool
 	AllowIndexing              bool
 	CLIPassthrough             bool
+	NativeSessionResume        bool // Agent supports ACP session/load for resume
 }
 
 // ProfileResolver resolves agent profile IDs to profile information

@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -201,6 +200,11 @@ func (a *lifecycleAdapter) CancelAgent(ctx context.Context, sessionID string) er
 	return a.mgr.CancelAgentBySessionID(ctx, sessionID)
 }
 
+// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session.
+func (a *lifecycleAdapter) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	return a.mgr.RestartAgentProcess(ctx, agentExecutionID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)
@@ -215,6 +219,19 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
+	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
+	for i, r := range records {
+		lcRecords[i] = lifecycle.RemoteStatusPollRecord{
+			SessionID:        r.SessionID,
+			Runtime:          r.Runtime,
+			AgentExecutionID: r.AgentExecutionID,
+			ContainerID:      r.ContainerID,
+		}
+	}
+	a.mgr.PollRemoteStatusForRecords(ctx, lcRecords)
 }
 
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
@@ -549,32 +566,4 @@ func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string
 
 func newTurnServiceAdapter(svc *taskservice.Service) *turnServiceAdapter {
 	return &turnServiceAdapter{svc: svc}
-}
-
-// worktreeRecreatorAdapter adapts the worktree.Recreator to the orchestrator.WorktreeRecreator interface.
-type worktreeRecreatorAdapter struct {
-	recreator *worktree.Recreator
-}
-
-func newWorktreeRecreatorAdapter(recreator *worktree.Recreator) *worktreeRecreatorAdapter {
-	return &worktreeRecreatorAdapter{recreator: recreator}
-}
-
-// RecreateWorktree implements orchestrator.WorktreeRecreator.
-func (a *worktreeRecreatorAdapter) RecreateWorktree(ctx context.Context, req orchestrator.WorktreeRecreateRequest) (*orchestrator.WorktreeRecreateResult, error) {
-	result, err := a.recreator.Recreate(ctx, worktree.RecreateRequest{
-		SessionID:    req.SessionID,
-		TaskID:       req.TaskID,
-		TaskTitle:    req.TaskTitle,
-		RepositoryID: req.RepositoryID,
-		BaseBranch:   req.BaseBranch,
-		WorktreeID:   req.WorktreeID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &orchestrator.WorktreeRecreateResult{
-		WorktreePath:   result.WorktreePath,
-		WorktreeBranch: result.WorktreeBranch,
-	}, nil
 }

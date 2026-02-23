@@ -34,13 +34,8 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		return nil, fmt.Errorf("agent not found for profile: %w", err)
 	}
 
-	// Determine the model to use: profile's model, or fall back to agent's default model
-	model := profile.Model
-	if model == "" && r.registry != nil {
-		if ag, ok := r.registry.Get(agent.Name); ok {
-			model = ag.DefaultModel()
-		}
-	}
+	// Resolve agent capabilities from the registry.
+	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
 
 	return &AgentProfileInfo{
 		ProfileID:                  profile.ID,
@@ -52,5 +47,27 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
 		CLIPassthrough:             profile.CLIPassthrough,
+		NativeSessionResume:        nativeSessionResume,
 	}, nil
+}
+
+// resolveAgentCapabilities looks up the agent in the registry and returns the effective model
+// and whether the agent supports native session resume.
+func (r *StoreProfileResolver) resolveAgentCapabilities(agentName, profileModel string) (string, bool) {
+	if r.registry == nil {
+		return profileModel, false
+	}
+	ag, ok := r.registry.Get(agentName)
+	if !ok {
+		return profileModel, false
+	}
+	model := profileModel
+	if model == "" {
+		model = ag.DefaultModel()
+	}
+	var nativeSessionResume bool
+	if rt := ag.Runtime(); rt != nil {
+		nativeSessionResume = rt.SessionConfig.NativeSessionResume
+	}
+	return model, nativeSessionResume
 }

@@ -68,6 +68,10 @@ func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, s
 	return nil
 }
 
+func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	return nil
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
 }
@@ -78,6 +82,8 @@ func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID s
 
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	return nil, nil
+}
+func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 }
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
@@ -200,8 +206,8 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	if cfg.ProcessInterval != 5*time.Second {
 		t.Errorf("expected ProcessInterval = 5s, got %v", cfg.ProcessInterval)
 	}
-	if cfg.RetryLimit != 3 {
-		t.Errorf("expected RetryLimit = 3, got %d", cfg.RetryLimit)
+	if cfg.RetryLimit != 2 {
+		t.Errorf("expected RetryLimit = 2, got %d", cfg.RetryLimit)
 	}
 	if cfg.RetryDelay != 30*time.Second {
 		t.Errorf("expected RetryDelay = 30s, got %v", cfg.RetryDelay)

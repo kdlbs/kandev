@@ -2,13 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -44,7 +47,6 @@ func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID s
 			zap.Error(err))
 		return false
 	}
-
 	// If no on_turn_complete actions, do nothing (manual step)
 	if len(currentStep.Events.OnTurnComplete) == 0 {
 		s.logger.Debug("step has no on_turn_complete actions, waiting for user",
@@ -62,7 +64,6 @@ func (s *Service) processOnTurnComplete(ctx context.Context, taskID, sessionID s
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return false
 	}
-
 	targetStepID, ok := s.resolveTransitionTargetStep(ctx, taskID, sessionID, currentStep, transitionAction)
 	if !ok {
 		return false
@@ -195,7 +196,7 @@ func (s *Service) processOnTurnStart(ctx context.Context, taskID, sessionID stri
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
 func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
-	s.processOnTurnStart(ctx, taskID, sessionID)
+	s.processOnTurnStartViaEngine(ctx, taskID, sessionID)
 	return nil
 }
 
@@ -279,7 +280,6 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.String("from_step", fromStep.Name),
 		zap.String("to_step", targetStep.Name),
 		zap.Bool("trigger_on_enter", triggerOnEnter))
-
 	// Process on_enter for the target step (skip if triggerOnEnter is false,
 	// e.g. on_turn_start transitions where the user is about to send a message)
 	if triggerOnEnter {
@@ -312,22 +312,18 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 
 	if len(step.Events.OnEnter) == 0 {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-
-		// Publish session state change
-		if s.eventBus != nil {
-			eventData := map[string]interface{}{
-				"task_id":          taskID,
-				"session_id":       sessionID,
-				"workflow_step_id": step.ID,
-				"new_state":        string(models.TaskSessionStateWaitingForInput),
-			}
-			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-				events.TaskSessionStateChanged,
-				"orchestrator",
-				eventData,
-			))
-		}
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
 		return
+	}
+
+	// Process reset_agent_context FIRST — must complete before auto_start_agent.
+	// Context reset works for both ACP and passthrough sessions.
+	if step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext) {
+		if !s.resetAgentContext(ctx, taskID, sessionID, step.Name) {
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+			return
+		}
 	}
 
 	hasAutoStart := false
@@ -350,37 +346,152 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
 		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
-		// Auto-start the agent via ACP prompt
-		go func() {
-			bgCtx := context.Background()
-			_, err := s.PromptTask(bgCtx, taskID, sessionID, effectivePrompt, "", planMode, nil)
-			if err != nil {
-				s.logger.Error("failed to auto-start agent for step",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.String("step_name", step.Name),
-					zap.Error(err))
-				s.setSessionWaitingForInput(bgCtx, taskID, sessionID)
-			}
-		}()
+		// Run auto-start inline so queue state is visible before handleAgentReady
+		// checks for queued messages.
+		err := s.autoStartStepPrompt(ctx, taskID, sessionID, step.Name, effectivePrompt, planMode, true)
+		if err != nil {
+			s.logger.Error("failed to auto-start agent for step",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		}
+		return
 	} else {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+	}
+}
 
-		// Publish session state change
-		if s.eventBus != nil {
-			eventData := map[string]interface{}{
-				"task_id":          taskID,
-				"session_id":       sessionID,
-				"workflow_step_id": step.ID,
-				"new_state":        string(models.TaskSessionStateWaitingForInput),
-			}
-			_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-				events.TaskSessionStateChanged,
-				"orchestrator",
-				eventData,
-			))
+func (s *Service) autoStartStepPrompt(
+	ctx context.Context,
+	taskID, sessionID, stepName, prompt string,
+	planMode bool,
+	shouldQueueIfBusy bool,
+) error {
+	if shouldQueueIfBusy {
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, sessionID, prompt, planMode)
+		if err != nil {
+			return err
+		}
+		if queued {
+			return nil
 		}
 	}
+
+	const maxRetryAttempts = 5
+	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, nil)
+		if err == nil {
+			return nil
+		}
+
+		if !isAgentPromptInProgressError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
+			return err
+		}
+
+		if shouldQueueIfBusy {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+				return queueErr
+			}
+			return nil
+		}
+
+		if attempt == maxRetryAttempts {
+			return err
+		}
+
+		delay := time.Duration(50*(1<<(attempt-1))) * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("auto-start context canceled: %w", ctx.Err())
+		case <-time.After(delay):
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) queueAutoStartPromptIfRunning(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+) (bool, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to load session for auto-start queue check: %w", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		return false, nil
+	}
+	if err := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) queueAutoStartPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+) error {
+	if s.messageQueue == nil {
+		return fmt.Errorf("message queue is not configured")
+	}
+	_, err := s.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", "workflow-auto-start", planMode, []messagequeue.MessageAttachment{})
+	if err != nil {
+		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	return nil
+}
+
+// resetAgentContext restarts the agent subprocess with a fresh ACP session, clearing
+// the agent's conversation context. The workspace environment is preserved.
+func (s *Service) resetAgentContext(ctx context.Context, taskID, sessionID, stepName string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for context reset",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+
+	if session.AgentExecutionID == "" {
+		s.logger.Debug("no agent execution for context reset, skipping",
+			zap.String("session_id", sessionID))
+		return true
+	}
+
+	s.logger.Info("resetting agent context for workflow step",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("step_name", stepName),
+		zap.String("agent_execution_id", session.AgentExecutionID))
+
+	s.setSessionResetInProgress(sessionID, true)
+	defer s.setSessionResetInProgress(sessionID, false)
+
+	if err := s.agentManager.RestartAgentProcess(ctx, session.AgentExecutionID); err != nil {
+		s.logger.Error("failed to reset agent context",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(err))
+		return false
+	}
+
+	// Clear the stored ACP session ID in the database so future resumes use session/new
+	if session.Metadata != nil {
+		delete(session.Metadata, "acp_session_id")
+	}
+	if updateErr := s.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+		s.logger.Warn("failed to clear ACP session ID from session metadata",
+			zap.String("session_id", sessionID),
+			zap.Error(updateErr))
+	}
+	return true
 }
 
 // processOnExit processes the on_exit events for a step when leaving it.
@@ -448,7 +559,7 @@ func (s *Service) processTurnCompleteActions(ctx context.Context, sessionID stri
 		case wfmodels.OnTurnCompleteDisablePlanMode:
 			s.clearSessionPlanMode(ctx, sessionID)
 		case wfmodels.OnTurnCompleteMoveToNext, wfmodels.OnTurnCompleteMoveToPrevious, wfmodels.OnTurnCompleteMoveToStep:
-			if requiresApproval(action.Config) {
+			if engine.ConfigRequiresApproval(action.Config) {
 				continue
 			}
 			if transitionAction == nil {
@@ -459,13 +570,22 @@ func (s *Service) processTurnCompleteActions(ctx context.Context, sessionID stri
 	return transitionAction
 }
 
-// requiresApproval returns true if an action config has requires_approval set to true.
-func requiresApproval(config map[string]interface{}) bool {
-	if config == nil {
-		return false
+// publishSessionWaitingEvent publishes a session state change event for WAITING_FOR_INPUT.
+func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessionID, stepID string) {
+	if s.eventBus == nil {
+		return
 	}
-	ra, ok := config["requires_approval"].(bool)
-	return ok && ra
+	eventData := map[string]interface{}{
+		"task_id":          taskID,
+		"session_id":       sessionID,
+		"workflow_step_id": stepID,
+		"new_state":        string(models.TaskSessionStateWaitingForInput),
+	}
+	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+		events.TaskSessionStateChanged,
+		"orchestrator",
+		eventData,
+	))
 }
 
 // resolveTurnStartTargetStep resolves the target step ID for an on_turn_start transition action.
@@ -493,4 +613,158 @@ func (s *Service) resolveTurnStartTargetStep(ctx context.Context, currentStep *w
 		return "", false
 	}
 	return "", false
+}
+
+// ============================================================================
+// Engine-driven workflow methods
+// ============================================================================
+
+// processOnTurnCompleteViaEngine uses the workflow engine to evaluate on_turn_complete
+// actions and drive step transitions. Falls back to the legacy method when the engine
+// is not initialized. Returns true if a step transition occurred.
+func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID, sessionID string) bool {
+	if s.workflowEngine == nil {
+		return s.processOnTurnComplete(ctx, taskID, sessionID)
+	}
+
+	if sessionID == "" || s.workflowStepGetter == nil {
+		return false
+	}
+
+	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
+		TaskID:       taskID,
+		SessionID:    sessionID,
+		Trigger:      engine.TriggerOnTurnComplete,
+		EvaluateOnly: true,
+	})
+	if err != nil {
+		s.logger.Error("workflow engine error on_turn_complete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+
+	if !result.Transitioned {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+
+	s.logger.Info("engine: on_turn_complete transition",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from_step_id", result.FromStepID),
+		zap.String("to_step_id", result.ToStepID))
+
+	// Retrieve the from-step for on_exit processing.
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
+	if err != nil {
+		s.logger.Warn("failed to load from-step for on_exit",
+			zap.String("step_id", result.FromStepID),
+			zap.Error(err))
+	} else {
+		s.processOnExit(ctx, taskID, sessionID, fromStep)
+	}
+
+	// Apply the transition in the DB.
+	if err := s.workflowStore.ApplyTransition(ctx, taskID, sessionID, result.FromStepID, result.ToStepID, engine.TriggerOnTurnComplete); err != nil {
+		s.logger.Error("failed to apply engine transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+
+	// Persist data patches from callbacks.
+	if len(result.DataPatch) > 0 {
+		if err := s.workflowStore.PersistData(ctx, sessionID, result.DataPatch); err != nil {
+			s.logger.Warn("failed to persist workflow data patch",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+
+	// Process on_enter for the target step (auto-start, plan mode, context reset).
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
+	if err != nil {
+		s.logger.Warn("failed to load target step for on_enter",
+			zap.String("step_id", result.ToStepID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return true
+	}
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to load task for on_enter prompt",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return true
+	}
+
+	s.processOnEnter(ctx, taskID, sessionID, targetStep, task.Description)
+	return true
+}
+
+// processOnTurnStartViaEngine uses the workflow engine to evaluate on_turn_start
+// actions. Falls back to the legacy method when the engine is not initialized.
+// Returns true if a step transition occurred.
+func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID, sessionID string) bool {
+	if s.workflowEngine == nil {
+		return s.processOnTurnStart(ctx, taskID, sessionID)
+	}
+
+	if sessionID == "" || s.workflowStepGetter == nil {
+		return false
+	}
+
+	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
+		TaskID:       taskID,
+		SessionID:    sessionID,
+		Trigger:      engine.TriggerOnTurnStart,
+		EvaluateOnly: true,
+	})
+	if err != nil {
+		s.logger.Error("workflow engine error on_turn_start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+
+	if !result.Transitioned {
+		return false
+	}
+
+	s.logger.Info("engine: on_turn_start transition",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("from_step_id", result.FromStepID),
+		zap.String("to_step_id", result.ToStepID))
+
+	// Retrieve the from-step for on_exit processing.
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
+	if err != nil {
+		s.logger.Warn("failed to load from-step for on_exit",
+			zap.String("step_id", result.FromStepID),
+			zap.Error(err))
+	} else {
+		s.processOnExit(ctx, taskID, sessionID, fromStep)
+	}
+
+	// Apply the transition in the DB.
+	if err := s.workflowStore.ApplyTransition(ctx, taskID, sessionID, result.FromStepID, result.ToStepID, engine.TriggerOnTurnStart); err != nil {
+		s.logger.Error("failed to apply engine transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+
+	// on_turn_start does NOT trigger on_enter (user's message is the next prompt).
+	s.setSessionWaitingForInput(ctx, taskID, sessionID)
+	return true
 }

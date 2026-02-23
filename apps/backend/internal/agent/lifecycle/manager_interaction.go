@@ -8,7 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -131,6 +133,152 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	}
 
 	return m.StopAgent(ctx, execution.ID, force)
+}
+
+// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session,
+// clearing the agent's conversation context. The execution environment (container/agentctl) is
+// preserved — only the agent process inside agentctl is restarted. Works for both local and remote
+// executors since it operates via the agentctl HTTP API.
+func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+
+	m.logger.Info("restarting agent process for context reset",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID))
+
+	// 1. Close WebSocket streams (updates + workspace)
+	execution.agentctl.Close()
+
+	// 2. Stop the agent subprocess via agentctl (keeps agentctl server alive)
+	if err := execution.agentctl.Stop(ctx); err != nil {
+		m.logger.Warn("failed to stop agent subprocess during restart",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		// Continue — the process may already be stopped
+	}
+
+	// 3. Reset execution state for fresh context
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		exec.ACPSessionID = ""
+		exec.Status = v1.AgentStatusStarting
+		exec.ErrorMessage = ""
+		exec.needsResumeContext = false
+		exec.resumeContextInjected = false
+
+		exec.messageMu.Lock()
+		exec.messageBuffer.Reset()
+		exec.thinkingBuffer.Reset()
+		exec.currentMessageID = ""
+		exec.currentThinkingID = ""
+		exec.messageMu.Unlock()
+
+		// Drain any stale prompt completion signal
+		select {
+		case <-exec.promptDoneCh:
+		default:
+		}
+	})
+
+	// 4. Wait for agentctl to be ready (it should still be running)
+	if err := execution.agentctl.WaitForReady(ctx, 30*time.Second); err != nil {
+		m.updateExecutionError(executionID, "agentctl not ready after restart: "+err.Error())
+		return fmt.Errorf("agentctl not ready after restart: %w", err)
+	}
+
+	// 5. Reconfigure and start new agent subprocess
+	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
+	taskDescription := getTaskDescriptionFromMetadata(execution)
+
+	if _, err := m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy); err != nil {
+		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
+		return fmt.Errorf("failed to restart agent: %w", err)
+	}
+
+	// 6. Wait for agent process to initialize
+	if err := execution.agentctl.WaitForReady(ctx, 10*time.Second); err != nil {
+		m.logger.Warn("agent process slow to initialize after restart, continuing",
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+	}
+
+	// 7. Reconnect WebSocket streams and initialize new ACP session
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config for restart: %w", err)
+	}
+
+	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	if err != nil {
+		return fmt.Errorf("failed to resolve MCP config for restart: %w", err)
+	}
+
+	if err := m.initializeACPSessionForRestart(ctx, execution, agentConfig, mcpServers); err != nil {
+		m.updateExecutionError(executionID, "failed to initialize ACP session after restart: "+err.Error())
+		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
+	}
+
+	m.logger.Info("agent process restarted with fresh context",
+		zap.String("execution_id", executionID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("new_acp_session_id", execution.ACPSessionID))
+
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
+	return nil
+}
+
+// initializeACPSessionForRestart connects streams and creates a new ACP session without
+// sending an initial prompt. The caller (workflow processOnEnter) handles prompting separately.
+func (m *Manager) initializeACPSessionForRestart(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	mcpServers []agentctltypes.McpServer,
+) error {
+	// Connect WebSocket streams
+	if m.streamManager != nil {
+		updatesReady := make(chan struct{})
+		m.streamManager.ConnectAll(execution, updatesReady)
+
+		select {
+		case <-updatesReady:
+			m.logger.Debug("updates stream ready after restart")
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("timeout waiting for agent stream to connect after restart")
+		}
+	}
+
+	// Initialize ACP session (always session/new since ACPSessionID was cleared)
+	result, err := m.sessionManager.InitializeSession(
+		ctx,
+		execution.agentctl,
+		agentConfig,
+		"", // empty — force session/new
+		execution.WorkspacePath,
+		mcpServers,
+	)
+	if err != nil {
+		return fmt.Errorf("ACP session initialization failed: %w", err)
+	}
+
+	execution.ACPSessionID = result.SessionID
+
+	if m.sessionManager.eventPublisher != nil {
+		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+	}
+
+	// Mark execution as ready
+	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentReady, execution)
+
+	return nil
 }
 
 // GetExecution returns an agent execution by ID.

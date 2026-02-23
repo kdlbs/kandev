@@ -156,19 +156,7 @@ const adapters: MessageAdapter[] = [
   {
     matches: () => true,
     render: (comment, ctx) => {
-      if (ctx.isTaskDescription && ctx.sessionState !== "FAILED") {
-        return (
-          <ChatMessage
-            comment={comment}
-            label="Task"
-            className="bg-amber-500/10 text-foreground border-amber-500/30"
-            showRichBlocks
-            allMessages={ctx.allMessages}
-            onScrollToMessage={ctx.onScrollToMessage}
-          />
-        );
-      }
-      if (comment.author_type === "user") {
+      if (comment.author_type === "user" || (ctx.isTaskDescription && ctx.sessionState !== "FAILED")) {
         return (
           <ChatMessage
             comment={comment}

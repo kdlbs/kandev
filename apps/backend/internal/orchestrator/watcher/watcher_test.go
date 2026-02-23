@@ -136,7 +136,7 @@ func TestNewWatcher(t *testing.T) {
 	handlers := EventHandlers{}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 	if w == nil {
 		t.Fatal("NewWatcher returned nil")
 	} else if w.running {
@@ -151,7 +151,7 @@ func TestStartStop(t *testing.T) {
 	}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 
 	err := w.Start(context.Background())
 	if err != nil {
@@ -175,7 +175,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 	handlers := EventHandlers{}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 
 	_ = w.Start(context.Background())
 	err := w.Start(context.Background())
@@ -193,7 +193,7 @@ func TestStopNotRunning(t *testing.T) {
 	handlers := EventHandlers{}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 
 	err := w.Stop()
 	// Stopping a not running watcher should be a no-op (no error)
@@ -220,7 +220,7 @@ func TestTaskEventHandling(t *testing.T) {
 		}
 		log := createTestLogger()
 
-		w := NewWatcher(eventBus, handlers, log)
+		w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 		_ = w.Start(context.Background())
 		defer func() {
 			_ = w.Stop()
@@ -269,7 +269,7 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		log := createTestLogger()
 
-		w := NewWatcher(eventBus, handlers, log)
+		w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 		_ = w.Start(context.Background())
 		defer func() {
 			_ = w.Stop()
@@ -321,7 +321,7 @@ func TestAgentStreamEventHandling(t *testing.T) {
 		}
 		log := createTestLogger()
 
-		w := NewWatcher(eventBus, handlers, log)
+		w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 		_ = w.Start(context.Background())
 		defer func() {
 			_ = w.Stop()
@@ -367,7 +367,7 @@ func TestNoHandlersRegistered(t *testing.T) {
 	handlers := EventHandlers{} // No handlers registered
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 	err := w.Start(context.Background())
 
 	if err != nil {
@@ -390,7 +390,7 @@ func TestPartialHandlers(t *testing.T) {
 	}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 	err := w.Start(context.Background())
 
 	if err != nil {
@@ -410,7 +410,7 @@ func TestIsRunning(t *testing.T) {
 	handlers := EventHandlers{}
 	log := createTestLogger()
 
-	w := NewWatcher(eventBus, handlers, log)
+	w := NewWatcher(eventBus, handlers, "orchestrator-test", log)
 
 	if w.IsRunning() {
 		t.Error("watcher should not be running before Start")
