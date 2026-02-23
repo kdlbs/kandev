@@ -99,7 +99,6 @@ const TaskTopBar = memo(function TaskTopBar({
         displayBranch={displayBranch}
         repositoryPath={repositoryPath}
         worktreePath={worktreePath}
-        gitStatus={git}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorName={remoteExecutorName}
         remoteExecutorType={remoteExecutorType}
@@ -120,6 +119,7 @@ const TaskTopBar = memo(function TaskTopBar({
       <TopBarRight
         activeSessionId={activeSessionId}
         baseBranch={baseBranch}
+        gitStatus={git}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
@@ -270,14 +270,13 @@ function RemoteExecutorIndicator({
   );
 }
 
-/** Left section: breadcrumbs, branch pill, git status badges */
+/** Left section: breadcrumbs, branch pill */
 function TopBarLeft({
   taskTitle,
   repositoryName,
   displayBranch,
   repositoryPath,
   worktreePath,
-  gitStatus,
   isRemoteExecutor,
   remoteExecutorName,
   remoteExecutorType,
@@ -291,7 +290,6 @@ function TopBarLeft({
   displayBranch?: string;
   repositoryPath?: string | null;
   worktreePath?: string | null;
-  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
   isRemoteExecutor?: boolean;
   remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
@@ -335,7 +333,6 @@ function TopBarLeft({
         worktreePath={worktreePath}
       />
 
-      <GitAheadBehindBadges gitStatus={gitStatus} />
       <RemoteExecutorIndicator
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorName={remoteExecutorName}
@@ -389,10 +386,11 @@ function GitAheadBehindBadges({
   );
 }
 
-/** Right section: debug toggle, document controls, editors, VCS, settings */
+/** Right section: git badges, debug toggle, document controls, editors, VCS, settings */
 function TopBarRight({
   activeSessionId,
   baseBranch,
+  gitStatus,
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
@@ -400,6 +398,7 @@ function TopBarRight({
 }: {
   activeSessionId?: string | null;
   baseBranch?: string;
+  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
@@ -424,13 +423,14 @@ function TopBarRight({
           </TooltipContent>
         </Tooltip>
       )}
+      <GitAheadBehindBadges gitStatus={gitStatus} />
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
-          <LayoutPresetSelector />
-          <EditorsMenu activeSessionId={activeSessionId ?? null} />
           <PRTopbarButton />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
+          <LayoutPresetSelector />
+          <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
       <Tooltip>

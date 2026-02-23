@@ -16,8 +16,8 @@ type LineStatProps = {
 };
 
 const commitTone = {
-  ahead: "text-emerald-200 bg-emerald-600/40",
-  behind: "text-yellow-200 bg-yellow-600/40",
+  ahead: "text-emerald-500 border-emerald-500/40",
+  behind: "text-yellow-500 border-yellow-500/40",
 };
 
 const lineTone = {
@@ -28,9 +28,9 @@ const lineTone = {
 export function CommitStatBadge({ label, tone, className }: CommitStatBadgeProps) {
   return (
     <Badge
-      variant="secondary"
+      variant="outline"
       className={cn(
-        "border-transparent px-2 text-xs font-semibold rounded-lg",
+        "h-6 px-1.5 text-xs font-medium rounded-md",
         commitTone[tone],
         className,
       )}
