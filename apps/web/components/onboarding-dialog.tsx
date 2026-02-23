@@ -26,6 +26,7 @@ import {
   IconGitCommit,
   IconTerminal2,
   IconArrowDown,
+  IconCloud,
 } from "@tabler/icons-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Kbd } from "@kandev/ui/kbd";
@@ -65,12 +66,18 @@ const RUNTIMES = [
     description: "Containerized execution for full isolation and reproducibility.",
     icon: IconBrandDocker,
   },
+  {
+    name: "Sprites (Remote sprites.dev)",
+    description: "Hardware-isolated execution environment for arbitrary code.",
+    icon: IconCloud,
+    href: "https://sprites.dev",
+  },
 ];
 
-const STEP_TITLES = ["AI Agents", "Environments", "Agentic Workflows", "Command Panel"];
+const STEP_TITLES = ["AI Agents", "Executors", "Agentic Workflows", "Command Panel"];
 const STEP_DESCRIPTIONS = [
   "These AI coding agents were discovered on your system.",
-  "Agents can run in different runtime environments.",
+  "Agents can run in different executor environments — local, containerized, or remote.",
   "Workflows define the steps and automation for your tasks.",
   "Quick access to actions from anywhere with a keyboard shortcut.",
 ];
@@ -156,11 +163,11 @@ function useOnboardingResources(open: boolean) {
         setAvailableAgents(availRes.agents ?? []);
         setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoadingAgents(false));
     listWorkflowTemplates()
       .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoadingTemplates(false));
   }, [open]);
 
@@ -259,7 +266,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={() => { }}>
       <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
@@ -374,6 +381,9 @@ function StepAgents({
         Expand an agent to configure its model and permissions. Changes are saved when you proceed.
         You can also add custom TUI agents later in Settings &gt; Agents.
       </p>
+      <p className="text-xs text-muted-foreground">
+        <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles run with with Auto Approve enabled (YOLO mode).
+      </p>
     </div>
   );
 }
@@ -384,13 +394,25 @@ function StepEnvironments() {
       <div className="grid gap-2">
         {RUNTIMES.map((runtime) => {
           const Icon = runtime.icon;
+          const nameEl = runtime.href ? (
+            <a
+              href={runtime.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium hover:underline cursor-pointer"
+            >
+              {runtime.name}
+            </a>
+          ) : (
+            <p className="text-sm font-medium">{runtime.name}</p>
+          );
           return (
             <div key={runtime.name} className="flex items-start gap-3 rounded-lg border p-3">
               <div className="h-8 w-8 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
                 <Icon className="h-4.5 w-4.5 text-muted-foreground" />
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-medium">{runtime.name}</p>
+                {nameEl}
                 <p className="text-xs text-muted-foreground">{runtime.description}</p>
               </div>
             </div>
@@ -398,7 +420,7 @@ function StepEnvironments() {
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        Configure runtime environments in Settings to control where agents execute.
+        Configure executors in Settings to control where agents execute.
       </p>
     </div>
   );
