@@ -8,7 +8,7 @@ export type EditorContext =
   | "chat-diff"
   | "plan-editor";
 
-export type EditorProvider = "monaco" | "codemirror" | "pierre-diffs" | "tiptap";
+export type EditorProvider = "monaco" | "codemirror" | "shiki" | "pierre-diffs" | "tiptap";
 
 const MONACO: EditorProvider = "monaco";
 const PIERRE_DIFFS: EditorProvider = "pierre-diffs";
@@ -16,7 +16,7 @@ const PIERRE_DIFFS: EditorProvider = "pierre-diffs";
 const VALID_PROVIDERS: Record<EditorContext, EditorProvider[]> = {
   "code-editor": [MONACO, "codemirror"],
   "diff-viewer": [MONACO, PIERRE_DIFFS],
-  "chat-code-block": [MONACO, "codemirror"],
+  "chat-code-block": ["shiki", MONACO, "codemirror"],
   "chat-diff": [MONACO, PIERRE_DIFFS],
   "plan-editor": ["tiptap"],
 };
@@ -24,7 +24,7 @@ const VALID_PROVIDERS: Record<EditorContext, EditorProvider[]> = {
 const DEFAULT_PROVIDERS: Record<EditorContext, EditorProvider> = {
   "code-editor": MONACO,
   "diff-viewer": PIERRE_DIFFS,
-  "chat-code-block": MONACO,
+  "chat-code-block": "shiki",
   "chat-diff": PIERRE_DIFFS,
   "plan-editor": "tiptap",
 };
@@ -51,12 +51,17 @@ export const useEditorResolverStore = create<EditorResolverStore>()(
     }),
     {
       name: "kandev-editor-providers",
-      version: 1,
+      version: 3,
       migrate: (persisted) => {
         const state = persisted as { providers: Record<EditorContext, EditorProvider> };
         return {
           ...state,
-          providers: { ...state.providers, "diff-viewer": PIERRE_DIFFS, "chat-diff": PIERRE_DIFFS },
+          providers: {
+            ...state.providers,
+            "diff-viewer": PIERRE_DIFFS,
+            "chat-diff": PIERRE_DIFFS,
+            "chat-code-block": "shiki",
+          },
         };
       },
     },

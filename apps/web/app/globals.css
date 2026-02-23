@@ -1167,6 +1167,20 @@
   font-family: inherit;
 }
 
+/* Shiki code block styling */
+.shiki-code-block pre.shiki {
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  background-color: var(--background) !important;
+}
+
+.shiki-code-block pre.shiki code {
+  font-family: var(--font-geist-mono, ui-monospace, monospace);
+}
+
 .debug {
   border: 1px solid red !important;
 }

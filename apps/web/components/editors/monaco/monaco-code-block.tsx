@@ -32,7 +32,7 @@ export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
       <button
         onClick={() => copy(code)}
         className={cn(
-          "absolute top-2 right-2 z-10",
+          "absolute top-1 right-2 z-10",
           "p-1.5 rounded-md",
           "bg-white/10 hover:bg-white/20",
           "transition-all duration-200",

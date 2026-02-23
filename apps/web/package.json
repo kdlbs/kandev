@@ -97,6 +97,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "shadcn": "^3.6.3",
+    "shiki": "^3.22.0",
     "sonner": "^2.0.7",
     "styled-jsx": "5.1.6",
     "tailwind-merge": "^3.4.0",
