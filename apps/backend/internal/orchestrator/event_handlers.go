@@ -37,6 +37,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
 // This is called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
 // The optional lastMessageUUID is persisted alongside the token for --resume-session-at support.
+// The resume token is only stored for agents that support native session resume (ACP session/load).
 func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -45,6 +46,17 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
+	}
+
+	// Clear the resume token for agents that don't support native session resume (ACP session/load).
+	// The ExecutorRunning record is still created (for worktree info etc.) but without a token,
+	// so the frontend won't attempt to auto-resume with a stale ACP session ID.
+	if session.AgentProfileID != "" {
+		profileInfo, profileErr := s.agentManager.ResolveAgentProfile(ctx, session.AgentProfileID)
+		if profileErr == nil && profileInfo != nil && !profileInfo.NativeSessionResume {
+			acpSessionID = ""
+			lastMessageUUID = ""
+		}
 	}
 
 	resumable := true

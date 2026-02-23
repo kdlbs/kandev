@@ -2,6 +2,7 @@ package events
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -17,7 +18,7 @@ type ProvidedBus struct {
 
 // Provide builds the configured event bus implementation.
 func Provide(cfg *config.Config, log *logger.Logger) (*ProvidedBus, func() error, error) {
-	if cfg.NATS.URL != "" {
+	if strings.TrimSpace(cfg.NATS.URL) != "" {
 		natsBus, err := bus.NewNATSEventBus(cfg.NATS, log)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize NATS event bus: %w", err)

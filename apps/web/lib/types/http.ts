@@ -11,7 +11,7 @@ export type TaskState =
   | "CANCELLED";
 
 // On Enter action types
-export type OnEnterActionType = "enable_plan_mode" | "auto_start_agent";
+export type OnEnterActionType = "enable_plan_mode" | "auto_start_agent" | "reset_agent_context";
 
 // On Turn Start action types
 export type OnTurnStartActionType = "move_to_next" | "move_to_previous" | "move_to_step";

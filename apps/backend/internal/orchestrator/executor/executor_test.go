@@ -64,6 +64,10 @@ func (m *mockAgentManager) RespondToPermissionBySessionID(ctx context.Context, s
 	return nil
 }
 
+func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	return nil
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
 }
@@ -74,6 +78,8 @@ func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID s
 
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error) {
 	return nil, nil
+}
+func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest) {
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {

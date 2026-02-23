@@ -9,8 +9,9 @@ import (
 type OnEnterActionType string
 
 const (
-	OnEnterEnablePlanMode OnEnterActionType = "enable_plan_mode"
-	OnEnterAutoStartAgent OnEnterActionType = "auto_start_agent"
+	OnEnterEnablePlanMode    OnEnterActionType = "enable_plan_mode"
+	OnEnterAutoStartAgent    OnEnterActionType = "auto_start_agent"
+	OnEnterResetAgentContext OnEnterActionType = "reset_agent_context"
 )
 
 // OnTurnStartActionType represents the type of action to execute when a user sends a message.

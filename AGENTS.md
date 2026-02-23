@@ -87,6 +87,10 @@ apps/backend/
 │   ├── sysprompt/        # System prompt injection
 │   ├── user/             # User management
 │   ├── workflow/         # Workflow engine
+│   │   ├── engine/       # Typed state-machine engine (trigger evaluation, action callbacks, transition store)
+│   │   ├── models/       # Workflow step, template, and history models
+│   │   ├── repository/   # Workflow persistence (SQLite)
+│   │   └── service/      # Workflow CRUD and step resolution
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 
@@ -95,8 +99,17 @@ apps/backend/
 **Orchestrator** coordinates task execution:
 - Receives task start/stop/resume requests via WebSocket
 - Delegates to lifecycle manager for agent operations
-- Handles event-driven state transitions
+- Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
+
+**Workflow Engine** (`internal/workflow/engine/`) provides typed state-machine evaluation:
+- `Engine.HandleTrigger()` evaluates step actions for triggers (on_enter, on_turn_start, on_turn_complete, on_exit)
+- `TransitionStore` interface abstracts persistence (implemented by `orchestrator.workflowStore`)
+- `CallbackRegistry` maps action kinds to callbacks (plan mode, auto-start, context reset)
+- First-transition-wins: multiple transition actions in one trigger, first eligible wins
+- `EvaluateOnly` mode: engine evaluates without persisting, caller orchestrates on_exit → DB → on_enter
+- `RequiresApproval` on actions: transitions requiring review gating are skipped
+- Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
 **Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
 - `Manager` (`manager.go`) - central coordinator for agent lifecycle

@@ -384,6 +384,16 @@ func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	return dir, wt
 }
 
+func TestWorkspaceTrackerStop_Idempotent(t *testing.T) {
+	_, wt := setupTestDir(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wt.Start(ctx)
+	wt.Stop()
+	wt.Stop()
+}
+
 func TestCreateFile(t *testing.T) {
 	t.Run("basic creation", func(t *testing.T) {
 		dir, wt := setupTestDir(t)

@@ -33,7 +33,7 @@ type SchedulerConfig struct {
 func DefaultSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
 		ProcessInterval: 5 * time.Second,
-		RetryLimit:      3,
+		RetryLimit:      2,
 		RetryDelay:      30 * time.Second,
 	}
 }

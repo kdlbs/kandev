@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,9 +10,12 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -88,7 +92,12 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
-	isPassthrough bool
+	isPassthrough       bool
+	isAgentRunning      bool
+	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
+	restartProcessErr   error
+	promptErr           error
+	promptResult        *executor.PromptResult
 }
 
 func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
@@ -100,15 +109,27 @@ func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecuti
 	return m.StopAgent(ctx, agentExecutionID, force)
 }
 func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, _ string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
-	return nil, nil
+	if m.promptErr != nil {
+		return nil, m.promptErr
+	}
+	if m.promptResult != nil {
+		return m.promptResult, nil
+	}
+	return &executor.PromptResult{}, nil
 }
 func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error { return nil }
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }
-func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool { return false }
+func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool {
+	return m.isAgentRunning
+}
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	return nil, nil
+}
+func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecutionID string) error {
+	m.restartProcessCalls = append(m.restartProcessCalls, agentExecutionID)
+	return m.restartProcessErr
 }
 func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
 	return nil
@@ -118,6 +139,8 @@ func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) boo
 }
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(_ context.Context, _ string) (*executor.RemoteRuntimeStatus, error) {
 	return nil, nil
+}
+func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []executor.RemoteStatusPollRequest) {
 }
 
 // --- Helpers ---
@@ -206,47 +229,24 @@ func createTestService(repo *sqliterepo.Repository, stepGetter *mockStepGetter, 
 }
 
 func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
+	log := testLogger()
 	return &Service{
-		logger:             testLogger(),
+		logger:             log,
 		repo:               repo,
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
+		messageQueue:       messagequeue.NewService(log),
 	}
 }
 
 // --- Tests ---
 
-func TestIsResumeFailure(t *testing.T) {
-	tests := []struct {
-		name     string
-		errorMsg string
-		want     bool
-	}{
-		{name: "exact match", errorMsg: "no conversation found", want: true},
-		{name: "mixed case", errorMsg: "No Conversation Found", want: true},
-		{name: "embedded in longer message", errorMsg: "prompt failed: no conversation found for session abc-123", want: true},
-		{name: "unrelated error", errorMsg: "connection refused", want: false},
-		{name: "empty string", errorMsg: "", want: false},
-		{name: "agent crashed", errorMsg: "agent process exited with code 1", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isResumeFailure(tt.errorMsg)
-			if got != tt.want {
-				t.Errorf("isResumeFailure(%q) = %v, want %v", tt.errorMsg, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestProcessOnTurnComplete(t *testing.T) {
+func TestWasResumeAttempt(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("no session step returns false", func(t *testing.T) {
+	t.Run("returns true when resume token exists", func(t *testing.T) {
 		repo := setupTestRepo(t)
-		// Create session without workflow step
 		now := time.Now().UTC()
 		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
 		_ = repo.CreateWorkspace(ctx, ws)
@@ -256,213 +256,123 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		_ = repo.CreateTask(ctx, task)
 		session := &models.TaskSession{ID: "s1", TaskID: "t1", State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now}
 		_ = repo.CreateTaskSession(ctx, session)
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "acp-session-123",
+			CreatedAt: now, UpdatedAt: now,
+		})
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if got {
-			t.Error("expected false when session has no workflow step")
+		if !svc.wasResumeAttempt(ctx, "s1") {
+			t.Error("expected wasResumeAttempt to return true when resume token exists")
 		}
 	})
 
-	t.Run("no actions returns false", func(t *testing.T) {
+	t.Run("returns false when no resume token", func(t *testing.T) {
 		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+		now := time.Now().UTC()
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		task := &models.Task{ID: "t1", WorkflowID: "wf1", Title: "T", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateTask(ctx, task)
+		session := &models.TaskSession{ID: "s1", TaskID: "t1", State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now}
+		_ = repo.CreateTaskSession(ctx, session)
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "",
+			CreatedAt: now, UpdatedAt: now,
+		})
 
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{}, // no actions
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if got {
-			t.Error("expected false when step has no on_turn_complete actions")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		if svc.wasResumeAttempt(ctx, "s1") {
+			t.Error("expected wasResumeAttempt to return false when no resume token")
 		}
 	})
 
-	t.Run("move_to_next transitions to next step", func(t *testing.T) {
+	t.Run("returns false when no executor running record", func(t *testing.T) {
 		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{Type: wfmodels.OnTurnCompleteMoveToNext},
-				},
-			},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{},
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if !got {
-			t.Error("expected true when move_to_next transitions")
-		}
-
-		// Verify the session was updated to step2
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", session.WorkflowStepID)
-		}
-	})
-
-	t.Run("move_to_step transitions to specified step", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step3"}},
-				},
-			},
-		}
-		stepGetter.steps["step3"] = &wfmodels.WorkflowStep{
-			ID: "step3", WorkflowID: "wf1", Name: "Step 3", Position: 2,
-			Events: wfmodels.StepEvents{},
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if !got {
-			t.Error("expected true when move_to_step transitions")
-		}
-
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step3" {
-			t.Errorf("expected session workflow step to be 'step3', got %v", session.WorkflowStepID)
-		}
-	})
-
-	t.Run("last step with move_to_next stays", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step_last")
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step_last"] = &wfmodels.WorkflowStep{
-			ID: "step_last", WorkflowID: "wf1", Name: "Last Step", Position: 99,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{Type: wfmodels.OnTurnCompleteMoveToNext},
-				},
-			},
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if got {
-			t.Error("expected false when at last step with move_to_next (no next step)")
-		}
-	})
-
-	t.Run("requires_approval action is skipped", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{
-						Type: wfmodels.OnTurnCompleteMoveToStep,
-						Config: map[string]interface{}{
-							"step_id":           "step2",
-							"requires_approval": true,
-						},
-					},
-				},
-			},
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if got {
-			t.Error("expected false when only action requires_approval")
-		}
-
-		// Verify session step was NOT changed
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step1" {
-			t.Error("expected session to stay on step1")
-		}
-	})
-
-	t.Run("disable_plan_mode side-effect with transition", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Set plan_mode in session metadata
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		stepGetter := newMockStepGetter()
-		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{
-				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
-					{Type: wfmodels.OnTurnCompleteDisablePlanMode},
-					{Type: wfmodels.OnTurnCompleteMoveToNext},
-				},
-			},
-		}
-		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{},
-		}
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
-		if !got {
-			t.Error("expected true when transition occurs alongside disable_plan_mode")
-		}
-
-		// Verify plan_mode was cleared
-		updatedSession, _ := repo.GetTaskSession(ctx, "s1")
-		if updatedSession.Metadata != nil {
-			if _, hasPlanMode := updatedSession.Metadata["plan_mode"]; hasPlanMode {
-				t.Error("expected plan_mode to be cleared from session metadata")
-			}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		if svc.wasResumeAttempt(ctx, "nonexistent-session") {
+			t.Error("expected wasResumeAttempt to return false when no executor running record")
 		}
 	})
 }
 
-func TestProcessOnTurnStart(t *testing.T) {
+func TestHandleCompleteStreamEvent(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("no actions returns false", func(t *testing.T) {
+	t.Run("does not force waiting when session is still running", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+		payload := &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type: agentEventComplete,
+			},
+		}
+
+		svc.handleCompleteStreamEvent(ctx, payload)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to load session: %v", err)
+		}
+		if session.State != models.TaskSessionStateRunning {
+			t.Fatalf("expected session to stay %q, got %q", models.TaskSessionStateRunning, session.State)
+		}
+		if _, ok := taskRepo.updatedStates["t1"]; ok {
+			t.Fatalf("expected task state to remain unchanged, got update %q", taskRepo.updatedStates["t1"])
+		}
+	})
+}
+
+func TestHandleAgentReadyGuards(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ignores ready when session is not running", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
 			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
-			Events: wfmodels.StepEvents{}, // no on_turn_start
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		got := svc.processOnTurnStart(ctx, "t1", "s1")
-		if got {
-			t.Error("expected false when step has no on_turn_start actions")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateWaitingForInput
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", "test", false, nil); err != nil {
+			t.Fatalf("failed to queue message: %v", err)
+		}
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
+		}
+		status := svc.messageQueue.GetStatus(ctx, "s1")
+		if !status.IsQueued {
+			t.Fatalf("expected queued message to remain queued")
 		}
 	})
 
-	t.Run("move_to_next transitions", func(t *testing.T) {
+	t.Run("ignores ready while reset is in progress", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 
@@ -470,278 +380,100 @@ func TestProcessOnTurnStart(t *testing.T) {
 		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
 			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
 			Events: wfmodels.StepEvents{
-				OnTurnStart: []wfmodels.OnTurnStartAction{
-					{Type: wfmodels.OnTurnStartMoveToNext},
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
 				},
 			},
 		}
 		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
 			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
-			Events: wfmodels.StepEvents{},
 		}
 
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnStart(ctx, "t1", "s1")
-		if !got {
-			t.Error("expected true when move_to_next transitions")
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		svc.setSessionResetInProgress("s1", true)
+		defer svc.setSessionResetInProgress("s1", false)
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
+		}
+	})
+
+	t.Run("ignores stale ready from old execution", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 		}
 
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
 		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", session.WorkflowStepID)
+		session.AgentExecutionID = "exec-active"
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-stale",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
+			t.Fatalf("expected workflow step to remain step1, got %v", updated.WorkflowStepID)
 		}
 	})
 }
 
-func TestProcessOnEnter(t *testing.T) {
+func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
 
-	t.Run("enable_plan_mode sets plan mode", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
 
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Plan Step",
-			Events: wfmodels.StepEvents{
-				OnEnter: []wfmodels.OnEnterAction{
-					{Type: wfmodels.OnEnterEnablePlanMode},
-				},
-			},
-		}
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "hello",
+		QueuedBy:  "test",
+	}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
+	svc.executeQueuedMessage("s1", queuedMsg)
 
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.Metadata == nil {
-			t.Fatal("expected metadata to be set")
-		}
-		if pm, ok := session.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to be set to true in session metadata")
-		}
-	})
-
-	t.Run("no plan mode clears it", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Set plan_mode in session metadata
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, newMockStepGetter(), taskRepo)
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", Name: "Regular Step",
-			Events: wfmodels.StepEvents{}, // no enable_plan_mode
-		}
-
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
-
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
-				t.Error("expected plan_mode to be cleared from session metadata")
-			}
-		}
-	})
-}
-
-func TestSetSessionPlanMode(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("enables plan mode", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", true)
-
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.Metadata == nil {
-			t.Fatal("expected metadata to be set")
-		}
-		if pm, ok := session.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to be true")
-		}
-	})
-
-	t.Run("disables plan mode", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// First enable
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", false)
-
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
-				t.Error("expected plan_mode to be removed from metadata")
-			}
-		}
-	})
-
-	t.Run("nil metadata gets initialized", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", true)
-
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.Metadata == nil {
-			t.Fatal("expected metadata to be initialized")
-		}
-		if pm, ok := session.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to be true after initialization")
-		}
-	})
-}
-
-func TestProcessOnExit(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("no actions is a no-op", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
-			Events: wfmodels.StepEvents{},
-		}
-
-		// Should not panic or modify anything
-		svc.processOnExit(ctx, "t1", "s1", step)
-	})
-
-	t.Run("disable_plan_mode clears plan mode", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Set plan_mode in session metadata
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
-			Events: wfmodels.StepEvents{
-				OnExit: []wfmodels.OnExitAction{
-					{Type: wfmodels.OnExitDisablePlanMode},
-				},
-			},
-		}
-
-		svc.processOnExit(ctx, "t1", "s1", step)
-
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata != nil {
-			if _, hasPlanMode := updated.Metadata["plan_mode"]; hasPlanMode {
-				t.Error("expected plan_mode to be cleared from session metadata")
-			}
-		}
-	})
-
-	t.Run("disable_plan_mode skipped for passthrough session", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Set plan_mode in session metadata
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
-			Events: wfmodels.StepEvents{
-				OnExit: []wfmodels.OnExitAction{
-					{Type: wfmodels.OnExitDisablePlanMode},
-				},
-			},
-		}
-
-		svc.processOnExit(ctx, "t1", "s1", step)
-
-		// plan_mode should still be set
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata == nil {
-			t.Fatal("expected metadata to still be set")
-		}
-		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to remain true for passthrough session")
-		}
-	})
-}
-
-func TestProcessOnEnterPassthrough(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("plan mode not set for passthrough session", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", WorkflowID: "wf1", Name: "Plan Step",
-			Events: wfmodels.StepEvents{
-				OnEnter: []wfmodels.OnEnterAction{
-					{Type: wfmodels.OnEnterEnablePlanMode},
-				},
-			},
-		}
-
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
-
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.Metadata != nil {
-			if _, hasPlanMode := session.Metadata["plan_mode"]; hasPlanMode {
-				t.Error("expected plan_mode NOT to be set for passthrough session")
-			}
-		}
-	})
-
-	t.Run("plan mode not cleared for passthrough session", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Set plan_mode in session metadata
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		session.Metadata = map[string]interface{}{"plan_mode": true}
-		_ = repo.UpdateTaskSession(ctx, session)
-
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isPassthrough: true})
-
-		step := &wfmodels.WorkflowStep{
-			ID: "step1", Name: "Regular Step",
-			Events: wfmodels.StepEvents{}, // no enable_plan_mode
-		}
-
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
-
-		// plan_mode should still be set since passthrough sessions skip plan mode management
-		updated, _ := repo.GetTaskSession(ctx, "s1")
-		if updated.Metadata == nil {
-			t.Fatal("expected metadata to still be set")
-		}
-		if pm, ok := updated.Metadata["plan_mode"].(bool); !ok || !pm {
-			t.Error("expected plan_mode to remain true for passthrough session")
-		}
-	})
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if !status.IsQueued || status.Message == nil {
+		t.Fatalf("expected queued message to be requeued after transient failure")
+	}
+	if status.Message.Content != "hello" {
+		t.Fatalf("expected queued content to be preserved, got %q", status.Message.Content)
+	}
 }

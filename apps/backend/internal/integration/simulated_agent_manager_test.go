@@ -399,10 +399,19 @@ func (s *SimulatedAgentManagerClient) ResolveAgentProfile(ctx context.Context, p
 	}, nil
 }
 
+func (s *SimulatedAgentManagerClient) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	s.logger.Info("simulated: restarting agent process",
+		zap.String("agent_execution_id", agentExecutionID))
+	return nil
+}
+
 func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }
 
 func (s *SimulatedAgentManagerClient) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	return nil, nil
+}
+
+func (s *SimulatedAgentManagerClient) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 }

@@ -105,21 +105,23 @@ type Watcher struct {
 	eventBus bus.EventBus
 	handlers EventHandlers
 	logger   *logger.Logger
+	queue    string
 
 	subscriptions []bus.Subscription
 	mu            sync.Mutex
 	running       bool
 }
 
-// queueName is the queue group for load balancing across orchestrator instances
-const queueName = "orchestrator"
-
 // NewWatcher creates a new event watcher
-func NewWatcher(eventBus bus.EventBus, handlers EventHandlers, log *logger.Logger) *Watcher {
+func NewWatcher(eventBus bus.EventBus, handlers EventHandlers, queue string, log *logger.Logger) *Watcher {
+	if queue == "" {
+		queue = "orchestrator"
+	}
 	return &Watcher{
 		eventBus:      eventBus,
 		handlers:      handlers,
 		logger:        log.WithFields(zap.String("component", "watcher")),
+		queue:         queue,
 		subscriptions: make([]bus.Subscription, 0),
 	}
 }
@@ -231,10 +233,11 @@ func (w *Watcher) subscribeToTaskEvents() error {
 			continue
 		}
 		handler := te.handler // capture for closure
-		sub, err := w.eventBus.QueueSubscribe(te.subject, queueName, w.createTaskEventHandler(handler))
+		sub, err := w.eventBus.QueueSubscribe(te.subject, w.queue, w.createTaskEventHandler(handler))
 		if err != nil {
 			w.logger.Error("Failed to subscribe to task event",
 				zap.String("subject", te.subject),
+				zap.String("queue", w.queue),
 				zap.Error(err))
 			return err
 		}
@@ -262,10 +265,11 @@ func (w *Watcher) subscribeToAgentEvents() error {
 			continue
 		}
 		handler := ae.handler // capture for closure
-		sub, err := w.eventBus.QueueSubscribe(ae.subject, queueName, w.createAgentEventHandler(handler))
+		sub, err := w.eventBus.QueueSubscribe(ae.subject, w.queue, w.createAgentEventHandler(handler))
 		if err != nil {
 			w.logger.Error("Failed to subscribe to agent event",
 				zap.String("subject", ae.subject),
+				zap.String("queue", w.queue),
 				zap.Error(err))
 			return err
 		}
@@ -280,10 +284,11 @@ func (w *Watcher) subscribeToACPSessionEvents() error {
 		return nil
 	}
 
-	sub, err := w.eventBus.QueueSubscribe(events.AgentACPSessionCreated, queueName, w.createACPSessionEventHandler(w.handlers.OnACPSessionCreated))
+	sub, err := w.eventBus.QueueSubscribe(events.AgentACPSessionCreated, w.queue, w.createACPSessionEventHandler(w.handlers.OnACPSessionCreated))
 	if err != nil {
 		w.logger.Error("Failed to subscribe to ACP session event",
 			zap.String("subject", events.AgentACPSessionCreated),
+			zap.String("queue", w.queue),
 			zap.Error(err))
 		return err
 	}
@@ -336,6 +341,7 @@ func (w *Watcher) createTaskEventHandler(handler func(ctx context.Context, data 
 // createAgentEventHandler creates a bus.EventHandler for agent events
 func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data AgentEventData)) bus.EventHandler {
 	return func(ctx context.Context, event *bus.Event) error {
+
 		var data AgentEventData
 		if err := w.parseEventData(event.Data, &data); err != nil {
 			w.logger.Error("Failed to parse agent event data",

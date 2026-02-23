@@ -18,6 +18,7 @@ type Config struct {
 	Server              ServerConfig              `mapstructure:"server"`
 	Database            DatabaseConfig            `mapstructure:"database"`
 	NATS                NATSConfig                `mapstructure:"nats"`
+	Events              EventsConfig              `mapstructure:"events"`
 	Docker              DockerConfig              `mapstructure:"docker"`
 	Agent               AgentConfig               `mapstructure:"agent"`
 	Auth                AuthConfig                `mapstructure:"auth"`
@@ -55,6 +56,13 @@ type NATSConfig struct {
 	ClusterID     string `mapstructure:"clusterId"`
 	ClientID      string `mapstructure:"clientId"`
 	MaxReconnects int    `mapstructure:"maxReconnects"`
+}
+
+// EventsConfig holds event bus namespace configuration.
+type EventsConfig struct {
+	// Namespace isolates queue-group subscribers across deployments/instances.
+	// Empty value means derive from runtime data identity.
+	Namespace string `mapstructure:"namespace"`
 }
 
 // DockerConfig holds Docker client configuration.
@@ -186,6 +194,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("nats.clientId", "kandev-client")
 	v.SetDefault("nats.maxReconnects", 10)
 
+	// Events defaults
+	v.SetDefault("events.namespace", "")
+
 	// Docker defaults — platform-aware host and volume path
 	v.SetDefault("docker.enabled", true) // Docker runtime enabled by default if Docker is available
 	v.SetDefault("docker.host", DefaultDockerHost())
@@ -275,6 +286,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
+	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 
 	// Configure config file
 	v.SetConfigName("config")

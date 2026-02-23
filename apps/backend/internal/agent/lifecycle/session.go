@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/sysprompt"
-	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -147,10 +146,8 @@ func (sm *SessionManager) createOrLoadSession(
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
 // Returns true if:
-// 1. The agent uses ACP protocol
-// 2. The agent doesn't support native session loading (NativeSessionResume is false)
-// 3. We have a task session ID (for history lookup)
-// 4. There's existing history for this session
+// 1. The agent explicitly opts in via SessionConfig.HistoryContextInjection
+// 2. There's existing history for this session
 func (sm *SessionManager) shouldInjectResumeContext(agentConfig agents.Agent, taskSessionID string) bool {
 	if sm.historyManager == nil {
 		return false
@@ -158,13 +155,8 @@ func (sm *SessionManager) shouldInjectResumeContext(agentConfig agents.Agent, ta
 
 	rt := agentConfig.Runtime()
 
-	// Only inject for ACP agents that don't support session/load
-	if rt.Protocol != agent.ProtocolACP {
-		return false
-	}
-
-	// If agent supports native session loading, don't inject (it will restore context natively)
-	if rt.SessionConfig.NativeSessionResume {
+	// Only inject if the agent explicitly opts in to history-based context injection
+	if !rt.SessionConfig.HistoryContextInjection {
 		return false
 	}
 
@@ -516,7 +508,7 @@ func (sm *SessionManager) SendPrompt(
 		zap.Int("attachments_count", len(attachments)))
 
 	// Store user prompt to session history for context injection (store original, not with injected context)
-	if sm.historyManager != nil && execution.SessionID != "" {
+	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
 			sm.logger.Warn("failed to store user message to history", zap.Error(err))
 		}

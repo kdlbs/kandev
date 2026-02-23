@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 )
 
+const toolStatusComplete = "complete"
+
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.Text == "" {
@@ -178,7 +180,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	flushedText := m.flushMessageBuffer(execution)
 	if flushedText != "" {
 		event.Text = flushedText
-		if m.historyManager != nil && execution.SessionID != "" {
+		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
 				m.logger.Warn("failed to store final agent message to history", zap.Error(err))
 			}
@@ -199,13 +201,13 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
 		event.Text = flushedText
-		if m.historyManager != nil && execution.SessionID != "" {
+		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
 				m.logger.Warn("failed to store agent message to history", zap.Error(err))
 			}
 		}
 	}
-	if m.historyManager != nil && execution.SessionID != "" {
+	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
 			m.logger.Warn("failed to store tool call to history", zap.Error(err))
 		}
@@ -273,7 +275,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		event = m.handleToolCallEvent(execution, event)
 
 	case "tool_update":
-		if m.historyManager != nil && execution.SessionID != "" && event.ToolStatus == "complete" {
+		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
 			if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
 				m.logger.Warn("failed to store tool result to history", zap.Error(err))
 			}
@@ -290,6 +292,12 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 			zap.String("error", event.Error),
 			zap.String("text", event.Text),
 			zap.Any("data", event.Data))
+		// Signal prompt completion as an error so waitForPromptDone unblocks
+		// and the session state transitions from RUNNING to FAILED.
+		m.handleCompleteEventMarkState(execution, &event, true)
+		handleCompleteEventSignal(execution, &event, true)
+		return // Don't publish raw error event to frontend stream; the agent failure
+		// path (handleAgentFailed) sets session FAILED with the error message.
 
 	case "complete":
 		m.handleCompleteEvent(execution, &event)

@@ -157,13 +157,14 @@ type ResourceLimits struct {
 
 // SessionConfig defines session resumption behaviour.
 type SessionConfig struct {
-	NativeSessionResume bool
-	ResumeFlag          Param
-	CanRecover          *bool
-	SessionDirTemplate  string
-	SessionDirTarget    string
-	ForkSessionCmd      Command
-	ContinueSessionCmd  Command
+	NativeSessionResume     bool
+	HistoryContextInjection bool // Opt-in: inject conversation history on session resume for agents without native resume
+	ResumeFlag              Param
+	CanRecover              *bool
+	SessionDirTemplate      string
+	SessionDirTarget        string
+	ForkSessionCmd          Command
+	ContinueSessionCmd      Command
 }
 
 // SupportsRecovery returns whether the agent supports session recovery.

@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -25,6 +26,26 @@ import (
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
+}
+
+var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
+var ErrSessionResetInProgress = errors.New("session reset in progress")
+
+func isAgentPromptInProgressError(err error) bool {
+	return err != nil && (errors.Is(err, ErrAgentPromptInProgress) || strings.Contains(err.Error(), ErrAgentPromptInProgress.Error()))
+}
+
+func isSessionResetInProgressError(err error) bool {
+	return err != nil && (errors.Is(err, ErrSessionResetInProgress) || strings.Contains(err.Error(), ErrSessionResetInProgress.Error()))
+}
+
+func isTransientPromptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "agent stream disconnected") ||
+		strings.Contains(msg, "use of closed network connection")
 }
 
 func validateSessionWorktrees(session *models.TaskSession) error {
@@ -391,11 +412,17 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || !canResumeRunning(running) {
-		return nil, fmt.Errorf("session is not resumable")
+	if err != nil || running == nil {
+		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	if err := validateSessionWorktrees(session); err != nil {
 		return nil, err
+	}
+
+	// Don't resume sessions that are in a terminal state.
+	switch session.State {
+	case models.TaskSessionStateFailed, models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
+		return nil, fmt.Errorf("session is in terminal state %s and cannot be resumed", session.State)
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
@@ -403,7 +430,14 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	resumeCtx := context.WithoutCancel(ctx)
 	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
 	if err != nil {
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		// If the execution is already running (duplicate resume request), return it as success.
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+			if existing, ok := s.executor.GetExecutionBySession(sessionID); ok && existing != nil {
+				existing.SessionState = v1.TaskSessionState(session.State)
+				return existing, nil
+			}
+		}
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false)
 		if stateErr := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after resume error",
 				zap.String("task_id", taskID),
@@ -508,20 +542,22 @@ func (s *Service) advanceSessionWorkflowStep(ctx context.Context, sessionID, wor
 	}
 }
 
-// ensureSessionRunning resumes the session if it is not currently running or waiting for input.
+// ensureSessionRunning resumes the session if the agent is not actually running.
+// After lazy recovery, a session may be in WAITING_FOR_INPUT with no agent process;
+// this function detects that case and triggers a resume.
 func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
-	sessionState := session.State
-	if sessionState == models.TaskSessionStateRunning || sessionState == models.TaskSessionStateWaitingForInput {
+	// Check if agent is genuinely running (in-memory execution store, not just DB state)
+	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		return nil
 	}
 
-	s.logger.Debug("session not running, attempting resume",
+	s.logger.Debug("agent not running for session, attempting resume",
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || !canResumeRunning(running) {
-		return fmt.Errorf("session is not resumable (state: %s)", session.State)
+	if err != nil || running == nil {
+		return fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
 	}
 
 	if err := validateSessionWorktrees(session); err != nil {
@@ -531,7 +567,10 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
-		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+			return nil // Agent is already running, nothing to do
+		}
+		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false)
 		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
 				zap.String("task_id", session.TaskID),
@@ -541,8 +580,49 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		return fmt.Errorf("failed to resume session: %w", err)
 	}
 
-	s.logger.Debug("session resumed, now sending prompt")
+	// ResumeSession launches the agent asynchronously. Wait for it to finish
+	// initializing before returning, so the caller can send a prompt immediately.
+	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("session not ready after resume: %w", err)
+	}
+
+	s.logger.Debug("session resumed and ready for prompt")
 	return nil
+}
+
+// waitForSessionReady polls the session state until the agent is ready for prompts.
+func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) error {
+	const (
+		pollInterval = 500 * time.Millisecond
+		maxWait      = 90 * time.Second
+	)
+	deadline := time.Now().Add(maxWait)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for agent to become ready")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		sess, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to check session state: %w", err)
+		}
+		switch sess.State {
+		case models.TaskSessionStateWaitingForInput:
+			return nil
+		case models.TaskSessionStateFailed:
+			errMsg := sess.ErrorMessage
+			if errMsg == "" {
+				errMsg = "session failed during startup"
+			}
+			return fmt.Errorf("session failed: %s", errMsg)
+		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
+			return fmt.Errorf("session in unexpected state: %s", sess.State)
+		}
+	}
 }
 
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
@@ -586,15 +666,34 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	}
 
 	// 3. Session can be resumed if it has a resume token
-	if resumeToken == "" {
+	if resumeToken != "" {
+		// Don't auto-resume terminal sessions — they failed/completed for a reason.
+		if !isActiveSessionState(session.State) {
+			resp.IsAgentRunning = false
+			resp.IsResumable = false
+			resp.NeedsResume = false
+			return resp, nil
+		}
+		return s.validateResumeEligibility(session, resp), nil
+	}
+
+	// 4. No resume token, but session may still be startable as a fresh session
+	// if there's an ExecutorRunning record (worktree info) and session is in an active state.
+	// Don't set NeedsResume — agent will be launched lazily when the user sends their next message
+	// via ensureSessionRunning(). This avoids auto-starting agents that can't natively resume.
+	running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if runErr == nil && running != nil && isActiveSessionState(session.State) {
 		resp.IsAgentRunning = false
-		resp.IsResumable = false
+		resp.IsResumable = true
 		resp.NeedsResume = false
+		resp.ResumeReason = "agent_not_running_fresh_start"
 		return resp, nil
 	}
 
-	// 4. Additional validations for resumption
-	return s.validateResumeEligibility(session, resp), nil
+	resp.IsAgentRunning = false
+	resp.IsResumable = false
+	resp.NeedsResume = false
+	return resp, nil
 }
 
 // populateResumeInfo extracts resume token from executor runtime state and populates resp fields.
@@ -670,6 +769,17 @@ func populateWorktreeInfo(session *models.TaskSession, resp *dto.TaskSessionStat
 	if wt.WorktreeBranch != "" {
 		resp.WorktreeBranch = &wt.WorktreeBranch
 	}
+}
+
+// isActiveSessionState returns true for session states where lazy resume makes sense.
+func isActiveSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning:
+		return true
+	}
+	return false
 }
 
 // validateResumeEligibility performs final checks before marking a session as resumable.
@@ -753,6 +863,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	if s.isSessionResetInProgress(sessionID) {
+		return nil, ErrSessionResetInProgress
+	}
 
 	// Check if session is already processing a prompt (RUNNING state)
 	// This prevents concurrent prompts that can cause race conditions
@@ -765,7 +878,13 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("session_state", string(session.State)))
-		return nil, fmt.Errorf("agent is currently processing a prompt, please wait for completion")
+		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
+
+	// Ensure the agent process is actually running. After a lazy backend restart,
+	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
+	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
+		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
 	// Apply plan mode prefix if enabled
@@ -790,14 +909,33 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	promptCtx := context.WithoutCancel(ctx)
 	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments)
 	if err != nil {
-		s.logger.Error("prompt failed",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		expectedResetInterrupt := false
+		if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
+			s.logger.Warn("prompt interrupted by in-progress session reset; retry expected",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			err = ErrSessionResetInProgress
+			expectedResetInterrupt = true
+		}
+
+		if expectedResetInterrupt {
+			s.logger.Warn("prompt deferred while session reset is in progress",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			s.logger.Error("prompt failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 		// Revert session state so it doesn't stay stuck in RUNNING.
 		// Use repo directly to bypass state machine guards that block transitions from terminal states.
 		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, previousSessionState, "")
-		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		if !isTransientPromptError(err) {
+			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
+		}
 		s.completeTurnForSession(ctx, sessionID)
 		return nil, err
 	}

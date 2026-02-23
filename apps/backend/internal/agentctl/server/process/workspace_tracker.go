@@ -53,9 +53,10 @@ type WorkspaceTracker struct {
 	gitPollInterval time.Duration
 
 	// Control
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
-	started bool
+	stopCh   chan struct{}
+	wg       sync.WaitGroup
+	started  bool
+	stopOnce sync.Once
 }
 
 // NewWorkspaceTracker creates a new workspace tracker
@@ -110,12 +111,14 @@ func (wt *WorkspaceTracker) Start(ctx context.Context) {
 
 // Stop stops the workspace tracker
 func (wt *WorkspaceTracker) Stop() {
-	close(wt.stopCh)
-	if wt.watcher != nil {
-		if err := wt.watcher.Close(); err != nil {
-			wt.logger.Debug("failed to close watcher", zap.Error(err))
+	wt.stopOnce.Do(func() {
+		close(wt.stopCh)
+		if wt.watcher != nil {
+			if err := wt.watcher.Close(); err != nil {
+				wt.logger.Debug("failed to close watcher", zap.Error(err))
+			}
 		}
-	}
-	wt.wg.Wait()
-	wt.logger.Info("workspace tracker stopped")
+		wt.wg.Wait()
+		wt.logger.Info("workspace tracker stopped")
+	})
 }

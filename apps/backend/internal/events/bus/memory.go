@@ -345,34 +345,40 @@ func (b *MemoryEventBus) publishToQueue(ctx context.Context, queueKey, subject s
 		return
 	}
 
-	qg.mu.Lock()
-	defer qg.mu.Unlock()
+	// Select the target subscriber under queue lock, then invoke handler after unlock.
+	// Holding qg.mu during handler execution can block all subsequent messages for
+	// the same queue key if a handler is slow or blocked.
+	var selected *memorySubscription
 
-	if len(qg.subscribers) == 0 {
+	qg.mu.Lock()
+	if len(qg.subscribers) > 0 {
+		startIndex := qg.nextIndex
+		for i := 0; i < len(qg.subscribers); i++ {
+			idx := (startIndex + i) % len(qg.subscribers)
+			sub := qg.subscribers[idx]
+
+			sub.mu.Lock()
+			active := sub.active
+			sub.mu.Unlock()
+
+			if active {
+				qg.nextIndex = (idx + 1) % len(qg.subscribers)
+				selected = sub
+				break
+			}
+		}
+	}
+	qg.mu.Unlock()
+
+	if selected == nil {
 		return
 	}
 
-	// Find next active subscriber (round-robin)
-	startIndex := qg.nextIndex
-	for i := 0; i < len(qg.subscribers); i++ {
-		idx := (startIndex + i) % len(qg.subscribers)
-		sub := qg.subscribers[idx]
-
-		sub.mu.Lock()
-		active := sub.active
-		sub.mu.Unlock()
-
-		if active {
-			qg.nextIndex = (idx + 1) % len(qg.subscribers)
-
-			// Deliver synchronously to preserve ordering
-			if err := sub.handler(ctx, event); err != nil {
-				b.logger.Error("Queue event handler error",
-					zap.String("subject", subject),
-					zap.String("queue", queueKey),
-					zap.Error(err))
-			}
-			return
-		}
+	// Deliver synchronously to preserve ordering.
+	if err := selected.handler(ctx, event); err != nil {
+		b.logger.Error("Queue event handler error",
+			zap.String("subject", subject),
+			zap.String("queue", queueKey),
+			zap.Error(err))
 	}
 }

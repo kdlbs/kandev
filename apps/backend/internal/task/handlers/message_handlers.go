@@ -375,8 +375,19 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
 	}
 	if err != nil {
-		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+		// Don't create a prompt error message if the agent itself reported the error.
+		// The agent failure path (handleAgentFailed) already sets the session to FAILED
+		// with the error_message, which the UI displays via agent-status.
+		if !isAgentReportedError(err) {
+			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+		}
 	}
+}
+
+// isAgentReportedError returns true when the error originated from the agent's
+// own error event (surfaced via waitForPromptDone as "agent error: ...").
+func isAgentReportedError(err error) bool {
+	return strings.Contains(err.Error(), "agent error: ")
 }
 
 // handlePromptWithResume attempts to resume a session and retry a prompt when the

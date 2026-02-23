@@ -403,6 +403,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		defer cancel()
 		if err := adapter.Prompt(promptCtx, req.Text, req.Attachments); err != nil {
 			s.logger.Error("async prompt failed", zap.Error(err))
+			s.procMgr.SendErrorEvent(err.Error())
 		}
 	}(ctx)
 

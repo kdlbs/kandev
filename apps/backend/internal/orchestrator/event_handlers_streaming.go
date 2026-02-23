@@ -324,6 +324,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 }
 
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool) {
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
@@ -420,6 +421,24 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
+
+	// READY events own workflow transitions and queued prompt execution.
+	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("skipping complete-event terminal state update; session lookup failed",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return
+	}
+	if session.State == models.TaskSessionStateRunning {
+		s.logger.Debug("skipping complete-event terminal state update while session is running",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID))
+		return
+	}
+
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID)
 }
 

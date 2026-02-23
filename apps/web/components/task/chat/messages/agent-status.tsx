@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
@@ -138,8 +138,9 @@ function AgentErrorStatus({
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
       : undefined,
   );
-  const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((v) => !v), []);
+  const [userCollapsed, setUserCollapsed] = useState(false);
+  const expanded = !!errorMessage && !userCollapsed;
+  const toggle = useCallback(() => setUserCollapsed((v) => !v), []);
 
   const displayLabel = errorMessage ? "Environment setup failed" : config.label;
   const hasDetails = !!errorMessage;
