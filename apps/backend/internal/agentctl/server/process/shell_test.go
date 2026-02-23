@@ -1,13 +1,14 @@
 package process
 
 import (
+	"os"
 	"runtime"
 	"testing"
 )
 
 func TestDefaultShellCommand_CustomShell(t *testing.T) {
-	cmd := defaultShellCommand("/usr/local/bin/fish")
-	if cmd[0] != "/usr/local/bin/fish" {
+	cmd := defaultShellCommand("/bin/sh")
+	if cmd[0] != "/bin/sh" {
 		t.Errorf("expected preferred shell as first element, got %q", cmd[0])
 	}
 }
@@ -23,6 +24,20 @@ func TestDefaultShellCommand_EmptyPreferred(t *testing.T) {
 		if cmd[len(cmd)-1] != "-l" {
 			t.Errorf("expected login flag -l on Unix, got %v", cmd)
 		}
+	}
+}
+
+func TestDefaultShellCommand_InvalidPreferredFallsBack(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only fallback behavior")
+	}
+	originalShell := os.Getenv("SHELL")
+	defer func() { _ = os.Setenv("SHELL", originalShell) }()
+
+	_ = os.Setenv("SHELL", "/bin/sh")
+	cmd := defaultShellCommand("/this/path/does/not/exist")
+	if cmd[0] != "/bin/sh" {
+		t.Fatalf("expected fallback to SHELL (/bin/sh), got %q", cmd[0])
 	}
 }
 

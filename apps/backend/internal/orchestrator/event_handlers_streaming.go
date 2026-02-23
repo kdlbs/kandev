@@ -356,6 +356,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			"session_id":             sessionID,
 			"old_state":              string(oldState),
 			"new_state":              string(nextState),
+			"error_message":          errorMessage,
 			"agent_profile_id":       session.AgentProfileID,
 			"agent_profile_snapshot": session.AgentProfileSnapshot,
 			"is_passthrough":         session.IsPassthrough,

@@ -137,6 +137,11 @@ func (a *lifecycleAdapter) StopAgent(ctx context.Context, agentInstanceID string
 	return a.mgr.StopAgent(ctx, agentInstanceID, force)
 }
 
+// StopAgentWithReason stops a running agent and propagates the stop reason to runtime teardown.
+func (a *lifecycleAdapter) StopAgentWithReason(ctx context.Context, agentInstanceID string, reason string, force bool) error {
+	return a.mgr.StopAgentWithReason(ctx, agentInstanceID, reason, force)
+}
+
 // GetAgentStatus returns the status of an agent execution
 func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentExecution, error) {
 	execution, found := a.mgr.GetExecution(agentInstanceID)
@@ -210,6 +215,21 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
+	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
+	if !ok || status == nil {
+		return nil, nil
+	}
+	return &executor.RemoteRuntimeStatus{
+		RuntimeName:   status.RuntimeName,
+		RemoteName:    status.RemoteName,
+		State:         status.State,
+		CreatedAt:     status.CreatedAt,
+		LastCheckedAt: status.LastCheckedAt,
+		ErrorMessage:  status.ErrorMessage,
+	}, nil
 }
 
 // ResolveAgentProfile resolves an agent profile ID to profile information

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -97,11 +98,18 @@ func (h *VscodeHandlers) wsVscodeStart(ctx context.Context, msg *ws.Message) (*w
 		zap.String("session_id", req.SessionID),
 		zap.Int("port", resp.Port),
 		zap.String("status", resp.Status))
+	h.logger.Debug("vscode start response payload",
+		zap.String("session_id", req.SessionID),
+		zap.String("theme", req.Theme),
+		zap.Bool("success", resp.Success),
+		zap.String("status", resp.Status),
+		zap.Int("port", resp.Port),
+		zap.String("error", resp.Error))
 
 	return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{
 		Status: resp.Status,
 		Port:   resp.Port,
-		URL:    fmt.Sprintf("/vscode/%s/", req.SessionID),
+		URL:    buildVscodeProxyURL(req.SessionID, execution.WorkspacePath),
 	})
 }
 
@@ -165,8 +173,18 @@ func (h *VscodeHandlers) wsVscodeStatus(ctx context.Context, msg *ws.Message) (*
 
 	status, err := client.VscodeStatus(ctx)
 	if err != nil {
+		h.logger.Debug("vscode status request failed",
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
 		return ws.NewResponse(msg.ID, msg.Action, types.VscodeStatusResponse{Status: "stopped"})
 	}
+	h.logger.Debug("vscode status response payload",
+		zap.String("session_id", req.SessionID),
+		zap.String("status", status.Status),
+		zap.Int("port", status.Port),
+		zap.String("url", status.URL),
+		zap.String("error", status.Error),
+		zap.String("message", status.Message))
 
 	resp := types.VscodeStatusResponse{
 		Status:  status.Status,
@@ -176,10 +194,18 @@ func (h *VscodeHandlers) wsVscodeStatus(ctx context.Context, msg *ws.Message) (*
 		Message: status.Message,
 	}
 	if status.Status == "running" {
-		resp.URL = fmt.Sprintf("/vscode/%s/", req.SessionID)
+		resp.URL = buildVscodeProxyURL(req.SessionID, execution.WorkspacePath)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+func buildVscodeProxyURL(sessionID, workspacePath string) string {
+	base := fmt.Sprintf("/vscode/%s/", sessionID)
+	if workspacePath == "" {
+		return base
+	}
+	return base + "?folder=" + url.QueryEscape(workspacePath)
 }
 
 func (h *VscodeHandlers) wsVscodeOpenFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

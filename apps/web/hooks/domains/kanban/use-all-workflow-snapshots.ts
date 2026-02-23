@@ -70,6 +70,10 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
                 primarySessionId: task.primary_session_id ?? undefined,
                 sessionCount: task.session_count ?? undefined,
                 reviewStatus: task.review_status ?? undefined,
+                primaryExecutorId: task.primary_executor_id ?? undefined,
+                primaryExecutorType: task.primary_executor_type ?? undefined,
+                primaryExecutorName: task.primary_executor_name ?? undefined,
+                isRemoteExecutor: task.is_remote_executor ?? false,
                 updatedAt: task.updated_at,
               } as KanbanTask;
             })

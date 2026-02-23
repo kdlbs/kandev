@@ -5,10 +5,9 @@ import { IconTestPipe, IconLoader2, IconCheck, IconX, IconSparkles } from "@tabl
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
-import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { testSpritesConnection } from "@/lib/api/domains/sprites-api";
 import { useSprites } from "@/hooks/domains/settings/use-sprites";
+import { InlineSecretSelect } from "@/components/settings/profile-edit/inline-secret-select";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 
@@ -17,8 +16,6 @@ type SpritesApiKeyCardProps = {
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 };
-
-const NONE_VALUE = "__none__";
 
 export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: SpritesApiKeyCardProps) {
   const { status } = useSprites(secretId ?? undefined);
@@ -62,25 +59,12 @@ export function SpritesApiKeyCard({ secretId, onSecretIdChange, secrets }: Sprit
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>Secret</Label>
-          <Select
-            value={secretId ?? NONE_VALUE}
-            onValueChange={(v) => onSecretIdChange(v === NONE_VALUE ? null : v)}
-          >
-            <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder="Select a secret..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE_VALUE}>None</SelectItem>
-              {secrets.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <InlineSecretSelect
+          secretId={secretId}
+          onSecretIdChange={onSecretIdChange}
+          secrets={secrets}
+          label="Secret"
+        />
         {secretId && (
           <ConnectionDetails
             status={status}

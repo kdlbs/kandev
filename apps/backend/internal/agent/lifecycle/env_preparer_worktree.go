@@ -31,8 +31,14 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	start := time.Now()
 	var steps []PrepareStep
 
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+
 	totalSteps := 2 // validate + create worktree
-	if req.SetupScript != "" {
+	if resolvedScript != "" {
 		totalSteps++
 	}
 
@@ -69,14 +75,10 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	reportProgress(onProgress, step, 1, totalSteps)
 
 	// Step 3: Run setup script (if provided)
-	workspacePath := req.WorkspacePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryPath
-	}
-	if req.SetupScript != "" {
+	if resolvedScript != "" {
 		step = beginStep("Run setup script")
 		reportProgress(onProgress, step, 2, totalSteps)
-		output, err := runSetupScript(ctx, req.SetupScript, workspacePath, req.Env)
+		output, err := runSetupScript(ctx, resolvedScript, workspacePath, req.Env)
 		if err != nil {
 			completeStepError(&step, err.Error())
 			step.Output = output

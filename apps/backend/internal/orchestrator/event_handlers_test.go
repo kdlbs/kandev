@@ -96,6 +96,9 @@ func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgen
 }
 func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
 func (m *mockAgentManager) StopAgent(_ context.Context, _ string, _ bool) error { return nil }
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
+	return m.StopAgent(ctx, agentExecutionID, force)
+}
 func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, _ string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
 	return nil, nil
 }
@@ -112,6 +115,9 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ strin
 }
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough
+}
+func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(_ context.Context, _ string) (*executor.RemoteRuntimeStatus, error) {
+	return nil, nil
 }
 
 // --- Helpers ---

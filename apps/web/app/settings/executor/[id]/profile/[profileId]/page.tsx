@@ -29,7 +29,7 @@ import {
   SpritesConnectionCard,
   SpritesInstancesCard,
 } from "@/components/settings/sprites-settings";
-import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
 
 type EnvVarRow = {
@@ -227,44 +227,6 @@ function EnvVarsCard({
             onRemove={onRemove}
           />
         ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ScriptCard({
-  title,
-  description,
-  value,
-  onChange,
-  height,
-  placeholders,
-  executorType,
-}: {
-  title: string;
-  description: string;
-  value: string;
-  onChange: (v: string) => void;
-  height: string;
-  placeholders: ScriptPlaceholder[];
-  executorType: string;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="border rounded-md overflow-hidden">
-          <ScriptEditor
-            value={value}
-            onChange={onChange}
-            height={height}
-            placeholders={placeholders}
-            executorType={executorType}
-          />
-        </div>
       </CardContent>
     </Card>
   );

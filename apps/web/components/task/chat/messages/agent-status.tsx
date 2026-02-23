@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
-import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
@@ -126,15 +126,49 @@ function useActiveTurn(sessionId: string | null) {
   }, [turns, activeTurnId]);
 }
 
-function AgentErrorStatus({ config }: { config: { label: string } }) {
+function AgentErrorStatus({
+  config,
+  sessionId,
+}: {
+  config: { label: string };
+  sessionId: string | null;
+}) {
+  const errorMessage = useAppStore((state) =>
+    sessionId
+      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
+      : undefined,
+  );
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+
+  const displayLabel = errorMessage ? "Environment setup failed" : config.label;
+  const hasDetails = !!errorMessage;
+
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
+      className="rounded-lg text-xs bg-destructive/10 text-destructive border border-destructive/20"
       role="status"
-      aria-label={config.label}
+      aria-label={displayLabel}
     >
-      <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-      <span className="font-medium">{config.label}</span>
+      <button
+        type="button"
+        className={`flex w-full items-center gap-2 px-3 py-2 ${hasDetails ? "cursor-pointer" : ""}`}
+        onClick={hasDetails ? toggle : undefined}
+        disabled={!hasDetails}
+      >
+        <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        <span className="font-medium">{displayLabel}</span>
+        {hasDetails && (
+          <IconChevronDown
+            className={`ml-auto h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        )}
+      </button>
+      {expanded && errorMessage && (
+        <pre className="px-3 pb-2 whitespace-pre-wrap break-words text-[11px] text-destructive/80 max-h-40 overflow-y-auto">
+          {errorMessage}
+        </pre>
+      )}
     </div>
   );
 }
@@ -201,7 +235,7 @@ export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentSta
     isRunning,
   );
 
-  if (isError && config) return <AgentErrorStatus config={config} />;
+  if (isError && config) return <AgentErrorStatus config={config} sessionId={sessionId} />;
   if (isWarning && config) return <AgentWarningStatus config={config} />;
   if (isRunning && config)
     return (

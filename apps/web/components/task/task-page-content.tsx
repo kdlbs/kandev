@@ -21,6 +21,12 @@ import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { SessionCommands } from "@/components/session-commands";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
+import {
+  buildDebugEntries,
+  deriveIsAgentWorking,
+  buildArchivedValue,
+  resolveTaskProps,
+} from "@/components/task/task-page-content-helpers";
 
 type TaskPageContentProps = {
   task: Task | null;
@@ -30,62 +36,6 @@ type TaskPageContentProps = {
   initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
 };
-
-function buildDebugEntries(params: {
-  connectionStatus: string;
-  task: Task | null;
-  effectiveSessionId: string | null | undefined;
-  taskSessionState: string | null;
-  isAgentWorking: boolean;
-  resumptionState: string;
-  resumptionError: string | null;
-  agentctlStatus: {
-    status: string;
-    isReady: boolean;
-    errorMessage?: string | null;
-    agentExecutionId?: string | null;
-  };
-  previewOpen: boolean;
-  previewStage: string;
-  previewUrl: string;
-  devProcessId: string | undefined;
-  devProcessStatus: string | null;
-}): Record<string, unknown> {
-  const {
-    connectionStatus,
-    task,
-    effectiveSessionId,
-    taskSessionState,
-    isAgentWorking,
-    resumptionState,
-    resumptionError,
-    agentctlStatus,
-    previewOpen,
-    previewStage,
-    previewUrl,
-    devProcessId,
-    devProcessStatus,
-  } = params;
-  return {
-    ws_status: connectionStatus,
-    task_id: task?.id ?? null,
-    session_id: effectiveSessionId ?? null,
-    task_state: task?.state ?? null,
-    task_session_state: taskSessionState ?? null,
-    is_agent_working: isAgentWorking,
-    resumption_state: resumptionState,
-    resumption_error: resumptionError,
-    agentctl_status: agentctlStatus.status,
-    agentctl_ready: agentctlStatus.isReady,
-    agentctl_error: agentctlStatus.errorMessage ?? null,
-    agentctl_execution_id: agentctlStatus.agentExecutionId ?? null,
-    preview_open: previewOpen,
-    preview_stage: previewStage,
-    preview_url: previewUrl || null,
-    dev_process_id: devProcessId ?? null,
-    dev_process_status: devProcessStatus ?? null,
-  };
-}
 
 function resolveEffectiveTask(
   taskDetails: Task | null,
@@ -198,16 +148,6 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
   };
 }
 
-function deriveIsAgentWorking(
-  taskSessionState: string | null,
-  isAgentRunning: boolean,
-  taskState: string | null,
-): boolean {
-  if (taskSessionState !== null)
-    return taskSessionState === "STARTING" || taskSessionState === "RUNNING";
-  return isAgentRunning && (taskState === "IN_PROGRESS" || taskState === "SCHEDULING");
-}
-
 function useMergedAgentState(
   agent: ReturnType<typeof useSessionAgent>,
   resumption: ReturnType<typeof useSessionResumption>,
@@ -234,17 +174,6 @@ function useMergedAgentState(
   return { isResuming, isResumed, taskSessionState, worktreePath, worktreeBranch, isAgentWorking };
 }
 
-function buildArchivedValue(task: Task | null, repository: Repository | null) {
-  const isArchived = !!task?.archived_at;
-  return {
-    isArchived,
-    archivedTaskId: isArchived ? task?.id : undefined,
-    archivedTaskTitle: isArchived ? task?.title : undefined,
-    archivedTaskRepositoryPath: isArchived ? (repository?.local_path ?? undefined) : undefined,
-    archivedTaskUpdatedAt: isArchived ? task?.updated_at : undefined,
-  };
-}
-
 type TaskPageInnerProps = {
   task: Task | null;
   effectiveSessionId: string | null;
@@ -265,26 +194,134 @@ type TaskPageInnerProps = {
   defaultLayouts: Record<string, Layout>;
 };
 
-function resolveTaskIds(task: Task | null) {
+type RemoteExecutorStatus = {
+  is_remote_executor?: boolean;
+  executor_type?: string | null;
+  executor_name?: string | null;
+  remote_name?: string | null;
+  remote_state?: string | null;
+  remote_created_at?: string | null;
+  remote_checked_at?: string | null;
+  remote_status_error?: string | null;
+};
+
+function toNullable(value: string | null | undefined): string | null {
+  return value ?? null;
+}
+
+function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
+  const remoteExecutorName = status?.remote_name ?? status?.executor_name ?? null;
   return {
-    taskId: task?.id ?? null,
-    workflowId: task?.workflow_id ?? null,
-    workspaceId: task?.workspace_id ?? null,
-    workflowStepId: task?.workflow_step_id ?? null,
-    baseBranch: task?.repositories?.[0]?.base_branch,
-    isArchived: !!task?.archived_at,
+    isRemoteExecutor: status?.is_remote_executor ?? false,
+    remoteExecutorType: toNullable(status?.executor_type),
+    remoteExecutorName,
+    remoteState: toNullable(status?.remote_state),
+    remoteCreatedAt: toNullable(status?.remote_created_at),
+    remoteCheckedAt: toNullable(status?.remote_checked_at),
+    remoteStatusError: toNullable(status?.remote_status_error),
   };
 }
 
-function resolveTaskProps(task: Task | null, repository: Repository | null) {
-  const ids = resolveTaskIds(task);
+function buildTaskTopBarProps(params: {
+  taskProps: ReturnType<typeof resolveTaskProps>;
+  agent: ReturnType<typeof useSessionAgent>;
+  merged: ReturnType<typeof useMergedAgentState>;
+  workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
+  showDebugOverlay: boolean;
+  onToggleDebugOverlay: () => void;
+  effectiveSessionId: string | null;
+  remote: ReturnType<typeof resolveRemoteExecutor>;
+}) {
+  const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
+    params;
   return {
-    ...ids,
-    taskTitle: task?.title,
-    taskDescription: task?.description,
-    repositoryPath: repository?.local_path ?? null,
-    repositoryName: repository?.name ?? null,
+    taskId: taskProps.taskId,
+    activeSessionId: params.effectiveSessionId,
+    taskTitle: taskProps.taskTitle,
+    taskDescription: taskProps.taskDescription,
+    baseBranch: taskProps.baseBranch ?? undefined,
+    onStartAgent: agent.handleStartAgent,
+    onStopAgent: agent.handleStopAgent,
+    isAgentRunning: agent.isAgentRunning || merged.isResumed,
+    isAgentLoading: agent.isAgentLoading || merged.isResuming,
+    worktreePath: merged.worktreePath,
+    worktreeBranch: merged.worktreeBranch,
+    repositoryPath: taskProps.repositoryPath,
+    repositoryName: taskProps.repositoryName,
+    showDebugOverlay,
+    onToggleDebugOverlay,
+    workflowSteps,
+    currentStepId: taskProps.workflowStepId,
+    workflowId: taskProps.workflowId,
+    isArchived: taskProps.isArchived,
+    isRemoteExecutor: params.remote.isRemoteExecutor,
+    remoteExecutorType: params.remote.remoteExecutorType,
+    remoteExecutorName: params.remote.remoteExecutorName,
+    remoteState: params.remote.remoteState,
+    remoteCreatedAt: params.remote.remoteCreatedAt,
+    remoteCheckedAt: params.remote.remoteCheckedAt,
+    remoteStatusError: params.remote.remoteStatusError,
   };
+}
+
+function buildTaskLayoutProps(params: {
+  taskProps: ReturnType<typeof resolveTaskProps>;
+  repository: Repository | null;
+  effectiveSessionId: string | null;
+  initialScripts: RepositoryScript[];
+  initialTerminals?: Terminal[];
+  defaultLayouts: Record<string, Layout>;
+  merged: ReturnType<typeof useMergedAgentState>;
+  remote: ReturnType<typeof resolveRemoteExecutor>;
+}) {
+  const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
+  return {
+    workspaceId: taskProps.workspaceId,
+    workflowId: taskProps.workflowId,
+    sessionId: effectiveSessionId,
+    repository: repository ?? null,
+    initialScripts,
+    initialTerminals,
+    defaultLayouts: params.defaultLayouts,
+    taskTitle: taskProps.taskTitle,
+    baseBranch: taskProps.baseBranch,
+    worktreeBranch: params.merged.worktreeBranch,
+    isRemoteExecutor: params.remote.isRemoteExecutor,
+    remoteExecutorType: params.remote.remoteExecutorType,
+    remoteExecutorName: params.remote.remoteExecutorName,
+    remoteState: params.remote.remoteState,
+    remoteCreatedAt: params.remote.remoteCreatedAt,
+    remoteCheckedAt: params.remote.remoteCheckedAt,
+    remoteStatusError: params.remote.remoteStatusError,
+  };
+}
+
+function maybeBuildDebugEntries(params: {
+  isVisible: boolean;
+  connectionStatus: string;
+  task: Task | null;
+  effectiveSessionId: string | null | undefined;
+  merged: ReturnType<typeof useMergedAgentState>;
+  resumption: ReturnType<typeof useSessionResumption>;
+  sessionPanel: ReturnType<typeof useSessionPanelState>;
+  agentctlStatus: ReturnType<typeof useSessionAgentctl>;
+}) {
+  if (!params.isVisible) return null;
+  return buildDebugEntries({
+    connectionStatus: params.connectionStatus,
+    task: params.task,
+    effectiveSessionId: params.effectiveSessionId,
+    taskSessionState: params.merged.taskSessionState,
+    isAgentWorking: params.merged.isAgentWorking,
+    resumptionState: params.resumption.resumptionState,
+    resumptionError: params.resumption.error,
+    agentctlStatus: params.agentctlStatus,
+    previewOpen: params.sessionPanel.previewOpen,
+    previewStage: params.sessionPanel.previewStage,
+    previewUrl: params.sessionPanel.previewUrl,
+    devProcessId: params.sessionPanel.devProcessId,
+    devProcessStatus: params.sessionPanel.devProcessStatus,
+  });
 }
 
 function TaskPageInner({
@@ -306,79 +343,59 @@ function TaskPageInner({
   initialTerminals,
   defaultLayouts,
 }: TaskPageInnerProps) {
-  const tp = resolveTaskProps(task, repository);
+  const taskProps = resolveTaskProps(task, repository);
+  const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
+  const debugEntries = maybeBuildDebugEntries({
+    isVisible: DEBUG_UI && showDebugOverlay,
+    connectionStatus,
+    task,
+    effectiveSessionId,
+    merged,
+    resumption,
+    sessionPanel,
+    agentctlStatus,
+  });
+  const topBarProps = buildTaskTopBarProps({
+    taskProps,
+    agent,
+    merged,
+    workflowSteps,
+    showDebugOverlay,
+    onToggleDebugOverlay,
+    effectiveSessionId,
+    remote,
+  });
+  const layoutProps = buildTaskLayoutProps({
+    taskProps,
+    repository,
+    effectiveSessionId,
+    initialScripts,
+    initialTerminals,
+    defaultLayouts,
+    merged,
+    remote,
+  });
+
   return (
     <TooltipProvider>
       <VcsDialogsProvider
         sessionId={effectiveSessionId}
-        baseBranch={tp.baseBranch}
-        taskTitle={tp.taskTitle}
+        baseBranch={taskProps.baseBranch}
+        taskTitle={taskProps.taskTitle}
         displayBranch={merged.worktreeBranch}
       >
         <div className="h-screen w-full flex flex-col bg-background">
           <SessionCommands
             sessionId={effectiveSessionId}
-            baseBranch={tp.baseBranch}
+            baseBranch={taskProps.baseBranch}
             isAgentRunning={merged.isAgentWorking}
             hasWorktree={Boolean(merged.worktreeBranch)}
             isPassthrough={sessionPanel.isSessionPassthrough}
           />
-          {DEBUG_UI && showDebugOverlay && (
-            <DebugOverlay
-              title="Task Debug"
-              entries={buildDebugEntries({
-                connectionStatus,
-                task,
-                effectiveSessionId,
-                taskSessionState: merged.taskSessionState,
-                isAgentWorking: merged.isAgentWorking,
-                resumptionState: resumption.resumptionState,
-                resumptionError: resumption.error,
-                agentctlStatus,
-                previewOpen: sessionPanel.previewOpen,
-                previewStage: sessionPanel.previewStage,
-                previewUrl: sessionPanel.previewUrl,
-                devProcessId: sessionPanel.devProcessId,
-                devProcessStatus: sessionPanel.devProcessStatus,
-              })}
-            />
-          )}
-          {!isMobile && (
-            <TaskTopBar
-              taskId={tp.taskId}
-              activeSessionId={effectiveSessionId}
-              taskTitle={tp.taskTitle}
-              taskDescription={tp.taskDescription}
-              baseBranch={tp.baseBranch ?? undefined}
-              onStartAgent={agent.handleStartAgent}
-              onStopAgent={agent.handleStopAgent}
-              isAgentRunning={agent.isAgentRunning || merged.isResumed}
-              isAgentLoading={agent.isAgentLoading || merged.isResuming}
-              worktreePath={merged.worktreePath}
-              worktreeBranch={merged.worktreeBranch}
-              repositoryPath={tp.repositoryPath}
-              repositoryName={tp.repositoryName}
-              showDebugOverlay={showDebugOverlay}
-              onToggleDebugOverlay={onToggleDebugOverlay}
-              workflowSteps={workflowSteps}
-              currentStepId={tp.workflowStepId}
-              workflowId={tp.workflowId}
-              isArchived={tp.isArchived}
-            />
-          )}
+          {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
+          {!isMobile && <TaskTopBar {...topBarProps} />}
           <TaskArchivedProvider value={archivedValue}>
-            <TaskLayout
-              workspaceId={tp.workspaceId}
-              workflowId={tp.workflowId}
-              sessionId={effectiveSessionId}
-              repository={repository ?? null}
-              initialScripts={initialScripts}
-              initialTerminals={initialTerminals}
-              defaultLayouts={defaultLayouts}
-              taskTitle={tp.taskTitle}
-              baseBranch={tp.baseBranch}
-              worktreeBranch={merged.worktreeBranch}
-            />
+            <TaskLayout {...layoutProps} />
           </TaskArchivedProvider>
         </div>
       </VcsDialogsProvider>

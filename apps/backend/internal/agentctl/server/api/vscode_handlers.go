@@ -29,6 +29,11 @@ func (s *Server) handleVscodeStart(c *gin.Context) {
 
 	// Return current status (will be "installing")
 	info := s.procMgr.VscodeInfo()
+	s.logger.Debug("vscode start response payload",
+		zap.String("status", string(info.Status)),
+		zap.Int("port", info.Port),
+		zap.String("error", info.Error),
+		zap.String("message", info.Message))
 	c.JSON(http.StatusOK, types.VscodeStartResponse{
 		Success: true,
 		Status:  string(info.Status),
@@ -51,6 +56,11 @@ func (s *Server) handleVscodeStop(c *gin.Context) {
 
 func (s *Server) handleVscodeStatus(c *gin.Context) {
 	info := s.procMgr.VscodeInfo()
+	s.logger.Debug("vscode status response payload",
+		zap.String("status", string(info.Status)),
+		zap.Int("port", info.Port),
+		zap.String("error", info.Error),
+		zap.String("message", info.Message))
 	c.JSON(http.StatusOK, types.VscodeStatusResponse{
 		Status:  string(info.Status),
 		Port:    info.Port,

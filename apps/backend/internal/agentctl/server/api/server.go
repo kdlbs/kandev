@@ -105,6 +105,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/vscode/stop", s.handleVscodeStop)
 		api.GET("/vscode/status", s.handleVscodeStatus)
 		api.POST("/vscode/open-file", s.handleVscodeOpenFile)
+		api.Any("/vscode/proxy", s.handleVscodeProxy)
+		api.Any("/vscode/proxy/*path", s.handleVscodeProxy)
 
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)

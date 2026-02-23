@@ -245,12 +245,6 @@ func NewService(
 	}
 	exec := executor.NewExecutor(agentManager, repo, log, execCfg)
 
-	// Wire executor task state changes through the task service layer so
-	// events are published (e.g. WebSocket notifications to the frontend).
-	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		return taskRepo.UpdateTaskState(ctx, taskID, state)
-	})
-
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 
@@ -270,6 +264,17 @@ func NewService(
 		scheduler:    sched,
 		messageQueue: msgQueue,
 	}
+
+	// Wire executor state changes through the orchestrator so events are published
+	// (e.g. WebSocket notifications to the frontend). Must be set after service
+	// construction so the session callback can reference s.updateTaskSessionState.
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		return taskRepo.UpdateTaskState(ctx, taskID, state)
+	})
+	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
+		return nil
+	})
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
@@ -582,7 +587,7 @@ func (s *Service) resumeOneExecutorOnStartup(ctx context.Context, running *model
 		return
 	}
 
-	startAgent := running.ResumeToken != "" && running.Resumable
+	startAgent := canResumeRunning(running)
 	if !startAgent {
 		s.logger.Debug("resuming workspace without agent session",
 			zap.String("session_id", sessionID),
@@ -679,7 +684,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 			}
 		}
 	}
-	if running.ResumeToken != "" && running.Resumable {
+	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
@@ -693,6 +698,16 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 				zap.Error(err))
 		}
 	}
+}
+
+func canResumeRunning(running *models.ExecutorRunning) bool {
+	if running == nil || running.ResumeToken == "" {
+		return false
+	}
+	if running.Resumable {
+		return true
+	}
+	return running.Runtime == string(models.ExecutorTypeSprites)
 }
 
 // handleWorktreeValidationFailure attempts to recreate a missing worktree.

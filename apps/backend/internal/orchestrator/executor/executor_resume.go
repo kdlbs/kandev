@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -72,9 +73,11 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	}
 
 	resumable := true
+	runtimeName := ""
 	if session.ExecutorID != "" {
 		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
 			resumable = executor.Resumable
+			runtimeName = string(executor.Type)
 		}
 	}
 	running := &models.ExecutorRunning{
@@ -82,6 +85,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		SessionID:        session.ID,
 		TaskID:           taskID,
 		ExecutorID:       session.ExecutorID,
+		Runtime:          runtimeName,
 		Status:           "starting",
 		Resumable:        resumable,
 		AgentExecutionID: resp.AgentExecutionID,
@@ -89,6 +93,10 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if existing, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && existing != nil {
+		running.ResumeToken = existing.ResumeToken
+		running.LastMessageUUID = existing.LastMessageUUID
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after launch",
@@ -142,7 +150,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		zap.String("resume_token", req.ACPSessionID),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
+	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
@@ -177,7 +185,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	if startAgent {
-		e.startAgentProcessOnResume(task.ID, session, resp.AgentExecutionID)
+		e.startAgentProcessOnResume(ctx, task.ID, session, resp.AgentExecutionID)
 	}
 
 	return execution, nil
@@ -247,6 +255,9 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 			metadata[key] = value
 		}
 	}
+	if session.ExecutorProfileID != "" {
+		metadata["executor_profile_id"] = session.ExecutorProfileID
+	}
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
@@ -256,6 +267,16 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	session.ExecutorID = execConfig.ExecutorID
 	metadata = execConfig.Metadata
 	req.ExecutorType = execConfig.ExecutorType
+	req.ExecutorConfig = execConfig.ExecutorCfg
+	req.SetupScript = execConfig.SetupScript
+	if len(execConfig.ProfileEnv) > 0 {
+		if req.Env == nil {
+			req.Env = make(map[string]string)
+		}
+		for k, v := range execConfig.ProfileEnv {
+			req.Env[k] = v
+		}
+	}
 
 	if executorWasEmpty && session.ExecutorID != "" {
 		session.UpdatedAt = time.Now().UTC()
@@ -277,6 +298,14 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	}
 
 	if running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); runErr == nil && running != nil {
+		if req.ExecutorType == string(models.ExecutorTypeSprites) && running.AgentExecutionID != "" {
+			if req.Metadata == nil {
+				req.Metadata = make(map[string]interface{})
+			}
+			req.Metadata[lifecycle.MetadataKeyRemoteReconnect] = true
+			req.Metadata[lifecycle.MetadataKeyRemoteExecID] = running.AgentExecutionID
+			req.Metadata[lifecycle.MetadataKeyRemoteName] = spriteNameFromExecutionID(running.AgentExecutionID)
+		}
 		if running.ResumeToken != "" && startAgent {
 			req.ACPSessionID = running.ResumeToken
 			// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
@@ -290,6 +319,17 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	}
 
 	return req, repositoryID, nil
+}
+
+func spriteNameFromExecutionID(executionID string) string {
+	if executionID == "" {
+		return ""
+	}
+	trimmed := executionID
+	if len(trimmed) > 12 {
+		trimmed = trimmed[:12]
+	}
+	return "kandev-" + trimmed
 }
 
 // applyResumeRepoConfig resolves repository details and applies them to req.
@@ -324,6 +364,12 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 	repositoryPath := repository.LocalPath
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
+	}
+	if repository.SetupScript != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata[lifecycle.MetadataKeyRepoSetupScript] = repository.SetupScript
 	}
 
 	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker {
@@ -368,9 +414,11 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	}
 
 	resumable := true
+	runtimeName := ""
 	if session.ExecutorID != "" {
 		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
 			resumable = executor.Resumable
+			runtimeName = string(executor.Type)
 		}
 	}
 	running := &models.ExecutorRunning{
@@ -378,6 +426,7 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 		SessionID:        session.ID,
 		TaskID:           taskID,
 		ExecutorID:       session.ExecutorID,
+		Runtime:          runtimeName,
 		Status:           "starting",
 		Resumable:        resumable,
 		AgentExecutionID: resp.AgentExecutionID,
@@ -385,6 +434,10 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
+	}
+	if existing, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && existing != nil {
+		running.ResumeToken = existing.ResumeToken
+		running.LastMessageUUID = existing.LastMessageUUID
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after resume",
@@ -421,35 +474,13 @@ func (e *Executor) persistResumeWorktree(ctx context.Context, taskID string, ses
 	}
 }
 
-// startAgentProcessOnResume starts the agent process asynchronously after a session resume.
-func (e *Executor) startAgentProcessOnResume(taskID string, session *models.TaskSession, agentExecutionID string) {
-	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
-			e.logger.Error("failed to start agent process on resume",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", agentExecutionID),
-				zap.Error(err))
-			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), session.ID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
-				e.logger.Warn("failed to mark session as failed after start error on resume",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.Error(updateErr))
-			}
-			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateFailed); updateErr != nil {
-				e.logger.Warn("failed to mark task as failed after start error on resume",
-					zap.String("task_id", taskID),
-					zap.Error(updateErr))
-			}
-			return
-		}
-
+// startAgentProcessOnResume starts the agent process asynchronously after a session resume,
+// syncing the task state (REVIEW or unchanged) on success.
+func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
+	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
 		// Agent resumed successfully - sync task state with session state.
 		if session.State == models.TaskSessionStateWaitingForInput {
-			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateReview); updateErr != nil {
+			if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateReview); updateErr != nil {
 				e.logger.Warn("failed to update task state to REVIEW after resume",
 					zap.String("task_id", taskID),
 					zap.Error(updateErr))
@@ -464,5 +495,5 @@ func (e *Executor) startAgentProcessOnResume(taskID string, session *models.Task
 				zap.String("session_id", session.ID),
 				zap.String("session_state", string(session.State)))
 		}
-	}()
+	})
 }

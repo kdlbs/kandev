@@ -1,4 +1,4 @@
-package scriptengine
+package lifecycle
 
 // DefaultPrepareScript returns the default prepare script for a given executor type string.
 func DefaultPrepareScript(executorType string) string {
@@ -18,22 +18,16 @@ func DefaultPrepareScript(executorType string) string {
 
 const defaultLocalPrepareScript = `#!/bin/bash
 # Prepare local environment
-# This runs directly on your machine in the repository folder
-
-cd {{repository.path}}
-
-# Fetch latest changes from remote
-git fetch --all --prune
+# Runs before launching the local agent runtime.
+# The script executes with working directory set to {{workspace.path}}.
+# Use {{repository.path}} when you need the canonical repository root path.
 `
 
 const defaultWorktreePrepareScript = `#!/bin/bash
 # Prepare worktree environment
-# A git worktree will be created from the base branch
-
-cd {{repository.path}}
-
-# Fetch latest changes before creating worktree
-git fetch --all --prune
+# Runs after the worktree has already been created/reused by Kandev.
+# The script executes with working directory set to {{worktree.path}}.
+# Use {{repository.path}} if you need to run commands in the main repository.
 `
 
 const defaultDockerPrepareScript = `#!/bin/bash
@@ -51,6 +45,9 @@ if ! command -v node &> /dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
   apt-get install -y -qq nodejs > /dev/null 2>&1
 fi
+
+# ---- Git identity (optional) ----
+{{git.identity_setup}}
 
 # ---- Clone repository ----
 git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
@@ -72,6 +69,13 @@ const defaultSpritesPrepareScript = `#!/bin/bash
 #   build-essential, openssh-client, ca-certificates
 
 set -euo pipefail
+
+# ---- Add SSH host keys (prevent "Host key verification failed") ----
+mkdir -p ~/.ssh
+ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
+
+# ---- Git identity ----
+{{git.identity_setup}}
 
 # ---- Clone repository ----
 echo "Cloning {{repository.clone_url}} (branch: {{repository.branch}})..."

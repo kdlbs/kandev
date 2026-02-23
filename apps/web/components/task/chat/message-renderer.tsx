@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, type ReactElement } from "react";
-import type { Message } from "@/lib/types/http";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
@@ -19,6 +19,7 @@ import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subage
 
 type AdapterContext = {
   isTaskDescription: boolean;
+  sessionState?: TaskSessionState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
@@ -155,7 +156,7 @@ const adapters: MessageAdapter[] = [
   {
     matches: () => true,
     render: (comment, ctx) => {
-      if (ctx.isTaskDescription) {
+      if (ctx.isTaskDescription && ctx.sessionState !== "FAILED") {
         return (
           <ChatMessage
             comment={comment}
@@ -195,6 +196,7 @@ const adapters: MessageAdapter[] = [
 type MessageRendererProps = {
   comment: Message;
   isTaskDescription: boolean;
+  sessionState?: TaskSessionState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
@@ -208,6 +210,7 @@ type MessageRendererProps = {
 export const MessageRenderer = memo(function MessageRenderer({
   comment,
   isTaskDescription,
+  sessionState,
   taskId,
   permissionsByToolCallId,
   childrenByParentToolCallId,
@@ -219,6 +222,7 @@ export const MessageRenderer = memo(function MessageRenderer({
 }: MessageRendererProps) {
   const ctx = {
     isTaskDescription,
+    sessionState,
     taskId,
     permissionsByToolCallId,
     childrenByParentToolCallId,

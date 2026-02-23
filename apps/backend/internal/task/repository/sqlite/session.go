@@ -881,8 +881,10 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT task_id, review_status FROM task_sessions
-		WHERE task_id IN (%s) AND is_primary = 1
+		SELECT ts.task_id, ts.review_status, ts.executor_id, e.type, e.name
+		FROM task_sessions ts
+		LEFT JOIN executors e ON e.id = ts.executor_id
+		WHERE ts.task_id IN (%s) AND ts.is_primary = 1
 	`, strings.Join(placeholders, ","))
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -895,7 +897,10 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	for rows.Next() {
 		var taskID string
 		var reviewStatus sql.NullString
-		if err := rows.Scan(&taskID, &reviewStatus); err != nil {
+		var executorID sql.NullString
+		var executorType sql.NullString
+		var executorName sql.NullString
+		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
@@ -903,6 +908,18 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		}
 		if reviewStatus.Valid {
 			session.ReviewStatus = &reviewStatus.String
+		}
+		if executorID.Valid {
+			session.ExecutorID = executorID.String
+		}
+		if executorType.Valid || executorName.Valid {
+			session.ExecutorSnapshot = make(map[string]interface{}, 2)
+			if executorType.Valid {
+				session.ExecutorSnapshot["executor_type"] = executorType.String
+			}
+			if executorName.Valid {
+				session.ExecutorSnapshot["executor_name"] = executorName.String
+			}
 		}
 		result[taskID] = session
 	}

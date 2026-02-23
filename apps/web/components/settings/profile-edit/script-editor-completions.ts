@@ -48,10 +48,13 @@ export function createPlaceholderCompletionProvider(
         : placeholders;
 
       const suggestions: languages.CompletionItem[] = filtered.map((p, i) => ({
-        label: `{{${p.key}}}`,
+        label: {
+          label: `{{${p.key}}}`,
+          description: p.description,
+        },
         kind: monaco.languages.CompletionItemKind.Variable,
         detail: p.description,
-        documentation: `Example: ${p.example}`,
+        documentation: p.example ? `Example: ${p.example}` : undefined,
         insertText: `${p.key}}}`,
         range,
         sortText: String(i).padStart(3, "0"),

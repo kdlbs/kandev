@@ -50,13 +50,17 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 // PrepareTaskSession creates a session entry without launching the agent.
 // This allows the HTTP handler to return the session ID immediately while the agent setup
 // continues in the background. Use StartTaskWithSession to continue with agent launch.
-func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
+// When launchWorkspace is true, workspace infrastructure (agentctl) is launched synchronously
+// so file browsing works immediately. When false, the workspace launch is deferred to
+// StartTaskWithSession (useful for remote executors where provisioning takes 30-60s).
+func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error) {
 	s.logger.Debug("preparing task session",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
-		zap.String("workflow_step_id", workflowStepID))
+		zap.String("workflow_step_id", workflowStepID),
+		zap.Bool("launch_workspace", launchWorkspace))
 
 	// Fetch the task to get workspace info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -76,16 +80,18 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		return "", err
 	}
 
-	// Launch workspace infrastructure (agentctl) without starting the agent subprocess.
-	// This enables file browsing, editing, etc. while the session is in CREATED state.
-	if prepExec, launchErr := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, "", workflowStepID, false); launchErr != nil {
-		s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(launchErr))
-		// Non-fatal: session is still usable, workspace will be launched when agent starts
-	} else if prepExec != nil && prepExec.WorktreeBranch != "" {
-		go s.ensureSessionPRWatch(context.Background(), taskID, prepExec.SessionID, prepExec.WorktreeBranch)
+	if launchWorkspace {
+		// Launch workspace infrastructure (agentctl) without starting the agent subprocess.
+		// This enables file browsing, editing, etc. while the session is in CREATED state.
+		if prepExec, launchErr := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID}); launchErr != nil {
+			s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(launchErr))
+			// Non-fatal: session is still usable, workspace will be launched when agent starts
+		} else if prepExec != nil && prepExec.WorktreeBranch != "" {
+			go s.ensureSessionPRWatch(context.Background(), taskID, prepExec.SessionID, prepExec.WorktreeBranch)
+		}
 	}
 
 	s.logger.Info("task session prepared",
@@ -128,7 +134,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, workflowStepID, planMode)
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, effectivePrompt, workflowStepID, true)
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true})
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +198,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	executorID := session.ExecutorID
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, effectiveProfileID, executorID, effectivePrompt, "", true)
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true})
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +391,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
+	if err != nil || !canResumeRunning(running) {
 		return nil, fmt.Errorf("session is not resumable")
 	}
 	if err := validateSessionWorktrees(session); err != nil {
@@ -398,6 +404,12 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
 	if err != nil {
 		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		if stateErr := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed); stateErr != nil {
+			s.logger.Warn("failed to update task state to FAILED after resume error",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(stateErr))
+		}
 		return nil, err
 	}
 	// Preserve persisted task/session state; resume should not mutate state/columns.
@@ -508,7 +520,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		zap.String("session_state", string(session.State)))
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil || running.ResumeToken == "" || !running.Resumable {
+	if err != nil || !canResumeRunning(running) {
 		return fmt.Errorf("session is not resumable (state: %s)", session.State)
 	}
 
@@ -520,6 +532,12 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		_ = s.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, err.Error())
+		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
+			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
+				zap.String("task_id", session.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(stateErr))
+		}
 		return fmt.Errorf("failed to resume session: %w", err)
 	}
 
@@ -552,6 +570,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	resp.State = string(session.State)
 	resp.AgentProfileID = session.AgentProfileID
+	s.populateExecutorStatusInfo(ctx, session, &resp)
 
 	// Extract resume token from executor runtime state.
 	resumeToken := s.populateResumeInfo(ctx, sessionID, &resp)
@@ -586,10 +605,57 @@ func (s *Service) populateResumeInfo(ctx context.Context, sessionID string, resp
 		return ""
 	}
 	resp.ACPSessionID = running.ResumeToken
+	resp.Runtime = running.Runtime
 	if running.Resumable {
 		resp.IsResumable = true
 	}
+	s.applyRemoteRuntimeStatus(ctx, sessionID, resp)
 	return running.ResumeToken
+}
+
+func (s *Service) populateExecutorStatusInfo(ctx context.Context, session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
+	if session == nil || resp == nil {
+		return
+	}
+	resp.ExecutorID = session.ExecutorID
+	if session.ExecutorID == "" {
+		return
+	}
+	execModel, err := s.repo.GetExecutor(ctx, session.ExecutorID)
+	if err != nil || execModel == nil {
+		return
+	}
+	resp.ExecutorType = string(execModel.Type)
+	resp.ExecutorName = execModel.Name
+	resp.IsRemoteExecutor = isRemoteExecutorType(execModel.Type)
+}
+
+func isRemoteExecutorType(t models.ExecutorType) bool {
+	return t == models.ExecutorTypeSprites || t == models.ExecutorTypeRemoteDocker
+}
+
+func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string, resp *dto.TaskSessionStatusResponse) {
+	if s.agentManager == nil || resp == nil || !resp.IsRemoteExecutor {
+		return
+	}
+	status, err := s.agentManager.GetRemoteRuntimeStatusBySession(ctx, sessionID)
+	if err != nil || status == nil {
+		return
+	}
+	if status.RuntimeName != "" {
+		resp.Runtime = status.RuntimeName
+	}
+	resp.RemoteState = status.State
+	resp.RemoteName = status.RemoteName
+	if status.ErrorMessage != "" {
+		resp.RemoteStatusErr = status.ErrorMessage
+	}
+	if status.CreatedAt != nil && !status.CreatedAt.IsZero() {
+		resp.RemoteCreatedAt = status.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !status.LastCheckedAt.IsZero() {
+		resp.RemoteCheckedAt = status.LastCheckedAt.UTC().Format(time.RFC3339)
+	}
 }
 
 // populateWorktreeInfo copies worktree path and branch into the response if present.
@@ -662,6 +728,15 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	return s.executor.Stop(ctx, sessionID, reason, force)
+}
+
+// StopExecution stops agent execution for a specific execution ID.
+func (s *Service) StopExecution(ctx context.Context, executionID string, reason string, force bool) error {
+	s.logger.Info("stopping execution",
+		zap.String("execution_id", executionID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	return s.executor.StopExecution(ctx, executionID, reason, force)
 }
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.

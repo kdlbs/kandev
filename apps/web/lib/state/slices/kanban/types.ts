@@ -30,6 +30,10 @@ export type KanbanState = {
     primarySessionId?: string | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
+    primaryExecutorId?: string | null;
+    primaryExecutorType?: string | null;
+    primaryExecutorName?: string | null;
+    isRemoteExecutor?: boolean;
     updatedAt?: string;
   }>;
   isLoading?: boolean;

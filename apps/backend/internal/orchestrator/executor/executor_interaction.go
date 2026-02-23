@@ -29,7 +29,7 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	err = e.agentManager.StopAgent(ctx, session.AgentExecutionID, force)
+	err = e.agentManager.StopAgentWithReason(ctx, session.AgentExecutionID, reason, force)
 	if err != nil {
 		// Log the error but continue to clean up execution state
 		// The agent instance may already be gone (container stopped externally)
@@ -45,6 +45,24 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 			zap.Error(dbErr))
 	}
 
+	return nil
+}
+
+// StopExecution stops a running execution by execution ID.
+func (e *Executor) StopExecution(ctx context.Context, executionID string, reason string, force bool) error {
+	if executionID == "" {
+		return ErrExecutionNotFound
+	}
+	e.logger.Info("stopping execution by execution id",
+		zap.String("agent_execution_id", executionID),
+		zap.String("reason", reason),
+		zap.Bool("force", force))
+	if err := e.agentManager.StopAgentWithReason(ctx, executionID, reason, force); err != nil {
+		e.logger.Warn("failed to stop agent by execution id",
+			zap.String("agent_execution_id", executionID),
+			zap.Error(err))
+		return ErrExecutionNotFound
+	}
 	return nil
 }
 
@@ -137,7 +155,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		return nil, err
 	}
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
+	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	e.logger.Info("launching new agent with model override",
 		zap.String("task_id", task.ID),

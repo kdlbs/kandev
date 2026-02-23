@@ -61,6 +61,7 @@ func (a *testAgent) Runtime() *agents.RuntimeConfig {
 		ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 	}
 }
+func (a *testAgent) RemoteAuth() *agents.RemoteAuth { return nil }
 
 var (
 	_ agents.Agent            = (*testAgent)(nil)

@@ -15,6 +15,16 @@ export type SessionStatus = {
   acp_session_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  executor_id?: string;
+  executor_type?: string;
+  executor_name?: string;
+  runtime?: string;
+  is_remote_executor?: boolean;
+  remote_state?: string;
+  remote_name?: string;
+  remote_created_at?: string;
+  remote_checked_at?: string;
+  remote_status_error?: string;
   error?: string;
 };
 
@@ -164,6 +174,7 @@ export function useSessionResumption(
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const hasAttemptedResume = useRef(false);
+  const remoteStatusRetryCount = useRef(0);
 
   const setters: ResumeStateSetter = {
     setResumptionState,
@@ -175,6 +186,7 @@ export function useSessionResumption(
 
   useEffect(() => {
     hasAttemptedResume.current = false;
+    remoteStatusRetryCount.current = 0;
   }, [sessionId, taskId]);
 
   // Check session status and auto-resume if needed
@@ -184,6 +196,32 @@ export function useSessionResumption(
     hasAttemptedResume.current = true;
     checkAndResume({ taskId, sessionId, session, setSessionStatus, setters });
   }, [taskId, sessionId, connectionStatus, setTaskSession, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Freshly created remote sessions may return status before runtime metadata is available.
+  // Retry a few times so topbar/tooltips can show remote details without manual refresh.
+  useEffect(() => {
+    if (!taskId || !sessionId || connectionStatus !== "connected") return;
+    if (!sessionStatus?.is_remote_executor) return;
+    if (sessionStatus.remote_checked_at || sessionStatus.remote_status_error) return;
+    if (remoteStatusRetryCount.current >= 3) return;
+
+    const timer = window.setTimeout(async () => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      remoteStatusRetryCount.current += 1;
+      try {
+        const nextStatus = await client.request<SessionStatus>("task.session.status", {
+          task_id: taskId,
+          session_id: sessionId,
+        });
+        setSessionStatus(nextStatus);
+      } catch {
+        // Best-effort refresh only.
+      }
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [taskId, sessionId, connectionStatus, sessionStatus]);
 
   // Manual resume function
   const resumeSession = useCallback(async (): Promise<boolean> => {

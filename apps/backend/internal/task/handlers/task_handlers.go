@@ -34,7 +34,10 @@ type OrchestratorStarter interface {
 	// StartTask starts agent execution for a task.
 	StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 	// PrepareTaskSession creates a session entry without launching the agent.
-	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error)
+	// When launchWorkspace is true, the workspace infrastructure (agentctl) is launched
+	// synchronously so file browsing works immediately. When false, the workspace launch
+	// is deferred to StartTaskWithSession (useful for remote executors where provisioning is slow).
+	PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error)
 	// StartTaskWithSession starts agent execution for a task using a pre-created session.
 	StartTaskWithSession(ctx context.Context, taskID string, sessionID string, agentProfileID string, executorID string, executorProfileID string, priority int, prompt string, workflowStepID string, planMode bool) (*executor.TaskExecution, error)
 }

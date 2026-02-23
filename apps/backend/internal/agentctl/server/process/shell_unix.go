@@ -2,19 +2,35 @@
 
 package process
 
-import "os"
+import (
+	"os"
+	"os/exec"
+	"strings"
+)
 
 // defaultShellCommand returns the command and args for starting an interactive login shell.
 // On Unix, uses $SHELL (or /bin/sh) with the -l (login) flag.
 func defaultShellCommand(preferredShell string) []string {
-	shell := preferredShell
+	shell := resolveShellPath(preferredShell)
 	if shell == "" {
-		shell = os.Getenv("SHELL")
+		shell = resolveShellPath(os.Getenv("SHELL"))
 	}
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 	return []string{shell, "-l"}
+}
+
+func resolveShellPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	path, err := exec.LookPath(value)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // shellExecArgs returns the program and arguments needed to execute a command

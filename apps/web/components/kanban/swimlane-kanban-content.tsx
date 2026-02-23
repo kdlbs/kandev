@@ -30,6 +30,7 @@ export type SwimlaneKanbanContentProps = {
   onMoveError?: (error: MoveTaskError) => void;
   onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   deletingTaskId?: string | null;
+  showMaximizeButton?: boolean;
 };
 
 async function handleWorkflowAutoStart(
@@ -178,6 +179,7 @@ export function SwimlaneKanbanContent({
   onMoveError,
   onWorkflowAutomation,
   deletingTaskId,
+  showMaximizeButton,
 }: SwimlaneKanbanContentProps) {
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onWorkflowAutomation, onMoveError });
@@ -214,6 +216,7 @@ export function SwimlaneKanbanContent({
               onMoveTask={moveTaskToStep}
               steps={steps}
               deletingTaskId={deletingTaskId}
+              showMaximizeButton={showMaximizeButton}
             />
           ))}
         </div>

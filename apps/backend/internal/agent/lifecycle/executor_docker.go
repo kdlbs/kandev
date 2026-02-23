@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,6 +24,20 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+func getMetadataBool(metadata map[string]interface{}, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	switch raw := metadata[key].(type) {
+	case bool:
+		return raw
+	case string:
+		return strings.EqualFold(strings.TrimSpace(raw), "true")
+	default:
+		return false
+	}
 }
 
 // DockerExecutor implements Runtime for Docker-based agent execution.

@@ -11,6 +11,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.new_state) update.state = payload.new_state;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.workflow_step_id !== undefined) update.workflow_step_id = payload.workflow_step_id;
+  if (payload.error_message !== undefined) update.error_message = payload.error_message;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;

@@ -30,33 +30,69 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
       <div className="min-w-0 flex-1">
         <span className="text-muted-foreground">{step.name || "Preparing..."}</span>
         {step.output && (
-          <div className="text-muted-foreground/60 mt-0.5 truncate">{step.output}</div>
+          <pre className="text-muted-foreground/60 mt-0.5 overflow-x-auto whitespace-pre text-xs">
+            {step.output}
+          </pre>
         )}
-        {step.error && <div className="text-destructive mt-0.5 truncate">{step.error}</div>}
+        {step.error && (
+          <pre className="text-destructive mt-0.5 overflow-x-auto whitespace-pre text-xs">
+            {step.error}
+          </pre>
+        )}
       </div>
     </div>
   );
 }
 
-export function PrepareProgress({ sessionId }: PrepareProgressProps) {
+function useEffectivePrepareStatus(sessionId: string) {
   const prepareState = useAppStore((state) => state.prepareProgress.bySessionId[sessionId] ?? null);
+  const sessionState = useAppStore((state) => state.taskSessions.items[sessionId]?.state);
+  const profileLabel = useAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    if (!session?.agent_profile_id) return null;
+    const profile = state.agentProfiles.items.find((p) => p.id === session.agent_profile_id);
+    return profile?.label ?? null;
+  });
 
-  if (!prepareState || prepareState.status === "completed") return null;
+  if (!prepareState)
+    return { visible: false, status: "preparing", prepareState, profileLabel } as const;
+  if (prepareState.status === "completed")
+    return { visible: false, status: "completed", prepareState, profileLabel } as const;
+
+  // If session reached a terminal state but prepare status is still "preparing",
+  // treat it as failed (the completed event may not have arrived)
+  const isSessionTerminal =
+    sessionState === "FAILED" || sessionState === "COMPLETED" || sessionState === "CANCELLED";
+  const status =
+    prepareState.status === "preparing" && isSessionTerminal ? "failed" : prepareState.status;
+
+  return { visible: true, status, prepareState, profileLabel } as const;
+}
+
+export function PrepareProgress({ sessionId }: PrepareProgressProps) {
+  const { visible, status, prepareState, profileLabel } = useEffectivePrepareStatus(sessionId);
+
+  if (!visible || !prepareState) return null;
+  const visibleSteps = prepareState.steps.filter(
+    (step) => step.name.trim() !== "" || Boolean(step.output) || Boolean(step.error),
+  );
 
   return (
     <div className="px-3 py-2 space-y-1.5 border-b border-border/50">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        {prepareState.status === "preparing" && <IconLoader2 className="h-3 w-3 animate-spin" />}
-        {prepareState.status === "failed" && <IconX className="h-3 w-3 text-destructive" />}
+        {status === "preparing" && <IconLoader2 className="h-3 w-3 animate-spin" />}
+        {status === "failed" && <IconX className="h-3 w-3 text-destructive" />}
         <span>
-          {prepareState.status === "preparing" && "Preparing environment..."}
-          {prepareState.status === "failed" &&
-            (prepareState.errorMessage ?? "Environment preparation failed")}
+          {status === "preparing" && "Preparing environment..."}
+          {status === "failed" && (prepareState.errorMessage ?? "Environment preparation failed")}
         </span>
+        {profileLabel && (
+          <span className="text-muted-foreground/50 ml-auto font-normal">{profileLabel}</span>
+        )}
       </div>
-      {prepareState.steps.length > 0 && (
+      {visibleSteps.length > 0 && (
         <div className="space-y-1 pl-1">
-          {prepareState.steps.map((step, i) => (
+          {visibleSteps.map((step, i) => (
             <StepRow key={i} step={step} />
           ))}
         </div>

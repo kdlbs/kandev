@@ -101,6 +101,26 @@ func (a *Codex) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *Codex) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:  "files",
+				Label: "Copy auth files",
+				SourceFiles: map[string][]string{
+					"darwin": {".codex/auth.json", ".codex/config.toml"},
+					"linux":  {".codex/auth.json", ".codex/config.toml"},
+				},
+				TargetRelDir: ".codex",
+			},
+			{
+				Type:   "env",
+				EnvVar: "OPENAI_API_KEY",
+			},
+		},
+	}
+}
+
 func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 	return codexPermSettings
 }

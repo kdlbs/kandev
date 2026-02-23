@@ -81,6 +81,8 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *MockAgent) RemoteAuth() *RemoteAuth { return nil }
+
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
 	return mockPermSettings
 }

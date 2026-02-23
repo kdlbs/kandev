@@ -43,6 +43,11 @@ type Agent interface {
 
 	// --- Runtime ---
 	Runtime() *RuntimeConfig
+
+	// --- Remote Auth ---
+	// RemoteAuth returns the auth methods this agent supports in remote environments.
+	// Returns nil if the agent has no remote auth configuration.
+	RemoteAuth() *RemoteAuth
 }
 
 // InferenceAgent is an optional capability for agents that support direct LLM inference.
@@ -222,6 +227,28 @@ type InferenceResponse struct {
 	Model        string
 	TokensUsed   int
 	FinishReason string
+}
+
+// RemoteAuth describes all auth methods an agent supports for remote environments.
+type RemoteAuth struct {
+	Methods []RemoteAuthMethod `json:"methods"`
+}
+
+// RemoteAuthMethod describes one way an agent can authenticate in a remote environment.
+type RemoteAuthMethod struct {
+	// Type is "env" (set env var via secret) or "files" (copy local files to remote).
+	Type string `json:"type"`
+	// EnvVar is the environment variable name (for type="env").
+	EnvVar string `json:"env_var,omitempty"`
+	// SetupHint is a UI hint for the user (for type="env").
+	SetupHint string `json:"setup_hint,omitempty"`
+	// SourceFiles maps OS name to relative paths from home dir (for type="files").
+	// Keys: "darwin", "linux", "windows".
+	SourceFiles map[string][]string `json:"source_files,omitempty"`
+	// TargetRelDir is the target directory relative to the remote user home (for type="files").
+	TargetRelDir string `json:"target_rel_dir,omitempty"`
+	// Label is a UI label for the file copy option (for type="files").
+	Label string `json:"label,omitempty"`
 }
 
 // Command is a domain value type representing a CLI command with arguments.

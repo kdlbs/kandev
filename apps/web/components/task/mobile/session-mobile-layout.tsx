@@ -12,6 +12,10 @@ import { ShellTerminal } from "../shell-terminal";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
+import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+
+const TOP_NAV_HEIGHT = "3.5rem";
+const BOTTOM_NAV_HEIGHT = "3.25rem";
 
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
@@ -20,6 +24,13 @@ type SessionMobileLayoutProps = {
   baseBranch?: string;
   worktreeBranch?: string | null;
   taskTitle?: string;
+  isRemoteExecutor?: boolean;
+  remoteExecutorType?: string | null;
+  remoteExecutorName?: string | null;
+  remoteState?: string | null;
+  remoteCreatedAt?: string | null;
+  remoteCheckedAt?: string | null;
+  remoteStatusError?: string | null;
 };
 
 function MobileChatPanelContent({
@@ -53,7 +64,7 @@ function MobileChatPanelContent({
 }
 
 type MobilePanelAreaProps = {
-  currentMobilePanel: string;
+  currentMobilePanel: MobileSessionPanel;
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
@@ -134,34 +145,13 @@ function MobilePanelArea({
   );
 }
 
-export const SessionMobileLayout = memo(function SessionMobileLayout({
-  workspaceId,
-  workflowId,
-  sessionId,
-  baseBranch,
-  worktreeBranch,
-  taskTitle,
-}: SessionMobileLayoutProps) {
-  // Use shared layout state hook
-  const {
-    activeTaskId,
-    effectiveSessionId,
-    isPassthroughMode,
-    selectedDiff,
-    handleSelectDiff,
-    handleClearSelectedDiff,
-    totalChangesCount,
-    hasUnseenPlanUpdate,
-    showApproveButton,
-    handleApprove,
-    currentMobilePanel,
-    handlePanelChange,
-    isTaskSwitcherOpen,
-    handleMenuClick,
-    setMobileSessionTaskSwitcherOpen,
-  } = useSessionLayoutState({ sessionId });
-
-  // Mobile-specific handlers that also switch panels
+function useMobilePanelHandlers({
+  handleSelectDiff,
+  handlePanelChange,
+}: {
+  handleSelectDiff: (path: string, content?: string) => void;
+  handlePanelChange: (panel: MobileSessionPanel) => void;
+}) {
   const handleSelectDiffAndSwitchPanel = useCallback(
     (path: string, content?: string) => {
       handleSelectDiff(path, content);
@@ -186,9 +176,48 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
     [handleSelectDiff, handlePanelChange],
   );
 
-  // Top nav height (~56px) + bottom nav height (~52px)
-  const topNavHeight = "3.5rem";
-  const bottomNavHeight = "3.25rem";
+  return { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile };
+}
+
+export const SessionMobileLayout = memo(function SessionMobileLayout({
+  workspaceId,
+  workflowId,
+  sessionId,
+  baseBranch,
+  worktreeBranch,
+  taskTitle,
+  isRemoteExecutor,
+  remoteExecutorType,
+  remoteExecutorName,
+  remoteState,
+  remoteCreatedAt,
+  remoteCheckedAt,
+  remoteStatusError,
+}: SessionMobileLayoutProps) {
+  // Use shared layout state hook
+  const {
+    activeTaskId,
+    effectiveSessionId,
+    isPassthroughMode,
+    selectedDiff,
+    handleSelectDiff,
+    handleClearSelectedDiff,
+    totalChangesCount,
+    hasUnseenPlanUpdate,
+    showApproveButton,
+    handleApprove,
+    currentMobilePanel,
+    handlePanelChange,
+    isTaskSwitcherOpen,
+    handleMenuClick,
+    setMobileSessionTaskSwitcherOpen,
+  } = useSessionLayoutState({ sessionId });
+
+  const { handleSelectDiffAndSwitchPanel, handleOpenFileFromChat, handleOpenFile } =
+    useMobilePanelHandlers({
+      handleSelectDiff,
+      handlePanelChange,
+    });
 
   return (
     <div className="h-dvh relative bg-background">
@@ -205,6 +234,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
           onMenuClick={handleMenuClick}
           showApproveButton={showApproveButton}
           onApprove={handleApprove}
+          isRemoteExecutor={isRemoteExecutor}
+          remoteExecutorType={remoteExecutorType}
+          remoteExecutorName={remoteExecutorName}
+          remoteState={remoteState}
+          remoteCreatedAt={remoteCreatedAt}
+          remoteCheckedAt={remoteCheckedAt}
+          remoteStatusError={remoteStatusError}
         />
       </div>
 
@@ -220,8 +256,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleSelectDiffAndSwitchPanel={handleSelectDiffAndSwitchPanel}
         handleOpenFile={handleOpenFile}
-        topNavHeight={topNavHeight}
-        bottomNavHeight={bottomNavHeight}
+        topNavHeight={TOP_NAV_HEIGHT}
+        bottomNavHeight={BOTTOM_NAV_HEIGHT}
       />
 
       {/* Fixed Bottom Navigation */}

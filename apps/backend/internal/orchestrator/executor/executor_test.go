@@ -48,6 +48,10 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 	return nil
 }
 
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID string, reason string, force bool) error {
+	return m.StopAgent(ctx, agentExecutionID, force)
+}
+
 func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*PromptResult, error) {
 	return nil, nil
 }
@@ -66,6 +70,10 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
+}
+
+func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error) {
+	return nil, nil
 }
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
@@ -668,7 +676,7 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "", true)
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
@@ -708,7 +716,7 @@ func TestLaunchPreparedSession_SessionNotBelongsToTask(t *testing.T) {
 		WorkspaceID: "workspace-123",
 	}
 
-	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "test prompt", "", true)
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
 	if err == nil {
 		t.Error("Expected error when session doesn't belong to task")
 	}
@@ -755,7 +763,7 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 	}
 
 	// startAgent=false: should launch workspace but NOT start agent
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "", "", false)
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession(startAgent=false) failed: %v", err)
 	}
@@ -821,7 +829,7 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 		Title:       "Test Task",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", "profile-123", "", "build the feature", "", true)
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "build the feature", StartAgent: true})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession(existing workspace) failed: %v", err)
 	}
@@ -908,6 +916,51 @@ func TestShouldUseWorktree(t *testing.T) {
 			t.Errorf("shouldUseWorktree(%q) = %v, want %v", tt.executorType, got, tt.want)
 		}
 	}
+}
+
+func TestShouldApplyPreferredShell(t *testing.T) {
+	tests := []struct {
+		executorType string
+		want         bool
+	}{
+		{"local", true},
+		{"worktree", true},
+		{"local_docker", false},
+		{"remote_docker", false},
+		{"sprites", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := shouldApplyPreferredShell(tt.executorType); got != tt.want {
+			t.Errorf("shouldApplyPreferredShell(%q) = %v, want %v", tt.executorType, got, tt.want)
+		}
+	}
+}
+
+func TestApplyPreferredShellEnv(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	t.Run("local executor injects shell env", func(t *testing.T) {
+		got := executor.applyPreferredShellEnv(context.Background(), string(models.ExecutorTypeLocal), map[string]string{})
+		if got["AGENTCTL_SHELL_COMMAND"] != "/bin/bash" {
+			t.Fatalf("expected AGENTCTL_SHELL_COMMAND=/bin/bash, got %q", got["AGENTCTL_SHELL_COMMAND"])
+		}
+		if got["SHELL"] != "/bin/bash" {
+			t.Fatalf("expected SHELL=/bin/bash, got %q", got["SHELL"])
+		}
+	})
+
+	t.Run("sprites executor does not inject shell env", func(t *testing.T) {
+		got := executor.applyPreferredShellEnv(context.Background(), string(models.ExecutorTypeSprites), map[string]string{})
+		if _, ok := got["AGENTCTL_SHELL_COMMAND"]; ok {
+			t.Fatal("did not expect AGENTCTL_SHELL_COMMAND for sprites executor")
+		}
+		if _, ok := got["SHELL"]; ok {
+			t.Fatal("did not expect SHELL for sprites executor")
+		}
+	})
 }
 
 func TestRepositoryCloneURL(t *testing.T) {

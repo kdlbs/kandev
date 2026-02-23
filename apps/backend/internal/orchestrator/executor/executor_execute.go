@@ -8,30 +8,34 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
 
-// startAgentProcessAsync starts the agent subprocess in a background goroutine.
-// On success it transitions the task to IN_PROGRESS; on failure it marks both the
-// session and task as FAILED.
-func (e *Executor) startAgentProcessAsync(taskID, sessionID, agentExecutionID string) {
+// runAgentProcessAsync starts the agent subprocess in a background goroutine.
+// On error it marks both the session and task as FAILED.
+// On success it calls onSuccess with a non-cancellable context derived from ctx.
+// ctx is used with WithoutCancel so trace spans are preserved without inheriting cancellation.
+func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context)) {
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
+		updateCtx := context.WithoutCancel(ctx)
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
 			e.logger.Error("failed to start agent process",
 				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.String("agent_execution_id", agentExecutionID),
 				zap.Error(err))
-			if updateErr := e.repo.UpdateTaskSessionState(context.Background(), sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
+			if updateErr := e.updateSessionState(updateCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
 				e.logger.Warn("failed to mark session as failed after start error",
 					zap.String("session_id", sessionID),
 					zap.Error(updateErr))
 			}
-			if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateFailed); updateErr != nil {
+			if updateErr := e.updateTaskState(updateCtx, taskID, v1.TaskStateFailed); updateErr != nil {
 				e.logger.Warn("failed to mark task as failed after start error",
 					zap.String("task_id", taskID),
 					zap.Error(updateErr))
@@ -39,12 +43,19 @@ func (e *Executor) startAgentProcessAsync(taskID, sessionID, agentExecutionID st
 			return
 		}
 
-		if updateErr := e.updateTaskState(context.Background(), taskID, v1.TaskStateInProgress); updateErr != nil {
+		onSuccess(updateCtx)
+	}()
+}
+
+// startAgentProcessAsync starts the agent subprocess and transitions the task to IN_PROGRESS on success.
+func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
+	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
+		if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateInProgress); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
 		}
-	}()
+	})
 }
 
 // updateTaskState updates a task's state, using the callback if set for event publishing,
@@ -56,9 +67,27 @@ func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.
 	return e.repo.UpdateTaskState(ctx, taskID, state)
 }
 
+// updateSessionState updates a session's state, using the callback if set for event publishing,
+// or falling back to the raw repository.
+func (e *Executor) updateSessionState(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+	if e.onSessionStateChange != nil {
+		return e.onSessionStateChange(ctx, taskID, sessionID, state, errorMessage)
+	}
+	return e.repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+}
+
 // shouldUseWorktree returns true if the given executor type should use Git worktrees.
 func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
+}
+
+func shouldApplyPreferredShell(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
+		return true
+	default:
+		return false
+	}
 }
 
 // repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
@@ -90,7 +119,10 @@ func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
 	return val.(*sync.Mutex)
 }
 
-func (e *Executor) applyPreferredShellEnv(ctx context.Context, env map[string]string) map[string]string {
+func (e *Executor) applyPreferredShellEnv(ctx context.Context, executorType string, env map[string]string) map[string]string {
+	if !shouldApplyPreferredShell(executorType) {
+		return env
+	}
 	if e.shellPrefs == nil {
 		return env
 	}
@@ -133,7 +165,13 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 	}
 
 	// Launch the agent for the prepared session
-	return e.LaunchPreparedSession(ctx, task, sessionID, agentProfileID, executorID, prompt, workflowStepID, true)
+	return e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
+		AgentProfileID: agentProfileID,
+		ExecutorID:     executorID,
+		Prompt:         prompt,
+		WorkflowStepID: workflowStepID,
+		StartAgent:     true,
+	})
 }
 
 // PrepareSession creates a session entry in the database without launching the agent.
@@ -246,11 +284,15 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 
 // LaunchPreparedSession launches the workspace (and optionally the agent) for a pre-created session.
 // The session must have been created using PrepareSession.
-// When startAgent is false, only the workspace infrastructure (agentctl) is launched; the agent
+// When opts.StartAgent is false, only the workspace infrastructure (agentctl) is launched; the agent
 // subprocess is not started and the session state remains CREATED.
-// When startAgent is true and the workspace was already launched (AgentExecutionID set), only the
+// When opts.StartAgent is true and the workspace was already launched (AgentExecutionID set), only the
 // agent subprocess is started.
-func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, agentProfileID string, executorID string, prompt string, workflowStepID string, startAgent bool) (*TaskExecution, error) {
+func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
+	agentProfileID := opts.AgentProfileID
+	executorID := opts.ExecutorID
+	prompt := opts.Prompt
+	startAgent := opts.StartAgent
 	// Fetch the session to get its configuration
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -287,7 +329,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		zap.String("executor_type", req.ExecutorType),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.Env)
+	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -303,7 +345,7 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),
 		zap.Error(launchErr))
-	if updateErr := e.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
+	if updateErr := e.updateSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
@@ -339,7 +381,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	}
 
 	if startAgent {
-		e.startAgentProcessAsync(task.ID, sessionID, resp.AgentExecutionID)
+		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
 	}
 
 	e.logger.Info("agent launched for prepared session",
@@ -393,6 +435,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.BaseBranch = repoInfo.BaseBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
+			if metadata == nil {
+				metadata = make(map[string]interface{})
+			}
+			metadata[lifecycle.MetadataKeyRepoSetupScript] = repoInfo.Repository.SetupScript
+		}
 	}
 
 	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
@@ -461,7 +509,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 
 	// Start the agent process asynchronously
-	e.startAgentProcessAsync(task.ID, session.ID, session.AgentExecutionID)
+	e.startAgentProcessAsync(ctx, task.ID, session.ID, session.AgentExecutionID)
 
 	e.logger.Info("agent starting on existing workspace",
 		zap.String("task_id", task.ID),

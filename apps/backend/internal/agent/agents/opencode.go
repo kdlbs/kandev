@@ -112,6 +112,8 @@ func (a *OpenCode) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *OpenCode) RemoteAuth() *RemoteAuth { return nil }
+
 func (a *OpenCode) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings
 }

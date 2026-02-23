@@ -104,10 +104,35 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			sessionCount = &count
 		}
 		var reviewStatus *string
+		var primaryExecutorID *string
+		var primaryExecutorType *string
+		var primaryExecutorName *string
 		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
 			reviewStatus = sessionInfo.ReviewStatus
+			if sessionInfo.ExecutorID != "" {
+				val := sessionInfo.ExecutorID
+				primaryExecutorID = &val
+			}
+			if sessionInfo.ExecutorSnapshot != nil {
+				if execType, ok := sessionInfo.ExecutorSnapshot["executor_type"].(string); ok && execType != "" {
+					val := execType
+					primaryExecutorType = &val
+				}
+				if execName, ok := sessionInfo.ExecutorSnapshot["executor_name"].(string); ok && execName != "" {
+					val := execName
+					primaryExecutorName = &val
+				}
+			}
 		}
-		result = append(result, dto.FromTaskWithSessionInfo(task, primarySessionID, sessionCount, reviewStatus))
+		result = append(result, dto.FromTaskWithSessionInfo(
+			task,
+			primarySessionID,
+			sessionCount,
+			reviewStatus,
+			primaryExecutorID,
+			primaryExecutorType,
+			primaryExecutorName,
+		))
 	}
 	return result, nil
 }
@@ -360,7 +385,8 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 	if body.PrepareSession && !body.StartAgent {
 		// Create session entry without launching the agent.
 		// The session stays in CREATED state until the user triggers it.
-		sessionID, err := h.orchestrator.PrepareTaskSession(c.Request.Context(), taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID)
+		// Launch workspace so file browsing works immediately.
+		sessionID, err := h.orchestrator.PrepareTaskSession(c.Request.Context(), taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID, true)
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
@@ -381,8 +407,10 @@ func (h *TaskHandlers) startAgentForNewTask(
 	body httpCreateTaskRequest,
 	resolvedStepID string,
 ) {
-	// Create session entry synchronously so we can return the session ID immediately
-	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID)
+	// Create session entry synchronously so we can return the session ID immediately.
+	// Skip workspace launch — StartTaskWithSession will handle it in the background goroutine.
+	// This prevents blocking for 30-60s on remote executors (sprites, remote_docker).
+	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID, false)
 	if err != nil {
 		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		// Continue without session - task was created successfully

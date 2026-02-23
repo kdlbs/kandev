@@ -15,6 +15,37 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.
   ),
 });
 
+// Module-level singleton: only one completion provider registered for "shell" at a time.
+let globalDisposable: { dispose: () => void } | null = null;
+let registeredInstanceCount = 0;
+
+function registerProvider(
+  monaco: typeof import("monaco-editor"),
+  language: string,
+  placeholders: ScriptPlaceholder[],
+  executorType?: string,
+) {
+  // Always dispose previous to avoid duplicates, then re-register with latest data
+  globalDisposable?.dispose();
+  import("./script-editor-completions").then(({ createPlaceholderCompletionProvider }) => {
+    globalDisposable?.dispose();
+    globalDisposable = monaco.languages.registerCompletionItemProvider(
+      language,
+      createPlaceholderCompletionProvider(monaco, placeholders, executorType),
+    );
+  });
+  registeredInstanceCount++;
+}
+
+function unregisterProvider() {
+  registeredInstanceCount--;
+  if (registeredInstanceCount <= 0) {
+    globalDisposable?.dispose();
+    globalDisposable = null;
+    registeredInstanceCount = 0;
+  }
+}
+
 type ScriptEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -36,12 +67,14 @@ export function ScriptEditor({
   readOnly = false,
   lineNumbers = "on",
 }: ScriptEditorProps) {
-  const disposableRef = useRef<{ dispose: () => void } | null>(null);
+  const mountedRef = useRef(false);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      disposableRef.current?.dispose();
+      if (mountedRef.current) {
+        unregisterProvider();
+        mountedRef.current = false;
+      }
     };
   }, []);
 
@@ -50,19 +83,11 @@ export function ScriptEditor({
   }, []);
 
   const handleMount: OnMount = useCallback(
-    (editor, monaco) => {
-      // Register placeholder completions if provided
+    (_editor, monaco) => {
       if (placeholders && placeholders.length > 0) {
-        import("./script-editor-completions").then(({ createPlaceholderCompletionProvider }) => {
-          disposableRef.current?.dispose();
-          disposableRef.current = monaco.languages.registerCompletionItemProvider(
-            language,
-            createPlaceholderCompletionProvider(monaco, placeholders, executorType),
-          );
-        });
+        mountedRef.current = true;
+        registerProvider(monaco, language, placeholders, executorType);
       }
-
-      // Do not auto-focus — prevents unwanted scroll-to-editor on page load
     },
     [placeholders, executorType, language],
   );
@@ -87,6 +112,7 @@ export function ScriptEditor({
         padding: { top: 8, bottom: 8 },
         renderLineHighlight: "none",
         overviewRulerLanes: 0,
+        wordBasedSuggestions: "off",
         scrollbar: {
           vertical: "auto",
           horizontal: "auto",

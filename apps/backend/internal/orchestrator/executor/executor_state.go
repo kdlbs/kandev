@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -95,12 +96,13 @@ func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) st
 
 // executorConfig holds resolved executor configuration.
 type executorConfig struct {
-	ExecutorID   string
-	ExecutorType string
-	ExecutorCfg  map[string]string // The executor record's Config map (docker_host, etc.)
-	Metadata     map[string]interface{}
-	SetupScript  string            // Setup script from profile
-	ProfileEnv   map[string]string // Resolved env vars from profile (secrets decrypted)
+	ExecutorID    string
+	ExecutorType  string
+	ExecutorCfg   map[string]string // The executor record's Config map (docker_host, etc.)
+	Metadata      map[string]interface{}
+	SetupScript   string            // Setup script from profile
+	CleanupScript string            // Cleanup script from profile (terminal teardown)
+	ProfileEnv    map[string]string // Resolved env vars from profile (secrets decrypted)
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
@@ -160,12 +162,31 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 		return
 	}
 	cfg.SetupScript = profile.PrepareScript
+	cfg.CleanupScript = profile.CleanupScript
 	cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	if profile.CleanupScript != "" {
+		metadata[lifecycle.MetadataKeyCleanupScript] = profile.CleanupScript
+	}
 	if policyJSON := strings.TrimSpace(profile.McpPolicy); policyJSON != "" {
 		metadata["executor_mcp_policy"] = policyJSON
 	}
 	if rulesJSON := profile.Config["sprites_network_policy_rules"]; rulesJSON != "" {
 		metadata["sprites_network_policy_rules"] = rulesJSON
+	}
+	if credJSON := profile.Config["remote_credentials"]; credJSON != "" {
+		metadata["remote_credentials"] = credJSON
+	}
+	if authSecretsJSON := profile.Config["remote_auth_secrets"]; authSecretsJSON != "" {
+		metadata["remote_auth_secrets"] = authSecretsJSON
+	}
+	if remoteAuthHome := profile.Config["remote_auth_target_home"]; remoteAuthHome != "" {
+		metadata["remote_auth_target_home"] = remoteAuthHome
+	}
+	if gitUserName := profile.Config["git_user_name"]; gitUserName != "" {
+		metadata["git_user_name"] = gitUserName
+	}
+	if gitUserEmail := profile.Config["git_user_email"]; gitUserEmail != "" {
+		metadata["git_user_email"] = gitUserEmail
 	}
 }
 

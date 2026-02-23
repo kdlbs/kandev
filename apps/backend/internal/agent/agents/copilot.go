@@ -110,6 +110,8 @@ func (a *Copilot) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *Copilot) RemoteAuth() *RemoteAuth { return nil }
+
 func (a *Copilot) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings
 }

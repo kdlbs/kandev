@@ -99,6 +99,8 @@ help:
 
 .PHONY: dev
 dev:
+	@echo "Building Linux agentctl for remote executors..."
+	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
 	@echo "Launching via CLI (auto ports)..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
 

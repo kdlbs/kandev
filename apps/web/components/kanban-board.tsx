@@ -330,6 +330,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onMoveError={s.handleMoveError}
         onWorkflowAutomation={s.handleWorkflowAutomation}
         deletingTaskId={s.deletingTaskId}
+        showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
       />

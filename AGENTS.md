@@ -44,7 +44,8 @@ apps/backend/
 │   │   ├── registry/     # Agent type registry and defaults
 │   │   ├── runtime/      # Runtime name constants
 │   │   ├── settings/     # Agent settings
-│   │   └── mcpconfig/    # MCP server configuration
+│   │   ├── mcpconfig/    # MCP server configuration
+│   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
 │   ├── agentctl/
 │   │   ├── client/       # HTTP client for talking to agentctl
 │   │   └── server/       # agentctl HTTP server
@@ -158,6 +159,8 @@ Client (WS)     Orchestrator        Lifecycle Manager       Runtime          age
 **Provider Pattern:** Packages expose `Provide(cfg, log) (*impl, cleanup, error)` for DI. Returns implementation, cleanup function, and error. Cleanup called during graceful shutdown.
 
 **Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
+
+**Executor default scripts:** Default prepare scripts are owned by executor lifecycle code (`internal/agent/lifecycle/default_scripts.go`), while `internal/scriptengine/` handles placeholder resolution and interpolation.
 
 ---
 
@@ -315,4 +318,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-22

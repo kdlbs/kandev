@@ -107,23 +107,27 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	WorkflowID       string                 `json:"workflow_id"`
-	WorkflowStepID   string                 `json:"workflow_step_id"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	State            v1.TaskState           `json:"state"`
-	Priority         int                    `json:"priority"`
-	Repositories     []TaskRepositoryDTO    `json:"repositories,omitempty"`
-	Position         int                    `json:"position"`
-	PrimarySessionID *string                `json:"primary_session_id,omitempty"`
-	SessionCount     *int                   `json:"session_count,omitempty"`
-	ReviewStatus     *string                `json:"review_status,omitempty"`
-	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	ID                  string                 `json:"id"`
+	WorkspaceID         string                 `json:"workspace_id"`
+	WorkflowID          string                 `json:"workflow_id"`
+	WorkflowStepID      string                 `json:"workflow_step_id"`
+	Title               string                 `json:"title"`
+	Description         string                 `json:"description"`
+	State               v1.TaskState           `json:"state"`
+	Priority            int                    `json:"priority"`
+	Repositories        []TaskRepositoryDTO    `json:"repositories,omitempty"`
+	Position            int                    `json:"position"`
+	PrimarySessionID    *string                `json:"primary_session_id,omitempty"`
+	SessionCount        *int                   `json:"session_count,omitempty"`
+	ReviewStatus        *string                `json:"review_status,omitempty"`
+	PrimaryExecutorID   *string                `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorType *string                `json:"primary_executor_type,omitempty"`
+	PrimaryExecutorName *string                `json:"primary_executor_name,omitempty"`
+	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
+	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
+	CreatedAt           time.Time              `json:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at"`
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -447,11 +451,19 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
-func FromTaskWithSessionInfo(task *models.Task, primarySessionID *string, sessionCount *int, reviewStatus *string) TaskDTO {
+func FromTaskWithSessionInfo(
+	task *models.Task,
+	primarySessionID *string,
+	sessionCount *int,
+	reviewStatus *string,
+	primaryExecutorID *string,
+	primaryExecutorType *string,
+	primaryExecutorName *string,
+) TaskDTO {
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
@@ -468,23 +480,27 @@ func FromTaskWithSessionInfo(task *models.Task, primarySessionID *string, sessio
 	}
 
 	return TaskDTO{
-		ID:               task.ID,
-		WorkspaceID:      task.WorkspaceID,
-		WorkflowID:       task.WorkflowID,
-		WorkflowStepID:   task.WorkflowStepID,
-		Title:            task.Title,
-		Description:      task.Description,
-		State:            task.State,
-		Priority:         task.Priority,
-		Repositories:     repositories,
-		Position:         task.Position,
-		PrimarySessionID: primarySessionID,
-		SessionCount:     sessionCount,
-		ReviewStatus:     reviewStatus,
-		ArchivedAt:       task.ArchivedAt,
-		CreatedAt:        task.CreatedAt,
-		UpdatedAt:        task.UpdatedAt,
-		Metadata:         task.Metadata,
+		ID:                  task.ID,
+		WorkspaceID:         task.WorkspaceID,
+		WorkflowID:          task.WorkflowID,
+		WorkflowStepID:      task.WorkflowStepID,
+		Title:               task.Title,
+		Description:         task.Description,
+		State:               task.State,
+		Priority:            task.Priority,
+		Repositories:        repositories,
+		Position:            task.Position,
+		PrimarySessionID:    primarySessionID,
+		SessionCount:        sessionCount,
+		ReviewStatus:        reviewStatus,
+		PrimaryExecutorID:   primaryExecutorID,
+		PrimaryExecutorType: primaryExecutorType,
+		PrimaryExecutorName: primaryExecutorName,
+		IsRemoteExecutor:    primaryExecutorType != nil && (*primaryExecutorType == string(models.ExecutorTypeSprites) || *primaryExecutorType == string(models.ExecutorTypeRemoteDocker)),
+		ArchivedAt:          task.ArchivedAt,
+		CreatedAt:           task.CreatedAt,
+		UpdatedAt:           task.UpdatedAt,
+		Metadata:            task.Metadata,
 	}
 }
 

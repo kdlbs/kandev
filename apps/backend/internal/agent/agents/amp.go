@@ -110,6 +110,8 @@ func (a *Amp) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *Amp) RemoteAuth() *RemoteAuth { return nil }
+
 func (a *Amp) PermissionSettings() map[string]PermissionSetting {
 	return ampPermSettings
 }

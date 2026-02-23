@@ -76,7 +76,7 @@ func provideLifecycleManager(
 
 	// Register Sprites runtime (remote sandboxes via Sprites.dev)
 	agentctlResolver := lifecycle.NewAgentctlResolver(log)
-	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentctlResolver, 8765, log)
+	spritesExec := lifecycle.NewSpritesExecutor(secretStore, agentRegistry, agentctlResolver, 8765, log)
 	executorRegistry.Register(spritesExec)
 	log.Info("Sprites runtime registered")
 

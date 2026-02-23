@@ -76,6 +76,8 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	}
 }
 
+func (a *OpenCodeACP) RemoteAuth() *RemoteAuth { return nil }
+
 func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings
 }

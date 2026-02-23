@@ -56,6 +56,10 @@ func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID strin
 	return nil
 }
 
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
+	return m.StopAgent(ctx, agentExecutionID, force)
+}
+
 func (m *mockAgentManager) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
 	return &executor.PromptResult{StopReason: "end_turn"}, nil
 }
@@ -70,6 +74,10 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
+}
+
+func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
+	return nil, nil
 }
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
