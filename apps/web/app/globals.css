@@ -378,6 +378,26 @@
   animation: chat-input-running 3s ease-in-out infinite;
 }
 
+@keyframes chat-input-running-plan {
+  0%,
+  100% {
+    border-color: color-mix(in oklab, oklch(0.6 0.05 260) 40%, var(--border));
+    box-shadow:
+      0 0 6px 1px color-mix(in oklab, oklch(0.6 0.05 260) 12%, transparent),
+      0 0 15px 3px color-mix(in oklab, oklch(0.6 0.05 260) 6%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, oklch(0.6 0.05 260) 70%, var(--border));
+    box-shadow:
+      0 0 20px 4px color-mix(in oklab, oklch(0.6 0.05 260) 20%, transparent),
+      0 0 50px 8px color-mix(in oklab, oklch(0.6 0.05 260) 10%, transparent);
+  }
+}
+
+.chat-input-running-plan {
+  animation: chat-input-running-plan 3s ease-in-out infinite;
+}
+
 @layer components {
   .border-flash-animation {
     position: relative;
@@ -1130,6 +1150,21 @@
   mask-composite: exclude;
   animation: node-border-rotate 3s linear infinite;
   pointer-events: none;
+}
+
+.chat-message-list {
+  font-size: 13px;
+  font-family: -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+.chat-message-list .prose {
+  font-size: inherit;
+  font-family: inherit;
+}
+
+.chat-message-list .prose :where(p, li, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, td, th) {
+  font-family: inherit;
 }
 
 .debug {

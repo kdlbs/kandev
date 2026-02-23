@@ -39,7 +39,7 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if err != nil {
 		return nil, err
 	}
-	checks, err := c.ListCheckRuns(ctx, owner, repo, pr.HeadBranch)
+	checks, err := c.ListCheckRuns(ctx, owner, repo, pr.HeadSHA)
 	if err != nil {
 		return nil, err
 	}

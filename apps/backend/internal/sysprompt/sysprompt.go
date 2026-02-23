@@ -25,12 +25,17 @@ var systemTagRegex = regexp.MustCompile(`<kandev-system>[\s\S]*?</kandev-system>
 // StripSystemContent removes all <kandev-system>...</kandev-system> blocks from text.
 // This is used to hide system-injected content from the frontend UI.
 func StripSystemContent(text string) string {
-	return systemTagRegex.ReplaceAllString(text, "")
+	return strings.TrimSpace(systemTagRegex.ReplaceAllString(text, ""))
 }
 
 // Wrap wraps content in <kandev-system> tags to mark it as system-injected.
 func Wrap(content string) string {
 	return TagStart + content + TagEnd
+}
+
+// HasSystemContent checks whether the text contains any <kandev-system> tags.
+func HasSystemContent(text string) bool {
+	return systemTagRegex.MatchString(text)
 }
 
 // PlanMode is the system prompt prepended when plan mode is enabled.

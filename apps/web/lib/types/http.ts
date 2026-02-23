@@ -563,6 +563,7 @@ export type Message = {
   author_type: MessageAuthorType;
   author_id?: string;
   content: string;
+  raw_content?: string;
   type: MessageType;
   metadata?: Record<string, unknown>;
   requests_input?: boolean;

@@ -4,11 +4,17 @@ import { cn } from "@/lib/utils";
 
 type ResizeHandleProps = {
   visible: boolean;
+  planModeEnabled?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 };
 
-export function ResizeHandle({ visible, onMouseDown, onDoubleClick }: ResizeHandleProps) {
+export function ResizeHandle({
+  visible,
+  planModeEnabled,
+  onMouseDown,
+  onDoubleClick,
+}: ResizeHandleProps) {
   return (
     <button
       type="button"
@@ -22,7 +28,12 @@ export function ResizeHandle({ visible, onMouseDown, onDoubleClick }: ResizeHand
       onDoubleClick={onDoubleClick}
       tabIndex={-1}
     >
-      <div className="w-8 h-0.5 bg-border rounded-full hover:bg-muted-foreground transition-colors" />
+      <div
+        className={cn(
+          "w-8 h-0.5 rounded-full transition-colors",
+          planModeEnabled ? "bg-slate-400/60 hover:bg-slate-400" : "bg-border hover:bg-muted-foreground",
+        )}
+      />
     </button>
   );
 }

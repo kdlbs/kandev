@@ -264,6 +264,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		SupportsMCP:                info.SupportsMCP,
 	}, nil
 }
 

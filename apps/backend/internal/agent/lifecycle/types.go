@@ -203,6 +203,7 @@ type AgentProfileInfo struct {
 	AllowIndexing              bool
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
+	SupportsMCP                bool
 }
 
 // ProfileResolver resolves agent profile IDs to profile information

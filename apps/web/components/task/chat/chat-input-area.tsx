@@ -15,15 +15,43 @@ import { type QueuedMessageIndicatorHandle } from "@/components/task/chat/queued
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
+  formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
+
+const PLAN_CONTEXT_PATH = "plan:context";
+
+function buildSubmitMessage(
+  message: string,
+  reviewComments: DiffComment[] | undefined,
+  pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[],
+  planComments: import("@/lib/state/slices/comments").PlanComment[],
+): string {
+  let finalMessage = message;
+  if (reviewComments && reviewComments.length > 0) {
+    finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
+  }
+  if (pendingPRFeedback.length > 0) {
+    finalMessage = formatPRFeedbackAsMarkdown(pendingPRFeedback) + finalMessage;
+  }
+  if (planComments.length > 0) {
+    const planMarkdown = formatPlanCommentsAsMarkdown(planComments);
+    const header = "### Plan Comments\n\n";
+    finalMessage = finalMessage
+      ? `${header}${planMarkdown}\n\n---\n\n${finalMessage}`
+      : `${header}${planMarkdown}`;
+  }
+  return finalMessage;
+}
 
 function resolveInputPlaceholder(
   isAgentBusy: boolean,
   activeDocumentType: string | undefined,
   planModeEnabled: boolean,
+  hasClarification: boolean,
 ): string {
+  if (hasClarification) return "Answer the question above to continue...";
   if (isAgentBusy) return "Queue instructions to the agent...";
   if (activeDocumentType === "file") return "Continue working on the file...";
   if (planModeEnabled) return "Continue working on the plan...";
@@ -39,7 +67,6 @@ export function useSubmitHandler(
     resolvedSessionId,
     sessionModel,
     activeModel,
-    planContextEnabled,
     isAgentBusy,
     activeDocument,
     planComments,
@@ -50,13 +77,15 @@ export function useSubmitHandler(
     clearSessionPlanComments,
     handleClearPRFeedback,
     clearEphemeral,
+    addContextFile,
+    planModeEnabled,
   } = panelState;
   const { handleSendMessage } = useMessageHandler({
     resolvedSessionId,
     taskId: panelState.taskId,
     sessionModel,
     activeModel,
-    planMode: planContextEnabled,
+    planModeEnabled: panelState.planModeEnabled,
     isAgentBusy,
     activeDocument,
     planComments,
@@ -74,15 +103,7 @@ export function useSubmitHandler(
       if (isSending) return;
       setIsSending(true);
       try {
-        let finalMessage = message;
-        if (reviewComments && reviewComments.length > 0) {
-          const reviewMarkdown = formatReviewCommentsAsMarkdown(reviewComments);
-          finalMessage = reviewMarkdown + (message ? message : "");
-        }
-        if (pendingPRFeedback.length > 0) {
-          const prMarkdown = formatPRFeedbackAsMarkdown(pendingPRFeedback);
-          finalMessage = prMarkdown + finalMessage;
-        }
+        const finalMessage = buildSubmitMessage(message, reviewComments, pendingPRFeedback, planComments);
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
           await onSend(finalMessage);
@@ -93,7 +114,13 @@ export function useSubmitHandler(
           markCommentsSent(reviewComments.map((c) => c.id));
         if (pendingPRFeedback.length > 0) handleClearPRFeedback();
         if (planComments.length > 0) clearSessionPlanComments();
-        if (resolvedSessionId) clearEphemeral(resolvedSessionId);
+        if (resolvedSessionId) {
+          clearEphemeral(resolvedSessionId);
+          // Re-add plan context if plan mode is still active (clearEphemeral removes unpinned files)
+          if (planModeEnabled) {
+            addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+          }
+        }
       } finally {
         setIsSending(false);
       }
@@ -103,12 +130,14 @@ export function useSubmitHandler(
       onSend,
       handleSendMessage,
       markCommentsSent,
-      planComments.length,
+      planComments,
       clearSessionPlanComments,
       pendingPRFeedback,
       handleClearPRFeedback,
       resolvedSessionId,
       clearEphemeral,
+      planModeEnabled,
+      addContextFile,
     ],
   );
 
@@ -165,6 +194,42 @@ export function useChatPanelHandlers(
   );
 
   return { handleCancelTurn, handleCancelQueue, handleQueueEditComplete };
+}
+
+function useImplementPlan(
+  resolvedSessionId: string | null,
+  taskId: string | null,
+  handlePlanModeChange: (enabled: boolean) => void,
+  chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
+) {
+  return useCallback(() => {
+    if (!resolvedSessionId || !taskId) return;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+
+    const userText = chatInputRef.current?.getValue() ?? "";
+    chatInputRef.current?.clear();
+
+    const visibleText = userText.trim() || "Implement the plan";
+    let content = `${visibleText}\n\n<kandev-system>
+IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
+Read the current plan using the get_task_plan_kandev MCP tool.
+Implement all changes described in the plan step by step.
+After completing the implementation, provide a summary of what was done.
+</kandev-system>`;
+
+    client
+      .request("message.add", {
+        task_id: taskId,
+        session_id: resolvedSessionId,
+        content,
+        plan_mode: false,
+      }, 10000)
+      .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
+
+    handlePlanModeChange(false);
+  }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
 }
 
 type ChatInputAreaProps = {
@@ -227,7 +292,14 @@ export function ChatInputArea({
     planContextEnabled,
     todoItems,
   } = panelState;
-  const placeholder = resolveInputPlaceholder(isAgentBusy, activeDocument?.type, planModeEnabled);
+  const handleImplementPlan = useImplementPlan(
+    resolvedSessionId, taskId, handlePlanModeChange, chatInputRef,
+  );
+
+  const hasClarification = !!panelState.pendingClarification;
+  const placeholder = resolveInputPlaceholder(
+    isAgentBusy, activeDocument?.type, planModeEnabled, hasClarification,
+  );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <ChatInputContainer
@@ -239,6 +311,8 @@ export function ChatInputArea({
         taskTitle={task?.title}
         taskDescription={taskDescription ?? ""}
         planModeEnabled={planModeEnabled}
+        planModeAvailable={panelState.planModeAvailable}
+        mcpServers={panelState.mcpServers}
         onPlanModeChange={handlePlanModeChange}
         isAgentBusy={isAgentBusy}
         isStarting={isStarting}
@@ -250,6 +324,7 @@ export function ChatInputArea({
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
         pendingCommentsByFile={pendingCommentsByFile}
+        hasContextComments={panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0}
         submitKey={chatSubmitKey}
         hasAgentCommands={!!(agentCommands && agentCommands.length > 0)}
         isFailed={isFailed}
@@ -266,6 +341,7 @@ export function ChatInputArea({
         queuedMessageRef={queuedMessageRef}
         onQueueEditComplete={handleQueueEditComplete}
         isPanelFocused={isPanelFocused}
+        onImplementPlan={handleImplementPlan}
       />
     </div>
   );

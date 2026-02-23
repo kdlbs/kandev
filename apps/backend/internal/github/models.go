@@ -12,6 +12,7 @@ type PR struct {
 	HTMLURL     string     `json:"html_url"`
 	State       string     `json:"state"` // open, closed, merged
 	HeadBranch  string     `json:"head_branch"`
+	HeadSHA     string     `json:"head_sha"`
 	BaseBranch  string     `json:"base_branch"`
 	AuthorLogin string     `json:"author_login"`
 	RepoOwner   string     `json:"repo_owner"`

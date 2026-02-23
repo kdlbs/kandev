@@ -142,6 +142,7 @@ type Message struct {
 	Type          string                 `json:"type,omitempty"`
 	AuthorID      string                 `json:"author_id,omitempty"`
 	Content       string                 `json:"content"`
+	RawContent    string                 `json:"raw_content,omitempty"`
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`

@@ -140,6 +140,7 @@ type AgentProfileInfo struct {
 	DangerouslySkipPermissions bool
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
+	SupportsMCP                bool
 }
 
 // LaunchAgentRequest contains parameters for launching an agent

@@ -6,6 +6,7 @@ import {
   IconCode,
   IconChevronLeft,
   IconChevronRight,
+  IconEyeCode,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
@@ -22,6 +23,7 @@ type MessageActionsProps = {
   showCopy?: boolean;
   showTimestamp?: boolean;
   showRawToggle?: boolean;
+  hasHiddenPrompts?: boolean;
   showNavigation?: boolean;
   showModel?: boolean;
   isRawView?: boolean;
@@ -112,23 +114,27 @@ function NavigationButtons({
 function RawToggleButton({
   isRawView,
   onToggleRaw,
+  hasHiddenPrompts,
 }: {
   isRawView: boolean;
   onToggleRaw: () => void;
+  hasHiddenPrompts?: boolean;
 }) {
   return (
     <button
       onClick={onToggleRaw}
       className={cn(
-        ACTION_BUTTON_SIZE,
+        "flex items-center gap-0.5 rounded",
         ACTION_BUTTON_HOVER,
         ACTION_BUTTON_TRANSITION,
+        hasHiddenPrompts ? "h-5 px-1 py-1" : ACTION_BUTTON_SIZE,
         isRawView && "bg-muted text-foreground",
       )}
       title={isRawView ? "Show formatted" : "Show raw text"}
       aria-label={isRawView ? "Show formatted message" : "Show raw text"}
     >
-      <IconCode className="h-full w-full" />
+      <IconCode className="h-3 w-3" />
+      {hasHiddenPrompts && <IconEyeCode className="h-3 w-3" />}
     </button>
   );
 }
@@ -163,6 +169,7 @@ export function MessageActions({
   showCopy = true,
   showTimestamp = true,
   showRawToggle = true,
+  hasHiddenPrompts = false,
   showNavigation = false,
   showModel = false,
   isRawView = false,
@@ -182,7 +189,7 @@ export function MessageActions({
     <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
-        <RawToggleButton isRawView={isRawView} onToggleRaw={onToggleRaw} />
+        <RawToggleButton isRawView={isRawView} onToggleRaw={onToggleRaw} hasHiddenPrompts={hasHiddenPrompts} />
       )}
       {showNavigation && (
         <NavigationButtons

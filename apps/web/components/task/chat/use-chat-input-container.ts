@@ -26,6 +26,7 @@ type UseChatInputContainerParams = {
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
+  hasContextComments: boolean;
   queuedMessage: string | null | undefined;
   onCancelQueue: (() => void) | undefined;
   updateQueueContent: ((content: string) => Promise<void>) | undefined;
@@ -55,6 +56,7 @@ function useInputHandle(
       insertText: (text: string, from: number, to: number) => {
         inputRef.current?.insertText(text, from, to);
       },
+      clear: () => inputRef.current?.clear(),
     }),
     [inputRef],
   );
@@ -101,8 +103,7 @@ function computeDerivedState(params: {
     params.updateQueueContent
   );
   const hasTodos = params.todoItems.length > 0;
-  const hasContextZone =
-    hasQueuedMessage || hasTodos || params.allItemsLength > 0 || hasClarification;
+  const hasContextZone = hasQueuedMessage || hasTodos || params.allItemsLength > 0;
   const showFocusHint = !params.isInputFocused && !hasClarification && !hasPendingComments;
   const inputPlaceholder = getInputPlaceholder(
     params.placeholder,
@@ -149,7 +150,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
 
-  const { height, resetHeight, containerRef, resizeHandleProps } = useResizableInput(
+  const { height, resetHeight, autoExpand, containerRef, resizeHandleProps } = useResizableInput(
     sessionId ?? undefined,
   );
   const { value, inputRef, handleImagePaste, handleChange, handleSubmit, allItems } =
@@ -158,12 +159,22 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
       isSending,
       contextItems,
       pendingCommentsByFile,
+      hasContextComments: params.hasContextComments,
       showRequestChangesTooltip,
       onRequestChangesTooltipDismiss,
       onSubmit,
     });
 
   useInputHandle(ref, inputRef);
+
+  // Auto-expand the input container as the user types more lines
+  const handleChangeWithAutoExpand = useCallback(
+    (val: string) => {
+      handleChange(val);
+      requestAnimationFrame(autoExpand);
+    },
+    [handleChange, autoExpand],
+  );
 
   useEffect(() => {
     if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
@@ -212,7 +223,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     value,
     inputRef,
     handleImagePaste,
-    handleChange,
+    handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
     handleAgentCommand,
     allItems,

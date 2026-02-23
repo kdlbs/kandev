@@ -3,7 +3,6 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { TipTapInput } from "./tiptap-input";
-import { ClarificationInputOverlay } from "./clarification-input-overlay";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
 import { TodoSummary } from "./todo-summary";
@@ -15,7 +14,6 @@ import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { Message } from "@/lib/types/http";
 
 type TodoItem = { text: string; done?: boolean };
 
@@ -28,6 +26,8 @@ export type ChatInputEditorAreaProps = {
   isDisabled: boolean;
   hasClarification: boolean;
   planModeEnabled: boolean;
+  planModeAvailable: boolean;
+  mcpServers: string[];
   submitKey: "enter" | "cmd_enter";
   setIsInputFocused: (focused: boolean) => void;
   sessionId: string | null;
@@ -48,6 +48,7 @@ export type ChatInputEditorAreaProps = {
   contextPopoverOpen: boolean;
   setContextPopoverOpen: (open: boolean) => void;
   contextFiles: ContextFile[];
+  onImplementPlan?: () => void;
 };
 
 export function ChatInputEditorArea({
@@ -59,6 +60,8 @@ export function ChatInputEditorArea({
   isDisabled,
   hasClarification,
   planModeEnabled,
+  planModeAvailable,
+  mcpServers,
   submitKey,
   setIsInputFocused,
   sessionId,
@@ -79,6 +82,7 @@ export function ChatInputEditorArea({
   contextPopoverOpen,
   setContextPopoverOpen,
   contextFiles,
+  onImplementPlan,
 }: ChatInputEditorAreaProps) {
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -103,6 +107,7 @@ export function ChatInputEditorArea({
               planContextEnabled={planContextEnabled}
               onAgentCommand={handleAgentCommand}
               onImagePaste={handleImagePaste}
+              onPlanModeChange={onPlanModeChange}
             />
           </div>
         </TooltipTrigger>
@@ -112,6 +117,8 @@ export function ChatInputEditorArea({
       </Tooltip>
       <ChatInputToolbar
         planModeEnabled={planModeEnabled}
+        planModeAvailable={planModeAvailable}
+        mcpServers={mcpServers}
         onPlanModeChange={onPlanModeChange}
         sessionId={sessionId}
         taskId={taskId}
@@ -129,6 +136,7 @@ export function ChatInputEditorArea({
         planContextEnabled={planContextEnabled}
         contextFiles={contextFiles}
         onToggleFile={onToggleContextFile}
+        onImplementPlan={onImplementPlan}
       />
     </div>
   );
@@ -146,9 +154,6 @@ export type ChatInputContextAreaProps = {
   onQueueEditComplete?: () => void;
   hasTodos: boolean;
   todoItems: TodoItem[];
-  hasClarification: boolean;
-  pendingClarification?: Message | null;
-  onClarificationResolved?: () => void;
 };
 
 export function ChatInputContextArea({
@@ -163,9 +168,6 @@ export function ChatInputContextArea({
   onQueueEditComplete,
   hasTodos,
   todoItems,
-  hasClarification,
-  pendingClarification,
-  onClarificationResolved,
 }: ChatInputContextAreaProps) {
   if (!hasContextZone) return null;
   const queueSlot = hasQueuedMessage ? (
@@ -179,21 +181,12 @@ export function ChatInputContextArea({
     />
   ) : undefined;
   const todoSlot = hasTodos ? <TodoSummary todos={todoItems} /> : undefined;
-  const clarificationSlot = hasClarification ? (
-    <div className="overflow-auto">
-      <ClarificationInputOverlay
-        message={pendingClarification!}
-        onResolved={onClarificationResolved!}
-      />
-    </div>
-  ) : undefined;
   return (
     <ContextZone
       items={allItems}
       sessionId={sessionId}
       queueSlot={queueSlot}
       todoSlot={todoSlot}
-      clarificationSlot={clarificationSlot}
     />
   );
 }
@@ -208,6 +201,7 @@ export type ChatInputBodyProps = {
   hasClarification: boolean;
   showRequestChangesTooltip: boolean;
   hasPendingComments: boolean;
+  planModeEnabled: boolean;
   showFocusHint: boolean;
   contextAreaProps: ChatInputContextAreaProps;
   editorAreaProps: ChatInputEditorAreaProps;
@@ -223,24 +217,28 @@ export function ChatInputBody({
   hasClarification,
   showRequestChangesTooltip,
   hasPendingComments,
+  planModeEnabled,
   showFocusHint,
   contextAreaProps,
   editorAreaProps,
 }: ChatInputBodyProps) {
+  console.log("[ChatInputBody] planModeEnabled:", planModeEnabled);
   return (
     <div
       ref={containerRef}
       className={cn(
         "relative flex flex-col border rounded ",
         isPanelFocused ? "bg-background border-border" : "bg-background/40 border-border",
-        isAgentBusy && "chat-input-running",
-        hasClarification && "border-blue-500/50",
+        isAgentBusy && !planModeEnabled && "chat-input-running",
+        isAgentBusy && planModeEnabled && "chat-input-running-plan",
+        planModeEnabled && !isAgentBusy && "border-slate-400/50",
+        hasClarification && "border-sky-400/50",
         showRequestChangesTooltip && "animate-pulse border-orange-500",
         hasPendingComments && "border-amber-500/50",
       )}
       style={{ height }}
     >
-      <ResizeHandle visible={isPanelFocused || isInputFocused} {...resizeHandleProps} />
+      <ResizeHandle visible={isPanelFocused || isInputFocused} planModeEnabled={planModeEnabled} {...resizeHandleProps} />
       <ChatInputFocusHint visible={showFocusHint} />
       <ChatInputContextArea {...contextAreaProps} />
       <ChatInputEditorArea {...editorAreaProps} />

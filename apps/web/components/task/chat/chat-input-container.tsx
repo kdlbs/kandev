@@ -32,6 +32,7 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clear: () => void;
 };
 
 type TodoItem = { text: string; done?: boolean };
@@ -48,6 +49,8 @@ type ChatInputContainerProps = {
   taskTitle?: string;
   taskDescription: string;
   planModeEnabled: boolean;
+  planModeAvailable?: boolean;
+  mcpServers?: string[];
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
   isStarting: boolean;
@@ -59,6 +62,7 @@ type ChatInputContainerProps = {
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   pendingCommentsByFile?: Record<string, DiffComment[]>;
+  hasContextComments?: boolean;
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;
   isFailed?: boolean;
@@ -75,6 +79,7 @@ type ChatInputContainerProps = {
   queuedMessageRef?: React.RefObject<QueuedMessageIndicatorHandle | null>;
   onQueueEditComplete?: () => void;
   isPanelFocused?: boolean;
+  onImplementPlan?: () => void;
 };
 
 function FailedSessionBanner({
@@ -142,9 +147,6 @@ function buildContextAreaProps(
     onQueueEditComplete: p.onQueueEditComplete,
     hasTodos: s.hasTodos,
     todoItems: p.todoItems ?? [],
-    hasClarification: s.hasClarification,
-    pendingClarification: p.pendingClarification,
-    onClarificationResolved: p.onClarificationResolved,
   };
 }
 
@@ -161,6 +163,8 @@ function buildEditorAreaProps(
     isDisabled: s.isDisabled,
     hasClarification: s.hasClarification,
     planModeEnabled: p.planModeEnabled,
+    planModeAvailable: p.planModeAvailable ?? true,
+    mcpServers: p.mcpServers ?? [],
     submitKey: p.submitKey ?? "cmd_enter",
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,
@@ -181,6 +185,7 @@ function buildEditorAreaProps(
     contextPopoverOpen: s.contextPopoverOpen,
     setContextPopoverOpen: s.setContextPopoverOpen,
     contextFiles: p.contextFiles ?? [],
+    onImplementPlan: p.onImplementPlan,
   };
 }
 
@@ -226,6 +231,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       pendingClarification: props.pendingClarification,
       onClarificationResolved: props.onClarificationResolved,
       pendingCommentsByFile: props.pendingCommentsByFile,
+      hasContextComments: props.hasContextComments ?? false,
       queuedMessage: props.queuedMessage,
       onCancelQueue: props.onCancelQueue,
       updateQueueContent: props.updateQueueContent,
@@ -259,6 +265,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         hasClarification={s.hasClarification}
         showRequestChangesTooltip={showRequestChangesTooltip}
         hasPendingComments={s.hasPendingComments}
+        planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
         contextAreaProps={buildContextAreaProps(s, p)}
         editorAreaProps={buildEditorAreaProps(s, p)}

@@ -42,8 +42,7 @@ async function postClarificationResponse(
 }
 
 function handleClarificationResult(result: "ok" | "expired" | "error", onResolved: () => void) {
-  if (result === "ok") onResolved();
-  else if (result === RESULT_EXPIRED) window.location.reload();
+  if (result === "ok" || result === RESULT_EXPIRED) onResolved();
 }
 
 type ClarificationOptionsProps = {
@@ -184,13 +183,7 @@ function useClarificationHandlers({
         rejected: true,
         reject_reason: "User skipped",
       });
-      if (result === "ok") onResolved();
-      else if (result === RESULT_EXPIRED) {
-        alert(
-          "This question has timed out. The agent has already moved on. Please refresh the page.",
-        );
-        onResolved();
-      }
+      handleClarificationResult(result, onResolved);
     } catch (error) {
       console.error("Failed to skip clarification:", error);
     } finally {

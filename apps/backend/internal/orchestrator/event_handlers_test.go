@@ -125,7 +125,9 @@ func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string)
 	return m.isAgentRunning
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
-	return nil, nil
+	return &executor.AgentProfileInfo{
+		SupportsMCP: true,
+	}, nil
 }
 func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecutionID string) error {
 	m.restartProcessCalls = append(m.restartProcessCalls, agentExecutionID)
