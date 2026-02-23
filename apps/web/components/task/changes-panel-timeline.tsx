@@ -1,6 +1,12 @@
 "use client";
 
-import { IconGitCommit, IconGitPullRequest, IconCloudUpload, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconGitCommit,
+  IconGitPullRequest,
+  IconCloudUpload,
+  IconChevronDown,
+  IconArrowBackUp,
+} from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -94,9 +100,15 @@ type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
+  onRevertCommit?: (sha: string) => void;
 };
 
-export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsSectionProps) {
+export function CommitsSection({
+  commits,
+  isLast,
+  onOpenCommitDetail,
+  onRevertCommit,
+}: CommitsSectionProps) {
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
@@ -105,10 +117,10 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
       isLast={isLast}
     >
       <ul className="space-y-0.5">
-        {commits.map((commit) => (
+        {commits.map((commit, index) => (
           <li
             key={commit.commit_sha}
-            className="flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
+            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
             onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
           >
             <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
@@ -116,9 +128,27 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
               {commit.commit_sha.slice(0, 7)}
             </code>
             <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-            <span className="shrink-0 text-[11px]">
+            <span className="shrink-0 text-[11px] flex items-center gap-1">
               <span className="text-emerald-500">+{commit.insertions}</span>{" "}
               <span className="text-rose-500">-{commit.deletions}</span>
+              {index === 0 && onRevertCommit && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Revert commit"
+                      className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRevertCommit(commit.commit_sha);
+                      }}
+                    >
+                      <IconArrowBackUp className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Revert commit</TooltipContent>
+                </Tooltip>
+              )}
             </span>
           </li>
         ))}
@@ -174,11 +204,7 @@ export function ActionButtonsSection({
               </Button>
             </span>
           </TooltipTrigger>
-          {prExists && (
-            <TooltipContent>
-              A pull request already exists for this task
-            </TooltipContent>
-          )}
+          {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -192,7 +218,9 @@ export function ActionButtonsSection({
               >
                 <IconCloudUpload className="h-3 w-3" />
                 Push
-                {aheadCount > 0 && <span className="text-muted-foreground">{aheadCount} ahead</span>}
+                {aheadCount > 0 && (
+                  <span className="text-muted-foreground">{aheadCount} ahead</span>
+                )}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

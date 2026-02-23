@@ -61,6 +61,11 @@ type GitShowCommitRequest struct {
 	CommitSHA string `uri:"sha" binding:"required"`
 }
 
+// GitRevertCommitRequest for POST /api/v1/git/revert-commit
+type GitRevertCommitRequest struct {
+	CommitSHA string `json:"commit_sha"`
+}
+
 // GitCreatePRRequest for POST /api/v1/git/create-pr
 type GitCreatePRRequest struct {
 	Title      string `json:"title"`
@@ -346,6 +351,37 @@ func (s *Server) handleGitCreatePR(c *gin.Context) {
 			Success: false,
 			Error:   err.Error(),
 		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitRevertCommit handles POST /api/v1/git/revert-commit
+func (s *Server) handleGitRevertCommit(c *gin.Context) {
+	var req GitRevertCommitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "revert_commit",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.CommitSHA == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "revert_commit",
+			Error:     "commit_sha is required",
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.RevertCommit(c.Request.Context(), req.CommitSHA)
+	if err != nil {
+		s.handleGitError(c, "revert_commit", err)
 		return
 	}
 

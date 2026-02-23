@@ -119,6 +119,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/unstage", s.handleGitUnstage)
 		api.POST("/git/discard", s.handleGitDiscard)
 		api.POST("/git/create-pr", s.handleGitCreatePR)
+		api.POST("/git/revert-commit", s.handleGitRevertCommit)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
 	}
 

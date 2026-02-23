@@ -57,6 +57,7 @@ export type SessionGit = {
   stageAll: () => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
+  revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -131,6 +132,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     stageAll,
     unstage: gitOps.unstage,
     discard: gitOps.discard,
+    revertCommit: gitOps.revertCommit,
     createPR: gitOps.createPR,
   };
 }

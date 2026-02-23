@@ -156,6 +156,7 @@ type ChangesPanelBodyProps = {
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string) => void;
   onOpenReview?: () => void;
+  onRevertCommit?: (sha: string) => void;
   onStageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
@@ -243,6 +244,7 @@ function ChangesPanelTimeline(
     | "onOpenDiffFile"
     | "onEditFile"
     | "onOpenCommitDetail"
+    | "onRevertCommit"
     | "onStageAll"
     | "onStage"
     | "onUnstage"
@@ -297,6 +299,7 @@ function ChangesPanelTimeline(
           commits={props.commits}
           isLast={false}
           onOpenCommitDetail={props.onOpenCommitDetail}
+          onRevertCommit={props.onRevertCommit}
         />
       )}
       {showCommits && (
@@ -366,11 +369,14 @@ const ChangesPanel = memo(function ChangesPanel({
     [git.stagedFiles],
   );
 
-  const { handleGitOperation, handlePull, handleRebase, handlePush, handleForcePush } = useChangesGitHandlers(
-    git,
-    toast,
-    baseBranch,
-  );
+  const {
+    handleGitOperation,
+    handlePull,
+    handleRebase,
+    handlePush,
+    handleForcePush,
+    handleRevertCommit,
+  } = useChangesGitHandlers(git, toast, baseBranch);
   const dialogs = useChangesDialogHandlers(git, toast, handleGitOperation, taskTitle, baseBranch);
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
@@ -409,6 +415,7 @@ const ChangesPanel = memo(function ChangesPanel({
         onOpenDiffFile={onOpenDiffFile}
         onEditFile={onEditFile}
         onOpenCommitDetail={onOpenCommitDetail}
+        onRevertCommit={handleRevertCommit}
         onOpenReview={onOpenReview}
         onStageAll={git.stageAll}
         onStage={(path) => git.stage([path]).then(() => undefined)}

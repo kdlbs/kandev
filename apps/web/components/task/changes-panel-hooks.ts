@@ -13,6 +13,7 @@ interface GitOps {
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
+  revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -69,8 +70,21 @@ export function useChangesGitHandlers(
   const handleForcePush = useCallback(() => {
     handleGitOperation(() => gitOps.push({ force: true }), "Force push");
   }, [handleGitOperation, gitOps]);
+  const handleRevertCommit = useCallback(
+    (sha: string) => {
+      handleGitOperation(() => gitOps.revertCommit(sha), "Revert commit");
+    },
+    [handleGitOperation, gitOps],
+  );
 
-  return { handleGitOperation, handlePull, handleRebase, handlePush, handleForcePush };
+  return {
+    handleGitOperation,
+    handlePull,
+    handleRebase,
+    handlePush,
+    handleForcePush,
+    handleRevertCommit,
+  };
 }
 
 function useChangesDiscardCommitHandlers(

@@ -131,6 +131,16 @@ func (c *Client) GitDiscard(ctx context.Context, paths []string) (*GitOperationR
 	return c.gitOperation(ctx, "/api/v1/git/discard", payload)
 }
 
+// GitRevertCommit undoes the latest commit using git reset --soft, keeping changes staged.
+func (c *Client) GitRevertCommit(ctx context.Context, commitSHA string) (*GitOperationResult, error) {
+	payload := struct {
+		CommitSHA string `json:"commit_sha"`
+	}{
+		CommitSHA: commitSHA,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/revert-commit", payload)
+}
+
 // GitCreatePR creates a pull request using the gh CLI.
 func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
 	payload := struct {
