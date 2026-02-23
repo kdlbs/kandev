@@ -6,7 +6,6 @@ import {
   fetchTask,
   fetchUserSettings,
   listAgents,
-  listAvailableAgents,
   listWorkflows,
   listRepositories,
   listTaskSessionMessages,
@@ -105,7 +104,6 @@ type BuildSessionPageStateParams = {
   agents: Awaited<ReturnType<typeof listAgents>>;
   repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
   allSessions: TaskSession[];
-  availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
   workspaces: Awaited<ReturnType<typeof listWorkspaces>>["workspaces"];
   workflows: Awaited<ReturnType<typeof listWorkflows>>["workflows"];
   turns: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
@@ -121,7 +119,6 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
     agents,
     repositories,
     allSessions,
-    availableAgents,
     workspaces,
     workflows,
     turns,
@@ -209,7 +206,6 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       agentsLoaded: true,
       executorsLoaded: false,
     },
-    availableAgents: { items: availableAgents, loaded: true, loading: false },
     userSettings: buildUserSettingsFromResponse(userSettingsResponse),
   };
 }
@@ -234,7 +230,6 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     agents,
     repositoriesResponse,
     allSessionsResponse,
-    availableAgentsResponse,
     workspacesResponse,
     workflowsResponse,
     turnsResponse,
@@ -246,7 +241,6 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     listAgents({ cache: "no-store" }),
     listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     listTaskSessions(session.task_id, { cache: "no-store" }),
-    listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     listWorkflows(task.workspace_id, { cache: "no-store" }).catch(() => ({ workflows: [] })),
     listSessionTurns(paramSessionId, { cache: "no-store" }).catch(() => ({ turns: [], total: 0 })),
@@ -261,7 +255,6 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
 
   const repositories = repositoriesResponse.repositories ?? [];
   const allSessions = allSessionsResponse.sessions ?? [session];
-  const availableAgents = availableAgentsResponse.agents ?? [];
   const workspaces = workspacesResponse.workspaces ?? [];
   const workflows = workflowsResponse.workflows ?? [];
   const turns = turnsResponse.turns ?? [];
@@ -280,7 +273,6 @@ async function fetchSessionData(paramSessionId: string): Promise<FetchedSessionD
     agents,
     repositories,
     allSessions,
-    availableAgents,
     workspaces,
     workflows,
     turns,

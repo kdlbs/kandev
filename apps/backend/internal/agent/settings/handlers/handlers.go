@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,6 +15,8 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
 	controller *controller.Controller
@@ -58,24 +62,15 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
+	h.controller.InvalidateDiscoveryCache()
 	resp, err := h.controller.ListDiscovery(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to discover agents", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to discover agents"})
 		return
 	}
-	if h.hub != nil {
-		availableResp, err := h.controller.ListAvailableAgents(c.Request.Context())
-		if err != nil {
-			h.logger.Error("failed to list available agents", zap.Error(err))
-		} else {
-			notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
-				"agents": availableResp.Agents,
-			})
-			h.hub.Broadcast(notification)
-		}
-	}
 	c.JSON(http.StatusOK, resp)
+	h.broadcastAvailableAgentsAsync()
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -86,6 +81,26 @@ func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) broadcastAvailableAgentsAsync() {
+	if h.hub == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), availableAgentsBroadcastTimeout)
+		defer cancel()
+
+		availableResp, err := h.controller.ListAvailableAgents(ctx)
+		if err != nil {
+			h.logger.Error("failed to list available agents for broadcast", zap.Error(err))
+			return
+		}
+		notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
+			"agents": availableResp.Agents,
+		})
+		h.hub.Broadcast(notification)
+	}()
 }
 
 func (h *Handlers) httpListAgents(c *gin.Context) {
@@ -202,20 +217,8 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 		return
 	}
 
-	// Broadcast updated available agents list (agent may have been unregistered)
-	if h.hub != nil {
-		availableResp, err := h.controller.ListAvailableAgents(c.Request.Context())
-		if err != nil {
-			h.logger.Error("failed to list available agents after delete", zap.Error(err))
-		} else {
-			notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
-				"agents": availableResp.Agents,
-			})
-			h.hub.Broadcast(notification)
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{"success": true})
+	h.broadcastAvailableAgentsAsync()
 }
 
 type updateProfileMcpConfigRequest struct {

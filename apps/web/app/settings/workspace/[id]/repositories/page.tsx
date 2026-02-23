@@ -1,9 +1,8 @@
-import {
-  getWorkspaceAction,
-  listRepositoriesAction,
-  listRepositoryScriptsAction,
-} from "@/app/actions/workspaces";
+import { getWorkspaceAction, listRepositoriesAction } from "@/app/actions/workspaces";
 import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
+import type { Repository, RepositoryScript } from "@/lib/types/http";
+
+type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
 export default async function WorkspaceRepositoriesPage({
   params,
@@ -12,21 +11,18 @@ export default async function WorkspaceRepositoriesPage({
 }) {
   const { id } = await params;
   let workspace = null;
-  let repositoriesWithScripts: Array<
-    Awaited<ReturnType<typeof listRepositoriesAction>>["repositories"][number] & {
-      scripts: Awaited<ReturnType<typeof listRepositoryScriptsAction>>["scripts"];
-    }
-  > = [];
+  let repositoriesWithScripts: RepositoryWithScripts[] = [];
 
   try {
-    workspace = await getWorkspaceAction(id);
-    const repositories = await listRepositoriesAction(id);
-    repositoriesWithScripts = await Promise.all(
-      repositories.repositories.map(async (repository) => {
-        const scripts = await listRepositoryScriptsAction(repository.id);
-        return { ...repository, scripts: scripts.scripts };
-      }),
-    );
+    const [ws, repoResponse] = await Promise.all([
+      getWorkspaceAction(id),
+      listRepositoriesAction(id, { includeScripts: true }),
+    ]);
+    workspace = ws;
+    repositoriesWithScripts = repoResponse.repositories.map((repository) => ({
+      ...repository,
+      scripts: repository.scripts ?? [],
+    }));
   } catch {
     workspace = null;
     repositoriesWithScripts = [];

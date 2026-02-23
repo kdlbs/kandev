@@ -226,6 +226,7 @@ export type AppState = {
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
+  setAgentDiscoveryLoading: (loading: boolean) => void;
   setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;

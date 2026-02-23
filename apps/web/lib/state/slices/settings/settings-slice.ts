@@ -4,7 +4,7 @@ import type { SettingsSlice, SettingsSliceState } from "./types";
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
   settingsAgents: { items: [] },
-  agentDiscovery: { items: [] },
+  agentDiscovery: { items: [], loading: false, loaded: false },
   availableAgents: { items: [], loading: false, loaded: false },
   agentProfiles: { items: [], version: 0 },
   editors: { items: [], loaded: false, loading: false },
@@ -49,6 +49,7 @@ function createCoreActions(
   | "setExecutors"
   | "setSettingsAgents"
   | "setAgentDiscovery"
+  | "setAgentDiscoveryLoading"
   | "setAvailableAgents"
   | "setAvailableAgentsLoading"
   | "setAgentProfiles"
@@ -72,6 +73,12 @@ function createCoreActions(
     setAgentDiscovery: (agents) =>
       set((draft) => {
         draft.agentDiscovery.items = agents;
+        draft.agentDiscovery.loading = false;
+        draft.agentDiscovery.loaded = true;
+      }),
+    setAgentDiscoveryLoading: (loading) =>
+      set((draft) => {
+        draft.agentDiscovery.loading = loading;
       }),
     setAvailableAgents: (agents) =>
       set((draft) => {

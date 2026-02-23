@@ -56,35 +56,24 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
 }
 
+func (c *Controller) InvalidateDiscoveryCache() {
+	if c.discovery != nil {
+		c.discovery.InvalidateCache()
+	}
+}
+
 func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent, availability discovery.Availability, now time.Time) dto.AvailableAgentDTO {
 	displayName := ag.DisplayName()
 	if displayName == "" {
 		displayName = ag.Name()
 	}
 
-	var modelEntries []dto.ModelEntryDTO
-	var supportsDynamic bool
-	if modelList, err := ag.ListModels(ctx); err == nil && modelList != nil {
-		supportsDynamic = modelList.SupportsDynamic
-		modelEntries = make([]dto.ModelEntryDTO, 0, len(modelList.Models))
-		for _, model := range modelList.Models {
-			modelEntries = append(modelEntries, dto.ModelEntryDTO{
-				ID:            model.ID,
-				Name:          model.Name,
-				Provider:      model.Provider,
-				ContextWindow: model.ContextWindow,
-				IsDefault:     model.IsDefault,
-			})
-		}
-	}
+	modelEntries, supportsDynamic := c.fetchModelsWithCache(ctx, ag)
 
-	var capabilities dto.AgentCapabilitiesDTO
-	if disc, discErr := ag.IsInstalled(ctx); discErr == nil && disc != nil {
-		capabilities = dto.AgentCapabilitiesDTO{
-			SupportsSessionResume: disc.Capabilities.SupportsSessionResume,
-			SupportsShell:         disc.Capabilities.SupportsShell,
-			SupportsWorkspaceOnly: disc.Capabilities.SupportsWorkspaceOnly,
-		}
+	capabilities := dto.AgentCapabilitiesDTO{
+		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
+		SupportsShell:         availability.Capabilities.SupportsShell,
+		SupportsWorkspaceOnly: availability.Capabilities.SupportsWorkspaceOnly,
 	}
 
 	var permissionSettings map[string]dto.PermissionSettingDTO
@@ -131,6 +120,37 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		PassthroughConfig:  passthroughConfig,
 		UpdatedAt:          now,
 	}
+}
+
+// fetchModelsWithCache returns model entries for an agent, using the model cache
+// to avoid expensive subprocess calls (e.g. `opencode models`) on every request.
+func (c *Controller) fetchModelsWithCache(ctx context.Context, ag agents.Agent) ([]dto.ModelEntryDTO, bool) {
+	agentName := ag.ID()
+
+	// Check cache first
+	if entry, exists := c.modelCache.Get(agentName); exists && (entry.IsValid() || entry.IsStale()) {
+		if entry.Error == nil && entry.Models != nil {
+			return modelsToDTO(entry.Models), true
+		}
+	}
+
+	// Cache miss — call ListModels and cache the result
+	modelList, err := ag.ListModels(ctx)
+	if err != nil {
+		c.logger.Warn("failed to list models for available agent",
+			zap.String("agent", agentName), zap.Error(err))
+		c.modelCache.Set(agentName, nil, err)
+		return nil, false
+	}
+	if modelList == nil {
+		return nil, false
+	}
+
+	if modelList.SupportsDynamic {
+		c.modelCache.Set(agentName, modelList.Models, nil)
+	}
+
+	return modelsToDTO(modelList.Models), modelList.SupportsDynamic
 }
 
 func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {

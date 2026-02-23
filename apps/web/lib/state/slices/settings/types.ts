@@ -22,6 +22,8 @@ export type SettingsAgentsState = {
 
 export type AgentDiscoveryState = {
   items: AgentDiscovery[];
+  loading: boolean;
+  loaded: boolean;
 };
 
 export type AvailableAgentsState = {
@@ -132,6 +134,7 @@ export type SettingsSliceActions = {
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
+  setAgentDiscoveryLoading: (loading: boolean) => void;
   setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;

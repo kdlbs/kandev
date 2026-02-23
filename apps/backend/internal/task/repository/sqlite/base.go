@@ -54,6 +54,20 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
 		return err
 	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureMessageMetadataIndexes creates indexes on JSON metadata fields for fast lookups.
+func (r *Repository) ensureMessageMetadataIndexes() error {
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_metadata_tool_call_id ON task_session_messages(task_session_id, json_extract(metadata, '$.tool_call_id'))`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id ON task_session_messages(task_session_id, json_extract(metadata, '$.pending_id'))`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -89,7 +103,10 @@ func (r *Repository) initSchema() error {
 	if err := r.runMigrations(); err != nil {
 		return err
 	}
-	return r.ensureWorkspaceIndexes()
+	if err := r.ensureWorkspaceIndexes(); err != nil {
+		return err
+	}
+	return r.ensureMessageMetadataIndexes()
 }
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.

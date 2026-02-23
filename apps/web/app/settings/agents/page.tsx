@@ -14,6 +14,7 @@ import {
   listAgents,
   listAvailableAgents,
 } from "@/lib/api";
+import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
@@ -84,8 +85,117 @@ function ProfileListItem({ agent, profile }: ProfileListItemProps) {
   );
 }
 
+type SupportedAgentsSectionProps = {
+  installedAgents: AgentDiscovery[];
+  discoveryLoading: boolean;
+  rescanning: boolean;
+  savedAgentsByName: Map<string, Agent>;
+  resolveDisplayName: (name: string) => string;
+  setTuiDialogOpen: (open: boolean) => void;
+  handleRescan: () => Promise<void>;
+};
+
+function SupportedAgentsSection({
+  installedAgents,
+  discoveryLoading,
+  rescanning,
+  savedAgentsByName,
+  resolveDisplayName,
+  setTuiDialogOpen,
+  handleRescan,
+}: SupportedAgentsSectionProps) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold">Supported agents found</h3>
+          <p className="text-sm text-muted-foreground">
+            Agents detected on this machine are ready to configure.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTuiDialogOpen(true)}
+            className="cursor-pointer"
+          >
+            <IconPlus className="h-4 w-4 mr-2" />
+            Add TUI Agent
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRescan}
+            disabled={rescanning}
+            className="cursor-pointer"
+          >
+            {rescanning ? "Rescanning..." : "Rescan"}
+          </Button>
+        </div>
+      </div>
+
+      {installedAgents.length === 0 && (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              {discoveryLoading ? (
+                <span>Scanning for installed agents...</span>
+              ) : (
+                <>
+                  <IconAlertTriangle className="h-4 w-4" />
+                  No installed agents were detected yet.
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {installedAgents.map((agent: AgentDiscovery) => (
+          <AgentCard
+            key={agent.name}
+            agent={agent}
+            savedAgent={savedAgentsByName.get(agent.name)}
+            displayName={resolveDisplayName(agent.name)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type AgentProfilesSectionProps = {
+  savedAgents: Agent[];
+};
+
+function AgentProfilesSection({ savedAgents }: AgentProfilesSectionProps) {
+  if (!savedAgents.some((agent: Agent) => agent.profiles.length > 0)) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4">
+      <Separator />
+      <div>
+        <h3 className="text-lg font-semibold">Agent Profiles</h3>
+        <p className="text-sm text-muted-foreground">Manage existing profiles by agent.</p>
+      </div>
+
+      <div className="space-y-2">
+        {savedAgents.flatMap((agent: Agent) =>
+          agent.profiles.map((profile: AgentProfile) => (
+            <ProfileListItem key={profile.id} agent={agent} profile={profile} />
+          )),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function useAgentPageState() {
-  const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
+  const { items: discoveryAgents, loading: discoveryLoading } = useAgentDiscovery();
   const savedAgents = useAppStore((state) => state.settingsAgents.items);
   const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -136,6 +246,7 @@ function useAgentPageState() {
     savedAgents,
     installedAgents,
     savedAgentsByName,
+    discoveryLoading,
     rescanning,
     tuiDialogOpen,
     setTuiDialogOpen,
@@ -150,6 +261,7 @@ export default function AgentsSettingsPage() {
     savedAgents,
     installedAgents,
     savedAgentsByName,
+    discoveryLoading,
     rescanning,
     tuiDialogOpen,
     setTuiDialogOpen,
@@ -169,76 +281,17 @@ export default function AgentsSettingsPage() {
 
       <Separator />
 
-      <div className="space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold">Supported agents found</h3>
-            <p className="text-sm text-muted-foreground">
-              Agents detected on this machine are ready to configure.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setTuiDialogOpen(true)}
-              className="cursor-pointer"
-            >
-              <IconPlus className="h-4 w-4 mr-2" />
-              Add TUI Agent
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRescan}
-              disabled={rescanning}
-              className="cursor-pointer"
-            >
-              {rescanning ? "Rescanning..." : "Rescan"}
-            </Button>
-          </div>
-        </div>
+      <SupportedAgentsSection
+        installedAgents={installedAgents}
+        discoveryLoading={discoveryLoading}
+        rescanning={rescanning}
+        savedAgentsByName={savedAgentsByName}
+        resolveDisplayName={resolveDisplayName}
+        setTuiDialogOpen={setTuiDialogOpen}
+        handleRescan={handleRescan}
+      />
 
-        {installedAgents.length === 0 && (
-          <Card>
-            <CardContent className="py-8 text-center">
-              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <IconAlertTriangle className="h-4 w-4" />
-                No installed agents were detected yet.
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {installedAgents.map((agent: AgentDiscovery) => (
-            <AgentCard
-              key={agent.name}
-              agent={agent}
-              savedAgent={savedAgentsByName.get(agent.name)}
-              displayName={resolveDisplayName(agent.name)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {savedAgents.some((agent: Agent) => agent.profiles.length > 0) && (
-        <div className="space-y-4">
-          <Separator />
-          <div>
-            <h3 className="text-lg font-semibold">Agent Profiles</h3>
-            <p className="text-sm text-muted-foreground">Manage existing profiles by agent.</p>
-          </div>
-
-          <div className="space-y-2">
-            {savedAgents.flatMap((agent: Agent) =>
-              agent.profiles.map((profile: AgentProfile) => (
-                <ProfileListItem key={profile.id} agent={agent} profile={profile} />
-              )),
-            )}
-          </div>
-        </div>
-      )}
+      <AgentProfilesSection savedAgents={savedAgents} />
 
       <AddTUIAgentDialog
         open={tuiDialogOpen}
