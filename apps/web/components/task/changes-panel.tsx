@@ -3,11 +3,8 @@
 import { memo, useMemo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { useGitOperations } from "@/hooks/use-git-operations";
+import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
-import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
@@ -20,11 +17,7 @@ import {
   ActionButtonsSection,
   ReviewProgressBar,
 } from "./changes-panel-timeline";
-import {
-  useChangesGitHandlers,
-  useChangesStageHandlers,
-  useChangesDialogHandlers,
-} from "./changes-panel-hooks";
+import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string) => void;
@@ -34,20 +27,39 @@ type ChangesPanelProps = {
   onOpenReview?: () => void;
 };
 
+// Maps FileInfo (store) to the display format expected by FileListSection
+type ChangedFile = {
+  path: string;
+  status: FileInfo["status"];
+  staged: boolean;
+  plus: number | undefined;
+  minus: number | undefined;
+  oldPath: string | undefined;
+};
+
+function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
+  return files.map((file) => ({
+    path: file.path,
+    status: file.status,
+    staged: file.staged,
+    plus: file.additions,
+    minus: file.deletions,
+    oldPath: file.old_path,
+  }));
+}
+
 type CumulativeDiffFiles = Record<
   string,
   { diff?: string; status?: string; additions?: number; deletions?: number }
 >;
 
 function collectReviewPaths(
-  gitStatus: ReturnType<typeof useSessionGitStatus>,
+  uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
 ): Set<string> {
   const paths = new Set<string>();
-  if (gitStatus?.files) {
-    for (const [path, file] of Object.entries(gitStatus.files)) {
-      if (file.diff && normalizeDiffContent(file.diff)) paths.add(path);
-    }
+  for (const file of uncommittedFiles) {
+    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
   }
   if (cumulativeDiffFiles) {
     for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
@@ -58,88 +70,52 @@ function collectReviewPaths(
   return paths;
 }
 
-function getDiffContentForPath(
+function getDiffForPath(
   path: string,
-  gitStatus: ReturnType<typeof useSessionGitStatus>,
+  uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
 ): string {
-  const uncommitted = gitStatus?.files?.[path];
+  const uncommitted = uncommittedFiles.find((f) => f.path === path);
   if (uncommitted?.diff) return normalizeDiffContent(uncommitted.diff);
   const cumDiff = cumulativeDiffFiles?.[path]?.diff;
   if (cumDiff) return normalizeDiffContent(cumDiff);
   return "";
 }
 
-function isFileReviewStale(diffContent: string, diffHash: string | undefined): boolean {
-  return !!(diffContent && diffHash && diffHash !== hashDiff(diffContent));
-}
-
-/** Compute review progress across uncommitted + committed files */
 function computeReviewProgress(
-  gitStatus: ReturnType<typeof useSessionGitStatus>,
+  uncommittedFiles: FileInfo[],
   cumulativeDiff: { files?: CumulativeDiffFiles } | null,
   reviews: Map<string, { reviewed: boolean; diffHash?: string }>,
 ) {
   const cumulativeDiffFiles = cumulativeDiff?.files;
-  const paths = collectReviewPaths(gitStatus, cumulativeDiffFiles);
+  const paths = collectReviewPaths(uncommittedFiles, cumulativeDiffFiles);
   let reviewed = 0;
   for (const path of paths) {
     const state = reviews.get(path);
     if (!state?.reviewed) continue;
-    const diffContent = getDiffContentForPath(path, gitStatus, cumulativeDiffFiles);
-    if (isFileReviewStale(diffContent, state.diffHash)) continue;
+    const diffContent = getDiffForPath(path, uncommittedFiles, cumulativeDiffFiles);
+    if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }
   return { reviewedCount: reviewed, totalFileCount: paths.size };
 }
 
-function computeHasAnything(
-  hasUnstaged: boolean,
-  hasStaged: boolean,
-  hasCommits: boolean,
-): boolean {
-  return hasUnstaged || hasStaged || hasCommits;
-}
-
-/** Determine the last timeline section for isLast logic */
-function getLastTimelineSection(hasCommits: boolean, hasStaged: boolean): string {
-  if (hasCommits) return "action";
-  if (hasStaged) return "staged";
-  return "unstaged";
+function computeStagedStats(stagedFiles: FileInfo[]) {
+  let additions = 0;
+  let deletions = 0;
+  for (const file of stagedFiles) {
+    additions += file.additions || 0;
+    deletions += file.deletions || 0;
+  }
+  return {
+    stagedFileCount: stagedFiles.length,
+    stagedAdditions: additions,
+    stagedDeletions: deletions,
+  };
 }
 
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
   return baseBranch ? baseBranch.replace(/^origin\//, "") : "main";
-}
-
-function mapChangedFiles(gitStatus: ReturnType<typeof useSessionGitStatus>) {
-  if (!gitStatus?.files || Object.keys(gitStatus.files).length === 0) return [];
-  return (Object.values(gitStatus.files) as FileInfo[]).map((file: FileInfo) => ({
-    path: file.path,
-    status: file.status,
-    staged: file.staged,
-    plus: file.additions,
-    minus: file.deletions,
-    oldPath: file.old_path,
-  }));
-}
-
-function computeStagedStats(
-  gitStatus: ReturnType<typeof useSessionGitStatus>,
-  stagedFiles: unknown[],
-) {
-  let additions = 0;
-  let deletions = 0;
-  const count = stagedFiles.length;
-  if (gitStatus?.files && count > 0) {
-    for (const file of Object.values(gitStatus.files) as FileInfo[]) {
-      if (file.staged) {
-        additions += file.additions || 0;
-        deletions += file.deletions || 0;
-      }
-    }
-  }
-  return { stagedFileCount: count, stagedAdditions: additions, stagedDeletions: deletions };
 }
 
 function useChangesPanelStoreData() {
@@ -151,10 +127,12 @@ function useChangesPanelStoreData() {
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
-  const displayBranch = useAppStore((state) =>
-    activeSessionId ? (state.gitStatus.bySessionId[activeSessionId]?.branch ?? null) : null,
-  );
-  return { activeSessionId, taskTitle, baseBranch, displayBranch };
+  const existingPrUrl = useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return undefined;
+    return state.taskPRs.byTaskId[taskId]?.pr_url ?? undefined;
+  });
+  return { activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
 
 type ChangesPanelBodyProps = {
@@ -162,11 +140,13 @@ type ChangesPanelBodyProps = {
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
-  unstagedFiles: ReturnType<typeof mapChangedFiles>;
-  stagedFiles: ReturnType<typeof mapChangedFiles>;
-  commits: ReturnType<typeof useSessionCommits>["commits"];
+  canPush: boolean;
+  canCreatePR: boolean;
+  existingPrUrl: string | undefined;
+  unstagedFiles: ChangedFile[];
+  stagedFiles: ChangedFile[];
+  commits: ReturnType<typeof useSessionGit>["commits"];
   pendingStageFiles: Set<string>;
-  lastTimelineSection: string;
   reviewedCount: number;
   totalFileCount: number;
   aheadCount: number;
@@ -176,10 +156,12 @@ type ChangesPanelBodyProps = {
   onEditFile: (path: string) => void;
   onOpenCommitDetail?: (sha: string) => void;
   onOpenReview?: () => void;
+  onRevertCommit?: (sha: string) => void;
   onStageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
   onPush: () => void;
+  onForcePush: () => void;
   stagedFileCount: number;
   stagedAdditions: number;
   stagedDeletions: number;
@@ -249,21 +231,25 @@ function ChangesPanelTimeline(
     | "hasUnstaged"
     | "hasStaged"
     | "hasCommits"
+    | "canPush"
+    | "canCreatePR"
+    | "existingPrUrl"
     | "unstagedFiles"
     | "stagedFiles"
     | "commits"
     | "pendingStageFiles"
-    | "lastTimelineSection"
     | "aheadCount"
     | "isLoading"
     | "dialogs"
     | "onOpenDiffFile"
     | "onEditFile"
     | "onOpenCommitDetail"
+    | "onRevertCommit"
     | "onStageAll"
     | "onStage"
     | "onUnstage"
     | "onPush"
+    | "onForcePush"
   >,
 ) {
   if (!props.hasAnything) {
@@ -273,6 +259,9 @@ function ChangesPanelTimeline(
       </div>
     );
   }
+  const showStaged = props.hasUnstaged || props.hasStaged;
+  const showCommits = props.hasStaged || props.hasCommits;
+
   return (
     <div className="flex flex-col">
       {props.hasUnstaged && (
@@ -280,7 +269,7 @@ function ChangesPanelTimeline(
           variant="unstaged"
           files={props.unstagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={props.lastTimelineSection === "unstaged"}
+          isLast={!showStaged}
           actionLabel="Stage all"
           onAction={props.onStageAll}
           onOpenDiff={props.onOpenDiffFile}
@@ -290,12 +279,12 @@ function ChangesPanelTimeline(
           onDiscard={props.dialogs.handleDiscardClick}
         />
       )}
-      {props.hasStaged && (
+      {showStaged && (
         <FileListSection
           variant="staged"
           files={props.stagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={props.lastTimelineSection === "staged"}
+          isLast={!showCommits}
           actionLabel="Commit"
           onAction={props.dialogs.handleOpenCommitDialog}
           onOpenDiff={props.onOpenDiffFile}
@@ -305,19 +294,24 @@ function ChangesPanelTimeline(
           onDiscard={props.dialogs.handleDiscardClick}
         />
       )}
-      {props.hasCommits && (
+      {showCommits && (
         <CommitsSection
           commits={props.commits}
-          isLast={!props.hasCommits}
+          isLast={false}
           onOpenCommitDetail={props.onOpenCommitDetail}
+          onRevertCommit={props.onRevertCommit}
         />
       )}
-      {props.hasCommits && (
+      {showCommits && (
         <ActionButtonsSection
           onOpenPRDialog={props.dialogs.handleOpenPRDialog}
           onPush={props.onPush}
           isLoading={props.isLoading}
           aheadCount={props.aheadCount}
+          canPush={props.canPush}
+          canCreatePR={props.canCreatePR}
+          existingPrUrl={props.existingPrUrl}
+          onForcePush={props.onForcePush}
         />
       )}
     </div>
@@ -356,97 +350,82 @@ const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
 }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { activeSessionId, taskTitle, baseBranch, displayBranch } = useChangesPanelStoreData();
+  const { activeSessionId, taskTitle, baseBranch, existingPrUrl } = useChangesPanelStoreData();
 
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId ?? null);
-  const gitOps = useGitOperations(activeSessionId ?? null);
+  const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
-  const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
 
-  const aheadCount = gitStatus?.ahead ?? 0;
-  const behindCount = gitStatus?.behind ?? 0;
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
-  const changedFiles = useMemo(() => mapChangedFiles(gitStatus), [gitStatus]);
-  const unstagedFiles = useMemo(() => changedFiles.filter((f) => !f.staged), [changedFiles]);
-  const stagedFiles = useMemo(() => changedFiles.filter((f) => f.staged), [changedFiles]);
+  const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
+  const stagedFiles = useMemo(() => mapToChangedFiles(git.stagedFiles), [git.stagedFiles]);
+
   const { reviewedCount, totalFileCount } = useMemo(
-    () => computeReviewProgress(gitStatus, cumulativeDiff, reviews),
-    [gitStatus, cumulativeDiff, reviews],
+    () => computeReviewProgress(git.allFiles, git.cumulativeDiff, reviews),
+    [git.allFiles, git.cumulativeDiff, reviews],
   );
   const { stagedFileCount, stagedAdditions, stagedDeletions } = useMemo(
-    () => computeStagedStats(gitStatus, stagedFiles),
-    [gitStatus, stagedFiles],
+    () => computeStagedStats(git.stagedFiles),
+    [git.stagedFiles],
   );
 
-  const { handleGitOperation, handlePull, handleRebase, handlePush } = useChangesGitHandlers(
-    gitOps,
-    toast,
-    baseBranch,
-  );
-  const { pendingStageFiles, handleStageAll, handleStage, handleUnstage } = useChangesStageHandlers(
-    gitOps,
-    changedFiles,
-  );
-  const dialogs = useChangesDialogHandlers(
-    gitOps,
-    toast,
+  const {
     handleGitOperation,
-    taskTitle,
-    baseBranch,
-  );
-
-  const hasUnstaged = unstagedFiles.length > 0;
-  const hasStaged = stagedFiles.length > 0;
-  const hasCommits = commits.length > 0;
-  const hasChanges = changedFiles.length > 0;
-  const hasAnything = computeHasAnything(hasUnstaged, hasStaged, hasCommits);
-  const lastTimelineSection = getLastTimelineSection(hasCommits, hasStaged);
+    handlePull,
+    handleRebase,
+    handlePush,
+    handleForcePush,
+    handleRevertCommit,
+  } = useChangesGitHandlers(git, toast, baseBranch);
+  const dialogs = useChangesDialogHandlers(git, toast, handleGitOperation, taskTitle, baseBranch);
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
     <PanelRoot>
       <ChangesPanelHeader
-        hasChanges={hasChanges}
-        hasCommits={hasCommits}
-        displayBranch={displayBranch}
+        hasChanges={git.hasChanges}
+        hasCommits={git.hasCommits}
+        displayBranch={git.branch}
         baseBranchDisplay={baseBranchDisplay}
-        behindCount={behindCount}
-        isLoading={gitOps.isLoading}
+        behindCount={git.behind}
+        isLoading={git.isLoading}
         onOpenDiffAll={onOpenDiffAll}
         onOpenReview={onOpenReview}
         onPull={handlePull}
         onRebase={handleRebase}
       />
       <ChangesPanelBody
-        hasAnything={hasAnything}
-        hasUnstaged={hasUnstaged}
-        hasStaged={hasStaged}
-        hasCommits={hasCommits}
+        hasAnything={git.hasAnything}
+        hasUnstaged={git.hasUnstaged}
+        hasStaged={git.hasStaged}
+        hasCommits={git.hasCommits}
+        canPush={git.canPush}
+        canCreatePR={git.canCreatePR}
+        existingPrUrl={existingPrUrl}
         unstagedFiles={unstagedFiles}
         stagedFiles={stagedFiles}
-        commits={commits}
-        pendingStageFiles={pendingStageFiles}
-        lastTimelineSection={lastTimelineSection}
+        commits={git.commits}
+        pendingStageFiles={git.pendingStageFiles}
         reviewedCount={reviewedCount}
         totalFileCount={totalFileCount}
-        aheadCount={aheadCount}
-        isLoading={gitOps.isLoading}
+        aheadCount={git.ahead}
+        isLoading={git.isLoading}
         dialogs={dialogs}
         onOpenDiffFile={onOpenDiffFile}
         onEditFile={onEditFile}
         onOpenCommitDetail={onOpenCommitDetail}
+        onRevertCommit={handleRevertCommit}
         onOpenReview={onOpenReview}
-        onStageAll={handleStageAll}
-        onStage={handleStage}
-        onUnstage={handleUnstage}
+        onStageAll={git.stageAll}
+        onStage={(path) => git.stage([path]).then(() => undefined)}
+        onUnstage={(path) => git.unstage([path]).then(() => undefined)}
         onPush={handlePush}
+        onForcePush={handleForcePush}
         stagedFileCount={stagedFileCount}
         stagedAdditions={stagedAdditions}
         stagedDeletions={stagedDeletions}
-        displayBranch={displayBranch}
+        displayBranch={git.branch}
         baseBranch={baseBranch}
       />
     </PanelRoot>

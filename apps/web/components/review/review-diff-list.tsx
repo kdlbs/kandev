@@ -1,7 +1,13 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, useCallback } from "react";
-import { IconAlertTriangle, IconArrowBackUp, IconPencil } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconArrowBackUp,
+  IconChevronDown,
+  IconChevronRight,
+  IconPencil,
+} from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -20,6 +26,7 @@ type ReviewDiffListProps = {
   sessionId: string;
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
+  selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string) => void;
@@ -33,6 +40,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   sessionId,
   autoMarkOnScroll,
   wordWrap,
+  selectedFile,
   onToggleReviewed,
   onDiscard,
   onOpenFile,
@@ -50,6 +58,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           sessionId={sessionId}
           autoMarkOnScroll={autoMarkOnScroll}
           wordWrap={wordWrap}
+          isSelected={selectedFile === file.path}
           onToggleReviewed={onToggleReviewed}
           onDiscard={onDiscard}
           onOpenFile={onOpenFile}
@@ -68,6 +77,7 @@ type FileDiffSectionProps = {
   sessionId: string;
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
+  isSelected?: boolean;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string) => void;
@@ -148,9 +158,11 @@ type FileDiffHeaderProps = {
   isReviewed: boolean;
   isStale: boolean;
   sessionId: string;
+  collapsed: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
   onOpenFile?: (filePath: string) => void;
+  onToggleCollapse: () => void;
 };
 
 function FileDiffHeader({
@@ -158,9 +170,11 @@ function FileDiffHeader({
   isReviewed,
   isStale,
   sessionId,
+  collapsed,
   onCheckboxChange,
   onDiscard,
   onOpenFile,
+  onToggleCollapse,
 }: FileDiffHeaderProps) {
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50">
@@ -169,8 +183,17 @@ function FileDiffHeader({
         onCheckedChange={onCheckboxChange}
         className="h-4 w-4 cursor-pointer"
       />
-      <span className="text-sm font-medium truncate">{file.path}</span>
-      <div className="flex-1" />
+      <button
+        onClick={onToggleCollapse}
+        className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer text-left hover:text-foreground"
+      >
+        {collapsed ? (
+          <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="text-[13px] font-medium truncate">{file.path}</span>
+      </button>
       {isStale && (
         <span className="flex items-center gap-1 text-xs text-yellow-500">
           <IconAlertTriangle className="h-3.5 w-3.5" />
@@ -226,12 +249,22 @@ function FileDiffSection({
   sessionId,
   autoMarkOnScroll,
   wordWrap,
+  isSelected,
   onToggleReviewed,
   onDiscard,
   onOpenFile,
   sectionRef,
   scrollContainer,
 }: FileDiffSectionProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
+  useEffect(() => {
+    setCollapsed(isReviewed);
+  }, [isReviewed]);
+  // Force-expand when the user explicitly navigates to this file
+  useEffect(() => {
+    if (isSelected) setCollapsed(false);
+  }, [isSelected]);
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
@@ -285,30 +318,33 @@ function FileDiffSection({
         isReviewed={isReviewed}
         isStale={isStale}
         sessionId={sessionId}
+        collapsed={collapsed}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
         onOpenFile={onOpenFile}
+        onToggleCollapse={handleToggleCollapse}
       />
       <div ref={sentinelRef} />
-      {isVisible && file.diff ? (
-        <div className="px-2 py-2">
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            onRevertBlock={handleRevertBlock}
-            sessionId={sessionId}
-            hideHeader
-            wordWrap={wordWrap}
-          />
-        </div>
-      ) : (
-        <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-          Loading diff...
-        </div>
-      )}
+      {!collapsed &&
+        (isVisible && file.diff ? (
+          <div className="">
+            <FileDiffViewer
+              filePath={file.path}
+              diff={file.diff}
+              status={file.status}
+              enableComments
+              enableAcceptReject
+              onRevertBlock={handleRevertBlock}
+              sessionId={sessionId}
+              hideHeader
+              wordWrap={wordWrap}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
+            Loading diff...
+          </div>
+        ))}
     </div>
   );
 }

@@ -374,6 +374,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
           staleFiles={staleFiles}
           autoMarkOnScroll={autoMarkOnScroll}
           wordWrap={wordWrap}
+          selectedFile={mode === "file" ? filePath : undefined}
           onToggleReviewed={handleToggleReviewed}
           onDiscard={handleDiscard}
           onOpenFile={handleOpenFile}
@@ -392,6 +393,7 @@ function ChangesPanelContent({
   staleFiles,
   autoMarkOnScroll,
   wordWrap,
+  selectedFile,
   onToggleReviewed,
   onDiscard,
   onOpenFile,
@@ -404,6 +406,7 @@ function ChangesPanelContent({
   staleFiles: Set<string>;
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
+  selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
   onOpenFile: (path: string) => void;
@@ -432,6 +435,7 @@ function ChangesPanelContent({
       sessionId={activeSessionId}
       autoMarkOnScroll={autoMarkOnScroll}
       wordWrap={wordWrap}
+      selectedFile={selectedFile}
       onToggleReviewed={onToggleReviewed}
       onDiscard={onDiscard}
       onOpenFile={onOpenFile}

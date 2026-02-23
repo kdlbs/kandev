@@ -590,6 +590,56 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 	return result, nil
 }
 
+// RevertCommit undoes the latest commit using git reset --soft HEAD~1.
+// The previously committed changes remain staged so the caller can review
+// and re-commit or discard as needed.
+func (g *GitOperator) RevertCommit(ctx context.Context, commitSHA string) (*GitOperationResult, error) {
+	if !g.tryLock("revert_commit") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "revert_commit",
+	}
+
+	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
+		result.Error = errMsg
+		return result, nil
+	}
+
+	// Only the HEAD commit can be reverted via reset --soft.
+	headSHA, err := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		result.Error = "failed to get HEAD: " + err.Error()
+		return result, nil
+	}
+	if strings.TrimSpace(headSHA) != commitSHA {
+		result.Error = "can only revert the latest commit"
+		return result, nil
+	}
+
+	// git reset --soft HEAD~1 moves HEAD backward while keeping the committed
+	// files staged. The git poller detects the backward HEAD movement and
+	// automatically emits a GitResetNotification, which triggers DB cleanup and
+	// the frontend commits_reset event.
+	output, err := g.runGitCommand(ctx, "reset", "--soft", "HEAD~1")
+	if err != nil {
+		result.Error = err.Error()
+		if output != "" {
+			result.Output = output
+		}
+		return result, nil
+	}
+
+	result.Success = true
+	result.Output = output
+	g.logger.Info("revert commit completed",
+		zap.String("commit_sha", commitSHA),
+		zap.Bool("success", result.Success))
+	return result, nil
+}
+
 func (g *GitOperator) discardUntrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
 	for _, path := range paths {
 		resetArgs := []string{"rm", "--cached", "--force", "--", path}

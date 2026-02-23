@@ -14,17 +14,37 @@ const DIFF_UNSAFE_CSS = `
     background-color: var(--background) !important;
     --diffs-bg: var(--background) !important;
     --diffs-bg-context: var(--background) !important;
-    --diffs-bg-buffer: var(--background) !important;
+    --diffs-bg-buffer: var(--card) !important;
     --diffs-bg-separator: var(--card) !important;
     --diffs-bg-hover: var(--muted) !important;
     --diffs-fg: var(--foreground) !important;
     --diffs-fg-number: var(--muted-foreground) !important;
     --diffs-addition-color-override: rgb(var(--git-addition)) !important;
     --diffs-deletion-color-override: rgb(var(--git-deletion)) !important;
+    --diffs-bg-addition: rgb(var(--git-addition) / 0.1) !important;
+    --diffs-bg-deletion: rgb(var(--git-deletion) / 0.1) !important;
+    --diffs-bg-addition-number: rgb(var(--git-addition) / 0.15) !important;
+    --diffs-bg-deletion-number: rgb(var(--git-deletion) / 0.15) !important;
+    --diffs-bg-addition-emphasis: rgb(var(--git-addition) / 0.3) !important;
+    --diffs-bg-deletion-emphasis: rgb(var(--git-deletion) / 0.3) !important;
+    --diffs-line-height: 24px !important;
     --diffs-font-size: ${FONT.size}px !important;
     --diffs-font-family: ${FONT.mono} !important;
+    --diffs-gap-fallback: 0;
     font-size: ${FONT.size}px !important;
     font-family: ${FONT.mono} !important;
+  }
+  [data-line] {
+    min-height: 24px !important;
+    line-height: 24px !important;
+  }
+  [data-separator='metadata'],
+  [data-separator]:empty {
+    height: 24px !important;
+    background-image: repeating-linear-gradient(-45deg, transparent, transparent calc(3px * 1.414), var(--diffs-bg-buffer) calc(3px * 1.414), var(--diffs-bg-buffer) calc(4px * 1.414));
+    background-color: transparent !important;
+    border-top: 1px solid var(--diffs-bg-separator) !important;
+    border-bottom: 1px solid var(--diffs-bg-separator) !important;
   }
   [data-change-icon] {
     width: 12px !important;

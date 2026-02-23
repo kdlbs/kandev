@@ -24,8 +24,7 @@ import {
   DropdownMenuSubContent,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useGitOperations } from "@/hooks/use-git-operations";
+import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 
@@ -211,40 +210,40 @@ const VcsSplitButton = memo(function VcsSplitButton({
   baseBranch,
 }: VcsSplitButtonProps) {
   const gitWithFeedback = useGitWithFeedback();
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { pull, push, rebase, merge, isLoading: isGitLoading } = useGitOperations(sessionId);
+  const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
 
-  const currentBranch = gitStatus?.branch;
-  const remoteBranch = gitStatus?.remote_branch;
+  const currentBranch = git.branch;
+  const remoteBranch = git.remoteBranch;
   const hasMatchingUpstream =
     remoteBranch && currentBranch && remoteBranch === `origin/${currentBranch}`;
 
-  const uncommittedFileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
-  const aheadCount = gitStatus?.ahead ?? 0;
-  const behindCount = gitStatus?.behind ?? 0;
-  const isDisabled = isGitLoading || !sessionId;
+  const uncommittedFileCount = git.allFiles.length;
+  const aheadCount = git.ahead;
+  const behindCount = git.behind;
+  const isDisabled = git.isLoading || !sessionId;
+  const isGitLoading = git.isLoading;
 
   const handlePull = useCallback(() => {
-    gitWithFeedback(() => pull(), "Pull");
-  }, [gitWithFeedback, pull]);
+    gitWithFeedback(() => git.pull(), "Pull");
+  }, [gitWithFeedback, git]);
 
   const handlePush = useCallback(
     (force = false) => {
-      gitWithFeedback(() => push({ force }), force ? "Force Push" : "Push");
+      gitWithFeedback(() => git.push({ force }), force ? "Force Push" : "Push");
     },
-    [gitWithFeedback, push],
+    [gitWithFeedback, git],
   );
 
   const handleRebase = useCallback(() => {
     const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    gitWithFeedback(() => rebase(targetBranch), "Rebase");
-  }, [gitWithFeedback, rebase, baseBranch]);
+    gitWithFeedback(() => git.rebase(targetBranch), "Rebase");
+  }, [gitWithFeedback, git, baseBranch]);
 
   const handleMerge = useCallback(() => {
     const targetBranch = baseBranch?.replace(/^origin\//, "") || "main";
-    gitWithFeedback(() => merge(targetBranch), "Merge");
-  }, [gitWithFeedback, merge, baseBranch]);
+    gitWithFeedback(() => git.merge(targetBranch), "Merge");
+  }, [gitWithFeedback, git, baseBranch]);
 
   const primaryAction = determinePrimaryAction(uncommittedFileCount, aheadCount, behindCount);
   const primaryButtonConfig = buildPrimaryButtonConfig({

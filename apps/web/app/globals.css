@@ -96,8 +96,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 
   /* Git diff colors - centralized for easy maintenance */
-  --git-addition: 16 185 129; /* emerald-500 */
-  --git-deletion: 244 63 94; /* rose-500 */
+  --git-addition: 63 185 80; /* #3fb950 - GitHub addition green */
+  --git-deletion: 244 112 103; /* #f47067 - GitHub deletion red */
 }
 
 .dark {
@@ -138,8 +138,8 @@
   --sidebar-ring: #555555;
 
   /* Git diff colors - same as light mode for consistency */
-  --git-addition: 16 185 129; /* emerald-500 */
-  --git-deletion: 244 63 94; /* rose-500 */
+  --git-addition: 63 185 80; /* #3fb950 - GitHub addition green */
+  --git-deletion: 244 112 103; /* #f47067 - GitHub deletion red */
 }
 
 @layer base {

@@ -31,6 +31,7 @@ interface UseGitOperationsReturn {
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
+  revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -80,6 +81,9 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
   const discard = async (paths?: string[]) =>
     executeOperation<GitOperationResult>("worktree.discard", { paths: paths ?? [] });
 
+  const revertCommit = async (commitSHA: string) =>
+    executeOperation<GitOperationResult>("worktree.revert_commit", { commit_sha: commitSHA });
+
   const createPR = async (
     title: string,
     body: string,
@@ -93,7 +97,19 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
       draft: draft ?? true,
     });
 
-  return { pull, push, rebase, merge, abort, commit, stage, unstage, discard, createPR };
+  return {
+    pull,
+    push,
+    rebase,
+    merge,
+    abort,
+    commit,
+    stage,
+    unstage,
+    discard,
+    revertCommit,
+    createPR,
+  };
 }
 
 export function useGitOperations(sessionId: string | null): UseGitOperationsReturn {

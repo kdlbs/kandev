@@ -1,10 +1,27 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import type { useGitOperations } from "@/hooks/use-git-operations";
+import { useState, useCallback } from "react";
+import type { GitOperationResult, PRCreateResult } from "@/hooks/use-git-operations";
 import type { useToast } from "@/components/toast-provider";
 
-type GitOps = ReturnType<typeof useGitOperations>;
+// Accepts both useGitOperations and SessionGit
+interface GitOps {
+  pull: (rebase?: boolean) => Promise<GitOperationResult>;
+  push: (options?: { force?: boolean; setUpstream?: boolean }) => Promise<GitOperationResult>;
+  rebase: (baseBranch: string) => Promise<GitOperationResult>;
+  commit: (message: string, stageAll?: boolean) => Promise<GitOperationResult>;
+  stage: (paths?: string[]) => Promise<GitOperationResult>;
+  unstage: (paths?: string[]) => Promise<GitOperationResult>;
+  discard: (paths?: string[]) => Promise<GitOperationResult>;
+  revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
+  createPR: (
+    title: string,
+    body: string,
+    baseBranch?: string,
+    draft?: boolean,
+  ) => Promise<PRCreateResult>;
+  isLoading: boolean;
+}
 type Toast = ReturnType<typeof useToast>["toast"];
 type GitOperationFn = (
   op: () => Promise<{ success: boolean; output: string; error?: string }>,
@@ -50,57 +67,24 @@ export function useChangesGitHandlers(
   const handlePush = useCallback(() => {
     handleGitOperation(() => gitOps.push(), "Push");
   }, [handleGitOperation, gitOps]);
-
-  return { handleGitOperation, handlePull, handleRebase, handlePush };
-}
-
-export function useChangesStageHandlers(gitOps: GitOps, changedFiles: unknown[]) {
-  const [pendingStageFiles, setPendingStageFiles] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (pendingStageFiles.size > 0) setPendingStageFiles(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [changedFiles]);
-
-  const handleStageAll = useCallback(async () => {
-    try {
-      await gitOps.stage();
-    } catch {
-      /* handled by gitOps */
-    }
-  }, [gitOps]);
-  const handleStage = useCallback(
-    async (path: string) => {
-      setPendingStageFiles((prev) => new Set(prev).add(path));
-      try {
-        await gitOps.stage([path]);
-      } catch {
-        setPendingStageFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
+  const handleForcePush = useCallback(() => {
+    handleGitOperation(() => gitOps.push({ force: true }), "Force push");
+  }, [handleGitOperation, gitOps]);
+  const handleRevertCommit = useCallback(
+    (sha: string) => {
+      handleGitOperation(() => gitOps.revertCommit(sha), "Revert commit");
     },
-    [gitOps],
-  );
-  const handleUnstage = useCallback(
-    async (path: string) => {
-      setPendingStageFiles((prev) => new Set(prev).add(path));
-      try {
-        await gitOps.unstage([path]);
-      } catch {
-        setPendingStageFiles((prev) => {
-          const next = new Set(prev);
-          next.delete(path);
-          return next;
-        });
-      }
-    },
-    [gitOps],
+    [handleGitOperation, gitOps],
   );
 
-  return { pendingStageFiles, handleStageAll, handleStage, handleUnstage };
+  return {
+    handleGitOperation,
+    handlePull,
+    handleRebase,
+    handlePush,
+    handleForcePush,
+    handleRevertCommit,
+  };
 }
 
 function useChangesDiscardCommitHandlers(

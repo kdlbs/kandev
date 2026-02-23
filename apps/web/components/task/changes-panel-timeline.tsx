@@ -1,9 +1,21 @@
 "use client";
 
-import { IconGitCommit, IconGitPullRequest, IconCloudUpload } from "@tabler/icons-react";
+import {
+  IconGitCommit,
+  IconGitPullRequest,
+  IconCloudUpload,
+  IconChevronDown,
+  IconArrowBackUp,
+} from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 
@@ -60,7 +72,7 @@ function TimelineSection({
           <div className="flex items-center justify-between gap-2 -mt-0.5 mb-1">
             <span className="text-[11px] font-medium uppercase tracking-wider text-foreground/70">
               {label}
-              {typeof count === "number" && count > 0 && (
+              {typeof count === "number" && (
                 <span className="ml-1 text-muted-foreground/50 font-normal">({count})</span>
               )}
             </span>
@@ -88,9 +100,15 @@ type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
+  onRevertCommit?: (sha: string) => void;
 };
 
-export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsSectionProps) {
+export function CommitsSection({
+  commits,
+  isLast,
+  onOpenCommitDetail,
+  onRevertCommit,
+}: CommitsSectionProps) {
   return (
     <TimelineSection
       dotColor={DOT_COLORS.commits}
@@ -99,10 +117,10 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
       isLast={isLast}
     >
       <ul className="space-y-0.5">
-        {commits.map((commit) => (
+        {commits.map((commit, index) => (
           <li
             key={commit.commit_sha}
-            className="flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
+            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
             onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
           >
             <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
@@ -110,9 +128,27 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
               {commit.commit_sha.slice(0, 7)}
             </code>
             <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-            <span className="shrink-0 text-[11px]">
+            <span className="shrink-0 text-[11px] flex items-center gap-1">
               <span className="text-emerald-500">+{commit.insertions}</span>{" "}
               <span className="text-rose-500">-{commit.deletions}</span>
+              {index === 0 && onRevertCommit && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Revert commit"
+                      className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRevertCommit(commit.commit_sha);
+                      }}
+                    >
+                      <IconArrowBackUp className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Revert commit</TooltipContent>
+                </Tooltip>
+              )}
             </span>
           </li>
         ))}
@@ -126,39 +162,88 @@ export function CommitsSection({ commits, isLast, onOpenCommitDetail }: CommitsS
 type ActionButtonsSectionProps = {
   onOpenPRDialog: () => void;
   onPush: () => void;
+  onForcePush: () => void;
   isLoading: boolean;
   aheadCount: number;
+  canPush: boolean;
+  canCreatePR: boolean;
+  existingPrUrl?: string;
 };
 
 export function ActionButtonsSection({
   onOpenPRDialog,
   onPush,
+  onForcePush,
   isLoading,
   aheadCount,
+  canPush,
+  canCreatePR,
+  existingPrUrl,
 }: ActionButtonsSectionProps) {
+  const prExists = !!existingPrUrl;
+  const createPrDisabled = !canCreatePR || prExists;
+  const pushDisabled = !canPush || isLoading;
+  let pushTooltip: string | null = null;
+  if (isLoading) pushTooltip = "A git operation is in progress";
+  else if (!canPush) pushTooltip = "No commits ahead of remote";
   return (
     <TimelineSection dotColor={DOT_COLORS.action} isLast>
       <div className="flex items-center gap-2 -mt-0.5">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={onOpenPRDialog}
-        >
-          <IconGitPullRequest className="h-3 w-3" />
-          Create PR
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
-          onClick={onPush}
-          disabled={isLoading}
-        >
-          <IconCloudUpload className="h-3 w-3" />
-          Push
-          {aheadCount > 0 && <span className="text-muted-foreground">{aheadCount} ahead</span>}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+                onClick={onOpenPRDialog}
+                disabled={createPrDisabled}
+              >
+                <IconGitPullRequest className="h-3 w-3" />
+                Create PR
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
+                onClick={onPush}
+                disabled={pushDisabled}
+              >
+                <IconCloudUpload className="h-3 w-3" />
+                Push
+                {aheadCount > 0 && (
+                  <span className="text-muted-foreground">{aheadCount} ahead</span>
+                )}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
+                    disabled={pushDisabled}
+                  >
+                    <IconChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem className="cursor-pointer gap-2 text-xs" onClick={onForcePush}>
+                    <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
+                    Force Push (with lease)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          </TooltipTrigger>
+          {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
+        </Tooltip>
       </div>
     </TimelineSection>
   );
@@ -199,36 +284,35 @@ export function FileListSection({
   const label = variant === "unstaged" ? "Unstaged" : "Staged";
 
   return (
-    <TimelineSection
-      dotColor={dotColor}
-      label={label}
-      count={files.length}
-      isLast={isLast}
-      action={
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-5 text-[10px] px-1.5 cursor-pointer"
-          onClick={onAction}
-        >
-          {actionLabel}
-        </Button>
-      }
-    >
-      <ul className="space-y-0.5">
-        {files.map((file) => (
-          <FileRow
-            key={file.path}
-            file={file}
-            isPending={pendingStageFiles.has(file.path)}
-            onOpenDiff={onOpenDiff}
-            onStage={onStage}
-            onUnstage={onUnstage}
-            onDiscard={onDiscard}
-            onEditFile={onEditFile}
-          />
-        ))}
-      </ul>
+    <TimelineSection dotColor={dotColor} label={label} count={files.length} isLast={isLast}>
+      {files.length > 0 && (
+        <ul className="space-y-0.5">
+          {files.map((file) => (
+            <FileRow
+              key={file.path}
+              file={file}
+              isPending={pendingStageFiles.has(file.path)}
+              onOpenDiff={onOpenDiff}
+              onStage={onStage}
+              onUnstage={onUnstage}
+              onDiscard={onDiscard}
+              onEditFile={onEditFile}
+            />
+          ))}
+        </ul>
+      )}
+      {files.length > 0 && (
+        <div className="mt-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+            onClick={onAction}
+          >
+            {actionLabel}
+          </Button>
+        </div>
+      )}
     </TimelineSection>
   );
 }

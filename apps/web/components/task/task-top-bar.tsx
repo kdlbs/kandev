@@ -25,7 +25,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { CommitStatBadge } from "@/components/diff-stat";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { formatUserHomePath } from "@/lib/utils";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
@@ -88,7 +88,7 @@ const TaskTopBar = memo(function TaskTopBar({
   remoteStatusError,
 }: TaskTopBarProps) {
   const router = useRouter();
-  const gitStatus = useSessionGitStatus(activeSessionId ?? null);
+  const git = useSessionGit(activeSessionId);
   const displayBranch = worktreeBranch || baseBranch;
 
   return (
@@ -99,7 +99,7 @@ const TaskTopBar = memo(function TaskTopBar({
         displayBranch={displayBranch}
         repositoryPath={repositoryPath}
         worktreePath={worktreePath}
-        gitStatus={gitStatus}
+        gitStatus={git}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorName={remoteExecutorName}
         remoteExecutorType={remoteExecutorType}
@@ -291,7 +291,7 @@ function TopBarLeft({
   displayBranch?: string;
   repositoryPath?: string | null;
   worktreePath?: string | null;
-  gitStatus: ReturnType<typeof useSessionGitStatus>;
+  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
   isRemoteExecutor?: boolean;
   remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
@@ -353,7 +353,7 @@ function TopBarLeft({
 function GitAheadBehindBadges({
   gitStatus,
 }: {
-  gitStatus: ReturnType<typeof useSessionGitStatus>;
+  gitStatus: { ahead: number; behind: number; remote_branch?: string | null };
 }) {
   const ahead = gitStatus?.ahead ?? 0;
   const behind = gitStatus?.behind ?? 0;

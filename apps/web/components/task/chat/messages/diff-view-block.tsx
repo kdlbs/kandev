@@ -21,7 +21,7 @@ export function DiffViewBlock({ data, className }: DiffViewBlockProps) {
   return (
     <div
       className={cn(
-        "mt-3 rounded-md border border-border/50 bg-background/60 px-3 py-2 text-xs",
+        "mt-3 rounded-md border border-border/50 bg-background/60 px-3 text-xs",
         className,
       )}
     >

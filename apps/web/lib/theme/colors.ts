@@ -47,22 +47,22 @@ export const LIGHT = {
 // Git diff colors (shared across Monaco, Pierre, CSS --git-addition/deletion)
 // ---------------------------------------------------------------------------
 export const DIFF_COLORS = {
-  addition: "#10b981", // emerald-500
-  deletion: "#f43f5e", // rose-500
+  addition: "#3fb950", // GitHub addition green
+  deletion: "#f47067", // GitHub deletion red (rgb(244, 112, 103))
   /** Alpha variants for Monaco diff backgrounds */
-  additionTextBg: "#10b98126",
-  deletionTextBg: "#f43f5e26",
-  additionLineBg: "#10b98115",
-  deletionLineBg: "#f43f5e15",
+  additionTextBg: "#3fb95040",
+  deletionTextBg: "#f4706740",
+  additionLineBg: "#3fb95015",
+  deletionLineBg: "#f4706715",
 } as const;
 
 // ---------------------------------------------------------------------------
 // Font stack
 // ---------------------------------------------------------------------------
 export const FONT = {
-  mono: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  mono: '"Monaspace Neon", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   size: 12,
-  lineHeight: 18,
+  lineHeight: 20,
 } as const;
 
 // ---------------------------------------------------------------------------
