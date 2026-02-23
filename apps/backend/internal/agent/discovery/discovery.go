@@ -4,6 +4,8 @@ package discovery
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -11,6 +13,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+const defaultCacheTTL = 30 * time.Second
 
 // Capabilities describes what the agent supports.
 type Capabilities struct {
@@ -34,12 +38,13 @@ type KnownAgent struct {
 
 // Availability represents the result of detecting an agent's installation.
 type Availability struct {
-	Name              string   `json:"name"`
-	SupportsMCP       bool     `json:"supports_mcp"`
-	MCPConfigPath     string   `json:"mcp_config_path,omitempty"`
-	InstallationPaths []string `json:"installation_paths,omitempty"`
-	Available         bool     `json:"available"`
-	MatchedPath       string   `json:"matched_path,omitempty"`
+	Name              string       `json:"name"`
+	SupportsMCP       bool         `json:"supports_mcp"`
+	MCPConfigPath     string       `json:"mcp_config_path,omitempty"`
+	InstallationPaths []string     `json:"installation_paths,omitempty"`
+	Available         bool         `json:"available"`
+	MatchedPath       string       `json:"matched_path,omitempty"`
+	Capabilities      Capabilities `json:"capabilities"`
 }
 
 // Registry manages agent discovery using the agents.Agent interface.
@@ -47,6 +52,11 @@ type Registry struct {
 	agents      []agents.Agent
 	definitions []KnownAgent
 	logger      *logger.Logger
+
+	mu            sync.RWMutex
+	cachedResults []Availability
+	cachedAt      time.Time
+	cacheTTL      time.Duration
 }
 
 // LoadRegistry creates a new discovery registry from the agent registry.
@@ -113,6 +123,7 @@ func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logge
 		agents:      agentList,
 		definitions: definitions,
 		logger:      log,
+		cacheTTL:    defaultCacheTTL,
 	}, nil
 }
 
@@ -125,31 +136,109 @@ func (r *Registry) Definitions() []KnownAgent {
 }
 
 // Detect checks whether each agent is installed by calling IsInstalled.
+// Results are cached with a TTL to avoid redundant detection on repeated calls.
 func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
-	results := make([]Availability, 0, len(r.agents))
-	for _, ag := range r.agents {
-		result, err := ag.IsInstalled(ctx)
-		if err != nil {
+	if cached := r.getCached(); cached != nil {
+		return cached, nil
+	}
+
+	results := r.detectAll(ctx)
+
+	r.mu.Lock()
+	r.cachedResults = results
+	r.cachedAt = time.Now()
+	r.mu.Unlock()
+
+	return results, nil
+}
+
+// InvalidateCache clears the cached detection results, forcing the next
+// Detect call to re-run agent detection.
+func (r *Registry) InvalidateCache() {
+	r.mu.Lock()
+	r.cachedResults = nil
+	r.cachedAt = time.Time{}
+	r.mu.Unlock()
+}
+
+func (r *Registry) getCached() []Availability {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.cachedResults == nil {
+		return nil
+	}
+	if time.Since(r.cachedAt) > r.cacheTTL {
+		return nil
+	}
+	// Return a copy to prevent mutation.
+	copied := make([]Availability, len(r.cachedResults))
+	copy(copied, r.cachedResults)
+	return copied
+}
+
+// detectAll runs IsInstalled for all agents concurrently.
+func (r *Registry) detectAll(ctx context.Context) []Availability {
+	type indexedResult struct {
+		index int
+		avail Availability
+		err   error
+	}
+
+	ch := make(chan indexedResult, len(r.agents))
+	for i, ag := range r.agents {
+		go func(idx int, ag agents.Agent) {
+			result, err := ag.IsInstalled(ctx)
+			if err != nil {
+				ch <- indexedResult{index: idx, err: err}
+				return
+			}
+
+			mcpPath := ""
+			if len(result.MCPConfigPaths) > 0 {
+				mcpPath = result.MCPConfigPaths[0]
+			}
+
+			ch <- indexedResult{
+				index: idx,
+				avail: Availability{
+					Name:              ag.ID(),
+					SupportsMCP:       result.SupportsMCP,
+					MCPConfigPath:     mcpPath,
+					InstallationPaths: result.InstallationPaths,
+					Available:         result.Available,
+					MatchedPath:       result.MatchedPath,
+					Capabilities: Capabilities{
+						SupportsSessionResume: result.Capabilities.SupportsSessionResume,
+						SupportsShell:         result.Capabilities.SupportsShell,
+						SupportsWorkspaceOnly: result.Capabilities.SupportsWorkspaceOnly,
+					},
+				},
+			}
+		}(i, ag)
+	}
+
+	// Collect results preserving original order.
+	slots := make([]Availability, len(r.agents))
+	valid := make([]bool, len(r.agents))
+	for range r.agents {
+		res := <-ch
+		if res.err != nil {
 			r.logger.Warn("discovery: detect failed for agent",
-				zap.String("agent", ag.ID()),
-				zap.Error(err),
+				zap.String("agent", r.agents[res.index].ID()),
+				zap.Error(res.err),
 			)
 			continue
 		}
-
-		mcpPath := ""
-		if len(result.MCPConfigPaths) > 0 {
-			mcpPath = result.MCPConfigPaths[0]
-		}
-
-		results = append(results, Availability{
-			Name:              ag.ID(),
-			SupportsMCP:       result.SupportsMCP,
-			MCPConfigPath:     mcpPath,
-			InstallationPaths: result.InstallationPaths,
-			Available:         result.Available,
-			MatchedPath:       result.MatchedPath,
-		})
+		slots[res.index] = res.avail
+		valid[res.index] = true
 	}
-	return results, nil
+
+	results := make([]Availability, 0, len(r.agents))
+	for i, v := range valid {
+		if v {
+			results = append(results, slots[i])
+		}
+	}
+	return results
 }

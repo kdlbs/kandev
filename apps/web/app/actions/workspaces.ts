@@ -137,10 +137,15 @@ export async function deleteWorkflowAction(id: string) {
 
 export async function listRepositoriesAction(
   workspaceId: string,
+  params?: { includeScripts?: boolean },
 ): Promise<ListRepositoriesResponse> {
-  return fetchJson<ListRepositoriesResponse>(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories`,
-  );
+  const searchParams = new URLSearchParams();
+  if (params?.includeScripts) {
+    searchParams.set("include_scripts", "true");
+  }
+  const queryString = searchParams.toString();
+  const url = `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ""}`;
+  return fetchJson<ListRepositoriesResponse>(url);
 }
 
 export async function listLocalRepositoryBranchesAction(
