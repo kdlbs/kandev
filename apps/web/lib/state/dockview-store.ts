@@ -271,9 +271,10 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
-        const centerIdx = current.columns.findIndex((c) => c.id === "center");
         const withoutRight: LayoutState = {
-          columns: current.columns.slice(0, centerIdx + 1),
+          columns: current.columns.filter(
+            (c) => !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
+          ),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
