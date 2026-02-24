@@ -6,19 +6,17 @@ on:
     paths:
       - "apps/backend/**"
       - ".github/workflows/backend-tests.yml"
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.mdx"
-      - "**/*.markdown"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
   pull_request:
     branches: [main]
     paths:
       - "apps/backend/**"
       - ".github/workflows/backend-tests.yml"
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.mdx"
-      - "**/*.markdown"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
 
 jobs:
   test:

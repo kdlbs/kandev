@@ -12,10 +12,9 @@ on:
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
       - ".github/workflows/frontend-tests.yml"
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.mdx"
-      - "**/*.markdown"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
   pull_request:
     branches: [main]
     paths:
@@ -27,10 +26,9 @@ on:
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
       - ".github/workflows/frontend-tests.yml"
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.mdx"
-      - "**/*.markdown"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
 
 jobs:
   frontend:
