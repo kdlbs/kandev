@@ -6,16 +6,24 @@ on:
     paths:
       - "apps/backend/**"
       - ".github/workflows/backend-tests.yml"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "**/*.markdown"
   pull_request:
     branches: [main]
     paths:
       - "apps/backend/**"
       - ".github/workflows/backend-tests.yml"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "**/*.markdown"
 
 jobs:
   test:
     name: Run Backend Tests
-    runs-on: homelab-runner
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/backend
