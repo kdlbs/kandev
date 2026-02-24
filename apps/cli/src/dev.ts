@@ -28,7 +28,8 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     extra: { KANDEV_MOCK_AGENT: "true", KANDEV_DATABASE_PATH: dbPath },
   });
   const webEnv = buildWebEnv({ ports, includeMcp: true, debug: true });
-  const logLevel = process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
+  const logLevel =
+    process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
 
   logStartupInfo({
     header: "dev mode: using local repo",
