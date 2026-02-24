@@ -125,8 +125,15 @@ The published package name is `kandev`, with a bin entry `kandev`.
 ## Release
 
 ```bash
-scripts/release/publish-launcher.sh 0.1.0
+scripts/release/release.sh
 ```
+
+The unified release script supports `cli`, `app`, or `both` in one flow.
+Versioning strategy:
+
+- App release tags: `vM.m`
+- CLI npm version: `M.m.0`
+- Default bump mode: `minor`
 
 ## Environment Overrides
 

@@ -12,6 +12,9 @@ on:
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
       - ".github/workflows/frontend-tests.yml"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
   pull_request:
     branches: [main]
     paths:
@@ -23,11 +26,14 @@ on:
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
       - ".github/workflows/frontend-tests.yml"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.markdown"
 
 jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build
-    runs-on: homelab-runner
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps
