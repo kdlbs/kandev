@@ -12,6 +12,26 @@
  *    and release it on unmount — without destroying it.
  *  – The actual React component tree is rendered into the portal element via
  *    `createPortal`, so component state, effects, and DOM survive layout switches.
+ *
+ * ## Session scoping
+ *
+ * Portals are either **global** or **session-scoped**:
+ *
+ * - **Global** (`sessionId` is `undefined`) — the portal persists across session
+ *   switches. Used for panels that read `activeSessionId` reactively from the
+ *   store and automatically show the correct data for whichever session is active.
+ *   Examples: sidebar, chat, changes, files, plan.
+ *
+ * - **Session-scoped** (`sessionId` is set) — the portal is bound to the session
+ *   that created it and is destroyed via `releaseBySession()` when the user
+ *   switches away. Used for panels whose content is intrinsically tied to a
+ *   specific session's runtime state (container processes, worktree files, etc.)
+ *   and cannot simply re-read a store selector to switch context.
+ *   Examples: terminal, file-editor, browser, vscode, commit-detail, diff-viewer,
+ *   pr-detail.
+ *
+ * See `SESSION_SCOPED_COMPONENTS` in `dockview-desktop-layout.tsx` for the
+ * authoritative list and per-component rationale.
  */
 
 import type { DockviewPanelApi } from "dockview-react";
@@ -25,6 +45,8 @@ export type PortalEntry = {
   params: Record<string, unknown>;
   /** Latest dockview panel API handle — updated on each remount. */
   api: DockviewPanelApi | null;
+  /** Session ID this portal is scoped to (undefined = global, persists across sessions). */
+  sessionId?: string;
 };
 
 type Listener = () => void;
@@ -42,13 +64,14 @@ class PanelPortalManager {
     component: string,
     params: Record<string, unknown>,
     api: DockviewPanelApi,
+    sessionId?: string,
   ): PortalEntry {
     let entry = this.entries.get(panelId);
     if (!entry) {
       const el = document.createElement("div");
       el.style.display = "contents";
       el.dataset.portalPanel = panelId;
-      entry = { element: el, component, params, api };
+      entry = { element: el, component, params, api, sessionId };
       this.entries.set(panelId, entry);
       this.notify();
     } else {
@@ -67,6 +90,35 @@ class PanelPortalManager {
     entry.element.remove();
     entry.api = null;
     this.entries.delete(panelId);
+    this.notify();
+  }
+
+  /** Release all portals scoped to a specific session. */
+  releaseBySession(sessionId: string): void {
+    const toRemove: string[] = [];
+    for (const [panelId, entry] of this.entries) {
+      if (entry.sessionId === sessionId) {
+        toRemove.push(panelId);
+      }
+    }
+    if (toRemove.length === 0) return;
+    for (const panelId of toRemove) {
+      const entry = this.entries.get(panelId)!;
+      entry.element.remove();
+      entry.api = null;
+      this.entries.delete(panelId);
+    }
+    this.notify();
+  }
+
+  /** Release all portals (e.g. when the layout component unmounts entirely). */
+  releaseAll(): void {
+    if (this.entries.size === 0) return;
+    for (const entry of this.entries.values()) {
+      entry.element.remove();
+      entry.api = null;
+    }
+    this.entries.clear();
     this.notify();
   }
 

@@ -63,8 +63,14 @@ export function PanelPortalHost({ renderPanel }: PanelPortalHostProps) {
  *
  * Also updates the stored `api` and `params` on every mount, so the portal
  * content can read the latest dockview state.
+ *
+ * @param sessionId — when provided, tags the portal as session-scoped so it
+ *   gets cleaned up on session switch via `releaseBySession()`.
  */
-export function usePortalSlot(props: IDockviewPanelProps): React.RefObject<HTMLDivElement | null> {
+export function usePortalSlot(
+  props: IDockviewPanelProps,
+  sessionId?: string,
+): React.RefObject<HTMLDivElement | null> {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const panelId = props.api.id;
   const component = props.api.component;
@@ -74,7 +80,7 @@ export function usePortalSlot(props: IDockviewPanelProps): React.RefObject<HTMLD
     const container = containerRef.current;
     if (!container) return;
 
-    const entry = panelPortalManager.acquire(panelId, component, params, props.api);
+    const entry = panelPortalManager.acquire(panelId, component, params, props.api, sessionId);
 
     // Reparent the portal element into this panel's DOM slot.
     container.appendChild(entry.element);

@@ -61,13 +61,60 @@ const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 // ---------------------------------------------------------------------------
 
 /**
+ * Components whose portals are tied to a specific session.
+ *
+ * When the user switches sessions, portals for these components are released
+ * via `panelPortalManager.releaseBySession()` so stale state (WebSocket
+ * connections, iframes, editor buffers) from the old session doesn't leak
+ * into the new one.
+ *
+ * A component belongs here if its content is bound to session-specific runtime
+ * state that can't be swapped by simply reading a new `activeSessionId` from
+ * the store:
+ *
+ *  - terminal      — holds a live xterm WebSocket to a shell in the session's container
+ *  - file-editor   — editing a file in the session's worktree
+ *  - browser       — iframe preview of the session's dev server URL
+ *  - vscode        — VS Code Server iframe running in the session's container
+ *  - commit-detail — displays a commit from the session's git history
+ *  - diff-viewer   — shows file diffs from the session's working tree
+ *  - pr-detail     — PR linked to the session's task
+ *
+ * Components NOT listed here are **global** — they read `activeSessionId`
+ * reactively from the store and automatically reflect the current session:
+ *
+ *  - sidebar  — workspace/task navigation, not session-specific
+ *  - chat     — subscribes to `activeSessionId`, re-renders for new session
+ *  - changes  — reads session git status via `useSessionGitStatus(activeSessionId)`
+ *  - files    — reads the active session's file tree reactively
+ *  - plan     — reads `activeTaskId` from the store
+ */
+const SESSION_SCOPED_COMPONENTS = new Set([
+  "terminal",
+  "file-editor",
+  "browser",
+  "vscode",
+  "commit-detail",
+  "diff-viewer",
+  "pr-detail",
+]);
+
+/**
  * Every entry in the dockview `components` map uses this wrapper.
  * It renders an empty container and attaches the persistent portal element
  * managed by PanelPortalManager.  The actual panel content is rendered by
  * PanelPortalHost outside the dockview tree.
+ *
+ * Session-scoped panels are tagged with the current session ID so they can
+ * be cleaned up on session switch.
  */
 function PortalSlot(props: IDockviewPanelProps) {
-  const containerRef = usePortalSlot(props);
+  const component = props.api.component;
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const sessionId = SESSION_SCOPED_COMPONENTS.has(component)
+    ? (activeSessionId ?? undefined)
+    : undefined;
+  const containerRef = usePortalSlot(props, sessionId);
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />;
 }
 
@@ -527,6 +574,34 @@ function useReviewDialog(effectiveSessionId: string | null) {
 }
 
 // ---------------------------------------------------------------------------
+// useSessionSwitchCleanup — releases session-scoped portals + triggers layout switch
+// ---------------------------------------------------------------------------
+
+function useSessionSwitchCleanup(effectiveSessionId: string | null) {
+  const prevSessionRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevSessionRef.current === undefined) {
+      prevSessionRef.current = effectiveSessionId;
+      return;
+    }
+    if (prevSessionRef.current === effectiveSessionId) return;
+
+    const oldSessionId = prevSessionRef.current;
+    prevSessionRef.current = effectiveSessionId;
+
+    // Release session-scoped portals from the old session so stale
+    // terminals, editors, etc. don't leak into the new session.
+    if (oldSessionId) {
+      panelPortalManager.releaseBySession(oldSessionId);
+    }
+
+    if (effectiveSessionId) {
+      performLayoutSwitch(oldSessionId, effectiveSessionId);
+    }
+  }, [effectiveSessionId]);
+}
+
+// ---------------------------------------------------------------------------
 // MAIN LAYOUT COMPONENT
 // ---------------------------------------------------------------------------
 
@@ -606,28 +681,15 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
     [setApi, buildDefaultLayout],
   );
 
-  // Catch-all: detect session changes and trigger layout switch
-  const prevSessionRef = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (prevSessionRef.current === undefined) {
-      prevSessionRef.current = effectiveSessionId;
-      return;
-    }
-    if (prevSessionRef.current === effectiveSessionId) return;
+  // Release session-scoped portals + trigger layout switch on session change
+  useSessionSwitchCleanup(effectiveSessionId);
 
-    const oldSessionId = prevSessionRef.current;
-    prevSessionRef.current = effectiveSessionId;
-
-    if (effectiveSessionId) {
-      performLayoutSwitch(oldSessionId, effectiveSessionId);
-    }
-  }, [effectiveSessionId]);
-
-  // Clean up timer on unmount
+  // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {
     const timerRef = saveTimerRef;
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      panelPortalManager.releaseAll();
     };
   }, []);
 
