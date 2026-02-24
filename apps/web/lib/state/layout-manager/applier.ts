@@ -8,6 +8,7 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
+  LAYOUT_SIDEBAR_MAX_PX,
 } from "./constants";
 
 export type LayoutGroupIds = {
@@ -50,11 +51,13 @@ export function applyLayout(
 
   api.fromJSON(serialized);
 
-  // Lock sidebar group
+  // Lock sidebar group and enforce max-width constraint.
+  // Constraints are not serialized with layouts, so we must reapply after fromJSON.
   const sb = api.getPanel("sidebar");
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
+    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
   }
 
   return resolveGroupIds(api);
