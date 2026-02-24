@@ -4,7 +4,6 @@ import { useCallback, useState, useEffect, useImperativeHandle } from "react";
 import type React from "react";
 import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
-import type { QueuedMessageIndicatorHandle } from "./queued-message-indicator";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
@@ -20,16 +19,12 @@ type UseChatInputContainerParams = {
   isFailed: boolean;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
-  isQueued: boolean;
   placeholder: string | undefined;
   contextItems: ContextItem[];
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
   hasContextComments: boolean;
-  queuedMessage: string | null | undefined;
-  onCancelQueue: (() => void) | undefined;
-  updateQueueContent: ((content: string) => Promise<void>) | undefined;
   todoItems: { text: string; done?: boolean }[];
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss: (() => void) | undefined;
@@ -39,7 +34,6 @@ type UseChatInputContainerParams = {
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
   ) => void;
-  queuedMessageRef?: React.RefObject<QueuedMessageIndicatorHandle | null>;
 };
 
 function useInputHandle(
@@ -80,10 +74,6 @@ function computeDerivedState(params: {
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
-  isQueued: boolean;
-  queuedMessage: string | null | undefined;
-  onCancelQueue: (() => void) | undefined;
-  updateQueueContent: ((content: string) => Promise<void>) | undefined;
   todoItems: { text: string }[];
   allItemsLength: number;
   isInputFocused: boolean;
@@ -96,14 +86,8 @@ function computeDerivedState(params: {
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );
-  const hasQueuedMessage = !!(
-    params.isQueued &&
-    params.queuedMessage &&
-    params.onCancelQueue &&
-    params.updateQueueContent
-  );
   const hasTodos = params.todoItems.length > 0;
-  const hasContextZone = hasQueuedMessage || hasTodos || params.allItemsLength > 0;
+  const hasContextZone = hasTodos || params.allItemsLength > 0;
   const showFocusHint = !params.isInputFocused && !hasClarification && !hasPendingComments;
   const inputPlaceholder = getInputPlaceholder(
     params.placeholder,
@@ -114,7 +98,6 @@ function computeDerivedState(params: {
     isDisabled,
     hasClarification,
     hasPendingComments,
-    hasQueuedMessage,
     hasTodos,
     hasContextZone,
     showFocusHint,
@@ -131,15 +114,11 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isFailed,
     isAgentBusy,
     hasAgentCommands,
-    isQueued,
     placeholder,
     contextItems,
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,
-    queuedMessage,
-    onCancelQueue,
-    updateQueueContent,
     todoItems,
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
@@ -198,10 +177,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,
-    isQueued,
-    queuedMessage,
-    onCancelQueue,
-    updateQueueContent,
     todoItems,
     allItemsLength: allItems.length,
     isInputFocused,
