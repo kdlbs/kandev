@@ -104,9 +104,46 @@ jobs:
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
 
-      - name: Upload release assets
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.platform }}
+          path: |
+            dist/kandev-${{ matrix.platform }}.tar.gz
+            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+
+  publish-release:
+    needs: build-bundles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: dist/release-assets
+          merge-multiple: true
+
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+          required_platforms=(linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64)
+          for platform in "${required_platforms[@]}"; do
+            archive="dist/release-assets/kandev-${platform}.tar.gz"
+            checksum="${archive}.sha256"
+            if [ ! -f "$archive" ]; then
+              echo "Missing required archive: $archive" >&2
+              exit 1
+            fi
+            if [ ! -f "$checksum" ]; then
+              echo "Missing required checksum: $checksum" >&2
+              exit 1
+            fi
+          done
+          ls -lh dist/release-assets
+
+      - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/kandev-${{ matrix.platform }}.tar.gz
-            dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/release-assets/kandev-*.tar.gz
+            dist/release-assets/kandev-*.tar.gz.sha256

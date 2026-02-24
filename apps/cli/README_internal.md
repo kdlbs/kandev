@@ -58,6 +58,8 @@ Note: the runtime bundles are pulled from the latest GitHub Release by default, 
 - **New runtime release without CLI publish**: users get new runtime automatically, but no update prompt.
 - **New CLI publish**: users get an update prompt and then re-run with the new CLI.
 - On startup, `run` also prints the resolved runtime release tag.
+- Runtime assets are published atomically in CI (single final release upload job), so `/releases/latest`
+  does not surface partially uploaded platform bundles.
 
 You can disable the prompt with:
 
