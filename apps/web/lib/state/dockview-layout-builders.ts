@@ -1,5 +1,5 @@
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
-import { SIDEBAR_LOCK, resolveGroupIds } from "./layout-manager";
+import { SIDEBAR_LOCK, LAYOUT_SIDEBAR_MAX_PX, resolveGroupIds } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
 
 // Re-export for consumers that import from this module
@@ -11,6 +11,7 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   if (sb) {
     sb.group.locked = SIDEBAR_LOCK;
     sb.group.header.hidden = false;
+    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
   }
   const oldChanges = api.getPanel("diff-files");
   if (oldChanges) oldChanges.api.setTitle("Changes");
