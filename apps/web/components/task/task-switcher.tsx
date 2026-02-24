@@ -187,10 +187,15 @@ export const TaskSwitcher = memo(function TaskSwitcher({
       else backlog.push(task);
     }
 
-    const byTitle = (a: TaskSwitcherItem, b: TaskSwitcherItem) => a.title.localeCompare(b.title);
-    review.sort(byTitle);
-    inProgress.sort(byTitle);
-    backlog.sort(byTitle);
+    const byRecent = (a: TaskSwitcherItem, b: TaskSwitcherItem) => {
+      const ta = a.updatedAt ?? "";
+      const tb = b.updatedAt ?? "";
+      if (ta !== tb) return tb.localeCompare(ta);
+      return a.title.localeCompare(b.title);
+    };
+    review.sort(byRecent);
+    inProgress.sort(byRecent);
+    backlog.sort(byRecent);
 
     return [
       { label: "Review", tasks: review },
