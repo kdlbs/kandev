@@ -9,17 +9,10 @@ type ContextZoneProps = {
   sessionId?: string | null;
   queueSlot?: ReactNode;
   todoSlot?: ReactNode;
-  clarificationSlot?: ReactNode;
 };
 
-export function ContextZone({
-  items,
-  sessionId,
-  queueSlot,
-  todoSlot,
-  clarificationSlot,
-}: ContextZoneProps) {
-  const hasContent = !!queueSlot || !!todoSlot || items.length > 0 || !!clarificationSlot;
+export function ContextZone({ items, sessionId, queueSlot, todoSlot }: ContextZoneProps) {
+  const hasContent = !!queueSlot || !!todoSlot || items.length > 0;
   if (!hasContent) return null;
 
   return (
@@ -34,7 +27,6 @@ export function ContextZone({
             ))}
           </div>
         )}
-        {clarificationSlot}
       </div>
     </div>
   );

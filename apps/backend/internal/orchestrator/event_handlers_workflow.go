@@ -293,6 +293,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, step *wfmodels.WorkflowStep, taskDescription string) {
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 
+	// Resolve whether the agent supports MCP (needed for plan mode which uses MCP tools).
+	agentSupportsMCP := s.resolveSessionMCPSupport(ctx, sessionID)
+
 	// Check if this step enables plan mode
 	hasPlanMode := false
 	for _, action := range step.Events.OnEnter {
@@ -300,6 +303,15 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 			hasPlanMode = true
 			break
 		}
+	}
+
+	// Plan mode requires MCP support. If the agent doesn't support MCP, treat as if
+	// the step doesn't enable plan mode so we don't send plan-mode prompts the agent can't act on.
+	if hasPlanMode && !agentSupportsMCP {
+		s.logger.Warn("skipping plan mode for step: agent does not support MCP",
+			zap.String("session_id", sessionID),
+			zap.String("step_id", step.ID))
+		hasPlanMode = false
 	}
 
 	// Skip plan mode management for passthrough sessions — the CLI manages its own state.
@@ -330,8 +342,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 	for _, action := range step.Events.OnEnter {
 		switch action.Type {
 		case wfmodels.OnEnterEnablePlanMode:
-			// Skip plan mode for passthrough — CLI manages its own state
-			if !isPassthrough {
+			// Skip plan mode for passthrough — CLI manages its own state.
+			// Also skip if agent doesn't support MCP (hasPlanMode is already false above).
+			if !isPassthrough && hasPlanMode {
 				s.setSessionPlanMode(ctx, sessionID, true)
 			}
 		case wfmodels.OnEnterAutoStartAgent:
@@ -344,7 +357,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID, sessionID string, 
 	if hasAutoStart && !isPassthrough {
 		// Build prompt from step configuration
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
-		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+		planMode := hasPlanMode
 
 		// Run auto-start inline so queue state is visible before handleAgentReady
 		// checks for queued messages.
@@ -492,6 +505,31 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID, sessionID, step
 			zap.Error(updateErr))
 	}
 	return true
+}
+
+// resolveSessionMCPSupport checks if the agent for a session supports MCP.
+// Returns true by default when the profile cannot be resolved (e.g. no profile ID set)
+// so that plan mode is not blocked unnecessarily.
+func (s *Service) resolveSessionMCPSupport(ctx context.Context, sessionID string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for MCP check",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return true
+	}
+	if session.AgentProfileID == "" {
+		return true
+	}
+	profileInfo, err := s.agentManager.ResolveAgentProfile(ctx, session.AgentProfileID)
+	if err != nil {
+		s.logger.Warn("failed to resolve agent profile for MCP check",
+			zap.String("session_id", sessionID),
+			zap.String("profile_id", session.AgentProfileID),
+			zap.Error(err))
+		return true
+	}
+	return profileInfo.SupportsMCP
 }
 
 // processOnExit processes the on_exit events for a step when leaving it.

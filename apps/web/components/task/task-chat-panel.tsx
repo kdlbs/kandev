@@ -9,6 +9,7 @@ import { VirtualizedMessageList } from "@/components/task/chat/virtualized-messa
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
+import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -52,6 +53,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     childrenByParentToolCallId,
     agentMessageCount,
     cancelQueue,
+    pendingClarification,
   } = panelState;
   const { handleCancelTurn, handleCancelQueue, handleQueueEditComplete } = useChatPanelHandlers(
     resolvedSessionId,
@@ -82,6 +84,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onOpenFile={onOpenFile}
         />
       </PanelBody>
+      {pendingClarification && !isArchived && (
+        <div className="flex-shrink-0 border-t border-sky-400/30 bg-card px-1">
+          <ClarificationInputOverlay
+            message={pendingClarification}
+            onResolved={handleClarificationResolved}
+          />
+        </div>
+      )}
       {isArchived ? (
         <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
           This task is archived and read-only.

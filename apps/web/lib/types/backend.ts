@@ -183,6 +183,7 @@ export type MessageAddedPayload = {
   author_type: "user" | "agent";
   author_id?: string;
   content: string;
+  raw_content?: string;
   type?: string;
   metadata?: Record<string, unknown>;
   requests_input?: boolean;

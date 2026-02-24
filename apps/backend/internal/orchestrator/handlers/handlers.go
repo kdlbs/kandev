@@ -101,6 +101,7 @@ type wsStartTaskRequest struct {
 	Priority          int    `json:"priority,omitempty"`
 	Prompt            string `json:"prompt,omitempty"`
 	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
+	PlanMode          bool   `json:"plan_mode,omitempty"`
 }
 
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -157,7 +158,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 	}
 
 	// Otherwise, create a new session
-	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, req.Prompt, req.WorkflowStepID, false)
+	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, req.Prompt, req.WorkflowStepID, req.PlanMode)
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)

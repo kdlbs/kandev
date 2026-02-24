@@ -159,9 +159,10 @@ function renderUserMessageBody(
   showRaw: boolean,
   hasAttachments: boolean,
   content: string,
+  rawContent?: string,
 ): React.ReactNode {
   if (hasContent && showRaw) {
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{content}</pre>;
+    return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
   }
   if (hasContent) {
     return (
@@ -190,6 +191,7 @@ type UserMessageMetadata = {
   attachments?: Array<{ type: string; data: string; mime_type: string }>;
   plan_mode?: boolean;
   has_review_comments?: boolean;
+  has_hidden_prompts?: boolean;
   context_files?: Array<{ path: string; name: string }>;
 };
 
@@ -199,6 +201,7 @@ function parseUserMessageMetadata(comment: Message) {
   const contextFiles = metadata?.context_files || [];
   const hasPlanMode = !!metadata?.plan_mode;
   const hasReviewComments = !!metadata?.has_review_comments;
+  const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0;
   return {
@@ -206,6 +209,7 @@ function parseUserMessageMetadata(comment: Message) {
     contextFiles,
     hasPlanMode,
     hasReviewComments,
+    hasHiddenPrompts,
     hasContent,
     hasAttachments,
   };
@@ -224,7 +228,7 @@ function UserContextBadges({
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {hasPlanMode && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/20 px-2 py-0.5 text-[10px] text-purple-400">
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
           <IconWand size={10} /> Plan mode
         </span>
       )}
@@ -267,6 +271,7 @@ function UserMessageContent({
     contextFiles,
     hasPlanMode,
     hasReviewComments,
+    hasHiddenPrompts,
     hasContent,
     hasAttachments,
   } = parseUserMessageMetadata(comment);
@@ -279,7 +284,7 @@ function UserMessageContent({
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
         />
-        <div className="rounded-2xl bg-primary/30 px-4 py-2.5 text-xs overflow-hidden">
+        <div className="rounded-2xl bg-primary/30 px-4 py-2.5 overflow-hidden">
           {hasAttachments && (
             <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
               {imageAttachments.map((att, index) => (
@@ -294,13 +299,20 @@ function UserMessageContent({
               ))}
             </div>
           )}
-          {renderUserMessageBody(hasContent, showRaw, hasAttachments, comment.content)}
+          {renderUserMessageBody(
+            hasContent,
+            showRaw,
+            hasAttachments,
+            comment.content,
+            comment.raw_content,
+          )}
         </div>
         <MessageActions
           message={comment}
           showCopy={true}
           showTimestamp={true}
           showRawToggle={true}
+          hasHiddenPrompts={hasHiddenPrompts}
           showNavigation={!!allMessages && allMessages.length > 0}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
@@ -331,7 +343,7 @@ type AgentMessageProps = {
 function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: AgentMessageProps) {
   return (
     <div className="flex items-start gap-2 sm:gap-3 w-full group">
-      <div className="flex-1 min-w-0 text-xs">
+      <div className="flex-1 min-w-0">
         {showRaw ? (
           <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
             {comment.content || "(empty)"}
@@ -378,7 +390,7 @@ export const ChatMessage = memo(function ChatMessage({
   // Keep the old card-based layout for task descriptions (amber banner)
   if (label === "Task") {
     return (
-      <div className={cn("w-full rounded-lg  px-4 py-3 text-xs", className)}>
+      <div className={cn("w-full rounded-lg px-4 py-3", className)}>
         <div className="flex items-center">
           <p className="text-[11px] uppercase tracking-wide opacity-70">
             {comment.requests_input ? (

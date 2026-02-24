@@ -41,6 +41,7 @@ type UseTipTapEditorOptions = {
   disabled: boolean;
   className?: string;
   planModeEnabled: boolean;
+  onPlanModeChange?: (enabled: boolean) => void;
   submitKey: "enter" | "cmd_enter";
   onFocus?: () => void;
   onBlur?: () => void;
@@ -60,6 +61,8 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const onChangeRef = useRef(opts.onChange);
   const onImagePasteRef = useRef(opts.onImagePaste);
   const sessionIdRef = useRef(opts.sessionId);
+  const planModeEnabledRef = useRef(opts.planModeEnabled);
+  const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
   useLayoutEffect(() => {
     onSubmitRef.current = opts.onSubmit;
     submitKeyRef.current = opts.submitKey;
@@ -67,8 +70,19 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     onChangeRef.current = opts.onChange;
     onImagePasteRef.current = opts.onImagePaste;
     sessionIdRef.current = opts.sessionId;
+    planModeEnabledRef.current = opts.planModeEnabled;
+    onPlanModeChangeRef.current = opts.onPlanModeChange;
   });
-  return { onSubmitRef, submitKeyRef, disabledRef, onChangeRef, onImagePasteRef, sessionIdRef };
+  return {
+    onSubmitRef,
+    submitKeyRef,
+    disabledRef,
+    onChangeRef,
+    onImagePasteRef,
+    sessionIdRef,
+    planModeEnabledRef,
+    onPlanModeChangeRef,
+  };
 }
 
 export function useTipTapEditor(opts: UseTipTapEditorOptions) {
@@ -87,7 +101,13 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     ref,
   } = opts;
   const refs = useTipTapRefs(opts);
-  const SubmitKeymap = useSubmitKeymap(refs.disabledRef, refs.submitKeyRef, refs.onSubmitRef);
+  const SubmitKeymap = useSubmitKeymap(
+    refs.disabledRef,
+    refs.submitKeyRef,
+    refs.onSubmitRef,
+    refs.planModeEnabledRef,
+    refs.onPlanModeChangeRef,
+  );
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
   const editor = useEditor({
@@ -270,6 +290,8 @@ function useSubmitKeymap(
   disabledRef: React.RefObject<boolean | undefined>,
   submitKeyRef: React.RefObject<"enter" | "cmd_enter">,
   onSubmitRef: React.RefObject<(() => void) | undefined>,
+  planModeEnabledRef: React.RefObject<boolean>,
+  onPlanModeChangeRef: React.RefObject<((enabled: boolean) => void) | undefined>,
 ) {
   return useMemo(() => {
     return Extension.create({
@@ -291,6 +313,11 @@ function useSubmitKeymap(
               return true;
             }
             return false;
+          },
+          "Shift-Tab": () => {
+            console.log("[ShiftTab] toggling plan mode", { current: planModeEnabledRef.current });
+            onPlanModeChangeRef.current?.(!planModeEnabledRef.current);
+            return true;
           },
         };
       },

@@ -324,7 +324,6 @@ export function KanbanCard({
       style={style}
       className={cn(
         "max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
-        (task.state === "IN_PROGRESS" || task.state === "SCHEDULING") && "kanban-task-pulse",
         needsAction(task) && "border-l-2 border-l-amber-500",
         isDragging && "opacity-50 z-50",
       )}

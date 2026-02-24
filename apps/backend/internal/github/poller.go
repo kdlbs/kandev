@@ -110,7 +110,25 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("id", watch.ID), zap.Error(err))
 		return
 	}
-	if !hasNew || feedback == nil {
+	if feedback == nil {
+		return
+	}
+
+	// Auto-cleanup: remove watch when PR is merged or closed.
+	if feedback.PR != nil && (feedback.PR.State == prStateMerged || feedback.PR.State == prStateClosed) {
+		if delErr := p.service.DeletePRWatch(ctx, watch.ID); delErr != nil {
+			p.logger.Error("failed to delete completed PR watch",
+				zap.String("id", watch.ID), zap.Error(delErr))
+		} else {
+			p.logger.Info("removed PR watch for completed PR",
+				zap.String("id", watch.ID),
+				zap.String("state", feedback.PR.State),
+				zap.Int("pr_number", watch.PRNumber))
+		}
+		return
+	}
+
+	if !hasNew {
 		return
 	}
 

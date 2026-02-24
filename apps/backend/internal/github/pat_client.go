@@ -257,6 +257,7 @@ type patPR struct {
 	} `json:"user"`
 	Head struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
@@ -280,7 +281,7 @@ type patSearchItem struct {
 func convertPatPR(raw *patPR, owner, repo string) *PR {
 	state := strings.ToLower(raw.State)
 	if raw.MergedAt != nil && *raw.MergedAt != "" {
-		state = "merged"
+		state = prStateMerged
 	}
 	mergeable := false
 	if raw.Mergeable != nil {
@@ -292,6 +293,7 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		HTMLURL:     raw.HTMLURL,
 		State:       state,
 		HeadBranch:  raw.Head.Ref,
+		HeadSHA:     raw.Head.SHA,
 		BaseBranch:  raw.Base.Ref,
 		AuthorLogin: raw.User.Login,
 		RepoOwner:   owner,

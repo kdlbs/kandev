@@ -25,6 +25,8 @@ type UseChatInputStateProps = {
   isSending: boolean;
   contextItems: ContextItem[];
   pendingCommentsByFile?: Record<string, DiffComment[]>;
+  /** Whether there are plan comments or PR feedback that allow empty-text submit */
+  hasContextComments?: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   onSubmit: (
@@ -112,6 +114,7 @@ export function useChatInputState({
   isSending,
   contextItems,
   pendingCommentsByFile,
+  hasContextComments = false,
   showRequestChangesTooltip,
   onRequestChangesTooltipDismiss,
   onSubmit,
@@ -163,7 +166,9 @@ export function useChatInputState({
       const trimmed = valueRef.current.trim();
       const allComments = collectComments(pendingCommentsRef.current);
       const currentAttachments = attachmentsRef.current;
-      if (!trimmed && allComments.length === 0 && currentAttachments.length === 0) return;
+      const hasContent =
+        trimmed || allComments.length > 0 || currentAttachments.length > 0 || hasContextComments;
+      if (!hasContent) return;
       const messageAttachments = toMessageAttachments(currentAttachments);
       const inlineMentions = inputRef.current?.getMentions() ?? [];
       onSubmit(
@@ -179,7 +184,7 @@ export function useChatInputState({
       resetHeight();
       clearDraft(sessionId);
     },
-    [onSubmit, isSending, sessionId, attachmentsRef, setAttachments],
+    [onSubmit, isSending, sessionId, attachmentsRef, setAttachments, hasContextComments],
   );
 
   const allItems = useMemo((): ContextItem[] => {

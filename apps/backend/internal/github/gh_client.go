@@ -54,6 +54,7 @@ type ghPR struct {
 	URL         string    `json:"url"`
 	State       string    `json:"state"`
 	HeadRefName string    `json:"headRefName"`
+	HeadRefOid  string    `json:"headRefOid"`
 	BaseRefName string    `json:"baseRefName"`
 	IsDraft     bool      `json:"isDraft"`
 	Mergeable   string    `json:"mergeable"`
@@ -71,7 +72,7 @@ type ghPR struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,headRefName,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt")
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt")
 	if err != nil {
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
@@ -87,7 +88,7 @@ func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch strin
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--head", branch,
 		"--state", "open",
-		"--json", "number,title,url,state,headRefName,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt",
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt",
 		"--limit", "1")
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
@@ -107,7 +108,7 @@ func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--author", "@me",
 		"--state", "open",
-		"--json", "number,title,url,state,headRefName,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt")
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt")
 	if err != nil {
 		return nil, fmt.Errorf("list authored PRs: %w", err)
 	}
@@ -361,7 +362,7 @@ func (c *GHClient) parseSearchResults(data string) ([]*PR, error) {
 func convertGHPR(raw *ghPR, owner, repo string) *PR {
 	state := strings.ToLower(raw.State)
 	if raw.MergedAt != "" {
-		state = "merged"
+		state = prStateMerged
 	}
 	pr := &PR{
 		Number:      raw.Number,
@@ -370,6 +371,7 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		HTMLURL:     raw.URL,
 		State:       state,
 		HeadBranch:  raw.HeadRefName,
+		HeadSHA:     raw.HeadRefOid,
 		BaseBranch:  raw.BaseRefName,
 		AuthorLogin: raw.Author.Login,
 		RepoOwner:   owner,

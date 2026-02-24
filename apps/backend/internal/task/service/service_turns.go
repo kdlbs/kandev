@@ -215,10 +215,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	// Get agent ID from profile snapshot
+	// Get agent name (registry slug) from profile snapshot.
+	// Prefer "agent_name" (the slug used as registry key) over "agent_id" (the database UUID).
 	var agentID string
 	if session.AgentProfileSnapshot != nil {
-		if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
+		if name, ok := session.AgentProfileSnapshot["agent_name"].(string); ok {
+			agentID = name
+		} else if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
 			agentID = id
 		}
 	}

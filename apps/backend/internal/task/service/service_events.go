@@ -197,6 +197,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		messageType = "message"
 	}
 
+	hasHidden := sysprompt.HasSystemContent(message.Content)
 	data := map[string]interface{}{
 		"message_id":     message.ID,
 		"session_id":     message.TaskSessionID,
@@ -210,8 +211,25 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"created_at":     message.CreatedAt.Format(time.RFC3339),
 	}
 
-	if message.Metadata != nil {
-		data["metadata"] = message.Metadata
+	if hasHidden {
+		data["raw_content"] = message.Content
+	}
+
+	meta := message.Metadata
+	if hasHidden {
+		if meta == nil {
+			meta = make(map[string]interface{})
+		} else {
+			cp := make(map[string]interface{}, len(meta))
+			for k, v := range meta {
+				cp[k] = v
+			}
+			meta = cp
+		}
+		meta["has_hidden_prompts"] = true
+	}
+	if meta != nil {
+		data["metadata"] = meta
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)

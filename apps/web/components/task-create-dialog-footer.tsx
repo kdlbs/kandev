@@ -45,6 +45,7 @@ type StartTaskSplitButtonProps = {
   disabled: boolean;
   isEditMode: boolean;
   onAltAction: () => void;
+  onPlanModeAction?: () => void;
 };
 
 function StartTaskSplitButton({
@@ -52,6 +53,7 @@ function StartTaskSplitButton({
   disabled,
   isEditMode,
   onAltAction,
+  onPlanModeAction,
 }: StartTaskSplitButtonProps) {
   return (
     <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
@@ -80,6 +82,15 @@ function StartTaskSplitButton({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto min-w-max">
+          {onPlanModeAction && (
+            <DropdownMenuItem
+              onClick={onPlanModeAction}
+              className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+            >
+              <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
+              Start task in plan mode
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onClick={onAltAction}
             className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
@@ -173,6 +184,7 @@ export type TaskCreateDialogFooterProps = {
   onCancel: () => void;
   onUpdateWithoutAgent: () => void;
   onCreateWithoutAgent: () => void;
+  onCreateWithPlanMode?: () => void;
 };
 
 function isMissingWorkflowCtx(
@@ -232,6 +244,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     onCancel,
     onUpdateWithoutAgent,
     onCreateWithoutAgent,
+    onCreateWithPlanMode,
   } = props;
   const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
 
@@ -271,6 +284,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
                 disabled={splitDisabled}
                 isEditMode={isEditMode}
                 onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
+                onPlanModeAction={onCreateWithPlanMode}
               />
             );
           }

@@ -93,6 +93,7 @@ func TestConvertGHPR(t *testing.T) {
 		URL:         "https://github.com/owner/repo/pull/42",
 		State:       "OPEN",
 		HeadRefName: "feature-branch",
+		HeadRefOid:  "abc123def456",
 		BaseRefName: "main",
 		IsDraft:     true,
 		Mergeable:   "MERGEABLE",
@@ -115,6 +116,9 @@ func TestConvertGHPR(t *testing.T) {
 	}
 	if pr.HeadBranch != "feature-branch" {
 		t.Errorf("head_branch = %q, want feature-branch", pr.HeadBranch)
+	}
+	if pr.HeadSHA != "abc123def456" {
+		t.Errorf("head_sha = %q, want abc123def456", pr.HeadSHA)
 	}
 	if !pr.Draft {
 		t.Error("expected draft = true")
@@ -142,7 +146,7 @@ func TestConvertGHPR_Merged(t *testing.T) {
 
 	pr := convertGHPR(raw, "owner", "repo")
 
-	if pr.State != "merged" {
+	if pr.State != prStateMerged {
 		t.Errorf("state = %q, want merged", pr.State)
 	}
 	if pr.MergedAt == nil {

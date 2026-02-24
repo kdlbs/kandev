@@ -100,9 +100,22 @@ export function useResizableInput(sessionId: string | undefined) {
     };
   }, [persistHeight]);
 
+  /** Expand the input to fit content, clamped to max height. Does not shrink below user-set height. */
+  const autoExpand = useCallback(() => {
+    const el = containerRef.current;
+    if (!el || isDragging.current) return;
+    const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
+    if (el.scrollHeight > height) {
+      const next = Math.min(el.scrollHeight, maxHeight);
+      setHeight(next);
+      persistHeight(next);
+    }
+  }, [height, persistHeight]);
+
   return {
     height,
     resetHeight,
+    autoExpand,
     containerRef,
     resizeHandleProps: {
       onMouseDown: handleMouseDown,

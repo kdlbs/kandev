@@ -369,7 +369,7 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   }, [isRunning]);
 
   return (
-    <SessionPanelContent ref={messagesContainerRef} className="relative p-4">
+    <SessionPanelContent ref={messagesContainerRef} className="relative p-4 chat-message-list">
       <MessageListStatus
         isLoadingMore={isLoadingMore}
         hasMore={hasMore}

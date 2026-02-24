@@ -21,7 +21,8 @@ func TestConvertPatPR(t *testing.T) {
 		}{Login: "bob"},
 		Head: struct {
 			Ref string `json:"ref"`
-		}{Ref: "feature-y"},
+			SHA string `json:"sha"`
+		}{Ref: "feature-y", SHA: "deadbeef1234"},
 		Base: struct {
 			Ref string `json:"ref"`
 		}{Ref: "main"},
@@ -40,6 +41,9 @@ func TestConvertPatPR(t *testing.T) {
 	}
 	if pr.HeadBranch != "feature-y" {
 		t.Errorf("head = %q, want feature-y", pr.HeadBranch)
+	}
+	if pr.HeadSHA != "deadbeef1234" {
+		t.Errorf("head_sha = %q, want deadbeef1234", pr.HeadSHA)
 	}
 	if pr.Mergeable {
 		t.Error("expected mergeable = false when nil")
@@ -60,6 +64,7 @@ func TestConvertPatPR_Merged(t *testing.T) {
 		}{Login: "alice"},
 		Head: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "fix"},
 		Base: struct {
 			Ref string `json:"ref"`
@@ -68,7 +73,7 @@ func TestConvertPatPR_Merged(t *testing.T) {
 
 	pr := convertPatPR(raw, "org", "repo")
 
-	if pr.State != "merged" {
+	if pr.State != prStateMerged {
 		t.Errorf("state = %q, want merged", pr.State)
 	}
 	if pr.MergedAt == nil {
@@ -87,6 +92,7 @@ func TestConvertPatPR_Mergeable(t *testing.T) {
 		}{Login: "alice"},
 		Head: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "b"},
 		Base: struct {
 			Ref string `json:"ref"`

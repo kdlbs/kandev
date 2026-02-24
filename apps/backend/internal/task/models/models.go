@@ -1,6 +1,7 @@
 package models
 
 import (
+	"maps"
 	"time"
 
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -136,6 +137,17 @@ func (m *Message) ToAPI() *v1.Message {
 	if messageType == "" {
 		messageType = string(MessageTypeMessage)
 	}
+	hasHidden := sysprompt.HasSystemContent(m.Content)
+	meta := m.Metadata
+	if hasHidden {
+		if meta == nil {
+			meta = make(map[string]interface{})
+		} else {
+			// Copy to avoid mutating original
+			meta = copyMetadata(meta)
+		}
+		meta["has_hidden_prompts"] = true
+	}
 	result := &v1.Message{
 		ID:            m.ID,
 		TaskSessionID: m.TaskSessionID,
@@ -145,11 +157,21 @@ func (m *Message) ToAPI() *v1.Message {
 		AuthorID:      m.AuthorID,
 		Content:       sysprompt.StripSystemContent(m.Content),
 		Type:          messageType,
-		Metadata:      m.Metadata,
+		Metadata:      meta,
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
 	}
+	if hasHidden {
+		result.RawContent = m.Content
+	}
 	return result
+}
+
+// copyMetadata returns a shallow copy of a metadata map.
+func copyMetadata(m map[string]any) map[string]any {
+	cp := make(map[string]any, len(m))
+	maps.Copy(cp, m)
+	return cp
 }
 
 // Turn represents a single prompt/response cycle within a task session.

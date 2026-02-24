@@ -1,7 +1,15 @@
 "use client";
 
 import { memo } from "react";
-import { IconArrowUp, IconFileTextSpark, IconPlayerPauseFilled, IconAt } from "@tabler/icons-react";
+import {
+  IconArrowUp,
+  IconFileTextSpark,
+  IconPlayerPauseFilled,
+  IconAt,
+  IconPlugConnected,
+  IconPlugConnectedX,
+  IconRocket,
+} from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -16,6 +24,8 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
+  planModeAvailable?: boolean;
+  mcpServers?: string[];
   onPlanModeChange: (enabled: boolean) => void;
   sessionId: string | null;
   taskId: string | null;
@@ -34,12 +44,14 @@ export type ChatInputToolbarProps = {
   planContextEnabled?: boolean;
   contextFiles?: ContextFile[];
   onToggleFile?: (file: ContextFile) => void;
+  onImplementPlan?: () => void;
 };
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
   isDisabled: boolean;
   isSending: boolean;
+  planModeEnabled: boolean;
   onCancel: () => void;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
@@ -49,12 +61,17 @@ function SubmitButton({
   isAgentBusy,
   isDisabled,
   isSending,
+  planModeEnabled,
   onCancel,
   onSubmit,
   submitShortcut,
 }: SubmitButtonProps) {
   return (
-    <KeyboardShortcutTooltip shortcut={submitShortcut} enabled={!isAgentBusy && !isDisabled}>
+    <KeyboardShortcutTooltip
+      shortcut={submitShortcut}
+      description={planModeEnabled ? "Request plan changes" : undefined}
+      enabled={!isAgentBusy && !isDisabled}
+    >
       {isAgentBusy ? (
         <Button
           type="button"
@@ -70,23 +87,107 @@ function SubmitButton({
           type="button"
           variant="default"
           size="icon"
-          className="h-7 w-7 rounded-full cursor-pointer"
+          className={cn(
+            "h-7 w-7 rounded-full cursor-pointer",
+            planModeEnabled && "bg-slate-600 hover:bg-slate-500",
+          )}
           disabled={isDisabled}
           onClick={onSubmit}
         >
-          {isSending ? (
-            <GridSpinner className="text-primary-foreground" />
-          ) : (
-            <IconArrowUp className="h-4 w-4" />
-          )}
+          {isSending && <GridSpinner className="text-primary-foreground" />}
+          {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
+          {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
         </Button>
       )}
     </KeyboardShortcutTooltip>
   );
 }
 
+function PlanToggleButton({
+  planModeEnabled,
+  planModeAvailable,
+  onPlanModeChange,
+}: {
+  planModeEnabled: boolean;
+  planModeAvailable: boolean;
+  onPlanModeChange: (enabled: boolean) => void;
+}) {
+  const tooltip = planModeAvailable
+    ? "Toggle plan mode (Shift+Tab) — Agent collaborates on the plan without implementing changes"
+    : "Toggle plan layout (Shift+Tab) — View and edit the plan (agent cannot read/write it without MCP)";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
+            planModeEnabled && planModeAvailable && "bg-slate-500/15 text-slate-400",
+          )}
+          onClick={() => onPlanModeChange(!planModeEnabled)}
+        >
+          <IconFileTextSpark className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ImplementPlanButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-slate-400"
+          onClick={onClick}
+        >
+          <IconRocket className="h-4 w-4" />
+          <span className="text-xs">Implement</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Implement the plan</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
+  const hasMcp = mcpServers.length > 0;
+  const tooltipText = hasMcp
+    ? `MCP Servers: ${mcpServers.join(", ")}`
+    : "Agent does not support MCP";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className={cn(
+            "h-7 w-7 flex items-center justify-center rounded-md",
+            hasMcp ? "text-foreground" : "text-muted-foreground/40",
+          )}
+        >
+          {hasMcp ? (
+            <IconPlugConnected className="h-4 w-4" />
+          ) : (
+            <IconPlugConnectedX className="h-4 w-4" />
+          )}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{tooltipText}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export const ChatInputToolbar = memo(function ChatInputToolbar({
   planModeEnabled,
+  planModeAvailable = true,
+  mcpServers = [],
   onPlanModeChange,
   sessionId,
   taskId,
@@ -104,29 +205,20 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   planContextEnabled = false,
   contextFiles = [],
   onToggleFile,
+  onImplementPlan,
 }: ChatInputToolbarProps) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <div className="flex items-center gap-0.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40",
-                planModeEnabled && "bg-primary/15 text-primary",
-              )}
-              onClick={() => onPlanModeChange(!planModeEnabled)}
-            >
-              <IconFileTextSpark className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Toggle plan mode</TooltipContent>
-        </Tooltip>
+        <PlanToggleButton
+          planModeEnabled={planModeEnabled}
+          planModeAvailable={planModeAvailable}
+          onPlanModeChange={onPlanModeChange}
+        />
+
+        <McpIndicator mcpServers={mcpServers} />
 
         <ContextPopover
           open={contextPopoverOpen}
@@ -164,11 +256,15 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
         />
         <TokenUsageDisplay sessionId={sessionId} />
         <ModelSelector sessionId={sessionId} />
+        {planModeEnabled && !isAgentBusy && onImplementPlan && (
+          <ImplementPlanButton onClick={onImplementPlan} />
+        )}
         <div className="ml-1">
           <SubmitButton
             isAgentBusy={isAgentBusy}
             isDisabled={isDisabled}
             isSending={isSending}
+            planModeEnabled={planModeEnabled}
             onCancel={onCancel}
             onSubmit={onSubmit}
             submitShortcut={submitShortcut}

@@ -52,6 +52,7 @@ type TipTapInputProps = {
   planContextEnabled?: boolean;
   onAgentCommand?: (commandName: string) => void;
   onImagePaste?: (files: File[]) => void;
+  onPlanModeChange?: (enabled: boolean) => void;
 };
 
 // ── Filter items ────────────────────────────────────────────────────
@@ -341,6 +342,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     disabled = false,
     className,
     planModeEnabled = false,
+    onPlanModeChange,
     submitKey = "cmd_enter",
     onFocus,
     onBlur,
@@ -385,6 +387,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     disabled,
     className,
     planModeEnabled,
+    onPlanModeChange,
     submitKey,
     onFocus,
     onBlur,

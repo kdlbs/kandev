@@ -9,11 +9,14 @@ import type { CustomPrompt } from "@/lib/types/http";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
+  planModeEnabled: boolean,
   planComments?: PlanComment[],
 ): string {
   if (!activeDocument) return "";
 
   if (activeDocument.type === "plan") {
+    if (!planModeEnabled) return "";
+
     let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
 
     if (planComments && planComments.length > 0) {
@@ -66,7 +69,7 @@ export interface UseMessageHandlerParams {
   taskId: string | null;
   sessionModel: string | null;
   activeModel: string | null;
-  planMode?: boolean;
+  planModeEnabled?: boolean;
   isAgentBusy?: boolean;
   activeDocument?: ActiveDocument | null;
   planComments?: PlanComment[];
@@ -122,7 +125,7 @@ export function useMessageHandler({
   taskId,
   sessionModel,
   activeModel,
-  planMode = false,
+  planModeEnabled = false,
   isAgentBusy = false,
   activeDocument = null,
   planComments = [],
@@ -134,14 +137,14 @@ export function useMessageHandler({
   const buildFinalMessage = useCallback(
     (message: string, inlineMentions?: ContextFile[]) => {
       const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
-      const documentContext = buildDocumentContext(activeDocument, planComments);
+      const documentContext = buildDocumentContext(activeDocument, planModeEnabled, planComments);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
       return {
         finalMessage: message.trim() + documentContext + contextFilesContext,
         allContextFiles,
       };
     },
-    [contextFiles, activeDocument, planComments, prompts],
+    [contextFiles, activeDocument, planModeEnabled, planComments, prompts],
   );
 
   const handleSendMessage = useCallback(
@@ -170,7 +173,7 @@ export function useMessageHandler({
           data: att.data,
           mime_type: att.mime_type,
         }));
-        await queue(taskId, finalMessage, modelToSend, planMode, queueAttachments);
+        await queue(taskId, finalMessage, modelToSend, planModeEnabled, queueAttachments);
         return;
       }
 
@@ -179,7 +182,7 @@ export function useMessageHandler({
         resolvedSessionId,
         finalMessage,
         modelToSend,
-        planMode,
+        planMode: planModeEnabled,
         hasReviewComments,
         attachments,
         contextFilesMeta,
@@ -190,7 +193,7 @@ export function useMessageHandler({
       taskId,
       activeModel,
       sessionModel,
-      planMode,
+      planModeEnabled,
       isAgentBusy,
       queue,
       buildFinalMessage,

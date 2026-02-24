@@ -584,15 +584,28 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     // Clear pinned overrides so fresh default gets clean preset widths
     const freshPinned = new Map<string, number>();
     set({ isRestoringLayout: true, pinnedWidths: freshPinned });
-    const state = userDefaultLayout ?? getPresetLayout("default");
-    const ids = applyLayout(api, state, freshPinned);
-    const hasSidebar = state.columns.some((c) => c.id === "sidebar");
-    const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
-    set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+    // Check if plan mode was queued before navigation (e.g. task created in plan mode).
+    // If so, use the plan preset directly and consume the deferred actions.
     const pending = get().deferredPanelActions;
-    if (pending.length > 0) {
+    const hasPlanAction = pending.some((a) => a.id === "plan");
+    if (hasPlanAction) {
       set({ deferredPanelActions: [] });
-      applyDeferredPanelActions(api, pending);
+      const planState = getPresetLayout("plan");
+      const ids = applyLayout(api, planState, freshPinned);
+      set({ ...ids, sidebarVisible: true, rightPanelsVisible: false });
+      // Apply any remaining non-plan deferred actions
+      const remaining = pending.filter((a) => a.id !== "plan");
+      if (remaining.length > 0) applyDeferredPanelActions(api, remaining);
+    } else {
+      const state = userDefaultLayout ?? getPresetLayout("default");
+      const ids = applyLayout(api, state, freshPinned);
+      const hasSidebar = state.columns.some((c) => c.id === "sidebar");
+      const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
+      set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+      if (pending.length > 0) {
+        set({ deferredPanelActions: [] });
+        applyDeferredPanelActions(api, pending);
+      }
     }
     requestAnimationFrame(() => {
       syncPinnedWidthsFromApi(api, set);

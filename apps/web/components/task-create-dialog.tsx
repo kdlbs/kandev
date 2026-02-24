@@ -382,25 +382,12 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { open, onOpenChange, initialValues, workspaceId } = props;
-  const {
-    fs,
-    isSessionMode,
-    isEditMode,
-    isCreateMode,
-    isTaskStarted,
-    sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositoriesLoading,
-    branchesLoading,
-    computed,
-    handlers,
-    submitHandlers,
-    handleKeyDown,
-  } = useTaskCreateDialogSetup(props);
-  const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent, handleCancel } =
-    submitHandlers;
+  const setup = useTaskCreateDialogSetup(props);
+  const { fs, isSessionMode, isEditMode, isCreateMode, isTaskStarted } = setup;
+  const { sessionRepoName, workflows, agentProfiles, snapshots } = setup;
+  const { repositoriesLoading, branchesLoading, computed, handlers, handleKeyDown } = setup;
+  const { handleSubmit, handleUpdateWithoutAgent, handleCreateWithoutAgent } = setup.submitHandlers;
+  const { handleCreateWithPlanMode, handleCancel } = setup.submitHandlers;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col">
@@ -470,6 +457,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               onCancel={handleCancel}
               onUpdateWithoutAgent={handleUpdateWithoutAgent}
               onCreateWithoutAgent={handleCreateWithoutAgent}
+              onCreateWithPlanMode={handleCreateWithPlanMode}
             />
           </DialogFooter>
         </form>

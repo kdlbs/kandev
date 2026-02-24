@@ -224,30 +224,41 @@ function useAgentStatusData(sessionId: string | null, messages: Message[], isRun
   return { isTurnActive, runningDuration, elapsedSeconds, displayDuration };
 }
 
+function renderActiveStatus(
+  config: { label: string; icon: string },
+  sessionId: string | null,
+  runningData: ReturnType<typeof useAgentStatusData>,
+): React.ReactNode {
+  switch (config.icon) {
+    case "error":
+      return <AgentErrorStatus config={config} sessionId={sessionId} />;
+    case "warning":
+      return <AgentWarningStatus config={config} />;
+    case "spinner":
+      return (
+        <AgentRunningStatus
+          config={config}
+          elapsedSeconds={runningData.elapsedSeconds}
+          runningDuration={runningData.runningDuration}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
 export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
   const config = sessionState ? STATE_CONFIG[sessionState] : null;
   const isRunning = config?.icon === "spinner";
-  const isError = config?.icon === "error";
-  const isWarning = config?.icon === "warning";
 
-  const { isTurnActive, runningDuration, elapsedSeconds, displayDuration } = useAgentStatusData(
-    sessionId,
-    messages,
-    isRunning,
-  );
+  const runningData = useAgentStatusData(sessionId, messages, isRunning);
 
-  if (isError && config) return <AgentErrorStatus config={config} sessionId={sessionId} />;
-  if (isWarning && config) return <AgentWarningStatus config={config} />;
-  if (isRunning && config)
-    return (
-      <AgentRunningStatus
-        config={config}
-        elapsedSeconds={elapsedSeconds}
-        runningDuration={runningDuration}
-      />
-    );
+  if (config?.icon) {
+    return renderActiveStatus({ label: config.label, icon: config.icon }, sessionId, runningData);
+  }
 
-  if (!isTurnActive && displayDuration) {
+  const displayDuration = runningData.displayDuration;
+  if (!runningData.isTurnActive && displayDuration) {
     return (
       <div className="flex items-center gap-2 py-2">
         <span className="inline-flex items-center gap-2 text-xs text-muted-foreground tabular-nums">

@@ -1,5 +1,11 @@
 package github
 
+// Normalized PR states (lowercase, used after conversion from GitHub API).
+const (
+	prStateMerged = "merged"
+	prStateClosed = "closed"
+)
+
 // PR review states from the GitHub API.
 const (
 	reviewStateApproved         = "APPROVED"
