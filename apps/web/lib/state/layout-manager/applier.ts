@@ -60,5 +60,19 @@ export function applyLayout(
     sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
   }
 
+  // Enforce max-width on other pinned columns (e.g. right panel group).
+  for (const col of state.columns) {
+    if (col.id === "sidebar" || !col.pinned || !col.maxWidth) continue;
+    for (const group of col.groups) {
+      for (const p of group.panels) {
+        const pnl = api.getPanel(p.id);
+        if (pnl) {
+          pnl.group.api.setConstraints({ maximumWidth: col.maxWidth });
+          break;
+        }
+      }
+    }
+  }
+
   return resolveGroupIds(api);
 }
