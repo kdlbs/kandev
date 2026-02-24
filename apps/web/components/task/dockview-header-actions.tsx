@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
@@ -16,6 +16,8 @@ import {
   IconLayoutRows,
   IconX,
   IconBrandVscode,
+  IconArrowsMaximize,
+  IconArrowsMinimize,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -154,10 +156,22 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-/** Faded split-vertical, split-horizontal, and close buttons for any non-sidebar group. */
+const ACTION_BTN =
+  "h-5 w-5 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer";
+
+/** Faded maximize, split, and close buttons for any non-sidebar group. */
 function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsProps) {
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const isChatGroup = group.id === centerGroupId;
+
+  const handleMaximize = useCallback(() => {
+    if (containerApi.hasMaximizedGroup()) {
+      containerApi.exitMaximizedGroup();
+    } else {
+      const panel = group.activePanel;
+      if (panel) containerApi.maximizeGroup(panel);
+    }
+  }, [group, containerApi]);
 
   const handleSplitRight = useCallback(() => {
     containerApi.addGroup({ referenceGroup: group, direction: "right" });
@@ -186,28 +200,40 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
     }
   }, [group, containerApi]);
 
+  const [isMaximized, setIsMaximized] = useState(() => containerApi.hasMaximizedGroup());
+  useEffect(() => {
+    const disposable = containerApi.onDidMaximizedGroupChange(() => {
+      setIsMaximized(containerApi.hasMaximizedGroup());
+    });
+    return () => disposable.dispose();
+  }, [containerApi]);
+
   return (
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
-            onClick={handleSplitRight}
-          >
-            <IconLayoutColumns className="h-3.5 w-3.5" />
+          <button type="button" className={ACTION_BTN} onClick={handleMaximize}>
+            {isMaximized ? (
+              <IconArrowsMinimize className="h-3 w-3" />
+            ) : (
+              <IconArrowsMaximize className="h-3 w-3" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{isMaximized ? "Restore" : "Maximize"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className={ACTION_BTN} onClick={handleSplitRight}>
+            <IconLayoutColumns className="h-3 w-3" />
           </button>
         </TooltipTrigger>
         <TooltipContent>Split right</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
-            onClick={handleSplitDown}
-          >
-            <IconLayoutRows className="h-3.5 w-3.5" />
+          <button type="button" className={ACTION_BTN} onClick={handleSplitDown}>
+            <IconLayoutRows className="h-3 w-3" />
           </button>
         </TooltipTrigger>
         <TooltipContent>Split down</TooltipContent>
@@ -215,12 +241,8 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       {!isChatGroup && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
-              onClick={handleCloseGroup}
-            >
-              <IconX className="h-3.5 w-3.5" />
+            <button type="button" className={ACTION_BTN} onClick={handleCloseGroup}>
+              <IconX className="h-3 w-3" />
             </button>
           </TooltipTrigger>
           <TooltipContent>Close group</TooltipContent>
