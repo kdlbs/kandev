@@ -31,7 +31,9 @@ export function ResizeHandle({
       <div
         className={cn(
           "w-8 h-0.5 rounded-full transition-colors",
-          planModeEnabled ? "bg-slate-400/60 hover:bg-slate-400" : "bg-border hover:bg-muted-foreground",
+          planModeEnabled
+            ? "bg-slate-400/60 hover:bg-slate-400"
+            : "bg-border hover:bg-muted-foreground",
         )}
       />
     </button>

@@ -156,7 +156,10 @@ const adapters: MessageAdapter[] = [
   {
     matches: () => true,
     render: (comment, ctx) => {
-      if (comment.author_type === "user" || (ctx.isTaskDescription && ctx.sessionState !== "FAILED")) {
+      if (
+        comment.author_type === "user" ||
+        (ctx.isTaskDescription && ctx.sessionState !== "FAILED")
+      ) {
         return (
           <ChatMessage
             comment={comment}

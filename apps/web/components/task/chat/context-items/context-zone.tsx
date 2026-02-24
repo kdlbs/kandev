@@ -11,12 +11,7 @@ type ContextZoneProps = {
   todoSlot?: ReactNode;
 };
 
-export function ContextZone({
-  items,
-  sessionId,
-  queueSlot,
-  todoSlot,
-}: ContextZoneProps) {
+export function ContextZone({ items, sessionId, queueSlot, todoSlot }: ContextZoneProps) {
   const hasContent = !!queueSlot || !!todoSlot || items.length > 0;
   if (!hasContent) return null;
 

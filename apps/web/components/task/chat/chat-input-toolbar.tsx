@@ -114,7 +114,7 @@ function PlanToggleButton({
 }) {
   const tooltip = planModeAvailable
     ? "Toggle plan mode (Shift+Tab) — Agent collaborates on the plan without implementing changes"
-    : "Plan mode requires an agent with MCP support";
+    : "Toggle plan layout (Shift+Tab) — View and edit the plan (agent cannot read/write it without MCP)";
 
   return (
     <Tooltip>
@@ -124,15 +124,10 @@ function PlanToggleButton({
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 gap-1.5 px-2 hover:bg-muted/40",
-            planModeAvailable ? "cursor-pointer" : "opacity-50 cursor-not-allowed",
+            "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
             planModeEnabled && planModeAvailable && "bg-slate-500/15 text-slate-400",
           )}
-          onClick={() => {
-            console.log("[PlanToggle] clicked", { planModeEnabled, planModeAvailable });
-            if (planModeAvailable) onPlanModeChange(!planModeEnabled);
-          }}
-          aria-disabled={!planModeAvailable}
+          onClick={() => onPlanModeChange(!planModeEnabled)}
         >
           <IconFileTextSpark className="h-4 w-4" />
         </Button>

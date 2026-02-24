@@ -198,10 +198,6 @@
     overflow-wrap: anywhere;
   }
 
-  .kanban-task-pulse {
-    animation: kanban-task-pulse 5s ease-in-out infinite;
-  }
-
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -310,16 +306,6 @@
 }
 .spinner-grid-cube:nth-child(9) {
   animation-delay: 0.2s;
-}
-
-@keyframes kanban-task-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.12);
-  }
-  50% {
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.22);
-  }
 }
 
 @keyframes border-flash-glow {
@@ -1154,7 +1140,8 @@
 
 .chat-message-list {
   font-size: 13px;
-  font-family: -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
+  font-family:
+    -apple-system, "system-ui", "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji";
 }
 

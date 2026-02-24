@@ -163,11 +163,11 @@ function useOnboardingResources(open: boolean) {
         setAvailableAgents(availRes.agents ?? []);
         setAgentSettings(buildAgentSettings(availRes.agents ?? [], savedRes.agents ?? []));
       })
-      .catch(() => { })
+      .catch(() => {})
       .finally(() => setLoadingAgents(false));
     listWorkflowTemplates()
       .then((res) => setTemplates(res.templates ?? []))
-      .catch(() => { })
+      .catch(() => {})
       .finally(() => setLoadingTemplates(false));
   }, [open]);
 
@@ -266,7 +266,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => { }}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-[540px]" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
@@ -382,7 +382,8 @@ function StepAgents({
         You can also add custom TUI agents later in Settings &gt; Agents.
       </p>
       <p className="text-xs text-muted-foreground">
-        <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles run with with Auto Approve enabled (YOLO mode).
+        <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles run
+        with with Auto Approve enabled (YOLO mode).
       </p>
     </div>
   );

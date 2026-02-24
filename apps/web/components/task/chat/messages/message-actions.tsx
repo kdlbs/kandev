@@ -189,7 +189,11 @@ export function MessageActions({
     <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
-        <RawToggleButton isRawView={isRawView} onToggleRaw={onToggleRaw} hasHiddenPrompts={hasHiddenPrompts} />
+        <RawToggleButton
+          isRawView={isRawView}
+          onToggleRaw={onToggleRaw}
+          hasHiddenPrompts={hasHiddenPrompts}
+        />
       )}
       {showNavigation && (
         <NavigationButtons

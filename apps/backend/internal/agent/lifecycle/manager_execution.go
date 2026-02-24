@@ -140,6 +140,15 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, err
 	}
 
+	// If agent ID not in workspace info (snapshot missing/empty), resolve from profile
+	if info.AgentID == "" && info.AgentProfileID != "" && m.profileResolver != nil {
+		profileInfo, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
+		}
+		info.AgentID = profileInfo.AgentName
+	}
+
 	// Create the execution
 	m.logger.Info("creating execution for passthrough session",
 		zap.String("task_id", info.TaskID),

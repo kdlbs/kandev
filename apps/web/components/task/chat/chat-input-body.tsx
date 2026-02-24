@@ -182,12 +182,7 @@ export function ChatInputContextArea({
   ) : undefined;
   const todoSlot = hasTodos ? <TodoSummary todos={todoItems} /> : undefined;
   return (
-    <ContextZone
-      items={allItems}
-      sessionId={sessionId}
-      queueSlot={queueSlot}
-      todoSlot={todoSlot}
-    />
+    <ContextZone items={allItems} sessionId={sessionId} queueSlot={queueSlot} todoSlot={todoSlot} />
   );
 }
 
@@ -238,7 +233,11 @@ export function ChatInputBody({
       )}
       style={{ height }}
     >
-      <ResizeHandle visible={isPanelFocused || isInputFocused} planModeEnabled={planModeEnabled} {...resizeHandleProps} />
+      <ResizeHandle
+        visible={isPanelFocused || isInputFocused}
+        planModeEnabled={planModeEnabled}
+        {...resizeHandleProps}
+      />
       <ChatInputFocusHint visible={showFocusHint} />
       <ChatInputContextArea {...contextAreaProps} />
       <ChatInputEditorArea {...editorAreaProps} />

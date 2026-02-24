@@ -299,7 +299,13 @@ function UserMessageContent({
               ))}
             </div>
           )}
-          {renderUserMessageBody(hasContent, showRaw, hasAttachments, comment.content, comment.raw_content)}
+          {renderUserMessageBody(
+            hasContent,
+            showRaw,
+            hasAttachments,
+            comment.content,
+            comment.raw_content,
+          )}
         </div>
         <MessageActions
           message={comment}

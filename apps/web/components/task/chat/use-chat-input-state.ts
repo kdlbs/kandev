@@ -166,7 +166,8 @@ export function useChatInputState({
       const trimmed = valueRef.current.trim();
       const allComments = collectComments(pendingCommentsRef.current);
       const currentAttachments = attachmentsRef.current;
-      const hasContent = trimmed || allComments.length > 0 || currentAttachments.length > 0 || hasContextComments;
+      const hasContent =
+        trimmed || allComments.length > 0 || currentAttachments.length > 0 || hasContextComments;
       if (!hasContent) return;
       const messageAttachments = toMessageAttachments(currentAttachments);
       const inlineMentions = inputRef.current?.getMentions() ?? [];

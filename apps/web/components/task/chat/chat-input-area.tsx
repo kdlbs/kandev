@@ -103,7 +103,12 @@ export function useSubmitHandler(
       if (isSending) return;
       setIsSending(true);
       try {
-        const finalMessage = buildSubmitMessage(message, reviewComments, pendingPRFeedback, planComments);
+        const finalMessage = buildSubmitMessage(
+          message,
+          reviewComments,
+          pendingPRFeedback,
+          planComments,
+        );
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
           await onSend(finalMessage);
@@ -212,7 +217,7 @@ function useImplementPlan(
     chatInputRef.current?.clear();
 
     const visibleText = userText.trim() || "Implement the plan";
-    let content = `${visibleText}\n\n<kandev-system>
+    const content = `${visibleText}\n\n<kandev-system>
 IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
 Read the current plan using the get_task_plan_kandev MCP tool.
 Implement all changes described in the plan step by step.
@@ -220,12 +225,16 @@ After completing the implementation, provide a summary of what was done.
 </kandev-system>`;
 
     client
-      .request("message.add", {
-        task_id: taskId,
-        session_id: resolvedSessionId,
-        content,
-        plan_mode: false,
-      }, 10000)
+      .request(
+        "message.add",
+        {
+          task_id: taskId,
+          session_id: resolvedSessionId,
+          content,
+          plan_mode: false,
+        },
+        10000,
+      )
       .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
 
     handlePlanModeChange(false);
@@ -293,12 +302,18 @@ export function ChatInputArea({
     todoItems,
   } = panelState;
   const handleImplementPlan = useImplementPlan(
-    resolvedSessionId, taskId, handlePlanModeChange, chatInputRef,
+    resolvedSessionId,
+    taskId,
+    handlePlanModeChange,
+    chatInputRef,
   );
 
   const hasClarification = !!panelState.pendingClarification;
   const placeholder = resolveInputPlaceholder(
-    isAgentBusy, activeDocument?.type, planModeEnabled, hasClarification,
+    isAgentBusy,
+    activeDocument?.type,
+    planModeEnabled,
+    hasClarification,
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
@@ -324,7 +339,9 @@ export function ChatInputArea({
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
         pendingCommentsByFile={pendingCommentsByFile}
-        hasContextComments={panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0}
+        hasContextComments={
+          panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
+        }
         submitKey={chatSubmitKey}
         hasAgentCommands={!!(agentCommands && agentCommands.length > 0)}
         isFailed={isFailed}

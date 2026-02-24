@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getLocalStorage } from "@/lib/local-storage";
 import { useLayoutStore } from "@/lib/state/layout-store";
@@ -58,6 +58,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   );
 
   const planModeEnabled = planModeFromStore;
+  const planLayoutVisible = activeDocument?.type === "plan";
 
   useEffect(() => {
     if (!resolvedSessionId) return;
@@ -68,13 +69,46 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
 
+  // Re-focus chat input after dockview layout rebuild completes
+  const refocusChatAfterLayout = useCallback(() => {
+    const unsub = useDockviewStore.subscribe((state) => {
+      if (!state.isRestoringLayout) {
+        unsub();
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(".tiptap.ProseMirror")?.focus();
+        });
+      }
+    });
+  }, []);
+
+  // Toggle only the plan layout (plan panel + preset) without changing chat input plan mode state
+  const togglePlanLayout = useCallback(
+    (show: boolean) => {
+      if (!resolvedSessionId || !taskId) return;
+      if (show) {
+        setActiveDocument(resolvedSessionId, { type: "plan", taskId });
+        applyBuiltInPreset("plan");
+      } else {
+        applyBuiltInPreset("default");
+        closeDocument(resolvedSessionId);
+        setActiveDocument(resolvedSessionId, null);
+      }
+      refocusChatAfterLayout();
+    },
+    [
+      resolvedSessionId,
+      taskId,
+      setActiveDocument,
+      applyBuiltInPreset,
+      closeDocument,
+      refocusChatAfterLayout,
+    ],
+  );
+
+  // Full plan mode toggle: layout + chat input state (context file, border, submit style)
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      console.log("[PlanMode] handlePlanModeChange called", { enabled, resolvedSessionId, taskId });
-      if (!resolvedSessionId || !taskId) {
-        console.log("[PlanMode] handlePlanModeChange bailing: no sessionId or taskId");
-        return;
-      }
+      if (!resolvedSessionId || !taskId) return;
       if (enabled) {
         setActiveDocument(resolvedSessionId, { type: "plan", taskId });
         applyBuiltInPreset("plan");
@@ -87,17 +121,7 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
         setPlanMode(resolvedSessionId, false);
         removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
       }
-      // Re-focus chat input after dockview layout rebuild completes
-      const unsub = useDockviewStore.subscribe((state) => {
-        if (!state.isRestoringLayout) {
-          unsub();
-          requestAnimationFrame(() => {
-            const chat = document.querySelector<HTMLElement>(".tiptap.ProseMirror");
-            chat?.focus();
-          });
-        }
-      });
-      console.log("[PlanMode] handlePlanModeChange done, set to:", enabled);
+      refocusChatAfterLayout();
     },
     [
       resolvedSessionId,
@@ -108,10 +132,17 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
       setPlanMode,
       addContextFile,
       removeContextFile,
+      refocusChatAfterLayout,
     ],
   );
 
-  return { planModeEnabled, activeDocument, handlePlanModeChange };
+  return {
+    planModeEnabled,
+    planLayoutVisible,
+    activeDocument,
+    handlePlanModeChange,
+    togglePlanLayout,
+  };
 }
 
 export function useContextFiles(resolvedSessionId: string | null) {
@@ -343,19 +374,48 @@ export function useChatPanelState({
   const { supportsMcp, mcpServers } = useSessionMcp(sessionState.session?.agent_profile_id);
   const planModeAvailable = supportsMcp;
 
-  // Wrap handlePlanModeChange to guard against enabling when MCP is unavailable
-  const { handlePlanModeChange: rawHandlePlanModeChange } = planMode;
+  // When MCP is available: full plan mode toggle (layout + chat input state)
+  // When MCP is unavailable: layout-only toggle (plan panel visible, but no plan context/border)
+  const {
+    handlePlanModeChange: rawHandlePlanModeChange,
+    togglePlanLayout,
+    planModeEnabled,
+    planLayoutVisible,
+  } = planMode;
   const guardedHandlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      console.log("[PlanMode] guardedHandlePlanModeChange", { enabled, planModeAvailable });
-      if (enabled && !planModeAvailable) {
-        console.log("[PlanMode] blocked: planModeAvailable is false");
-        return;
+      if (planModeAvailable) {
+        rawHandlePlanModeChange(enabled);
+      } else {
+        // Toggle based on current layout state, ignoring the passed value
+        togglePlanLayout(!planLayoutVisible);
       }
-      rawHandlePlanModeChange(enabled);
     },
-    [planModeAvailable, rawHandlePlanModeChange],
+    [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );
+
+  // Auto-disable plan mode if agent doesn't support MCP (e.g. started from create dialog)
+  const hasAgentProfile = Boolean(sessionState.session?.agent_profile_id);
+  const hasAutoDisabled = useRef(false);
+  useEffect(() => {
+    if (
+      planModeEnabled &&
+      hasAgentProfile &&
+      !planModeAvailable &&
+      resolvedSessionId &&
+      !hasAutoDisabled.current
+    ) {
+      hasAutoDisabled.current = true;
+      rawHandlePlanModeChange(false);
+    }
+    if (!planModeEnabled) hasAutoDisabled.current = false;
+  }, [
+    planModeEnabled,
+    hasAgentProfile,
+    planModeAvailable,
+    resolvedSessionId,
+    rawHandlePlanModeChange,
+  ]);
 
   const contextFilesState = useContextFiles(resolvedSessionId);
   const { contextFiles, removeContextFile, unpinFile } = contextFilesState;

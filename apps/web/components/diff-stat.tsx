@@ -29,11 +29,7 @@ export function CommitStatBadge({ label, tone, className }: CommitStatBadgeProps
   return (
     <Badge
       variant="outline"
-      className={cn(
-        "h-6 px-1.5 text-xs font-medium rounded-md",
-        commitTone[tone],
-        className,
-      )}
+      className={cn("h-6 px-1.5 text-xs font-medium rounded-md", commitTone[tone], className)}
     >
       {label}
     </Badge>

@@ -2,18 +2,18 @@
 
 import { useCallback, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { Task } from "@/lib/types/http";
-import type { LocalRepository } from "@/lib/types/http";
+import type { Task, LocalRepository } from "@/lib/types/http";
 import { createTask, updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
-import type { AppState } from "@/lib/state/store";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import { linkToSession } from "@/lib/links";
-import { useDockviewStore } from "@/lib/state/dockview-store";
-import { useContextFilesStore } from "@/lib/state/context-files-store";
-
-type CreateTaskParams = Parameters<typeof createTask>[0];
+import {
+  activatePlanMode,
+  buildCreateTaskPayload,
+  validateCreateInputs,
+  type CreateTaskParams,
+} from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
 
@@ -69,98 +69,6 @@ export type SubmitHandlersDeps = {
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
 };
-
-type ActivatePlanModeArgs = {
-  sessionId: string;
-  taskId: string;
-  setActiveDocument: AppState["setActiveDocument"];
-  setPlanMode: AppState["setPlanMode"];
-  router: ReturnType<typeof useRouter>;
-};
-
-function activatePlanMode({
-  sessionId,
-  taskId,
-  setActiveDocument,
-  setPlanMode,
-  router,
-}: ActivatePlanModeArgs) {
-  setActiveDocument(sessionId, { type: "plan", taskId });
-  useDockviewStore.getState().queuePanelAction({
-    id: "plan",
-    component: "plan",
-    title: "Plan",
-    placement: "right",
-    referencePanel: "chat",
-  });
-  setPlanMode(sessionId, true);
-  useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
-  router.push(linkToSession(sessionId));
-}
-
-type BuildCreatePayloadArgs = {
-  workspaceId: string;
-  effectiveWorkflowId: string;
-  trimmedTitle: string;
-  trimmedDescription: string;
-  repositoriesPayload: CreateTaskParams["repositories"];
-  agentProfileId: string;
-  executorId: string;
-  executorProfileId: string;
-  withAgent: boolean;
-};
-
-function buildCreateTaskPayload({
-  workspaceId,
-  effectiveWorkflowId,
-  trimmedTitle,
-  trimmedDescription,
-  repositoriesPayload,
-  agentProfileId,
-  executorId,
-  executorProfileId,
-  withAgent,
-}: BuildCreatePayloadArgs): CreateTaskParams {
-  return {
-    workspace_id: workspaceId,
-    workflow_id: effectiveWorkflowId,
-    title: trimmedTitle,
-    description: trimmedDescription,
-    repositories: repositoriesPayload,
-    state: withAgent ? "IN_PROGRESS" : "CREATED",
-    start_agent: withAgent ? true : undefined,
-    prepare_session: withAgent ? undefined : true,
-    agent_profile_id: agentProfileId || undefined,
-    executor_id: executorId || undefined,
-    executor_profile_id: executorProfileId || undefined,
-  };
-}
-
-type CreateInputs = {
-  trimmedTitle: string;
-  workspaceId: string | null;
-  effectiveWorkflowId: string | null;
-  repositoryId: string;
-  selectedLocalRepo: LocalRepository | null;
-  agentProfileId: string;
-};
-
-function validateCreateInputs({
-  trimmedTitle,
-  workspaceId,
-  effectiveWorkflowId,
-  repositoryId,
-  selectedLocalRepo,
-  agentProfileId,
-}: CreateInputs): boolean {
-  return Boolean(
-    trimmedTitle &&
-    workspaceId &&
-    effectiveWorkflowId &&
-    (repositoryId || selectedLocalRepo) &&
-    agentProfileId,
-  );
-}
 
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
@@ -250,7 +158,6 @@ export function useTaskSubmitHandlers({
 
     if (onCreateSession) {
       onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId });
-      resetForm();
       onOpenChange(false);
       return;
     }
@@ -274,7 +181,6 @@ export function useTaskSubmitHandlers({
         15000,
       );
 
-      resetForm();
       const newSessionId = response?.session_id;
       if (newSessionId) {
         router.push(linkToSession(newSessionId));
@@ -297,7 +203,6 @@ export function useTaskSubmitHandlers({
     isPassthroughProfile,
     onCreateSession,
     onOpenChange,
-    resetForm,
     router,
     taskId,
     toast,
@@ -361,9 +266,8 @@ export function useTaskSubmitHandlers({
         variant: "error",
       });
     } finally {
-      resetForm();
-      setIsCreatingTask(false);
       onOpenChange(false);
+      setIsCreatingTask(false);
     }
   }, [
     performTaskUpdate,
@@ -371,7 +275,6 @@ export function useTaskSubmitHandlers({
     executorId,
     executorProfileId,
     onSuccess,
-    resetForm,
     onOpenChange,
     toast,
     setIsCreatingTask,
@@ -390,17 +293,17 @@ export function useTaskSubmitHandlers({
         variant: "error",
       });
     } finally {
-      resetForm();
-      setIsCreatingTask(false);
       onOpenChange(false);
+      setIsCreatingTask(false);
     }
-  }, [performTaskUpdate, onSuccess, onOpenChange, resetForm, toast, setIsCreatingTask]);
+  }, [performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
 
-  const handleCreateWithAgent = useCallback(
+  const performCreateWithAgent = useCallback(
     async (
       trimmedTitle: string,
       trimmedDescription: string,
       repositoriesPayload: CreateTaskParams["repositories"],
+      planMode?: boolean,
     ) => {
       if (!workspaceId || !effectiveWorkflowId) return;
       const taskResponse = await createTask(
@@ -414,12 +317,21 @@ export function useTaskSubmitHandlers({
           executorId,
           executorProfileId,
           withAgent: true,
+          planMode,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
-      resetForm();
-      if (isPassthroughProfile && newSessionId) {
+      if (planMode && newSessionId) {
+        onOpenChange(false);
+        activatePlanMode({
+          sessionId: newSessionId,
+          taskId: taskResponse.id,
+          setActiveDocument,
+          setPlanMode,
+          router,
+        });
+      } else if (isPassthroughProfile && newSessionId) {
         router.push(linkToSession(newSessionId));
       } else {
         onOpenChange(false);
@@ -433,8 +345,9 @@ export function useTaskSubmitHandlers({
       executorProfileId,
       isPassthroughProfile,
       onSuccess,
-      resetForm,
       onOpenChange,
+      setActiveDocument,
+      setPlanMode,
       router,
     ],
   );
@@ -457,7 +370,6 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
-      resetForm();
       if (newSessionId) {
         activatePlanMode({
           sessionId: newSessionId,
@@ -477,13 +389,106 @@ export function useTaskSubmitHandlers({
       executorId,
       executorProfileId,
       onSuccess,
-      resetForm,
       onOpenChange,
       setActiveDocument,
       setPlanMode,
       router,
     ],
   );
+
+  const performEditWithPlanMode = useCallback(async () => {
+    const result = await performTaskUpdate();
+    if (!result) return;
+    const { updatedTask, trimmedDescription } = result;
+    const client = getWebSocketClient();
+    if (!client) throw new Error("WebSocket client not available");
+    const response = await client.request<OrchestratorStartResponse>(
+      "orchestrator.start",
+      {
+        task_id: updatedTask.id,
+        agent_profile_id: agentProfileId,
+        executor_id: executorId,
+        executor_profile_id: executorProfileId || undefined,
+        prompt: trimmedDescription || "",
+        plan_mode: true,
+      },
+      15000,
+    );
+    const newSessionId = response?.session_id ?? null;
+    onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
+    onOpenChange(false);
+    if (newSessionId) {
+      activatePlanMode({
+        sessionId: newSessionId,
+        taskId: updatedTask.id,
+        setActiveDocument,
+        setPlanMode,
+        router,
+      });
+    }
+  }, [
+    performTaskUpdate,
+    agentProfileId,
+    executorId,
+    executorProfileId,
+    onSuccess,
+    onOpenChange,
+    setActiveDocument,
+    setPlanMode,
+    router,
+  ]);
+
+  const handleCreateWithPlanMode = useCallback(async () => {
+    setIsCreatingTask(true);
+    try {
+      if (isEditMode) {
+        await performEditWithPlanMode();
+      } else {
+        const trimmedTitle = taskName.trim();
+        const description = descriptionInputRef.current?.getValue() ?? "";
+        const trimmedDescription = description.trim();
+        if (
+          !validateCreateInputs({
+            trimmedTitle,
+            workspaceId,
+            effectiveWorkflowId,
+            repositoryId,
+            selectedLocalRepo,
+            agentProfileId,
+          })
+        )
+          return;
+        await performCreateWithAgent(
+          trimmedTitle,
+          trimmedDescription,
+          getRepositoriesPayload(),
+          true,
+        );
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to start task in plan mode",
+        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        variant: "error",
+      });
+    } finally {
+      setIsCreatingTask(false);
+    }
+  }, [
+    isEditMode,
+    performEditWithPlanMode,
+    taskName,
+    workspaceId,
+    effectiveWorkflowId,
+    repositoryId,
+    selectedLocalRepo,
+    agentProfileId,
+    getRepositoriesPayload,
+    performCreateWithAgent,
+    toast,
+    descriptionInputRef,
+    setIsCreatingTask,
+  ]);
 
   const handleCreateSubmit = useCallback(async () => {
     const trimmedTitle = taskName.trim();
@@ -504,7 +509,7 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask(true);
     try {
       if (trimmedDescription || isPassthroughProfile) {
-        await handleCreateWithAgent(trimmedTitle, trimmedDescription, repositoriesPayload);
+        await performCreateWithAgent(trimmedTitle, trimmedDescription, repositoriesPayload);
       } else {
         await handleCreatePlanMode(trimmedTitle, repositoriesPayload);
       }
@@ -526,7 +531,7 @@ export function useTaskSubmitHandlers({
     agentProfileId,
     isPassthroughProfile,
     getRepositoriesPayload,
-    handleCreateWithAgent,
+    performCreateWithAgent,
     handleCreatePlanMode,
     toast,
     descriptionInputRef,
@@ -568,7 +573,6 @@ export function useTaskSubmitHandlers({
         executor_profile_id: executorProfileId || undefined,
       });
       onSuccess?.(taskResponse, "create");
-      resetForm();
       onOpenChange(false);
     } catch (error) {
       toast({
@@ -592,7 +596,6 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     onSuccess,
     onOpenChange,
-    resetForm,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -618,6 +621,7 @@ export function useTaskSubmitHandlers({
     handleSubmit,
     handleUpdateWithoutAgent,
     handleCreateWithoutAgent,
+    handleCreateWithPlanMode,
     handleCancel,
   };
 }

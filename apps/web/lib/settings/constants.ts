@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   LAST_AGENT_PROFILE_ID: "kandev.dialog.lastAgentProfileId",
   LAST_REPOSITORY_ID: "kandev.dialog.lastRepositoryId",
   LAST_BRANCH: "kandev.dialog.lastBranch",
+  LAST_EXECUTOR_PROFILE_ID: "kandev.dialog.lastExecutorProfileId",
 } as const;
 
 export const DEFAULT_BACKEND_URL = "http://localhost:8080";
