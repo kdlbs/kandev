@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { archiveTask, deleteTask, moveTask } from "@/lib/api";
+import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
 
 type MovePayload = { workflow_id: string; workflow_step_id: string; position: number };
 
@@ -16,5 +16,9 @@ export function useTaskActions() {
     return archiveTask(taskId);
   }, []);
 
-  return { moveTaskById, deleteTaskById, archiveTaskById };
+  const renameTaskById = useCallback(async (taskId: string, title: string) => {
+    return updateTask(taskId, { title });
+  }, []);
+
+  return { moveTaskById, deleteTaskById, archiveTaskById, renameTaskById };
 }

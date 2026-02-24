@@ -17,7 +17,8 @@ export function defaultLayout(): LayoutState {
       {
         id: "right",
         pinned: true,
-        maxWidth: LAYOUT_SIDEBAR_MAX_PX,
+        width: 350,
+        maxWidth: LAYOUT_RIGHT_MAX_PX,
         groups: [
           { panels: [panel("files"), panel("changes")] },
           { panels: [panel("terminal-default")] },

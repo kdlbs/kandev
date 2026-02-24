@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, memo } from "react";
 import type { TaskState, TaskSessionState, Repository, TaskSession, Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { TaskSwitcher } from "./task-switcher";
+import { TaskRenameDialog } from "./task-rename-dialog";
 import { Button } from "@kandev/ui/button";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { IconPlus } from "@tabler/icons-react";
@@ -221,7 +222,7 @@ function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const { deleteTaskById, archiveTaskById } = useTaskActions();
+  const { deleteTaskById, archiveTaskById, renameTaskById } = useTaskActions();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
@@ -288,7 +289,35 @@ function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
     [deleteTaskById, removeTaskFromBoard],
   );
 
-  return { deletingTaskId, handleSelectTask, handleArchiveTask, handleDeleteTask };
+  const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
+
+  const handleRenameTask = useCallback((taskId: string, currentTitle: string) => {
+    setRenamingTask({ id: taskId, title: currentTitle });
+  }, []);
+
+  const handleRenameSubmit = useCallback(
+    async (newTitle: string) => {
+      if (!renamingTask) return;
+      try {
+        await renameTaskById(renamingTask.id, newTitle);
+      } catch (error) {
+        console.error("Failed to rename task:", error);
+      }
+      setRenamingTask(null);
+    },
+    [renamingTask, renameTaskById],
+  );
+
+  return {
+    deletingTaskId,
+    handleSelectTask,
+    handleArchiveTask,
+    handleDeleteTask,
+    renamingTask,
+    setRenamingTask,
+    handleRenameTask,
+    handleRenameSubmit,
+  };
 }
 
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
@@ -299,8 +328,16 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
 
   const { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories } =
     useSidebarData(workspaceId);
-  const { deletingTaskId, handleSelectTask, handleArchiveTask, handleDeleteTask } =
-    useSidebarActions(store);
+  const {
+    deletingTaskId,
+    handleSelectTask,
+    handleArchiveTask,
+    handleDeleteTask,
+    renamingTask,
+    setRenamingTask,
+    handleRenameTask,
+    handleRenameSubmit,
+  } = useSidebarActions(store);
 
   return (
     <PanelRoot>
@@ -311,12 +348,19 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
           onSelectTask={handleSelectTask}
+          onRenameTask={handleRenameTask}
           onArchiveTask={handleArchiveTask}
           onDeleteTask={handleDeleteTask}
           deletingTaskId={deletingTaskId}
           isLoading={isLoadingWorkflow}
         />
       </PanelBody>
+      <TaskRenameDialog
+        open={renamingTask !== null}
+        onOpenChange={(open) => { if (!open) setRenamingTask(null); }}
+        currentTitle={renamingTask?.title ?? ""}
+        onSubmit={handleRenameSubmit}
+      />
     </PanelRoot>
   );
 });

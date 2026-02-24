@@ -41,6 +41,7 @@ type TaskSwitcherProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   deletingTaskId?: string | null;
@@ -101,6 +102,7 @@ function TaskSwitcherSection({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onRenameTask,
   onArchiveTask,
   onDeleteTask,
   deletingTaskId,
@@ -110,6 +112,7 @@ function TaskSwitcherSection({
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   deletingTaskId?: string | null;
@@ -141,6 +144,7 @@ function TaskSwitcherSection({
             primarySessionId={task.primarySessionId ?? null}
             updatedAt={task.updatedAt}
             onClick={() => onSelectTask(task.id)}
+            onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
             onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
             onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
             isDeleting={deletingTaskId === task.id}
@@ -157,6 +161,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onRenameTask,
   onArchiveTask,
   onDeleteTask,
   deletingTaskId,
@@ -212,6 +217,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
+          onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
           deletingTaskId={deletingTaskId}
