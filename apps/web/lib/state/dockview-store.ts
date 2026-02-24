@@ -137,17 +137,21 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
   }
 }
 
-/** Read live column widths from dockview's splitview and persist them as pinned overrides. */
+/** Read live column widths from dockview's splitview and persist them as pinned overrides.
+ *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
+ *  capturing plan/preview/vscode column widths as stale "right" overrides. */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
+    const state = fromDockviewApi(api);
     const updates = new Map<string, number>();
-    const sidebarW = sv.getViewSize(0);
-    if (sidebarW > 50) updates.set("sidebar", sidebarW);
-    if (sv.length >= 3) {
-      const rightW = sv.getViewSize(sv.length - 1);
-      if (rightW > 50) updates.set("right", rightW);
+    for (let i = 0; i < state.columns.length; i++) {
+      const col = state.columns[i];
+      if (col.id === "sidebar" || col.id === "right") {
+        const w = sv.getViewSize(i);
+        if (w > 50) updates.set(col.id, w);
+      }
     }
     if (updates.size > 0) {
       set((prev) => {
@@ -171,6 +175,8 @@ function performSessionSwitch(
   api: DockviewApi,
   oldSessionId: string | null,
   newSessionId: string,
+  safeWidth: number,
+  safeHeight: number,
   buildDefault: (api: DockviewApi) => void,
 ): LayoutGroupIds | null {
   if (oldSessionId) {
@@ -184,6 +190,8 @@ function performSessionSwitch(
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
+      // Force correct dimensions — fromJSON may use a stale container size
+      api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
     } catch {
       /* fall through */
@@ -318,17 +326,28 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      // Capture dimensions before layout change — api.width can become stale
+      // inside the rAF callback after dockview serialization
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
-      const ids = applyLayout(api, state, liveWidths);
+      // Remove stale pinned overrides for columns absent in the target layout
+      const targetColumnIds = new Set(state.columns.map((c) => c.id));
+      const cleanedWidths = new Map(liveWidths);
+      for (const key of cleanedWidths.keys()) {
+        if (!targetColumnIds.has(key)) cleanedWidths.delete(key);
+      }
+      const ids = applyLayout(api, state, cleanedWidths);
       set({
         ...ids,
         sidebarVisible: true,
         rightPanelsVisible: preset === "default",
+        pinnedWidths: cleanedWidths,
       });
       requestAnimationFrame(() => {
-        api.layout(api.width, api.height);
+        api.layout(safeWidth, safeHeight);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -337,6 +356,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
       if (!state?.columns) {
@@ -356,7 +377,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const hasRight = colCount > sidebarCols + 1;
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       requestAnimationFrame(() => {
-        api.layout(api.width, api.height);
+        api.layout(safeWidth, safeHeight);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -573,9 +594,11 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   switchSessionLayout: (oldSessionId, newSessionId) => {
     const { api, currentLayoutSessionId } = get();
     if (!api || currentLayoutSessionId === newSessionId) return;
+    const safeWidth = api.width;
+    const safeHeight = api.height;
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
-      const ids = performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
+      const ids = performSessionSwitch(api, oldSessionId, newSessionId, safeWidth, safeHeight, (a) => get().buildDefaultLayout(a));
       if (ids) set(ids);
     } finally {
       set({ isRestoringLayout: false });

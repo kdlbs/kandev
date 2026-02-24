@@ -105,26 +105,30 @@ const markdownComponents = {
     return <InlineCode>{content}</InlineCode>;
   },
   ol: ({ children }: { children?: ReactNode }) => (
-    <ol className="list-decimal pl-6 mb-2">{children}</ol>
+    <ol className="list-decimal pl-5 my-4">{children}</ol>
   ),
   ul: ({ children }: { children?: ReactNode }) => (
-    <ul className="list-disc pl-6 mb-2">{children}</ul>
+    <ul className="list-disc pl-5 my-4">{children}</ul>
   ),
   li: ({ children }: { children?: ReactNode }) => <li className="my-0.5">{children}</li>,
   p: ({ children }: { children?: ReactNode }) => (
-    <p className="leading-relaxed mb-1.5">{children}</p>
+    <p className="leading-[1.625]">{children}</p>
   ),
   h1: ({ children }: { children?: ReactNode }) => (
-    <p className="my-4 font-bold text-sm">{children}</p>
+    <h1 className="mt-5 mb-1.5 font-bold text-xl first:mt-0">{children}</h1>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <p className="my-3 font-bold text-sm">{children}</p>
+    <h2 className="mt-5 mb-1.5 font-bold text-[1.0625rem] first:mt-0">{children}</h2>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
-    <p className="my-2 font-bold text-sm">{children}</p>
+    <h3 className="mt-5 mb-1.5 font-bold text-[0.9375rem] first:mt-0">{children}</h3>
   ),
-  h4: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold">{children}</p>,
-  h5: ({ children }: { children?: ReactNode }) => <p className="my-2 font-bold">{children}</p>,
+  h4: ({ children }: { children?: ReactNode }) => (
+    <h4 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h4>
+  ),
+  h5: ({ children }: { children?: ReactNode }) => (
+    <h5 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h5>
+  ),
   hr: ({ children }: { children?: ReactNode }) => <hr className="my-5">{children}</hr>,
   table: ({ children }: { children?: ReactNode }) => (
     <div className="my-3 overflow-x-auto">

@@ -159,16 +159,103 @@ type MessageListBodyProps = {
   Footer: () => React.ReactNode;
 };
 
+function getItemKey(item: RenderItem): string {
+  return item.type === "turn_group" ? item.id : item.message.id;
+}
+
+function computeFirstItemIndex(prevKeys: string[], prevIndex: number, keys: string[]): number {
+  if (prevKeys.length > 0 && keys.length > prevKeys.length) {
+    const oldFirstKey = prevKeys[0];
+    const newPos = keys.indexOf(oldFirstKey);
+    console.log("[VirtualList] items grew", {
+      prevCount: prevKeys.length,
+      newCount: keys.length,
+      delta: keys.length - prevKeys.length,
+      oldFirstKey,
+      newPos,
+      prevIndex,
+      newFirst3Keys: keys.slice(0, 3),
+      oldFirst3Keys: prevKeys.slice(0, 3),
+    });
+    if (newPos > 0) {
+      const result = prevIndex - newPos;
+      console.log("[VirtualList] prepend detected → firstItemIndex", prevIndex, "→", result, `(shifted by ${newPos})`);
+      return result;
+    }
+    if (newPos === -1) {
+      // Old first key absorbed into a turn group — find first surviving key
+      for (let i = 0; i < prevKeys.length; i++) {
+        const idx = keys.indexOf(prevKeys[i]);
+        if (idx >= 0) {
+          const result = prevIndex - (idx - i);
+          console.log("[VirtualList] key absorbed → first surviving key", prevKeys[i], "at old pos", i, "now at", idx, "→ firstItemIndex", result);
+          return result;
+        }
+      }
+      console.warn("[VirtualList] no surviving keys found! Keeping prevIndex", prevIndex);
+    }
+    return prevIndex;
+  }
+  if (prevKeys.length === 0 && keys.length > 0) {
+    const result = FIRST_INDEX_BASE - keys.length + 1;
+    console.log("[VirtualList] initial mount → firstItemIndex", result, "itemCount", keys.length);
+    return result;
+  }
+  return prevIndex;
+}
+
+type IndexState = { keys: string[]; firstItemIndex: number };
+
+/** Compute a stable firstItemIndex by tracking the key of the item that was
+ *  previously at the top. When items change, we find where that key ended up
+ *  and adjust firstItemIndex so Virtuoso keeps scroll position stable. */
+function useStableFirstItemIndex(items: RenderItem[]) {
+  const keys = useMemo(() => items.map(getItemKey), [items]);
+
+  const [state, setState] = useState<IndexState>(() => ({
+    keys,
+    firstItemIndex: FIRST_INDEX_BASE - keys.length + 1,
+  }));
+
+  // When keys change, compute new firstItemIndex from previous state
+  // Return the computed value immediately so Virtuoso sees correct firstItemIndex
+  // on the SAME render that items change (not one render later).
+  if (keys !== state.keys) {
+    const nextIndex = computeFirstItemIndex(state.keys, state.firstItemIndex, keys);
+    console.log("[VirtualList] useStableFirstItemIndex update", {
+      prevKeyCount: state.keys.length,
+      newKeyCount: keys.length,
+      prevFirstItemIndex: state.firstItemIndex,
+      newFirstItemIndex: nextIndex,
+    });
+    setState({ keys, firstItemIndex: nextIndex });
+    return nextIndex;
+  }
+
+  return state.firstItemIndex;
+}
+
 function useVirtuosoCallbacks(props: MessageListBodyProps) {
   const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
   const { worktreePath, onOpenFile, lastTurnGroupId, isRunning, messages, sessionState } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
-  const firstItemIndex = FIRST_INDEX_BASE - itemCount + 1;
+  const firstItemIndex = useStableFirstItemIndex(items);
 
+  // Cooldown prevents startReached from rapid-firing after each prepend.
+  // After items are prepended, the viewport is still near the start so Virtuoso
+  // fires startReached again immediately — the cooldown breaks the loop.
+  const loadCooldownRef = useRef(false);
   const handleStartReached = useCallback(() => {
-    if (hasMore && !isLoadingMore) loadMore();
+    console.log("[VirtualList] startReached", { hasMore, isLoadingMore, cooldown: loadCooldownRef.current });
+    if (hasMore && !isLoadingMore && !loadCooldownRef.current) {
+      console.log("[VirtualList] → triggering loadMore");
+      loadCooldownRef.current = true;
+      loadMore().finally(() => {
+        setTimeout(() => { loadCooldownRef.current = false; }, 500);
+      });
+    }
   }, [hasMore, isLoadingMore, loadMore]);
 
   const handleScrollToMessage = useCallback(
@@ -194,7 +281,11 @@ function useVirtuosoCallbacks(props: MessageListBodyProps) {
   const renderItem = useCallback(
     (index: number) => {
       const item = items[index - firstItemIndex];
-      if (!item) return null;
+      if (!item) {
+        console.warn("[VirtualList] renderItem: no item at index", index, "firstItemIndex", firstItemIndex, "arrayIndex", index - firstItemIndex, "itemCount", items.length);
+        return <div />;
+      }
+
       return (
         <div className="pb-2">
           <VirtualItem
@@ -228,9 +319,12 @@ function MessageListBody(props: MessageListBodyProps) {
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
     useVirtuosoCallbacks(props);
 
+  console.log("[VirtualList] MessageListBody render", { itemCount, firstItemIndex, lastIndex: firstItemIndex + itemCount - 1 });
+
   return (
     <Virtuoso
       ref={virtuosoRef}
+      logLevel={Number.MAX_SAFE_INTEGER}
       customScrollParent={scrollParent}
       totalCount={itemCount}
       firstItemIndex={firstItemIndex}

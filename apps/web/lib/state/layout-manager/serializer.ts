@@ -234,6 +234,9 @@ function captureNode(
   return { type: "leaf", group, size };
 }
 
+/** Panel IDs that indicate the "right" column. */
+const RIGHT_PANEL_IDS = new Set(["files", "changes"]);
+
 /** Determine column ID and pinned status from its groups. */
 function inferColumnMeta(
   groups: LayoutGroup[],
@@ -241,11 +244,17 @@ function inferColumnMeta(
 ): { columnId: string; isPinned: boolean } {
   if (groups.length === 0) return { columnId: `col-${index}`, isPinned: false };
 
-  const hasSidebar = groups[0].panels.some((p) => p.id === "sidebar");
-  if (hasSidebar) return { columnId: "sidebar", isPinned: true };
+  const allPanelIds = new Set(groups.flatMap((g) => g.panels.map((p) => p.id)));
+
+  if (allPanelIds.has("sidebar")) return { columnId: "sidebar", isPinned: true };
+  if (allPanelIds.has("chat")) return { columnId: "center", isPinned: false };
+
+  // Column containing files/changes panels is the "right" column
+  for (const id of allPanelIds) {
+    if (RIGHT_PANEL_IDS.has(id)) return { columnId: "right", isPinned: true };
+  }
 
   const firstPanelId = groups[0].panels[0]?.id;
-  if (firstPanelId === "chat") return { columnId: "center", isPinned: false };
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };
 
   return { columnId: `col-${index}`, isPinned: false };

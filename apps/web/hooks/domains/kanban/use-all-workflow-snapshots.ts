@@ -68,6 +68,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
                 state: task.state,
                 repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
                 primarySessionId: task.primary_session_id ?? undefined,
+                primarySessionState: task.primary_session_state ?? undefined,
                 sessionCount: task.session_count ?? undefined,
                 reviewStatus: task.review_status ?? undefined,
                 primaryExecutorId: task.primary_executor_id ?? undefined,

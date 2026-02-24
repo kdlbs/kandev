@@ -27,7 +27,9 @@ export function useLazyLoadMessages(sessionId: string | null) {
   const loadMore = useCallback(async () => {
     const { hasMore, isLoading, oldestCursor } = stateRef.current;
 
+    console.log("[LazyLoad] loadMore called", { sessionId, hasMore, isLoading, oldestCursor });
     if (!sessionId || !hasMore || isLoading || !oldestCursor) {
+      console.log("[LazyLoad] loadMore skipped — guard failed");
       return 0;
     }
 
@@ -41,6 +43,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
       const orderedMessages = [...(response.messages ?? [])].reverse();
       // After reversing, orderedMessages[0] is the oldest message in this batch
       const newOldestCursor = orderedMessages[0]?.id ?? null;
+      console.log("[LazyLoad] fetched", orderedMessages.length, "messages, hasMore:", response.has_more, "newOldestCursor:", newOldestCursor);
       prependMessages(sessionId, orderedMessages, {
         hasMore: response.has_more,
         oldestCursor: newOldestCursor,
