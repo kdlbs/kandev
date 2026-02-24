@@ -143,7 +143,9 @@ func realMain() int {
 	}()
 	logger.SetDefault(log)
 
-	log.Info("Starting Kandev (unified mode)...")
+	log.Info("Starting Kandev (unified mode)...",
+		zap.String("db_path", cfg.Database.Path),
+	)
 
 	if !run(cfg, log, &cleanups, runCleanups) {
 		return 1
@@ -412,9 +414,7 @@ func buildHTTPServer(
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 ) *http.Server {
-	if cfg.Logging.Level != "debug" {
-		gin.SetMode(gin.ReleaseMode)
-	}
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(httpmw.OtelTracing("kandev"))

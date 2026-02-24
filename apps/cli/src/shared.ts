@@ -121,27 +121,36 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   return env;
 }
 
+export type StartupInfoOptions = {
+  /** Mode header line, e.g. "dev mode: using local repo" or "release: v0.0.12 (github latest)" */
+  header: string;
+  ports: PortConfig;
+  /** Database file path */
+  dbPath?: string;
+  /** Whether to log MCP-related ports */
+  includeMcp?: boolean;
+  /** Log level being used */
+  logLevel?: string;
+};
+
 /**
- * Logs port configuration to the console.
- *
- * @param mode - The launch mode name (e.g., "dev", "production", "release")
- * @param modeDescription - Human-readable description of the mode
- * @param ports - Port configuration to log
- * @param includeMcp - Whether to log MCP-related ports
+ * Logs a unified startup info block to the console.
  */
-export function logPortConfig(
-  mode: string,
-  modeDescription: string,
-  ports: PortConfig,
-  includeMcp = false,
-): void {
-  console.log(`[kandev] ${mode} mode: ${modeDescription}`);
+export function logStartupInfo(options: StartupInfoOptions): void {
+  const { header, ports, dbPath, includeMcp = false, logLevel } = options;
+  console.log(`[kandev] ${header}`);
   console.log("[kandev] backend port:", ports.backendPort);
   console.log("[kandev] web port:", ports.webPort);
   console.log("[kandev] agentctl port:", ports.agentctlPort);
   if (includeMcp) {
     console.log("[kandev] mcp port:", ports.mcpPort);
     console.log("[kandev] mcp url:", ports.mcpUrl);
+  }
+  if (dbPath) {
+    console.log("[kandev] db path:", dbPath);
+  }
+  if (logLevel) {
+    console.log("[kandev] log level:", logLevel);
   }
 }
 
