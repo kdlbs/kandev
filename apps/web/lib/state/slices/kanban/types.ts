@@ -28,6 +28,7 @@ export type KanbanState = {
     state?: TaskStatus;
     repositoryId?: string;
     primarySessionId?: string | null;
+    primarySessionState?: string | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;

@@ -30,8 +30,8 @@ export function InlineCode({ children }: InlineCodeProps) {
       <code
         onClick={handleClick}
         className={cn(
-          "px-0.5 py-0.5 text-indigo-400 rounded font-mono",
-          "cursor-pointer hover:bg-indigo-500/30 transition-colors",
+          "px-1 py-0.5 bg-foreground/[0.06] text-foreground/80 rounded font-mono",
+          "cursor-pointer hover:bg-foreground/10 transition-colors",
         )}
       >
         {children}

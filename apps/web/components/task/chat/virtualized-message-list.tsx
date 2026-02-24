@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, memo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import type { Virtualizer } from "@tanstack/react-virtual";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { GridSpinner } from "@/components/grid-spinner";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
@@ -13,142 +13,7 @@ import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 
-type ContainerResizeContext = {
-  isHiddenRef: React.RefObject<boolean>;
-  previousHeightRef: React.RefObject<number>;
-  previousWidthRef: React.RefObject<number>;
-  wasAtBottomRef: React.RefObject<boolean>;
-  virtualizerRef: React.RefObject<MessageVirtualizer>;
-  scrollSnapshot: React.RefObject<{ wasAtBottom: boolean; firstVisibleIndex: number }>;
-};
-
-type MessageVirtualizer = Virtualizer<HTMLDivElement, Element>;
-
-function handleContainerResize(
-  entry: ResizeObserverEntry,
-  element: HTMLDivElement,
-  ctx: ContainerResizeContext,
-): void {
-  const {
-    isHiddenRef,
-    previousHeightRef,
-    previousWidthRef,
-    wasAtBottomRef,
-    virtualizerRef,
-    scrollSnapshot,
-  } = ctx;
-  const currentHeight = entry.contentRect.height;
-  const currentWidth = entry.contentRect.width;
-  const previousHeight = previousHeightRef.current;
-  const previousWidth = previousWidthRef.current;
-
-  if (currentWidth === 0 || currentHeight === 0) {
-    isHiddenRef.current = true;
-    return;
-  }
-
-  if (isHiddenRef.current) {
-    isHiddenRef.current = false;
-    previousHeightRef.current = currentHeight;
-    previousWidthRef.current = currentWidth;
-    const virt = virtualizerRef.current;
-    const snapshot = scrollSnapshot.current;
-    virt.measure();
-    requestAnimationFrame(() => {
-      if (snapshot.wasAtBottom) {
-        const count = virt.options.count;
-        if (count > 0) virt.scrollToIndex(count - 1, { align: "end" });
-      } else {
-        virt.scrollToIndex(snapshot.firstVisibleIndex, { align: "start" });
-      }
-    });
-    return;
-  }
-
-  if (previousWidth > 0 && Math.abs(currentWidth - previousWidth) > 20)
-    virtualizerRef.current.measure();
-  if (previousHeight > 0 && currentHeight < previousHeight && wasAtBottomRef.current) {
-    requestAnimationFrame(() => {
-      element.scrollTop = element.scrollHeight;
-    });
-  }
-  previousHeightRef.current = currentHeight;
-  previousWidthRef.current = currentWidth;
-}
-
-function useVirtualListScrolling(
-  sessionId: string | null,
-  virtualizer: MessageVirtualizer,
-  messagesContainerRef: React.RefObject<HTMLDivElement | null>,
-) {
-  const wasAtBottomRef = useRef(true);
-  const savedScrollTopRef = useRef(0);
-  const previousHeightRef = useRef(0);
-  const previousWidthRef = useRef(0);
-  const isHiddenRef = useRef(false);
-  const scrollSnapshot = useRef<{ wasAtBottom: boolean; firstVisibleIndex: number }>({
-    wasAtBottom: true,
-    firstVisibleIndex: 0,
-  });
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
-  const loadingRef = useRef({ hasMore, isLoadingMore });
-  loadingRef.current = { hasMore, isLoadingMore };
-  const virtualizerRef = useRef(virtualizer);
-  virtualizerRef.current = virtualizer;
-
-  const handleScroll = useCallback(() => {
-    const element = messagesContainerRef.current;
-    if (!element || isHiddenRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = element;
-    wasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
-    savedScrollTopRef.current = scrollTop;
-    const virt = virtualizerRef.current;
-    const visibleItems = virt.getVirtualItems();
-    scrollSnapshot.current = {
-      wasAtBottom: wasAtBottomRef.current,
-      firstVisibleIndex: visibleItems.length > 0 ? visibleItems[0].index : 0,
-    };
-    if (scrollTop < 40 && loadingRef.current.hasMore && !loadingRef.current.isLoadingMore) {
-      const prevScrollHeight = scrollHeight;
-      const prevScrollTop = scrollTop;
-      loadMore().then((added) => {
-        if (!added) return;
-        requestAnimationFrame(() => {
-          const nextScrollHeight = element.scrollHeight;
-          element.scrollTop = prevScrollTop + (nextScrollHeight - prevScrollHeight);
-        });
-      });
-    }
-  }, [loadMore, messagesContainerRef]);
-
-  useEffect(() => {
-    const element = messagesContainerRef.current;
-    if (!element) return;
-    element.addEventListener("scroll", handleScroll);
-    return () => element.removeEventListener("scroll", handleScroll);
-  }, [handleScroll, messagesContainerRef]);
-
-  useEffect(() => {
-    const element = messagesContainerRef.current;
-    if (!element) return;
-    const resizeCtx: ContainerResizeContext = {
-      isHiddenRef,
-      previousHeightRef,
-      previousWidthRef,
-      wasAtBottomRef,
-      virtualizerRef,
-      scrollSnapshot,
-    };
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) handleContainerResize(entry, element, resizeCtx);
-    });
-    resizeObserver.observe(element);
-    return () => resizeObserver.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return { wasAtBottomRef, hasMore, isLoadingMore };
-}
+const FIRST_INDEX_BASE = 100_000;
 
 type VirtualizedMessageListProps = {
   items: RenderItem[];
@@ -163,131 +28,6 @@ type VirtualizedMessageListProps = {
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 };
-
-type MessageListBodyProps = {
-  items: RenderItem[];
-  messages: Message[];
-  permissionsByToolCallId: Map<string, Message>;
-  childrenByParentToolCallId: Map<string, Message[]>;
-  taskId?: string;
-  sessionId: string | null;
-  sessionState?: TaskSessionState;
-  worktreePath?: string;
-  onOpenFile?: (path: string) => void;
-  isInitialLoading: boolean;
-  virtualizer: MessageVirtualizer;
-  lastTurnGroupId: string | null;
-  isRunning: boolean;
-  handleScrollToMessage: (messageId: string) => void;
-};
-
-function MessageListBody({
-  items,
-  messages,
-  permissionsByToolCallId,
-  childrenByParentToolCallId,
-  taskId,
-  sessionId,
-  sessionState,
-  worktreePath,
-  onOpenFile,
-  isInitialLoading,
-  virtualizer,
-  lastTurnGroupId,
-  isRunning,
-  handleScrollToMessage,
-}: MessageListBodyProps) {
-  const itemCount = items.length;
-  if (isInitialLoading || itemCount === 0) return null;
-  return (
-    <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-      {virtualizer.getVirtualItems().map((virtualRow) => {
-        const item = items[virtualRow.index];
-        return (
-          <div
-            key={virtualRow.key}
-            ref={virtualizer.measureElement}
-            data-index={virtualRow.index}
-            className="absolute left-0 top-0 w-full"
-            style={{ transform: `translateY(${virtualRow.start}px)` }}
-          >
-            <div className="pb-2">
-              {item.type === "turn_group" ? (
-                <TurnGroupMessage
-                  group={item}
-                  sessionId={sessionId}
-                  permissionsByToolCallId={permissionsByToolCallId}
-                  childrenByParentToolCallId={childrenByParentToolCallId}
-                  taskId={taskId}
-                  worktreePath={worktreePath}
-                  onOpenFile={onOpenFile}
-                  isLastGroup={item.id === lastTurnGroupId}
-                  isTurnActive={isRunning}
-                  allMessages={messages}
-                  onScrollToMessage={handleScrollToMessage}
-                />
-              ) : (
-                <MessageRenderer
-                  comment={item.message}
-                  isTaskDescription={item.message.id === "task-description"}
-                  sessionState={sessionState}
-                  taskId={taskId}
-                  permissionsByToolCallId={permissionsByToolCallId}
-                  childrenByParentToolCallId={childrenByParentToolCallId}
-                  worktreePath={worktreePath}
-                  sessionId={sessionId ?? undefined}
-                  onOpenFile={onOpenFile}
-                  allMessages={messages}
-                  onScrollToMessage={handleScrollToMessage}
-                />
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-type AutoScrollOptions = {
-  items: RenderItem[];
-  virtualizer: MessageVirtualizer;
-  wasAtBottomRef: React.RefObject<boolean>;
-  isRunning: boolean;
-  containerRef: React.RefObject<HTMLDivElement | null>;
-};
-
-function useAutoScroll({ items, virtualizer, wasAtBottomRef, isRunning, containerRef }: AutoScrollOptions) {
-  const itemCount = items.length;
-  const lastMessageContent = useMemo(() => {
-    if (items.length === 0) return "";
-    const lastItem = items[items.length - 1];
-    if (lastItem.type === "turn_group")
-      return lastItem.messages[lastItem.messages.length - 1]?.content ?? "";
-    return lastItem.message?.content ?? "";
-  }, [items]);
-
-  useEffect(() => {
-    if (itemCount === 0) return;
-    if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: "end" });
-  }, [itemCount, lastMessageContent, virtualizer, wasAtBottomRef]);
-
-  useEffect(() => {
-    if (itemCount === 0) return;
-    requestAnimationFrame(() => {
-      virtualizer.measure();
-    });
-  }, [itemCount, virtualizer]);
-
-  useEffect(() => {
-    if (!isRunning) return;
-    const element = containerRef.current;
-    if (!element) return;
-    requestAnimationFrame(() => {
-      element.scrollTop = element.scrollHeight;
-    });
-  }, [isRunning, containerRef]);
-}
 
 function getSessionRunningState(sessionState: string | null | undefined) {
   return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
@@ -319,7 +59,7 @@ function MessageListStatus({
   return (
     <>
       {isLoadingMore && hasMore && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-muted-foreground">
+        <div className="text-center text-xs text-muted-foreground py-2">
           Loading older messages...
         </div>
       )}
@@ -338,6 +78,201 @@ function MessageListStatus({
   );
 }
 
+function VirtualItem({
+  item,
+  sessionId,
+  permissionsByToolCallId,
+  childrenByParentToolCallId,
+  taskId,
+  worktreePath,
+  onOpenFile,
+  isLastGroup,
+  isTurnActive,
+  messages,
+  sessionState,
+  onScrollToMessage,
+}: {
+  item: RenderItem;
+  sessionId: string | null;
+  permissionsByToolCallId: Map<string, Message>;
+  childrenByParentToolCallId: Map<string, Message[]>;
+  taskId?: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+  isLastGroup: boolean;
+  isTurnActive: boolean;
+  messages: Message[];
+  sessionState?: TaskSessionState;
+  onScrollToMessage: (id: string) => void;
+}) {
+  if (item.type === "turn_group") {
+    return (
+      <TurnGroupMessage
+        group={item}
+        sessionId={sessionId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        isLastGroup={isLastGroup}
+        isTurnActive={isTurnActive}
+        allMessages={messages}
+        onScrollToMessage={onScrollToMessage}
+      />
+    );
+  }
+  return (
+    <MessageRenderer
+      comment={item.message}
+      isTaskDescription={item.message.id === "task-description"}
+      sessionState={sessionState}
+      taskId={taskId}
+      permissionsByToolCallId={permissionsByToolCallId}
+      childrenByParentToolCallId={childrenByParentToolCallId}
+      worktreePath={worktreePath}
+      sessionId={sessionId ?? undefined}
+      onOpenFile={onOpenFile}
+      allMessages={messages}
+      onScrollToMessage={onScrollToMessage}
+    />
+  );
+}
+
+type MessageListBodyProps = {
+  items: RenderItem[];
+  messages: Message[];
+  permissionsByToolCallId: Map<string, Message>;
+  childrenByParentToolCallId: Map<string, Message[]>;
+  taskId?: string;
+  sessionId: string | null;
+  sessionState?: TaskSessionState;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+  scrollParent: HTMLDivElement;
+  isRunning: boolean;
+  lastTurnGroupId: string | null;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => Promise<number>;
+  Header: () => React.ReactNode;
+  Footer: () => React.ReactNode;
+};
+
+function useVirtuosoCallbacks(props: MessageListBodyProps) {
+  const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, isRunning, messages, sessionState } = props;
+  const { hasMore, isLoadingMore, loadMore } = props;
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const itemCount = items.length;
+  const firstItemIndex = FIRST_INDEX_BASE - itemCount + 1;
+
+  const handleStartReached = useCallback(() => {
+    if (hasMore && !isLoadingMore) loadMore();
+  }, [hasMore, isLoadingMore, loadMore]);
+
+  const handleScrollToMessage = useCallback(
+    (messageId: string) => {
+      const idx = items.findIndex((item) => {
+        if (item.type === "turn_group") return item.messages.some((m) => m.id === messageId);
+        return item.message?.id === messageId;
+      });
+      if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + idx, align: "center" });
+    },
+    [items, firstItemIndex],
+  );
+
+  const computeItemKey = useCallback(
+    (index: number) => {
+      const item = items[index - firstItemIndex];
+      if (!item) return index;
+      return item.type === "turn_group" ? item.id : item.message.id;
+    },
+    [items, firstItemIndex],
+  );
+
+  const renderItem = useCallback(
+    (index: number) => {
+      const item = items[index - firstItemIndex];
+      if (!item) return null;
+      return (
+        <div className="pb-2">
+          <VirtualItem
+            item={item}
+            sessionId={sessionId}
+            permissionsByToolCallId={permissionsByToolCallId}
+            childrenByParentToolCallId={childrenByParentToolCallId}
+            taskId={taskId}
+            worktreePath={worktreePath}
+            onOpenFile={onOpenFile}
+            isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
+            isTurnActive={isRunning}
+            messages={messages}
+            sessionState={sessionState}
+            onScrollToMessage={handleScrollToMessage}
+          />
+        </div>
+      );
+    },
+    [items, firstItemIndex, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId, worktreePath, onOpenFile, lastTurnGroupId, isRunning, messages, sessionState, handleScrollToMessage],
+  );
+
+  return { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem };
+}
+
+const FOLLOW_SMOOTH = "smooth" as const;
+const followOutput = (isAtBottom: boolean) => (isAtBottom ? FOLLOW_SMOOTH : false);
+
+function MessageListBody(props: MessageListBodyProps) {
+  const { scrollParent, Header, Footer } = props;
+  const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
+    useVirtuosoCallbacks(props);
+
+  return (
+    <Virtuoso
+      ref={virtuosoRef}
+      customScrollParent={scrollParent}
+      totalCount={itemCount}
+      firstItemIndex={firstItemIndex}
+      initialTopMostItemIndex={itemCount - 1}
+      computeItemKey={computeItemKey}
+      itemContent={renderItem}
+      followOutput={followOutput}
+      startReached={handleStartReached}
+      increaseViewportBy={200}
+      atBottomThreshold={100}
+      components={{ Header, Footer }}
+    />
+  );
+}
+
+/** Defer providing scroll parent to Virtuoso until the element has non-zero size.
+ *  Dockview tabs can mount hidden (display:none), which causes zero-size errors. */
+function useVisibleScrollParent() {
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
+  const nodeRef = useRef<HTMLDivElement | null>(null);
+  const setScrollRef = useCallback((node: HTMLDivElement | null) => {
+    nodeRef.current = node;
+    if (node && node.offsetHeight > 0) setScrollParent(node);
+  }, []);
+  useEffect(() => {
+    const node = nodeRef.current;
+    if (!node || scrollParent) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height > 0) {
+          setScrollParent(node);
+          ro.disconnect();
+          return;
+        }
+      }
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [scrollParent]);
+  return { scrollParent, setScrollRef };
+}
+
 export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   items,
   messages,
@@ -351,54 +286,18 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
   worktreePath,
   onOpenFile,
 }: VirtualizedMessageListProps) {
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const { scrollParent, setScrollRef } = useVisibleScrollParent();
   const isInitialLoading = messagesLoading && messages.length === 0;
   const isNonLoadableSession =
     !sessionState || ["CREATED", "FAILED", "COMPLETED", "CANCELLED"].includes(sessionState);
   const showLoadingState =
     (messagesLoading || isInitialLoading) && !isWorking && !isNonLoadableSession;
-  const itemCount = items.length;
-
-  const getItemKey = useCallback(
-    (index: number) => {
-      const item = items[index];
-      if (!item) return index;
-      return item.type === "turn_group" ? item.id : item.message.id;
-    },
-    [items],
-  );
-
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({
-    count: itemCount,
-    getScrollElement: () => messagesContainerRef.current,
-    estimateSize: () => 96,
-    overscan: 6,
-    getItemKey,
-  });
-  const { wasAtBottomRef, hasMore, isLoadingMore } = useVirtualListScrolling(
-    sessionId,
-    virtualizer,
-    messagesContainerRef,
-  );
-
-  const handleScrollToMessage = useCallback(
-    (messageId: string) => {
-      const index = items.findIndex((item) => {
-        if (item.type === "turn_group") return item.messages.some((msg) => msg.id === messageId);
-        return item.message?.id === messageId;
-      });
-      if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" });
-    },
-    [items, virtualizer],
-  );
-
+  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
-  useAutoScroll({ items, virtualizer, wasAtBottomRef, isRunning, containerRef: messagesContainerRef });
 
-  return (
-    <SessionPanelContent ref={messagesContainerRef} className="relative p-4 chat-message-list">
+  const Header = useCallback(
+    () => (
       <MessageListStatus
         isLoadingMore={isLoadingMore}
         hasMore={hasMore}
@@ -407,24 +306,60 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
       />
-      <MessageListBody
-        items={items}
-        messages={messages}
-        permissionsByToolCallId={permissionsByToolCallId}
-        childrenByParentToolCallId={childrenByParentToolCallId}
-        taskId={taskId}
-        sessionId={sessionId}
-        sessionState={sessionState}
-        worktreePath={worktreePath}
-        onOpenFile={onOpenFile}
-        isInitialLoading={isInitialLoading}
-        virtualizer={virtualizer}
-        lastTurnGroupId={lastTurnGroupId}
-        isRunning={isRunning}
-        handleScrollToMessage={handleScrollToMessage}
-      />
-      {sessionId && <PrepareProgress sessionId={sessionId} />}
-      <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+    ),
+    [isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading, messages.length],
+  );
+
+  const Footer = useCallback(
+    () => (
+      <>
+        {sessionId && <PrepareProgress sessionId={sessionId} />}
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+      </>
+    ),
+    [sessionId, sessionState, messages],
+  );
+
+  if (isInitialLoading || items.length === 0) {
+    return (
+      <SessionPanelContent className="relative p-4 chat-message-list">
+        <MessageListStatus
+          isLoadingMore={isLoadingMore}
+          hasMore={hasMore}
+          showLoadingState={showLoadingState}
+          messagesLoading={messagesLoading}
+          isInitialLoading={isInitialLoading}
+          messagesCount={messages.length}
+        />
+        {sessionId && <PrepareProgress sessionId={sessionId} />}
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+      </SessionPanelContent>
+    );
+  }
+
+  return (
+    <SessionPanelContent ref={setScrollRef} className="relative p-4 chat-message-list">
+      {scrollParent && (
+        <MessageListBody
+          items={items}
+          messages={messages}
+          permissionsByToolCallId={permissionsByToolCallId}
+          childrenByParentToolCallId={childrenByParentToolCallId}
+          taskId={taskId}
+          sessionId={sessionId}
+          sessionState={sessionState}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+          scrollParent={scrollParent}
+          isRunning={isRunning}
+          lastTurnGroupId={lastTurnGroupId}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          loadMore={loadMore}
+          Header={Header}
+          Footer={Footer}
+        />
+      )}
     </SessionPanelContent>
   );
 });

@@ -881,7 +881,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ts.task_id, ts.review_status, ts.executor_id, e.type, e.name
+		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state, e.type, e.name
 		FROM task_sessions ts
 		LEFT JOIN executors e ON e.id = ts.executor_id
 		WHERE ts.task_id IN (%s) AND ts.is_primary = 1
@@ -898,13 +898,17 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		var taskID string
 		var reviewStatus sql.NullString
 		var executorID sql.NullString
+		var sessionState sql.NullString
 		var executorType sql.NullString
 		var executorName sql.NullString
-		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &executorType, &executorName); err != nil {
+		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
 			TaskID: taskID,
+		}
+		if sessionState.Valid {
+			session.State = models.TaskSessionState(sessionState.String)
 		}
 		if reviewStatus.Valid {
 			session.ReviewStatus = &reviewStatus.String

@@ -170,7 +170,7 @@ function useSidebarData(workspaceId: string | null) {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
-        sessionState: sessionInfo.sessionState,
+        sessionState: sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,

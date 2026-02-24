@@ -47,6 +47,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 			if sessionInfo.ReviewStatus != nil {
 				data["review_status"] = *sessionInfo.ReviewStatus
 			}
+			if sessionInfo.State != "" {
+				data["primary_session_state"] = string(sessionInfo.State)
+			}
 		}
 	}
 

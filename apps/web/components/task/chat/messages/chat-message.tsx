@@ -75,7 +75,7 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
     parts.push(
       <code
         key={`file-ref-${keyIndex++}`}
-        className="px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-mono text-[0.9em]"
+        className="px-1 py-0.5 bg-foreground/[0.06] text-foreground/80 rounded font-mono text-[0.9em]"
       >
         @{filePath}
       </code>,
@@ -115,10 +115,10 @@ const markdownComponents = {
     <p className="leading-relaxed mb-1.5">{children}</p>
   ),
   h1: ({ children }: { children?: ReactNode }) => (
-    <p className="my-3 font-bold text-sm">{children}</p>
+    <p className="my-4 font-bold text-sm">{children}</p>
   ),
   h2: ({ children }: { children?: ReactNode }) => (
-    <p className="my-2 font-bold text-sm">{children}</p>
+    <p className="my-3 font-bold text-sm">{children}</p>
   ),
   h3: ({ children }: { children?: ReactNode }) => (
     <p className="my-2 font-bold text-sm">{children}</p>

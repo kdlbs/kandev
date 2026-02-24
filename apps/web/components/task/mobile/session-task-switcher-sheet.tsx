@@ -15,6 +15,7 @@ import { useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import type {
   TaskState,
+  TaskSessionState,
   Workspace,
   Repository,
   TaskSession,
@@ -91,13 +92,18 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
   const getSessionInfoForTask = useCallback(
     (taskId: string) => {
       const sessions = sessionsByTaskId[taskId] ?? [];
-      if (sessions.length === 0) return { diffStats: undefined, updatedAt: undefined };
+      if (sessions.length === 0) {
+        return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
+      }
       const primarySession = sessions.find((s: TaskSession) => s.is_primary);
       const latestSession = primarySession ?? sessions[0];
-      if (!latestSession) return { diffStats: undefined, updatedAt: undefined };
+      if (!latestSession) {
+        return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
+      }
       const updatedAt = latestSession.updated_at;
+      const sessionState = latestSession.state as TaskSessionState | undefined;
       const gitStatus = gitStatusBySessionId[latestSession.id];
-      if (!gitStatus?.files) return { diffStats: undefined, updatedAt };
+      if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
       let additions = 0;
       let deletions = 0;
       for (const file of Object.values(gitStatus.files)) {
@@ -105,7 +111,7 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         deletions += file.deletions ?? 0;
       }
       const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
-      return { diffStats, updatedAt };
+      return { diffStats, updatedAt, sessionState };
     },
     [sessionsByTaskId, gitStatusBySessionId],
   );
@@ -121,6 +127,7 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
+        sessionState: sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,

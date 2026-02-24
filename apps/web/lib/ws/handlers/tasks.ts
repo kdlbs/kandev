@@ -22,6 +22,7 @@ function buildTaskFromPayload(payload: any, existing?: KanbanTask): KanbanTask {
     state: payload.state,
     repositoryId: withFallback(payload.repository_id, existing?.repositoryId),
     primarySessionId: withFallback(payload.primary_session_id, existing?.primarySessionId),
+    primarySessionState: withFallback(payload.primary_session_state, existing?.primarySessionState),
     sessionCount: withFallback(payload.session_count, existing?.sessionCount),
     reviewStatus: withFallback(payload.review_status, existing?.reviewStatus),
     primaryExecutorId: withFallback(payload.primary_executor_id, existing?.primaryExecutorId),
