@@ -11,6 +11,11 @@ fi
 
 VERSION="$1"
 
+if [[ "$VERSION" != v* ]]; then
+  echo "Invalid version '$VERSION': release tags must start with 'v' (example: v0.1.2)."
+  exit 1
+fi
+
 if git rev-parse "$VERSION" >/dev/null 2>&1; then
   echo "Tag $VERSION already exists."
   exit 1
