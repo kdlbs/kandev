@@ -16,7 +16,7 @@ import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
-import { attachBackendExitHandler } from "./shared";
+import { attachBackendExitHandler, logStartupInfo } from "./shared";
 import { launchWebApp } from "./web";
 
 export type RunOptions = {
@@ -35,6 +35,8 @@ type PreparedRelease = {
   requestedVersion?: string;
   webPort: number;
   agentctlPort: number;
+  dbPath: string;
+  logLevel: string;
 };
 
 async function prepareReleaseBundle({
@@ -108,6 +110,8 @@ async function prepareReleaseBundle({
     requestedVersion: version,
     webPort: actualWebPort,
     agentctlPort,
+    dbPath,
+    logLevel,
   };
 }
 
@@ -119,10 +123,19 @@ function launchReleaseApps(prepared: PreparedRelease): {
   const releaseSource = prepared.requestedVersion
     ? `(requested: ${prepared.requestedVersion})`
     : "(github latest)";
-  console.log(`[kandev] release: ${prepared.releaseTag} ${releaseSource}`);
-  console.log("[kandev] backend port:", prepared.backendEnv.KANDEV_SERVER_PORT);
-  console.log("[kandev] web port:", prepared.webPort);
-  console.log("[kandev] agentctl port:", prepared.agentctlPort);
+  logStartupInfo({
+    header: `release: ${prepared.releaseTag} ${releaseSource}`,
+    ports: {
+      backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
+      webPort: prepared.webPort,
+      agentctlPort: prepared.agentctlPort,
+      mcpPort: 0,
+      backendUrl: prepared.backendUrl,
+      mcpUrl: "",
+    },
+    dbPath: prepared.dbPath,
+    logLevel: prepared.logLevel,
+  });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();

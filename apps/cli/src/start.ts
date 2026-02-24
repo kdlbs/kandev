@@ -19,7 +19,7 @@ import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, pickPorts } from "./shared";
+import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
 import { launchWebApp } from "./web";
 
 export type StartOptions = {
@@ -105,15 +105,18 @@ export async function runStart({
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
   const dbPath = path.join(DATA_DIR, "kandev.db");
+  const logLevel = debug ? "debug" : verbose ? "info" : "warn";
   const backendEnv = buildBackendEnv({
     ports,
-    logLevel: debug ? "debug" : verbose ? "info" : "warn",
+    logLevel,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
     },
   });
   const webEnv = buildWebEnv({ ports, includeMcp: true, production: true, debug });
+
+  logStartupInfo({ header: "start mode: using local build", ports, dbPath, includeMcp: true, logLevel });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
@@ -149,13 +152,6 @@ export async function runStart({
     quiet: !showOutput,
   });
 
-  // Print clean summary
-  console.log("");
-  console.log("[kandev] Server started successfully");
-  console.log("");
-  console.log(`  Web:      ${webUrl}`);
-  console.log(`  API:      ${ports.backendUrl}`);
-  console.log(`  MCP:      ${ports.mcpUrl}`);
-  console.log(`  Database: ${dbPath}`);
-  console.log("");
+  console.log(`[kandev] backend ready at ${ports.backendUrl}`);
+  console.log(`[kandev] web ready at ${webUrl}`);
 }
