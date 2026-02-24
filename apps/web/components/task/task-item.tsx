@@ -3,7 +3,7 @@
 import { memo, useState } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import type { TaskState } from "@/lib/types/http";
+import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { TaskItemMenu } from "./task-item-menu";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 
@@ -17,6 +17,7 @@ type TaskItemProps = {
   description?: string;
   stepName?: string;
   state?: TaskState;
+  sessionState?: TaskSessionState;
   isArchived?: boolean;
   isSelected?: boolean;
   onClick?: () => void;
@@ -111,6 +112,7 @@ export const TaskItem = memo(function TaskItem({
   description,
   stepName,
   state,
+  sessionState,
   isArchived,
   isSelected = false,
   onClick,
@@ -131,7 +133,11 @@ export const TaskItem = memo(function TaskItem({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const isInProgress = state === "IN_PROGRESS" || state === "SCHEDULING";
+  const isInProgress =
+    state === "IN_PROGRESS" ||
+    state === "SCHEDULING" ||
+    sessionState === "STARTING" ||
+    sessionState === "RUNNING";
   const hasDiffStats = diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (

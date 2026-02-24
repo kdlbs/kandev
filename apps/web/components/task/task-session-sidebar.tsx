@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
-import type { TaskState, Repository, TaskSession, Task } from "@/lib/types/http";
+import type { TaskState, TaskSessionState, Repository, TaskSession, Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { TaskSwitcher } from "./task-switcher";
 import { Button } from "@kandev/ui/button";
@@ -85,6 +85,45 @@ type TaskSessionSidebarProps = {
   workflowId: string | null;
 };
 
+type SessionInfo = {
+  diffStats: { additions: number; deletions: number } | undefined;
+  updatedAt: string | undefined;
+  sessionState: TaskSessionState | undefined;
+};
+
+type GitStatusMap = Record<
+  string,
+  { files?: Record<string, { additions?: number; deletions?: number }> }
+>;
+
+function getSessionInfoForTask(
+  taskId: string,
+  sessionsByTaskId: Record<string, TaskSession[]>,
+  gitStatusBySessionId: GitStatusMap,
+): SessionInfo {
+  const sessions = sessionsByTaskId[taskId] ?? [];
+  if (sessions.length === 0) {
+    return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
+  }
+  const primarySession = sessions.find((s: TaskSession) => s.is_primary);
+  const latestSession = primarySession ?? sessions[0];
+  if (!latestSession) {
+    return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
+  }
+  const updatedAt = latestSession.updated_at;
+  const sessionState = latestSession.state as TaskSessionState | undefined;
+  const gitStatus = gitStatusBySessionId[latestSession.id];
+  if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
+  let additions = 0;
+  let deletions = 0;
+  for (const file of Object.values(gitStatus.files)) {
+    additions += file.additions ?? 0;
+    deletions += file.deletions ?? 0;
+  }
+  const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
+  return { diffStats, updatedAt, sessionState };
+}
+
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -119,39 +158,18 @@ function useSidebarData(workspaceId: string | null) {
     return { allTasks: tasks, allSteps: sortedSteps };
   }, [snapshots]);
 
-  const getSessionInfoForTask = useCallback(
-    (taskId: string) => {
-      const sessions = sessionsByTaskId[taskId] ?? [];
-      if (sessions.length === 0) return { diffStats: undefined, updatedAt: undefined };
-      const primarySession = sessions.find((s: TaskSession) => s.is_primary);
-      const latestSession = primarySession ?? sessions[0];
-      if (!latestSession) return { diffStats: undefined, updatedAt: undefined };
-      const updatedAt = latestSession.updated_at;
-      const gitStatus = gitStatusBySessionId[latestSession.id];
-      if (!gitStatus?.files) return { diffStats: undefined, updatedAt };
-      let additions = 0;
-      let deletions = 0;
-      for (const file of Object.values(gitStatus.files)) {
-        additions += file.additions ?? 0;
-        deletions += file.deletions ?? 0;
-      }
-      const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
-      return { diffStats, updatedAt };
-    },
-    [sessionsByTaskId, gitStatusBySessionId],
-  );
-
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const repositoryPathsById = new Map(
       repositories.map((repo: Repository) => [repo.id, repo.local_path]),
     );
     const items = allTasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id);
+      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
       return {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
+        sessionState: sessionInfo.sessionState,
         description: task.description,
         workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
@@ -173,6 +191,7 @@ function useSidebarData(workspaceId: string | null) {
         id: archivedState.archivedTaskId,
         title: archivedState.archivedTaskTitle ?? "Archived task",
         state: undefined,
+        sessionState: undefined,
         description: undefined,
         workflowStepId: undefined,
         repositoryPath: archivedState.archivedTaskRepositoryPath,
@@ -186,7 +205,14 @@ function useSidebarData(workspaceId: string | null) {
       });
     }
     return items;
-  }, [repositoriesByWorkspace, allTasks, workspaceId, getSessionInfoForTask, archivedState]);
+  }, [
+    repositoriesByWorkspace,
+    allTasks,
+    workspaceId,
+    sessionsByTaskId,
+    gitStatusBySessionId,
+    archivedState,
+  ]);
 
   return { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories };
 }
