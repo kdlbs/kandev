@@ -308,14 +308,13 @@ function RightTopGroupActions() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer"
+        <button
+          type="button"
+          className="h-6 w-6 inline-flex items-center justify-center text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer"
           onClick={toggleRightPanels}
         >
           <IconLayoutSidebarRightCollapse className="h-3.5 w-3.5" />
-        </Button>
+        </button>
       </TooltipTrigger>
       <TooltipContent>Hide right panels</TooltipContent>
     </Tooltip>

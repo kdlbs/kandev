@@ -2,7 +2,6 @@
 
 import { memo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   IconBug,
   IconCopy,
@@ -87,7 +86,6 @@ const TaskTopBar = memo(function TaskTopBar({
   remoteCheckedAt,
   remoteStatusError,
 }: TaskTopBarProps) {
-  const router = useRouter();
   const git = useSessionGit(activeSessionId);
   const displayBranch = worktreeBranch || baseBranch;
 
@@ -123,7 +121,6 @@ const TaskTopBar = memo(function TaskTopBar({
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
-        router={router}
       />
     </header>
   );
@@ -394,7 +391,6 @@ function TopBarRight({
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
-  router,
 }: {
   activeSessionId?: string | null;
   baseBranch?: string;
@@ -402,7 +398,6 @@ function TopBarRight({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
-  router: ReturnType<typeof useRouter>;
 }) {
   return (
     <div className="flex items-center gap-2 justify-end">
@@ -435,13 +430,10 @@ function TopBarRight({
       )}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="outline"
-            className="cursor-pointer px-2"
-            onClick={() => router.push("/settings/general")}
-          >
-            <IconSettings className="h-4 w-4" />
+          <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>
+            <Link href="/settings/general">
+              <IconSettings className="h-4 w-4" />
+            </Link>
           </Button>
         </TooltipTrigger>
         <TooltipContent>Settings</TooltipContent>

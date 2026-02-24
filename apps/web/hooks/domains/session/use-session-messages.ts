@@ -76,6 +76,40 @@ async function doFetchMessages({
   }
 }
 
+function useTerminalStateFetch(
+  taskSessionId: string | null,
+  taskSessionState: TaskSessionState | null,
+  hasAgentMessage: boolean,
+  refs: {
+    store: ReturnType<typeof useAppStoreApi>;
+    setIsLoading: (v: boolean) => void;
+    setIsWaitingForInitialMessages: (v: boolean) => void;
+    initialFetchStartRef: MutableRefObject<number | null>;
+    lastFetchedSessionIdRef: MutableRefObject<string | null>;
+  },
+) {
+  const lastFetchStateKeyRef = useRef<string | null>(null);
+  const connectionStatus = useAppStore((state) => state.connection.status);
+
+  useEffect(() => {
+    if (!taskSessionId || connectionStatus !== "connected") return;
+    if (!taskSessionState || hasAgentMessage) return;
+
+    const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
+    if (!terminalStates.has(taskSessionState)) return;
+
+    const key = `${taskSessionId}:${taskSessionState}`;
+    if (lastFetchStateKeyRef.current === key) return;
+    lastFetchStateKeyRef.current = key;
+
+    void doFetchMessages({
+      taskSessionId,
+      ...refs,
+      onError: (error) => console.error("Failed to fetch messages after state change:", error),
+    });
+  }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const messages = useAppStore((state) =>
@@ -92,7 +126,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
   const initialFetchStartRef = useRef<number | null>(null);
   const lastFetchedSessionIdRef = useRef<string | null>(null);
-  const lastFetchStateKeyRef = useRef<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(null);
   const hasAgentMessage = messages.some((message: Message) => message.author_type === "agent");
 
@@ -121,6 +154,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
 
+    const isFreshMount = prevSessionIdRef.current === null;
     const sessionChanged =
       prevSessionIdRef.current !== null && prevSessionIdRef.current !== taskSessionId;
     prevSessionIdRef.current = taskSessionId;
@@ -129,10 +163,19 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
       lastFetchedSessionIdRef.current = null;
     }
 
-    if (messages.length > 0 && !sessionChanged) {
+    // Normal re-render with cached messages — skip fetch
+    if (messages.length > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsWaitingForInitialMessages(false);
+      return;
+    }
+
+    // Fresh mount with cached messages — show cached instantly, fetch in background
+    if (isFreshMount && messages.length > 0) {
+      lastFetchedSessionIdRef.current = taskSessionId;
+      setIsWaitingForInitialMessages(false);
+      fetchAndStoreMessages(taskSessionId, store).catch(() => {});
       return;
     }
 
@@ -158,26 +201,13 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     };
   }, [taskSessionId, connectionStatus]);
 
-  useEffect(() => {
-    if (!taskSessionId || !taskSessionState || hasAgentMessage) return;
-
-    const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
-    if (!terminalStates.has(taskSessionState)) return;
-
-    const key = `${taskSessionId}:${taskSessionState}`;
-    if (lastFetchStateKeyRef.current === key) return;
-    lastFetchStateKeyRef.current = key;
-
-    void doFetchMessages({
-      taskSessionId,
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
-      onError: (error) => console.error("Failed to fetch messages after state change:", error),
-    });
-  }, [taskSessionId, taskSessionState, hasAgentMessage, store]);
+  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, {
+    store,
+    setIsLoading,
+    setIsWaitingForInitialMessages,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+  });
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,

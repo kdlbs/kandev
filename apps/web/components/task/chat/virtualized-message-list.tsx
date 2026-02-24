@@ -249,6 +249,46 @@ function MessageListBody({
   );
 }
 
+type AutoScrollOptions = {
+  items: RenderItem[];
+  virtualizer: MessageVirtualizer;
+  wasAtBottomRef: React.RefObject<boolean>;
+  isRunning: boolean;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+};
+
+function useAutoScroll({ items, virtualizer, wasAtBottomRef, isRunning, containerRef }: AutoScrollOptions) {
+  const itemCount = items.length;
+  const lastMessageContent = useMemo(() => {
+    if (items.length === 0) return "";
+    const lastItem = items[items.length - 1];
+    if (lastItem.type === "turn_group")
+      return lastItem.messages[lastItem.messages.length - 1]?.content ?? "";
+    return lastItem.message?.content ?? "";
+  }, [items]);
+
+  useEffect(() => {
+    if (itemCount === 0) return;
+    if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: "end" });
+  }, [itemCount, lastMessageContent, virtualizer, wasAtBottomRef]);
+
+  useEffect(() => {
+    if (itemCount === 0) return;
+    requestAnimationFrame(() => {
+      virtualizer.measure();
+    });
+  }, [itemCount, virtualizer]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const element = containerRef.current;
+    if (!element) return;
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
+  }, [isRunning, containerRef]);
+}
+
 function getSessionRunningState(sessionState: string | null | undefined) {
   return sessionState === "CREATED" || sessionState === "STARTING" || sessionState === "RUNNING";
 }
@@ -319,12 +359,22 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     (messagesLoading || isInitialLoading) && !isWorking && !isNonLoadableSession;
   const itemCount = items.length;
 
+  const getItemKey = useCallback(
+    (index: number) => {
+      const item = items[index];
+      if (!item) return index;
+      return item.type === "turn_group" ? item.id : item.message.id;
+    },
+    [items],
+  );
+
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: itemCount,
     getScrollElement: () => messagesContainerRef.current,
     estimateSize: () => 96,
     overscan: 6,
+    getItemKey,
   });
   const { wasAtBottomRef, hasMore, isLoadingMore } = useVirtualListScrolling(
     sessionId,
@@ -343,30 +393,9 @@ export const VirtualizedMessageList = memo(function VirtualizedMessageList({
     [items, virtualizer],
   );
 
-  const lastMessageContent = useMemo(() => {
-    if (items.length === 0) return "";
-    const lastItem = items[items.length - 1];
-    if (lastItem.type === "turn_group")
-      return lastItem.messages[lastItem.messages.length - 1]?.content ?? "";
-    return lastItem.message?.content ?? "";
-  }, [items]);
-
-  useEffect(() => {
-    if (itemCount === 0) return;
-    if (wasAtBottomRef.current) virtualizer.scrollToIndex(itemCount - 1, { align: "end" });
-  }, [itemCount, lastMessageContent, virtualizer, wasAtBottomRef]);
-
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
-
-  useEffect(() => {
-    if (!isRunning) return;
-    const element = messagesContainerRef.current;
-    if (!element) return;
-    requestAnimationFrame(() => {
-      element.scrollTop = element.scrollHeight;
-    });
-  }, [isRunning]);
+  useAutoScroll({ items, virtualizer, wasAtBottomRef, isRunning, containerRef: messagesContainerRef });
 
   return (
     <SessionPanelContent ref={messagesContainerRef} className="relative p-4 chat-message-list">
