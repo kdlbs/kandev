@@ -142,6 +142,26 @@ func (g *GitOperator) getCurrentBranch(ctx context.Context) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// getUpstreamRef returns the upstream tracking ref for the given branch, or "" if none is set.
+func (g *GitOperator) getUpstreamRef(ctx context.Context, branch string) string {
+	output, err := g.runGitCommand(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output)
+}
+
+// getDefaultRemoteBranch returns "main" or "master", whichever exists on origin.
+func (g *GitOperator) getDefaultRemoteBranch(ctx context.Context) string {
+	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", "origin/main"); err == nil {
+		return "main"
+	}
+	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", "origin/master"); err == nil {
+		return "master"
+	}
+	return ""
+}
+
 // hasUncommittedChanges checks if there are uncommitted changes
 func (g *GitOperator) hasUncommittedChanges(ctx context.Context) (bool, error) {
 	output, err := g.runGitCommand(ctx, "status", "--porcelain")
@@ -192,11 +212,20 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		return result, nil
 	}
 
+	// Use upstream branch if set, otherwise fall back to default (main/master).
+	// This handles local branches that haven't been pushed to the remote yet.
+	pullBranch := branch
+	if upstream := g.getUpstreamRef(ctx, branch); upstream == "" {
+		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
+			pullBranch = defaultBranch
+		}
+	}
+
 	var args []string
 	if rebase {
-		args = []string{"pull", "--rebase", "origin", branch}
+		args = []string{"pull", "--rebase", "origin", pullBranch}
 	} else {
-		args = []string{"pull", "origin", branch}
+		args = []string{"pull", "origin", pullBranch}
 	}
 
 	output, err := g.runGitCommand(ctx, args...)
@@ -217,7 +246,7 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 	}
 
 	result.Success = true
-	g.logger.Info("pull completed", zap.String("branch", branch), zap.Bool("rebase", rebase))
+	g.logger.Info("pull completed", zap.String("branch", pullBranch), zap.Bool("rebase", rebase))
 	return result, nil
 }
 
