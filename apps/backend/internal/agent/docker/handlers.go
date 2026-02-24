@@ -36,7 +36,7 @@ type stopContainerRequest struct {
 // RegisterDockerRoutes registers Docker management HTTP routes on the given router.
 func RegisterDockerRoutes(router *gin.Engine, dockerClient *Client, log *logger.Logger) {
 	if dockerClient == nil {
-		log.Warn("Docker client is nil, skipping Docker route registration")
+		log.Debug("Docker client is nil, skipping Docker route registration")
 		return
 	}
 

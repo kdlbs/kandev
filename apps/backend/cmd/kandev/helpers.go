@@ -49,11 +49,11 @@ import (
 func initDockerClient(ctx context.Context, cfg *config.Config, log *logger.Logger) *docker.Client {
 	dockerClient, err := docker.NewClient(cfg.Docker, log)
 	if err != nil {
-		log.Warn("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
+		log.Debug("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
 		return nil
 	}
 	if err := dockerClient.Ping(ctx); err != nil {
-		log.Warn("Docker daemon not available - agent features will be disabled", zap.Error(err))
+		log.Debug("Docker daemon not available - agent features will be disabled", zap.Error(err))
 		_ = dockerClient.Close()
 		return nil
 	}

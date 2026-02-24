@@ -34,7 +34,7 @@ func (r *RemoteDockerExecutor) Name() executor.Name {
 func (r *RemoteDockerExecutor) HealthCheck(ctx context.Context) error {
 	// Remote docker health is checked per-host when creating instances.
 	// The runtime itself is always "available" as a capability.
-	r.logger.Warn("remote_docker runtime is registered but not yet implemented; health check is a no-op")
+	r.logger.Debug("remote_docker runtime is registered but not yet implemented; health check is a no-op")
 	return nil
 }
 

@@ -492,7 +492,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	_, err := c.cli.Ping(ctx)
 	if err != nil {
-		c.logger.Warn("Docker ping failed", zap.Error(err))
+		c.logger.Debug("Docker ping failed", zap.Error(err))
 		return fmt.Errorf("docker ping failed: %w", err)
 	}
 

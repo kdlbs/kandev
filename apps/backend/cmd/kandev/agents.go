@@ -66,7 +66,7 @@ func provideLifecycleManager(
 		executorRegistry.Register(dockerExec)
 		log.Info("Docker runtime registered")
 	} else if cfg.Docker.Enabled && dockerClient == nil {
-		log.Warn("Docker runtime enabled but Docker client not available")
+		log.Debug("Docker runtime enabled but Docker client not available")
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)

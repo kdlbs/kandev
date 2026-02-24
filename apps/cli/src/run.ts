@@ -71,6 +71,7 @@ async function prepareReleaseBundle({
   const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
   const backendUrl = `http://localhost:${actualBackendPort}`;
+  const logLevel = process.env.KANDEV_LOG_LEVEL?.trim() || "warn";
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbPath = path.join(DATA_DIR, "kandev.db");
@@ -83,7 +84,7 @@ async function prepareReleaseBundle({
     KANDEV_SERVER_PORT: String(actualBackendPort),
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
     KANDEV_DATABASE_PATH: dbPath,
-    KANDEV_LOG_LEVEL: "warn",
+    KANDEV_LOG_LEVEL: logLevel,
   };
 
   const webEnv: NodeJS.ProcessEnv = {
