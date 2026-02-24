@@ -3,7 +3,7 @@
   "version": "0.1.5",
   "private": false,
   "description": "NPX launcher for Kandev",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-only",
   "type": "commonjs",
   "bin": {
     "kandev": "bin/cli.js"
