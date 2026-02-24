@@ -33,7 +33,7 @@ func (s *Server) handleVscodeProxy(c *gin.Context) {
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := &httputil.ReverseProxy{}
 	proxy.Rewrite = func(r *httputil.ProxyRequest) {
 		r.SetURL(target)
 		// Strip /api/v1/vscode/proxy prefix and forward remaining path.
@@ -46,6 +46,8 @@ func (s *Server) handleVscodeProxy(c *gin.Context) {
 			zap.String("forwarded_path", path))
 		r.Out.URL.Path = path
 		r.Out.URL.RawPath = ""
+		// Rewrite Origin to match code-server's host so ensureOrigin check passes.
+		r.Out.Header.Set("Origin", target.String())
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")
 		}

@@ -1,25 +1,12 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useRef } from "react";
-import {
-  IconRefresh,
-  IconExternalLink,
-  IconPlayerStop,
-  IconBrandVscode,
-  IconLoader2,
-  IconAlertCircle,
-} from "@tabler/icons-react";
+import { IconBrandVscode, IconLoader2, IconAlertCircle } from "@tabler/icons-react";
 import { useTheme } from "next-themes";
 import { Button } from "@kandev/ui/button";
-import { PanelRoot, PanelBody, PanelFooterBar } from "./panel-primitives";
+import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
-import { useDockviewStore } from "@/lib/state/dockview-store";
-import {
-  startVscode,
-  stopVscode,
-  getVscodeStatus,
-  type VscodeStatus,
-} from "@/lib/api/domains/vscode-api";
+import { startVscode, getVscodeStatus, type VscodeStatus } from "@/lib/api/domains/vscode-api";
 import { getBackendConfig } from "@/lib/config";
 
 function VscodeProgress({
@@ -49,9 +36,7 @@ function VscodeProgress({
   return (
     <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground gap-4">
       <IconLoader2 className="h-10 w-10 text-blue-500 animate-spin" />
-      <p className="text-sm font-medium">
-        {status === "installing" ? "Installing VS Code Server" : "Starting VS Code Server"}
-      </p>
+      <p className="text-sm font-medium">Starting VS Code Server</p>
       {message && <p className="text-xs text-center max-w-xs opacity-70">{message}</p>}
     </div>
   );
@@ -60,25 +45,16 @@ function VscodeProgress({
 function VscodeIframe({ url }: { url: string }) {
   const [loaded, setLoaded] = useState(false);
 
-  const handleLoad = useCallback(() => {
-    setTimeout(() => setLoaded(true), 300);
-  }, []);
-
   return (
-    <div className="relative h-full w-full bg-card">
-      {!loaded && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <IconLoader2 className="h-8 w-8 text-muted-foreground animate-spin" />
-        </div>
-      )}
+    <div className="h-full w-full bg-card">
       <iframe
         src={url}
         title="VS Code"
-        className={`h-full w-full border-0 ${loaded ? "opacity-100" : "opacity-0"}`}
+        className={`h-full w-full border-0 transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
         allow="clipboard-read; clipboard-write"
         referrerPolicy="no-referrer"
-        onLoad={handleLoad}
+        onLoad={() => setTimeout(() => setLoaded(true), 100)}
       />
     </div>
   );
@@ -99,18 +75,16 @@ function VscodePanelBody({
   isRunning,
   isProgress,
   iframeUrl,
-  refreshKey,
   onRetry,
 }: {
   status: VscodeStatus;
   isRunning: boolean;
   isProgress: boolean;
   iframeUrl: string;
-  refreshKey: number;
   onRetry: () => void;
 }) {
   if (isRunning) {
-    return <VscodeIframe key={refreshKey} url={iframeUrl} />;
+    return <VscodeIframe url={iframeUrl} />;
   }
   if (isProgress) {
     return (
@@ -136,7 +110,6 @@ function useVscodeLifecycle() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { resolvedTheme } = useTheme();
   const [status, setStatus] = useState<VscodeStatus>({ status: "stopped" });
-  const [refreshKey, setRefreshKey] = useState(0);
   const startedRef = useRef(false);
 
   // Auto-start on mount or session change
@@ -183,23 +156,6 @@ function useVscodeLifecycle() {
     return () => clearInterval(interval);
   }, [activeSessionId, status.status]);
 
-  const handleStop = useCallback(async () => {
-    if (!activeSessionId) return;
-    await stopVscode(activeSessionId);
-    setStatus({ status: "stopped" });
-    startedRef.current = false;
-    // Remove the vscode panel from the current layout instead of switching layouts
-    const dockApi = useDockviewStore.getState().api;
-    const vscodePanel = dockApi?.getPanel("vscode");
-    if (vscodePanel) {
-      try {
-        dockApi!.removePanel(vscodePanel);
-      } catch {
-        /* already removed */
-      }
-    }
-  }, [activeSessionId]);
-
   const handleRetry = useCallback(() => {
     if (!activeSessionId) return;
     startedRef.current = true;
@@ -212,26 +168,12 @@ function useVscodeLifecycle() {
       });
   }, [activeSessionId, resolvedTheme]);
 
-  const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleOpenInTab = useCallback(() => {
-    if (status.url) {
-      window.open(buildBaseUrl(status.url), "_blank", "noopener,noreferrer");
-    }
-  }, [status.url]);
-
   const iframeUrl = status.status === "running" && status.url ? buildBaseUrl(status.url) : null;
 
   return {
     status,
     iframeUrl,
-    refreshKey,
-    handleStop,
     handleRetry,
-    handleRefresh,
-    handleOpenInTab,
   };
 }
 
@@ -241,8 +183,7 @@ type VscodePanelProps = {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const VscodePanel = memo(function VscodePanel({ panelId }: VscodePanelProps) {
-  const { status, iframeUrl, refreshKey, handleStop, handleRetry, handleRefresh, handleOpenInTab } =
-    useVscodeLifecycle();
+  const { status, iframeUrl, handleRetry } = useVscodeLifecycle();
 
   const isRunning = status.status === "running" && iframeUrl;
   const isProgress =
@@ -256,76 +197,9 @@ export const VscodePanel = memo(function VscodePanel({ panelId }: VscodePanelPro
           isRunning={!!isRunning}
           isProgress={isProgress}
           iframeUrl={iframeUrl ?? ""}
-          refreshKey={refreshKey}
           onRetry={handleRetry}
         />
       </PanelBody>
-      <VscodePanelFooter
-        status={status.status}
-        isRunning={!!isRunning}
-        onOpenInTab={handleOpenInTab}
-        onRefresh={handleRefresh}
-        onStop={handleStop}
-      />
     </PanelRoot>
   );
 });
-
-function VscodePanelFooter({
-  status,
-  isRunning,
-  onOpenInTab,
-  onRefresh,
-  onStop,
-}: {
-  status: VscodeStatus["status"];
-  isRunning: boolean;
-  onOpenInTab: () => void;
-  onRefresh: () => void;
-  onStop: () => void;
-}) {
-  return (
-    <PanelFooterBar>
-      <div className="flex items-center gap-1 text-xs text-muted-foreground px-1">
-        <IconBrandVscode className="h-3.5 w-3.5" />
-        <span>VS Code</span>
-        {isRunning && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-green-500" />}
-        {(status === "installing" || status === "starting") && (
-          <IconLoader2 className="ml-1 h-3 w-3 animate-spin text-blue-500" />
-        )}
-      </div>
-      <div className="flex-1" />
-      {isRunning && (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onOpenInTab}
-            className="cursor-pointer"
-            title="Open in browser tab"
-          >
-            <IconExternalLink className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onRefresh}
-            className="cursor-pointer"
-            title="Refresh"
-          >
-            <IconRefresh className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onStop}
-            className="cursor-pointer"
-            title="Stop VS Code"
-          >
-            <IconPlayerStop className="h-4 w-4" />
-          </Button>
-        </>
-      )}
-    </PanelFooterBar>
-  );
-}

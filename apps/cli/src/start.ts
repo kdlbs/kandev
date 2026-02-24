@@ -19,7 +19,13 @@ import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import {
+  attachBackendExitHandler,
+  buildBackendEnv,
+  buildWebEnv,
+  logStartupInfo,
+  pickPorts,
+} from "./shared";
 import { launchWebApp } from "./web";
 
 export type StartOptions = {
@@ -116,7 +122,13 @@ export async function runStart({
   });
   const webEnv = buildWebEnv({ ports, includeMcp: true, production: true, debug });
 
-  logStartupInfo({ header: "start mode: using local build", ports, dbPath, includeMcp: true, logLevel });
+  logStartupInfo({
+    header: "start mode: using local build",
+    ports,
+    dbPath,
+    includeMcp: true,
+    logLevel,
+  });
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();

@@ -42,6 +42,7 @@ import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
+import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -512,6 +513,11 @@ function setupLayoutPersistence(
 function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
+    // Stop code-server when the user explicitly closes the vscode tab
+    const entry = panelPortalManager.get(panel.id);
+    if (entry?.component === "vscode" && entry.sessionId) {
+      stopVscode(entry.sessionId);
+    }
     panelPortalManager.release(panel.id);
   });
 }

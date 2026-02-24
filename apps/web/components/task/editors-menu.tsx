@@ -66,7 +66,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {activeSessionId ? "Open in editor" : "Select a session to open its worktree"}
+          {activeSessionId ? "Open editor" : "Select a session to open its worktree"}
         </TooltipContent>
       </Tooltip>
       <DropdownMenu>
