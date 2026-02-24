@@ -498,7 +498,10 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		wt.DeletedAt = &now
 		wt.UpdatedAt = now
 		if err := m.store.UpdateWorktree(ctx, wt); err != nil {
-			m.logger.Warn("failed to update worktree status",
+			// Record may already be deleted by another cleanup path (e.g. task deletion).
+			// This is expected and harmless - only log at debug level.
+			m.logger.Debug("failed to update worktree status (may already be deleted)",
+				zap.String("worktree_id", wt.ID),
 				zap.Error(err))
 		}
 	}
@@ -847,17 +850,46 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 			zap.String("output", string(output)),
 			zap.Error(err))
 
-		// Fallback to direct removal
-		if err := os.RemoveAll(worktreePath); err != nil {
+		if err := m.forceRemoveDir(ctx, worktreePath); err != nil {
 			return err
 		}
 
 		// Prune stale worktree entries
-		cmd = exec.CommandContext(ctx, "git", "worktree", "prune")
-		cmd.Dir = repoPath
-		if err := cmd.Run(); err != nil {
+		pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+		pruneCmd.Dir = repoPath
+		if err := pruneCmd.Run(); err != nil {
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
 		}
+	}
+	return nil
+}
+
+// forceRemoveDir removes a directory, retrying on transient failures.
+// On macOS, os.RemoveAll can fail with "directory not empty" when files
+// have special attributes or were recently released by other processes
+// (e.g. .next/dev build cache). Falls back to rm -rf as a last resort.
+func (m *Manager) forceRemoveDir(ctx context.Context, dir string) error {
+	const maxRetries = 3
+	const retryDelay = 200 * time.Millisecond
+
+	for i := range maxRetries {
+		err := os.RemoveAll(dir)
+		if err == nil {
+			return nil
+		}
+		if i < maxRetries-1 {
+			m.logger.Debug("os.RemoveAll failed, retrying",
+				zap.String("path", dir),
+				zap.Int("attempt", i+1),
+				zap.Error(err))
+			time.Sleep(retryDelay)
+		}
+	}
+
+	// Last resort: shell out to rm -rf which handles macOS edge cases better
+	cmd := exec.CommandContext(ctx, "rm", "-rf", dir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("rm -rf failed: %w (output: %s)", err, string(output))
 	}
 	return nil
 }

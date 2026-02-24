@@ -37,7 +37,7 @@ func RequestLogger(log *logger.Logger, serverName string) gin.HandlerFunc {
 		switch {
 		case status >= 500:
 			log.Error("http", fields...)
-		case status >= 400:
+		case status >= 400 && status != 404:
 			log.Warn("http", fields...)
 		default:
 			log.Debug("http", fields...)
