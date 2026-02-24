@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useState, useCallback, useEffect, useRef } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
 import {
   IconRefresh,
   IconExternalLink,
@@ -236,9 +235,12 @@ function useVscodeLifecycle() {
   };
 }
 
-export const VscodePanel = memo(function VscodePanel(
-  _props: IDockviewPanelProps, // eslint-disable-line @typescript-eslint/no-unused-vars
-) {
+type VscodePanelProps = {
+  panelId: string;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const VscodePanel = memo(function VscodePanel({ panelId }: VscodePanelProps) {
   const { status, iframeUrl, refreshKey, handleStop, handleRetry, handleRefresh, handleOpenInTab } =
     useVscodeLifecycle();
 

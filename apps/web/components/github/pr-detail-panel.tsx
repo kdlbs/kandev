@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import {
   IconRefresh,
   IconPlus,
@@ -31,14 +31,18 @@ import { CommentsSection } from "./pr-comments-section";
 
 // --- Dockview panel wrapper ---
 
-export function PRDetailPanelComponent(props: IDockviewPanelProps) {
+type PRDetailPanelProps = {
+  panelId: string;
+};
+
+export function PRDetailPanelComponent({ panelId }: PRDetailPanelProps) {
   const pr = useActiveTaskPR();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
 
   useEffect(() => {
     const title = pr ? prPanelLabel(pr.pr_number) : "Pull Request";
-    if (props.api.title !== title) props.api.setTitle(title);
-  }, [pr, props.api]);
+    setPanelTitle(panelId, title);
+  }, [pr, panelId]);
 
   if (!pr || !sessionId) {
     return (

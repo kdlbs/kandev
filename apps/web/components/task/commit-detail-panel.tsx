@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useState, useEffect, useCallback, useMemo } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
@@ -10,10 +9,12 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import { usePanelActions } from "@/hooks/use-panel-actions";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import type { FileInfo } from "@/lib/state/store";
 
-type CommitDetailParams = {
-  commitSha: string;
+type CommitDetailPanelProps = {
+  panelId: string;
+  params: Record<string, unknown>;
 };
 
 function formatRelativeTime(dateStr: string): string {
@@ -40,10 +41,11 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
-const CommitDetailPanel = memo(function CommitDetailPanel(
-  props: IDockviewPanelProps<CommitDetailParams>,
-) {
-  const commitSha = props.params.commitSha;
+const CommitDetailPanel = memo(function CommitDetailPanel({
+  panelId,
+  params,
+}: CommitDetailPanelProps) {
+  const commitSha = params.commitSha as string;
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const { toast } = useToast();
@@ -58,7 +60,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
     [commits, commitSha],
   );
 
-  // Update tab title
+  // Update tab title via dockview API stored in portal manager
   useEffect(() => {
     if (commit) {
       const shortSha = commitSha.slice(0, 7);
@@ -66,9 +68,9 @@ const CommitDetailPanel = memo(function CommitDetailPanel(
         commit.commit_message.length > 30
           ? commit.commit_message.slice(0, 30) + "..."
           : commit.commit_message;
-      props.api.setTitle(`${shortSha} ${msg}`);
+      setPanelTitle(panelId, `${shortSha} ${msg}`);
     }
-  }, [commit, commitSha, props.api]);
+  }, [commit, commitSha, panelId]);
 
   // Fetch diff
   const fetchDiff = useCallback(async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, memo } from "react";
+import React, { useCallback, useEffect, useRef, useState, memo } from "react";
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -20,7 +20,7 @@ import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 
-// Panel components
+// Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
 import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions";
 import { DockviewWatermark } from "./dockview-watermark";
@@ -49,13 +49,113 @@ import type { DiffComment } from "@/lib/diff/types";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
+// Portal system
+import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
+
 // --- STORAGE KEY ---
 const LAYOUT_STORAGE_KEY = "dockview-layout-v1";
 
-// --- PANEL COMPONENTS ---
-// Each panel is a standalone component wrapped for dockview
+// ---------------------------------------------------------------------------
+// PORTAL SLOT — generic dockview component that adopts a persistent portal
+// ---------------------------------------------------------------------------
 
-function SidebarPanel(props: IDockviewPanelProps) {
+/**
+ * Components whose portals are tied to a specific session.
+ *
+ * When the user switches sessions, portals for these components are released
+ * via `panelPortalManager.releaseBySession()` so stale state (WebSocket
+ * connections, iframes, editor buffers) from the old session doesn't leak
+ * into the new one.
+ *
+ * A component belongs here if its content is bound to session-specific runtime
+ * state that can't be swapped by simply reading a new `activeSessionId` from
+ * the store:
+ *
+ *  - terminal      — holds a live xterm WebSocket to a shell in the session's container
+ *  - file-editor   — editing a file in the session's worktree
+ *  - browser       — iframe preview of the session's dev server URL
+ *  - vscode        — VS Code Server iframe running in the session's container
+ *  - commit-detail — displays a commit from the session's git history
+ *  - diff-viewer   — shows file diffs from the session's working tree
+ *  - pr-detail     — PR linked to the session's task
+ *
+ * Components NOT listed here are **global** — they read `activeSessionId`
+ * reactively from the store and automatically reflect the current session:
+ *
+ *  - sidebar  — workspace/task navigation, not session-specific
+ *  - chat     — subscribes to `activeSessionId`, re-renders for new session
+ *  - changes  — reads session git status via `useSessionGitStatus(activeSessionId)`
+ *  - files    — reads the active session's file tree reactively
+ *  - plan     — reads `activeTaskId` from the store
+ */
+const SESSION_SCOPED_COMPONENTS = new Set([
+  "terminal",
+  "file-editor",
+  "browser",
+  "vscode",
+  "commit-detail",
+  "diff-viewer",
+  "pr-detail",
+]);
+
+/**
+ * Every entry in the dockview `components` map uses this wrapper.
+ * It renders an empty container and attaches the persistent portal element
+ * managed by PanelPortalManager.  The actual panel content is rendered by
+ * PanelPortalHost outside the dockview tree.
+ *
+ * Session-scoped panels are tagged with the current session ID so they can
+ * be cleaned up on session switch.
+ */
+function PortalSlot(props: IDockviewPanelProps) {
+  const component = props.api.component;
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const sessionId = SESSION_SCOPED_COMPONENTS.has(component)
+    ? (activeSessionId ?? undefined)
+    : undefined;
+  const containerRef = usePortalSlot(props, sessionId);
+  return <div ref={containerRef} className="h-full w-full overflow-hidden" />;
+}
+
+// --- COMPONENT MAP ---
+// All panel types use the same PortalSlot wrapper — dockview only manages
+// layout positioning.  Actual rendering happens in PanelPortalHost below.
+const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
+  sidebar: PortalSlot,
+  chat: PortalSlot,
+  "diff-viewer": PortalSlot,
+  "file-editor": PortalSlot,
+  "commit-detail": PortalSlot,
+  changes: PortalSlot,
+  files: PortalSlot,
+  terminal: PortalSlot,
+  browser: PortalSlot,
+  vscode: PortalSlot,
+  plan: PortalSlot,
+  "pr-detail": PortalSlot,
+  // Backwards compat aliases for saved layouts
+  "diff-files": PortalSlot,
+  "all-files": PortalSlot,
+};
+
+// --- TAB COMPONENTS ---
+function PermanentTab(props: IDockviewPanelHeaderProps) {
+  return <DockviewDefaultTab {...props} hideClose />;
+}
+
+const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
+  permanentTab: PermanentTab,
+};
+
+// ---------------------------------------------------------------------------
+// PORTAL CONTENT — the actual panel implementations rendered via portals
+// ---------------------------------------------------------------------------
+
+// Each content component renders the real panel UI.  They live permanently
+// in the PanelPortalHost and survive dockview layout switches.
+
+function SidebarContent({ panelId }: { panelId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const workflowId = useAppStore((state) => state.workflows.activeId);
   const workspaceName = useAppStore((state) => {
@@ -63,19 +163,14 @@ function SidebarPanel(props: IDockviewPanelProps) {
     return ws?.name ?? "Workspace";
   });
 
-  // Keep the dockview tab title in sync with workspace name
   useEffect(() => {
-    if (props.api.title !== workspaceName) {
-      props.api.setTitle(workspaceName);
-    }
-  }, [props.api, workspaceName]);
+    setPanelTitle(panelId, workspaceName);
+  }, [panelId, workspaceName]);
 
   return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
 }
 
-function ChatPanel(props: IDockviewPanelProps) {
-  const groupId = props.api.group.id;
-  const isPanelFocused = useDockviewStore((s) => s.activeGroupId === groupId);
+function ChatContent({ panelId }: { panelId: string }) {
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { openFile } = useFileEditors();
 
@@ -85,8 +180,8 @@ function ChatPanel(props: IDockviewPanelProps) {
   });
 
   useEffect(() => {
-    props.api.setTitle("Agent");
-  }, [props.api]);
+    setPanelTitle(panelId, "Agent");
+  }, [panelId]);
 
   if (isPassthrough) {
     return (
@@ -103,29 +198,33 @@ function ChatPanel(props: IDockviewPanelProps) {
       sessionId={sessionId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
-      isPanelFocused={isPanelFocused}
+      isPanelFocused={false}
     />
   );
 }
 
-function DiffViewerPanelComponent(
-  props: IDockviewPanelProps<{ kind?: "all" | "file"; path?: string; content?: string }>,
-) {
+function DiffViewerContent({
+  panelId,
+  params,
+}: {
+  panelId: string;
+  params: Record<string, unknown>;
+}) {
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
-  const panelKind = props.params?.kind ?? "all";
-  const selectedPath = panelKind === "file" ? props.params?.path : undefined;
+  const panelKind = (params?.kind as string) ?? "all";
+  const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
-    const panel = dockApi?.getPanel(props.api.id);
+    const panel = dockApi?.getPanel(panelId);
     if (dockApi && panel) dockApi.removePanel(panel);
-  }, [props.api.id]);
+  }, [panelId]);
 
   return (
     <TaskChangesPanel
-      mode={panelKind}
+      mode={panelKind as "all" | "file"}
       filePath={selectedPath}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -135,7 +234,7 @@ function DiffViewerPanelComponent(
   );
 }
 
-function ChangesPanelWrapper(props: IDockviewPanelProps) {
+function ChangesContent({ panelId }: { panelId: string }) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
@@ -145,42 +244,24 @@ function ChangesPanelWrapper(props: IDockviewPanelProps) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
-
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
   const totalCount = fileCount + commits.length;
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
-    if (props.api.title !== title) {
-      props.api.setTitle(title);
-    }
-  }, [totalCount, props.api]);
+    setPanelTitle(panelId, title);
+  }, [totalCount, panelId]);
 
-  const handleEditFile = useCallback(
-    (path: string) => {
-      openFile(path);
-    },
-    [openFile],
-  );
-
+  const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
   const handleOpenDiffFile = useCallback(
-    (path: string) => {
-      addFileDiffPanel(path);
-    },
+    (path: string) => addFileDiffPanel(path),
     [addFileDiffPanel],
   );
-
   const handleOpenCommitDetail = useCallback(
-    (sha: string) => {
-      addCommitDetailPanel(sha);
-    },
+    (sha: string) => addCommitDetailPanel(sha),
     [addCommitDetailPanel],
   );
-
-  const handleOpenDiffAll = useCallback(() => {
-    addDiffViewerPanel();
-  }, [addDiffViewerPanel]);
-
+  const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
   const handleOpenReview = useCallback(() => {
     window.dispatchEvent(new CustomEvent("open-review-dialog"));
   }, []);
@@ -196,75 +277,81 @@ function ChangesPanelWrapper(props: IDockviewPanelProps) {
   );
 }
 
-function FilesPanelWrapper() {
+function FilesContent() {
   const { openFile } = useFileEditors();
-
   const handleOpenFile = useCallback(
-    (file: {
-      path: string;
-      name: string;
-      content: string;
-      originalContent?: string;
-      originalHash?: string;
-      isDirty?: boolean;
-      isBinary?: boolean;
-    }) => {
-      openFile(file.path);
-    },
+    (file: { path: string; name: string; content: string }) => openFile(file.path),
     [openFile],
   );
-
   return <FilesPanel onOpenFile={handleOpenFile} />;
 }
 
-function PlanPanelComponent() {
+function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
-// --- COMPONENT MAP ---
-const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  sidebar: SidebarPanel,
-  chat: ChatPanel,
-  "diff-viewer": DiffViewerPanelComponent,
-  "file-editor": FileEditorPanel,
-  "commit-detail": CommitDetailPanel,
-  changes: ChangesPanelWrapper,
-  files: FilesPanelWrapper,
-  terminal: TerminalPanel,
-  browser: BrowserPanel,
-  vscode: VscodePanel,
-  plan: PlanPanelComponent,
-  "pr-detail": PRDetailPanelComponent,
-  // Backwards compat aliases for saved layouts
-  "diff-files": ChangesPanelWrapper,
-  "all-files": FilesPanelWrapper,
+// ---------------------------------------------------------------------------
+// renderPanel — maps component names to their portal content
+// ---------------------------------------------------------------------------
+
+/** Resolve legacy component aliases to current names. */
+const COMPONENT_ALIASES: Record<string, string> = {
+  "diff-files": "changes",
+  "all-files": "files",
 };
 
-// --- TAB COMPONENTS ---
-// Permanent tab — same as default but without close button
-function PermanentTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose />;
+function resolveComponent(component: string): string {
+  return COMPONENT_ALIASES[component] ?? component;
 }
 
-const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
-  permanentTab: PermanentTab,
-};
+function renderPanel(
+  panelId: string,
+  component: string,
+  params: Record<string, unknown>,
+): React.ReactNode {
+  const resolved = resolveComponent(component);
 
-// --- LAYOUT RESTORATION HELPERS ---
+  switch (resolved) {
+    case "sidebar":
+      return <SidebarContent panelId={panelId} />;
+    case "chat":
+      return <ChatContent panelId={panelId} />;
+    case "diff-viewer":
+      return <DiffViewerContent panelId={panelId} params={params} />;
+    case "file-editor":
+      return <FileEditorPanel panelId={panelId} params={params} />;
+    case "commit-detail":
+      return <CommitDetailPanel panelId={panelId} params={params} />;
+    case "changes":
+      return <ChangesContent panelId={panelId} />;
+    case "files":
+      return <FilesContent />;
+    case "terminal":
+      return <TerminalPanel panelId={panelId} params={params} />;
+    case "browser":
+      return <BrowserPanel panelId={panelId} params={params} />;
+    case "vscode":
+      return <VscodePanel panelId={panelId} />;
+    case "plan":
+      return <PlanContent />;
+    case "pr-detail":
+      return <PRDetailPanelComponent panelId={panelId} />;
+    default:
+      return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LAYOUT RESTORATION HELPERS
+// ---------------------------------------------------------------------------
 
 const VALID_COMPONENTS = new Set(Object.keys(components));
 
-/**
- * Remove panels with unregistered component names from a serialized layout.
- * Prevents dockview from crashing when a saved layout references a component
- * that no longer exists (e.g. after a rename or removal).
- */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function sanitizeLayout(layout: any): any {
   if (!layout?.panels || !layout?.grid?.root) return layout;
 
-  // Find panels with unknown components
   const invalidIds = new Set<string>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const validPanels: Record<string, any> = {};
@@ -280,7 +367,6 @@ function sanitizeLayout(layout: any): any {
 
   if (invalidIds.size === 0) return layout;
 
-  // Strip invalid panel IDs from grid leaf nodes
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function cleanNode(node: any): any {
     if (node.type === "leaf") {
@@ -299,7 +385,7 @@ function sanitizeLayout(layout: any): any {
   }
 
   const cleanedRoot = cleanNode(layout.grid.root);
-  if (!cleanedRoot) return null; // Entire layout is empty
+  if (!cleanedRoot) return null;
 
   return {
     ...layout,
@@ -308,12 +394,10 @@ function sanitizeLayout(layout: any): any {
   };
 }
 
-/** Try to restore layout from per-session or global localStorage. Returns true if restored. */
 function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
   currentSessionId: string | null,
 ): boolean {
-  // 1. Try per-session layout
   if (currentSessionId) {
     try {
       const sessionLayout = getSessionLayout(currentSessionId);
@@ -329,9 +413,6 @@ function tryRestoreLayout(
     }
   }
 
-  // 2. Fallback to global localStorage — only when there's no session context
-  //    (true first load). If we have a session ID but no saved layout, it's a
-  //    new session and should get the default layout, not an old global one.
   if (!currentSessionId) {
     try {
       const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
@@ -350,17 +431,11 @@ function tryRestoreLayout(
   return false;
 }
 
-/**
- * Track pinned column widths (sidebar, right) when the user manually resizes.
- * Reads column widths from the root splitview on layout changes,
- * and stores them in the dockview store's pinnedWidths map.
- */
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    // Track sidebar (index 0)
     const sidebarW = sv.getViewSize(0);
     if (sidebarW > 50) {
       const current = useDockviewStore.getState().pinnedWidths.get("sidebar");
@@ -368,7 +443,6 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
         useDockviewStore.getState().setPinnedWidth("sidebar", sidebarW);
       }
     }
-    // Track right column (last index, if 3+ columns)
     if (sv.length >= 3) {
       const rightIdx = sv.length - 1;
       const rightW = sv.getViewSize(rightIdx);
@@ -384,11 +458,9 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   }
 }
 
-/** Re-add the chat panel if it gets removed (keeps center group alive). */
 function setupChatPanelSafetyNet(api: DockviewReadyEvent["api"]) {
   api.onDidRemovePanel((panel) => {
     if (panel.id !== "chat") return;
-    // Skip during layout restore — fromJSON removes all panels before re-adding
     if (useDockviewStore.getState().isRestoringLayout) return;
     requestAnimationFrame(() => {
       if (api.getPanel("chat")) return;
@@ -408,7 +480,6 @@ function setupChatPanelSafetyNet(api: DockviewReadyEvent["api"]) {
   });
 }
 
-/** Debounced layout persistence on every layout change. */
 function setupLayoutPersistence(
   api: DockviewReadyEvent["api"],
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
@@ -433,7 +504,22 @@ function setupLayoutPersistence(
   });
 }
 
-/** Hook encapsulating the review dialog state and send-comments handler. */
+/**
+ * Clean up portal entries for panels that were permanently removed (user
+ * closed a tab), but NOT during layout restores where fromJSON temporarily
+ * removes all panels.
+ */
+function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
+  api.onDidRemovePanel((panel) => {
+    if (useDockviewStore.getState().isRestoringLayout) return;
+    panelPortalManager.release(panel.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// useReviewDialog hook
+// ---------------------------------------------------------------------------
+
 function useReviewDialog(effectiveSessionId: string | null) {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const { toast } = useToast();
@@ -470,7 +556,6 @@ function useReviewDialog(effectiveSessionId: string | null) {
     [activeTaskId, effectiveSessionId, toast],
   );
 
-  // Listen for open-review-dialog events from any panel
   useEffect(() => {
     const handler = () => setReviewDialogOpen(true);
     window.addEventListener("open-review-dialog", handler);
@@ -488,7 +573,38 @@ function useReviewDialog(effectiveSessionId: string | null) {
   };
 }
 
-// --- MAIN LAYOUT COMPONENT ---
+// ---------------------------------------------------------------------------
+// useSessionSwitchCleanup — releases session-scoped portals + triggers layout switch
+// ---------------------------------------------------------------------------
+
+function useSessionSwitchCleanup(effectiveSessionId: string | null) {
+  const prevSessionRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevSessionRef.current === undefined) {
+      prevSessionRef.current = effectiveSessionId;
+      return;
+    }
+    if (prevSessionRef.current === effectiveSessionId) return;
+
+    const oldSessionId = prevSessionRef.current;
+    prevSessionRef.current = effectiveSessionId;
+
+    // Release session-scoped portals from the old session so stale
+    // terminals, editors, etc. don't leak into the new session.
+    if (oldSessionId) {
+      panelPortalManager.releaseBySession(oldSessionId);
+    }
+
+    if (effectiveSessionId) {
+      performLayoutSwitch(oldSessionId, effectiveSessionId);
+    }
+  }, [effectiveSessionId]);
+}
+
+// ---------------------------------------------------------------------------
+// MAIN LAYOUT COMPONENT
+// ---------------------------------------------------------------------------
+
 type DockviewDesktopLayoutProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -560,32 +676,20 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
       setupChatPanelSafetyNet(api);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
+      setupPortalCleanup(api);
     },
     [setApi, buildDefaultLayout],
   );
 
-  // Catch-all: detect session changes and trigger layout switch
-  const prevSessionRef = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (prevSessionRef.current === undefined) {
-      prevSessionRef.current = effectiveSessionId;
-      return;
-    }
-    if (prevSessionRef.current === effectiveSessionId) return;
+  // Release session-scoped portals + trigger layout switch on session change
+  useSessionSwitchCleanup(effectiveSessionId);
 
-    const oldSessionId = prevSessionRef.current;
-    prevSessionRef.current = effectiveSessionId;
-
-    if (effectiveSessionId) {
-      performLayoutSwitch(oldSessionId, effectiveSessionId);
-    }
-  }, [effectiveSessionId]);
-
-  // Clean up timer on unmount
+  // Clean up on unmount (e.g. navigating away from session page)
   useEffect(() => {
     const timerRef = saveTimerRef;
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      panelPortalManager.releaseAll();
     };
   }, []);
 
@@ -604,6 +708,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         defaultRenderer="always"
         className="h-full"
       />
+      <PanelPortalHost renderPanel={renderPanel} />
       {effectiveSessionId && (
         <ReviewDialog
           open={review.reviewDialogOpen}

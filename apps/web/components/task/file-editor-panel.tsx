@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
@@ -79,10 +78,13 @@ function useFileLoader(
   }, [hasFile, activeSessionId, path, setFileState]);
 }
 
-export const FileEditorPanel = memo(function FileEditorPanel(
-  props: IDockviewPanelProps<{ path: string }>,
-) {
-  const path = props.params.path;
+type FileEditorPanelProps = {
+  panelId: string;
+  params: Record<string, unknown>;
+};
+
+export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEditorPanelProps) {
+  const path = params.path as string;
 
   const hasFile = useDockviewStore((s) => s.openFiles.has(path));
   const content = useDockviewStore((s) => s.openFiles.get(path)?.content ?? "");
