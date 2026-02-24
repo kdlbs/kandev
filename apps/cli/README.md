@@ -10,6 +10,13 @@ npx kandev
 
 Downloads the latest release, starts the backend + web app, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
 
+## Version and Updates
+
+- `npx kandev` (run mode) uses the latest GitHub release bundle by default.
+- At startup, the launcher prints the resolved release tag (for example: `[kandev] release: v0.2.3 (github latest)`).
+- Use `--version <tag>` to pin a specific runtime bundle release.
+- CLI package updates are checked from npm and shown as a prompt. They are not forced.
+
 ## What You Get
 
 - **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode

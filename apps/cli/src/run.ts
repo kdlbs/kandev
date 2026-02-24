@@ -31,6 +31,8 @@ type PreparedRelease = {
   backendUrl: string;
   backendEnv: NodeJS.ProcessEnv;
   webEnv: NodeJS.ProcessEnv;
+  releaseTag: string;
+  requestedVersion?: string;
   webPort: number;
   agentctlPort: number;
 };
@@ -78,7 +80,8 @@ async function prepareReleaseBundle({
 
   // Note: Release mode doesn't configure MCP server ports as it uses
   // the bundled configuration. Only backend and agentctl ports are set.
-  // Log level is set to warn for clean production output.
+  // Log level defaults to warn for clean output and can be overridden
+  // via KANDEV_LOG_LEVEL.
   const backendEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
@@ -101,6 +104,8 @@ async function prepareReleaseBundle({
     backendUrl,
     backendEnv,
     webEnv,
+    releaseTag: tag,
+    requestedVersion: version,
     webPort: actualWebPort,
     agentctlPort,
   };
@@ -111,6 +116,10 @@ function launchReleaseApps(prepared: PreparedRelease): {
   backendProc: ReturnType<typeof spawn>;
   webServerPath: string;
 } {
+  const releaseSource = prepared.requestedVersion
+    ? `(requested: ${prepared.requestedVersion})`
+    : "(github latest)";
+  console.log(`[kandev] release: ${prepared.releaseTag} ${releaseSource}`);
   console.log("[kandev] backend port:", prepared.backendEnv.KANDEV_SERVER_PORT);
   console.log("[kandev] web port:", prepared.webPort);
   console.log("[kandev] agentctl port:", prepared.agentctlPort);
