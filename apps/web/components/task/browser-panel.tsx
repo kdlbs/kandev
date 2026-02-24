@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useState, useEffect, useMemo } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
 import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -45,10 +44,13 @@ function BrowserPanelContent({
   );
 }
 
-export const BrowserPanel = memo(function BrowserPanel(
-  props: IDockviewPanelProps<{ url?: string }>,
-) {
-  const initialUrl = props.params.url || "";
+type BrowserPanelProps = {
+  panelId: string;
+  params: Record<string, unknown>;
+};
+
+export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
+  const initialUrl = (params.url as string) || "";
   const [userUrl, setUserUrl] = useState(initialUrl);
   const [urlDraft, setUrlDraft] = useState(initialUrl);
   const [refreshKey, setRefreshKey] = useState(0);

@@ -1,23 +1,21 @@
 "use client";
 
 import { memo, useState } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { ShellTerminal } from "./shell-terminal";
 import { useAppStore } from "@/components/state-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 
-export const TerminalPanel = memo(function TerminalPanel(
-  props: IDockviewPanelProps<{
-    terminalId: string;
-    type?: "shell" | "dev-server";
-    processId?: string;
-  }>,
-) {
-  const terminalId = props.params.terminalId;
-  const type = props.params.type ?? "shell";
-  const processId = props.params.processId;
+type TerminalPanelProps = {
+  panelId: string;
+  params: Record<string, unknown>;
+};
+
+export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPanelProps) {
+  const terminalId = params.terminalId as string;
+  const type = (params.type as string) ?? "shell";
+  const processId = params.processId as string | undefined;
 
   // Capture the session ID at creation time — terminal stays connected
   // to its original session even when the user switches tasks
