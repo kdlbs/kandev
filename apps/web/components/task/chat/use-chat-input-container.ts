@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useEffect, useImperativeHandle } from "react";
+import { useCallback, useRef, useState, useEffect, useImperativeHandle } from "react";
 import type React from "react";
 import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
@@ -129,8 +129,14 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
 
+  const tiptapRef = useRef<TipTapInputHandle | null>(null);
+  const getContentElement = useCallback(
+    () => tiptapRef.current?.getTextareaElement() ?? null,
+    [],
+  );
   const { height, resetHeight, autoExpand, containerRef, resizeHandleProps } = useResizableInput(
     sessionId ?? undefined,
+    getContentElement,
   );
   const { value, inputRef, handleImagePaste, handleChange, handleSubmit, allItems } =
     useChatInputState({
@@ -143,6 +149,8 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
       onRequestChangesTooltipDismiss,
       onSubmit,
     });
+
+  tiptapRef.current = inputRef.current;
 
   useInputHandle(ref, inputRef);
 

@@ -7,7 +7,10 @@ const MIN_HEIGHT = 100;
 const DEFAULT_HEIGHT = 134;
 const MAX_ABSOLUTE = 450;
 
-export function useResizableInput(sessionId: string | undefined) {
+export function useResizableInput(
+  sessionId: string | undefined,
+  getContentElement?: () => HTMLElement | null,
+) {
   const [height, setHeight] = useState(() => {
     const maxHeight =
       typeof window !== "undefined"
@@ -100,17 +103,26 @@ export function useResizableInput(sessionId: string | undefined) {
     };
   }, [persistHeight]);
 
-  /** Expand the input to fit content, clamped to max height. Does not shrink below user-set height. */
+  /** Expand or shrink the input to fit content, clamped to [DEFAULT_HEIGHT, maxHeight]. */
   const autoExpand = useCallback(() => {
-    const el = containerRef.current;
-    if (!el || isDragging.current) return;
+    const container = containerRef.current;
+    const content = getContentElement?.();
+    if (!container || !content || isDragging.current) return;
     const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
-    if (el.scrollHeight > height) {
-      const next = Math.min(el.scrollHeight, maxHeight);
-      setHeight(next);
-      persistHeight(next);
+    // How much extra space the container uses beyond the editor (toolbar, context area, etc.)
+    const chrome = container.offsetHeight - content.offsetHeight;
+    // Temporarily collapse the editor to measure its natural content height,
+    // since it normally fills the container via flex and scrollHeight === offsetHeight.
+    const prev = content.style.height;
+    content.style.height = "0px";
+    const naturalHeight = content.scrollHeight;
+    content.style.height = prev;
+    const needed = Math.min(Math.max(naturalHeight + chrome, DEFAULT_HEIGHT), maxHeight);
+    if (needed !== height) {
+      setHeight(needed);
+      persistHeight(needed);
     }
-  }, [height, persistHeight]);
+  }, [height, persistHeight, getContentElement]);
 
   return {
     height,

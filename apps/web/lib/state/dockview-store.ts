@@ -172,7 +172,7 @@ function performSessionSwitch(
   oldSessionId: string | null,
   newSessionId: string,
   buildDefault: (api: DockviewApi) => void,
-): void {
+): LayoutGroupIds | null {
   if (oldSessionId) {
     try {
       setSessionLayout(oldSessionId, api.toJSON());
@@ -184,12 +184,13 @@ function performSessionSwitch(
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
-      return;
+      return applyLayoutFixups(api);
     } catch {
       /* fall through */
     }
   }
   buildDefault(api);
+  return null;
 }
 
 function buildFileStateActions(set: StoreSet) {
@@ -574,8 +575,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     if (!api || currentLayoutSessionId === newSessionId) return;
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
-      performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
-      if (getSessionLayout(newSessionId)) set(applyLayoutFixups(api));
+      const ids = performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
+      if (ids) set(ids);
     } finally {
       set({ isRestoringLayout: false });
     }
