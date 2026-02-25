@@ -345,6 +345,39 @@ ensure_prerequisites() {
   log_ok "Tags fetched"
 }
 
+ensure_npm_auth() {
+  [[ "$CLI_SELECTED" -eq 1 ]] || return 0
+  [[ "$DRY_RUN" -eq 1 ]] && return 0
+
+  log "Checking npm authentication..."
+  local npm_user
+  if npm_user="$(npm whoami 2>/dev/null)"; then
+    log_ok "Logged in to npm as $(bold "$npm_user")"
+  else
+    echo
+    echo "  $(yellow "npm auth required") — you are not logged in to npm."
+    echo "  $(dim "This is needed to publish the CLI package.")"
+    echo
+    if [[ "$AUTO_YES" -eq 1 ]]; then
+      die "npm login required but --yes was specified. Run 'npm login' first."
+    fi
+    local answer
+    read -r -p "$(bold "Run npm login now?") [Y/n]: " answer
+    answer="$(echo "${answer:-y}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$answer" == "y" || "$answer" == "yes" || -z "$answer" ]]; then
+      npm login
+      # Verify login succeeded
+      if npm_user="$(npm whoami 2>/dev/null)"; then
+        log_ok "Logged in to npm as $(bold "$npm_user")"
+      else
+        die "npm login failed. Cannot publish CLI."
+      fi
+    else
+      die "npm login required to publish CLI. Run 'npm login' and try again."
+    fi
+  fi
+}
+
 ensure_app_tag_available() {
   [[ "$APP_SELECTED" -eq 1 ]] || return 0
 
@@ -565,6 +598,7 @@ main() {
     select_target_interactive
   fi
 
+  ensure_npm_auth
   detect_current_cli_version
   detect_current_app_version
   compute_next_versions
