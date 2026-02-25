@@ -7,7 +7,6 @@ import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
-import type { QueuedMessageIndicatorHandle } from "./queued-message-indicator";
 import { useChatInputContainer } from "./use-chat-input-container";
 import {
   ChatInputBody,
@@ -66,18 +65,12 @@ type ChatInputContainerProps = {
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;
   isFailed?: boolean;
-  isQueued?: boolean;
   contextItems?: ContextItem[];
   planContextEnabled?: boolean;
   contextFiles?: ContextFile[];
   onToggleContextFile?: (file: ContextFile) => void;
   onAddContextFile?: (file: ContextFile) => void;
   todoItems?: TodoItem[];
-  queuedMessage?: string | null;
-  onCancelQueue?: () => void;
-  updateQueueContent?: (content: string) => Promise<void>;
-  queuedMessageRef?: React.RefObject<QueuedMessageIndicatorHandle | null>;
-  onQueueEditComplete?: () => void;
   isPanelFocused?: boolean;
   onImplementPlan?: () => void;
 };
@@ -139,12 +132,6 @@ function buildContextAreaProps(
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
-    hasQueuedMessage: s.hasQueuedMessage,
-    queuedMessage: p.queuedMessage,
-    onCancelQueue: p.onCancelQueue,
-    updateQueueContent: p.updateQueueContent,
-    queuedMessageRef: p.queuedMessageRef,
-    onQueueEditComplete: p.onQueueEditComplete,
     hasTodos: s.hasTodos,
     todoItems: p.todoItems ?? [],
   };
@@ -207,7 +194,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const p = {
       ...props,
       isFailed: isFailed ?? false,
-      isQueued: props.isQueued ?? false,
       hasAgentCommands: props.hasAgentCommands ?? false,
       submitKey: props.submitKey ?? "cmd_enter",
       planContextEnabled: props.planContextEnabled ?? false,
@@ -225,21 +211,16 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isFailed: p.isFailed,
       isAgentBusy,
       hasAgentCommands: p.hasAgentCommands,
-      isQueued: p.isQueued,
       placeholder: props.placeholder,
       contextItems: p.contextItems,
       pendingClarification: props.pendingClarification,
       onClarificationResolved: props.onClarificationResolved,
       pendingCommentsByFile: props.pendingCommentsByFile,
       hasContextComments: props.hasContextComments ?? false,
-      queuedMessage: props.queuedMessage,
-      onCancelQueue: props.onCancelQueue,
-      updateQueueContent: props.updateQueueContent,
       todoItems: p.todoItems,
       showRequestChangesTooltip,
       onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
       onSubmit: props.onSubmit,
-      queuedMessageRef: props.queuedMessageRef,
     });
 
     if (p.isFailed) {

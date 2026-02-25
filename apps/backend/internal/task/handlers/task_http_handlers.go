@@ -103,38 +103,52 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 		if count, ok := sessionCountMap[task.ID]; ok {
 			sessionCount = &count
 		}
-		var reviewStatus *string
-		var primaryExecutorID *string
-		var primaryExecutorType *string
-		var primaryExecutorName *string
-		if sessionInfo, ok := primarySessionInfoMap[task.ID]; ok && sessionInfo.ReviewStatus != nil {
-			reviewStatus = sessionInfo.ReviewStatus
-			if sessionInfo.ExecutorID != "" {
-				val := sessionInfo.ExecutorID
-				primaryExecutorID = &val
-			}
-			if sessionInfo.ExecutorSnapshot != nil {
-				if execType, ok := sessionInfo.ExecutorSnapshot["executor_type"].(string); ok && execType != "" {
-					val := execType
-					primaryExecutorType = &val
-				}
-				if execName, ok := sessionInfo.ExecutorSnapshot["executor_name"].(string); ok && execName != "" {
-					val := execName
-					primaryExecutorName = &val
-				}
-			}
-		}
+		si := extractSessionInfo(primarySessionInfoMap[task.ID])
 		result = append(result, dto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
-			reviewStatus,
-			primaryExecutorID,
-			primaryExecutorType,
-			primaryExecutorName,
+			si.reviewStatus,
+			si.executorID,
+			si.executorType,
+			si.executorName,
+			si.sessionState,
 		))
 	}
 	return result, nil
+}
+
+type sessionInfoFields struct {
+	reviewStatus *string
+	sessionState *string
+	executorID   *string
+	executorType *string
+	executorName *string
+}
+
+func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
+	var si sessionInfoFields
+	if info == nil {
+		return si
+	}
+	si.reviewStatus = info.ReviewStatus
+	if info.State != "" {
+		val := string(info.State)
+		si.sessionState = &val
+	}
+	if info.ExecutorID != "" {
+		val := info.ExecutorID
+		si.executorID = &val
+	}
+	if info.ExecutorSnapshot != nil {
+		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
+			si.executorType = &t
+		}
+		if n, ok := info.ExecutorSnapshot["executor_name"].(string); ok && n != "" {
+			si.executorName = &n
+		}
+	}
+	return si
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {

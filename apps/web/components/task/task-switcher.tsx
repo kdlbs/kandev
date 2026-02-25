@@ -1,9 +1,20 @@
 "use client";
 
 import { memo, useMemo } from "react";
+import type { ComponentType } from "react";
+import { IconCircleCheck, IconCircleDashed, IconProgress } from "@tabler/icons-react";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { truncateRepoPath } from "@/lib/utils";
 import { TaskItem } from "./task-item";
+
+const SECTION_ICONS: Record<
+  string,
+  { Icon: ComponentType<{ className?: string }>; className: string }
+> = {
+  Review: { Icon: IconCircleCheck, className: "text-green-500" },
+  "In Progress": { Icon: IconProgress, className: "text-yellow-500" },
+  Backlog: { Icon: IconCircleDashed, className: "text-muted-foreground" },
+};
 
 type DiffStats = {
   additions: number;
@@ -33,6 +44,7 @@ type TaskSwitcherProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   deletingTaskId?: string | null;
@@ -75,9 +87,11 @@ function TaskSwitcherSkeleton() {
 }
 
 function SectionHeader({ label, count }: { label: string; count: number }) {
+  const icon = SECTION_ICONS[label];
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-foreground/[0.03]">
-      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+      <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+        {icon && <icon.Icon className={`h-3 w-3 ${icon.className}`} />}
         {label}
       </span>
       <span className="text-[11px] text-muted-foreground/60">{count}</span>
@@ -91,6 +105,7 @@ function TaskSwitcherSection({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onRenameTask,
   onArchiveTask,
   onDeleteTask,
   deletingTaskId,
@@ -100,6 +115,7 @@ function TaskSwitcherSection({
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
   deletingTaskId?: string | null;
@@ -131,6 +147,7 @@ function TaskSwitcherSection({
             primarySessionId={task.primarySessionId ?? null}
             updatedAt={task.updatedAt}
             onClick={() => onSelectTask(task.id)}
+            onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
             onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
             onDelete={onDeleteTask ? () => onDeleteTask(task.id) : undefined}
             isDeleting={deletingTaskId === task.id}
@@ -147,6 +164,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onRenameTask,
   onArchiveTask,
   onDeleteTask,
   deletingTaskId,
@@ -172,10 +190,15 @@ export const TaskSwitcher = memo(function TaskSwitcher({
       else backlog.push(task);
     }
 
-    const byTitle = (a: TaskSwitcherItem, b: TaskSwitcherItem) => a.title.localeCompare(b.title);
-    review.sort(byTitle);
-    inProgress.sort(byTitle);
-    backlog.sort(byTitle);
+    const byRecent = (a: TaskSwitcherItem, b: TaskSwitcherItem) => {
+      const ta = a.updatedAt ?? "";
+      const tb = b.updatedAt ?? "";
+      if (ta !== tb) return tb.localeCompare(ta);
+      return a.title.localeCompare(b.title);
+    };
+    review.sort(byRecent);
+    inProgress.sort(byRecent);
+    backlog.sort(byRecent);
 
     return [
       { label: "Review", tasks: review },
@@ -202,6 +225,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
+          onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
           deletingTaskId={deletingTaskId}

@@ -4,12 +4,49 @@ import { useCallback, useEffect, useRef, useState, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import { type QueuedMessageIndicatorHandle } from "@/components/task/chat/queued-message-indicator";
-import { VirtualizedMessageList } from "@/components/task/chat/virtualized-message-list";
+import {
+  QueuedMessageIndicator,
+  type QueuedMessageIndicatorHandle,
+} from "@/components/task/chat/queued-message-indicator";
+import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+
+type QueuedOverlayProps = {
+  isQueued: boolean;
+  queuedMessage: { content: string } | null | undefined;
+  isArchived: boolean;
+  indicatorRef: React.RefObject<QueuedMessageIndicatorHandle | null>;
+  onCancel: () => void;
+  onUpdate: (content: string) => Promise<void>;
+  onEditComplete: () => void;
+};
+
+function QueuedMessageOverlay({
+  isQueued,
+  queuedMessage,
+  isArchived,
+  indicatorRef,
+  onCancel,
+  onUpdate,
+  onEditComplete,
+}: QueuedOverlayProps) {
+  if (!isQueued || !queuedMessage || isArchived) return null;
+  return (
+    <div className="flex-shrink-0 border-t border-blue-400/30 bg-card px-3 py-1">
+      <QueuedMessageIndicator
+        ref={indicatorRef}
+        content={queuedMessage.content}
+        onCancel={onCancel}
+        onUpdate={onUpdate}
+        isVisible={true}
+        onEditComplete={onEditComplete}
+      />
+    </div>
+  );
+}
 
 type TaskChatPanelProps = {
   onSend?: (message: string) => void;
@@ -54,6 +91,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     agentMessageCount,
     cancelQueue,
     pendingClarification,
+    isQueued,
+    queuedMessage,
+    updateQueueContent,
   } = panelState;
   const { handleCancelTurn, handleCancelQueue, handleQueueEditComplete } = useChatPanelHandlers(
     resolvedSessionId,
@@ -70,7 +110,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   return (
     <PanelRoot>
       <PanelBody padding={false}>
-        <VirtualizedMessageList
+        <MessageList
           items={groupedItems}
           messages={allMessages}
           permissionsByToolCallId={permissionsByToolCallId}
@@ -92,6 +132,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           />
         </div>
       )}
+      <QueuedMessageOverlay
+        isQueued={isQueued}
+        queuedMessage={queuedMessage}
+        isArchived={isArchived}
+        indicatorRef={queuedMessageRef}
+        onCancel={handleCancelQueue}
+        onUpdate={updateQueueContent}
+        onEditComplete={handleQueueEditComplete}
+      />
       {isArchived ? (
         <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
           This task is archived and read-only.
@@ -99,13 +148,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       ) : (
         <ChatInputArea
           chatInputRef={chatInputRef}
-          queuedMessageRef={queuedMessageRef}
           clarificationKey={clarificationKey}
           onClarificationResolved={handleClarificationResolved}
           handleSubmit={handleSubmit}
           handleCancelTurn={handleCancelTurn}
-          handleCancelQueue={handleCancelQueue}
-          handleQueueEditComplete={handleQueueEditComplete}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           isPanelFocused={isPanelFocused}

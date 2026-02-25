@@ -6,6 +6,7 @@ import {
   KNOWN_PANEL_IDS,
   STRUCTURAL_COMPONENTS,
   LAYOUT_SIDEBAR_MAX_PX,
+  LAYOUT_RIGHT_MAX_PX,
 } from "./constants";
 
 // Dockview serialized grid node types (internal format)
@@ -43,7 +44,7 @@ function serializeGroup(
   size: number,
   ctx: SerializationCtx,
 ): SerializedLeafNode {
-  const groupId = nextGroupId(ctx);
+  const groupId = group.id ?? nextGroupId(ctx);
   const views = group.panels.map((p) => p.id);
   const isSidebar = columnId === "sidebar";
   return {
@@ -204,7 +205,7 @@ function groupFromGridNode(node: any): LayoutGroup | null {
   const panels: LayoutPanel[] = (group.panels ?? []).map(panelFromDockviewPanel);
   if (panels.length === 0) return null;
 
-  return { panels, activePanel: group.activePanel?.id };
+  return { id: group.id, panels, activePanel: group.activePanel?.id };
 }
 
 /** Recursively capture a dockview grid node into a LayoutNode + flat groups. */
@@ -234,6 +235,9 @@ function captureNode(
   return { type: "leaf", group, size };
 }
 
+/** Panel IDs that indicate the "right" column. */
+const RIGHT_PANEL_IDS = new Set(["files", "changes"]);
+
 /** Determine column ID and pinned status from its groups. */
 function inferColumnMeta(
   groups: LayoutGroup[],
@@ -241,11 +245,17 @@ function inferColumnMeta(
 ): { columnId: string; isPinned: boolean } {
   if (groups.length === 0) return { columnId: `col-${index}`, isPinned: false };
 
-  const hasSidebar = groups[0].panels.some((p) => p.id === "sidebar");
-  if (hasSidebar) return { columnId: "sidebar", isPinned: true };
+  const allPanelIds = new Set(groups.flatMap((g) => g.panels.map((p) => p.id)));
+
+  if (allPanelIds.has("sidebar")) return { columnId: "sidebar", isPinned: true };
+  if (allPanelIds.has("chat")) return { columnId: "center", isPinned: false };
+
+  // Column containing files/changes panels is the "right" column
+  for (const id of allPanelIds) {
+    if (RIGHT_PANEL_IDS.has(id)) return { columnId: "right", isPinned: true };
+  }
 
   const firstPanelId = groups[0].panels[0]?.id;
-  if (firstPanelId === "chat") return { columnId: "center", isPinned: false };
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };
 
   return { columnId: `col-${index}`, isPinned: false };
@@ -277,7 +287,12 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
 
     columns.push({
       id: columnId,
-      ...(isPinned ? { pinned: true, maxWidth: LAYOUT_SIDEBAR_MAX_PX } : {}),
+      ...(isPinned
+        ? {
+            pinned: true,
+            maxWidth: columnId === "right" ? LAYOUT_RIGHT_MAX_PX : LAYOUT_SIDEBAR_MAX_PX,
+          }
+        : {}),
       width,
       groups: flatGroups,
       // Only store tree for columns with nested structure (branches)

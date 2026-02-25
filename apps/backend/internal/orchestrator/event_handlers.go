@@ -27,6 +27,10 @@ func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
 
 // Event handlers
 
+func (s *Service) handleTaskDeleted(ctx context.Context, data watcher.TaskEventData) {
+	s.scheduler.RemoveTask(data.TaskID)
+}
+
 func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {
 	if data.SessionID == "" || data.ACPSessionID == "" {
 		return

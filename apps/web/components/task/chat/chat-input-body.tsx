@@ -6,10 +6,6 @@ import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
 import { TodoSummary } from "./todo-summary";
-import {
-  QueuedMessageIndicator,
-  type QueuedMessageIndicatorHandle,
-} from "./queued-message-indicator";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
@@ -146,12 +142,6 @@ export type ChatInputContextAreaProps = {
   hasContextZone: boolean;
   allItems: ContextItem[];
   sessionId: string | null;
-  hasQueuedMessage: boolean;
-  queuedMessage?: string | null;
-  onCancelQueue?: () => void;
-  updateQueueContent?: (content: string) => Promise<void>;
-  queuedMessageRef?: React.RefObject<QueuedMessageIndicatorHandle | null>;
-  onQueueEditComplete?: () => void;
   hasTodos: boolean;
   todoItems: TodoItem[];
 };
@@ -160,30 +150,12 @@ export function ChatInputContextArea({
   hasContextZone,
   allItems,
   sessionId,
-  hasQueuedMessage,
-  queuedMessage,
-  onCancelQueue,
-  updateQueueContent,
-  queuedMessageRef,
-  onQueueEditComplete,
   hasTodos,
   todoItems,
 }: ChatInputContextAreaProps) {
   if (!hasContextZone) return null;
-  const queueSlot = hasQueuedMessage ? (
-    <QueuedMessageIndicator
-      ref={queuedMessageRef}
-      content={queuedMessage!}
-      onCancel={onCancelQueue!}
-      onUpdate={updateQueueContent!}
-      isVisible={true}
-      onEditComplete={onQueueEditComplete}
-    />
-  ) : undefined;
   const todoSlot = hasTodos ? <TodoSummary todos={todoItems} /> : undefined;
-  return (
-    <ContextZone items={allItems} sessionId={sessionId} queueSlot={queueSlot} todoSlot={todoSlot} />
-  );
+  return <ContextZone items={allItems} sessionId={sessionId} todoSlot={todoSlot} />;
 }
 
 export type ChatInputBodyProps = {
@@ -217,7 +189,6 @@ export function ChatInputBody({
   contextAreaProps,
   editorAreaProps,
 }: ChatInputBodyProps) {
-  console.log("[ChatInputBody] planModeEnabled:", planModeEnabled);
   return (
     <div
       ref={containerRef}

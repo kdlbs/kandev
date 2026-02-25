@@ -2,8 +2,34 @@ import { useEffect, useRef } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { Task } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
+
+// eslint-disable-next-line complexity -- pure field mapping, no real branching logic
+function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
+  const workflowStepId = task.workflow_step_id;
+  if (!workflowStepId || !stepIds.has(workflowStepId)) return null;
+
+  return {
+    id: task.id,
+    workflowStepId,
+    title: task.title,
+    description: task.description ?? undefined,
+    position: task.position ?? 0,
+    state: task.state,
+    repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
+    primarySessionId: task.primary_session_id ?? undefined,
+    primarySessionState: task.primary_session_state ?? undefined,
+    sessionCount: task.session_count ?? undefined,
+    reviewStatus: task.review_status ?? undefined,
+    primaryExecutorId: task.primary_executor_id ?? undefined,
+    primaryExecutorType: task.primary_executor_type ?? undefined,
+    primaryExecutorName: task.primary_executor_name ?? undefined,
+    isRemoteExecutor: task.is_remote_executor ?? false,
+    updatedAt: task.updated_at,
+  } as KanbanTask;
+}
 
 export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const store = useAppStoreApi();
@@ -55,28 +81,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
           const stepIds = new Set(steps.map((s) => s.id));
 
           const tasks: KanbanTask[] = snapshot.tasks
-            .map((task) => {
-              const workflowStepId = task.workflow_step_id;
-              if (!workflowStepId || !stepIds.has(workflowStepId)) return null;
-
-              return {
-                id: task.id,
-                workflowStepId,
-                title: task.title,
-                description: task.description ?? undefined,
-                position: task.position ?? 0,
-                state: task.state,
-                repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-                primarySessionId: task.primary_session_id ?? undefined,
-                sessionCount: task.session_count ?? undefined,
-                reviewStatus: task.review_status ?? undefined,
-                primaryExecutorId: task.primary_executor_id ?? undefined,
-                primaryExecutorType: task.primary_executor_type ?? undefined,
-                primaryExecutorName: task.primary_executor_name ?? undefined,
-                isRemoteExecutor: task.is_remote_executor ?? false,
-                updatedAt: task.updated_at,
-              } as KanbanTask;
-            })
+            .map((task) => mapSnapshotTask(task, stepIds))
             .filter((t): t is KanbanTask => t !== null);
 
           setWorkflowSnapshot(wf.id, {

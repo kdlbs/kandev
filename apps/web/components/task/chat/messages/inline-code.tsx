@@ -30,8 +30,8 @@ export function InlineCode({ children }: InlineCodeProps) {
       <code
         onClick={handleClick}
         className={cn(
-          "px-0.5 py-0.5 text-indigo-400 rounded font-mono",
-          "cursor-pointer hover:bg-indigo-500/30 transition-colors",
+          "px-1 py-0.5 bg-foreground/[0.06] text-foreground/80 rounded font-mono",
+          "cursor-pointer hover:bg-foreground/10 transition-colors",
         )}
       >
         {children}
@@ -41,14 +41,14 @@ export function InlineCode({ children }: InlineCodeProps) {
       <span
         className={cn(
           "absolute bottom-full left-1/2 -translate-x-1/2 mb-1",
-          "px-2 py-1 text-xs text-white bg-gray-900 rounded whitespace-nowrap",
+          "px-2 py-1 text-xs text-popover-foreground bg-popover border border-border rounded shadow-md whitespace-nowrap",
           "pointer-events-none transition-opacity duration-200",
           "opacity-0 group-hover/inline-code:opacity-100",
           showTooltip && "opacity-100",
         )}
       >
         {tooltipText}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900" />
+        <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-border" />
       </span>
     </span>
   );

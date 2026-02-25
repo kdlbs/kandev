@@ -16,6 +16,7 @@ import {
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import { buildFileStateActions } from "./dockview-file-state";
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -110,6 +111,7 @@ type DockviewStore = {
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
   setUserDefaultLayout: (layout: LayoutState | null) => void;
+  activeFilePath: string | null;
 };
 
 type StoreGet = () => DockviewStore;
@@ -137,17 +139,22 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
   }
 }
 
-/** Read live column widths from dockview's splitview and persist them as pinned overrides. */
+/** Read live column widths from dockview's splitview and persist them as pinned overrides.
+ *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
+ *  capturing plan/preview/vscode column widths as stale "right" overrides. */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
+    const state = fromDockviewApi(api);
+    if (state.columns.length !== sv.length) return;
     const updates = new Map<string, number>();
-    const sidebarW = sv.getViewSize(0);
-    if (sidebarW > 50) updates.set("sidebar", sidebarW);
-    if (sv.length >= 3) {
-      const rightW = sv.getViewSize(sv.length - 1);
-      if (rightW > 50) updates.set("right", rightW);
+    for (let i = 0; i < state.columns.length; i++) {
+      const col = state.columns[i];
+      if (col.id === "sidebar" || col.id === "right") {
+        const w = sv.getViewSize(i);
+        if (w > 50) updates.set(col.id, w);
+      }
     }
     if (updates.size > 0) {
       set((prev) => {
@@ -167,12 +174,17 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   return useDockviewStore.getState().pinnedWidths;
 }
 
-function performSessionSwitch(
-  api: DockviewApi,
-  oldSessionId: string | null,
-  newSessionId: string,
-  buildDefault: (api: DockviewApi) => void,
-): void {
+type SessionSwitchParams = {
+  api: DockviewApi;
+  oldSessionId: string | null;
+  newSessionId: string;
+  safeWidth: number;
+  safeHeight: number;
+  buildDefault: (api: DockviewApi) => void;
+};
+
+function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds {
+  const { api, oldSessionId, newSessionId, safeWidth, safeHeight, buildDefault } = params;
   if (oldSessionId) {
     try {
       setSessionLayout(oldSessionId, api.toJSON());
@@ -184,43 +196,15 @@ function performSessionSwitch(
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
-      return;
+      api.layout(safeWidth, safeHeight);
+      return applyLayoutFixups(api);
     } catch {
       /* fall through */
     }
   }
   buildDefault(api);
-}
-
-function buildFileStateActions(set: StoreSet) {
-  return {
-    setFileState: (path: string, state: FileEditorState) => {
-      set((prev) => {
-        const m = new Map(prev.openFiles);
-        m.set(path, state);
-        return { openFiles: m };
-      });
-    },
-    updateFileState: (path: string, updates: Partial<FileEditorState>) => {
-      set((prev) => {
-        const e = prev.openFiles.get(path);
-        if (!e) return prev;
-        const m = new Map(prev.openFiles);
-        m.set(path, { ...e, ...updates });
-        return { openFiles: m };
-      });
-    },
-    removeFileState: (path: string) => {
-      set((prev) => {
-        const m = new Map(prev.openFiles);
-        m.delete(path);
-        return { openFiles: m };
-      });
-    },
-    clearFileStates: () => {
-      set({ openFiles: new Map() });
-    },
-  };
+  api.layout(safeWidth, safeHeight);
+  return applyLayoutFixups(api);
 }
 
 function applyLayoutAndSet(
@@ -271,9 +255,11 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
-        const centerIdx = current.columns.findIndex((c) => c.id === "center");
         const withoutRight: LayoutState = {
-          columns: current.columns.slice(0, centerIdx + 1),
+          columns: current.columns.filter(
+            (c) =>
+              !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
+          ),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
@@ -316,17 +302,28 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      // Capture dimensions before layout change — api.width can become stale
+      // inside the rAF callback after dockview serialization
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
-      const ids = applyLayout(api, state, liveWidths);
+      // Remove stale pinned overrides for columns absent in the target layout
+      const targetColumnIds = new Set(state.columns.map((c) => c.id));
+      const cleanedWidths = new Map(liveWidths);
+      for (const key of cleanedWidths.keys()) {
+        if (!targetColumnIds.has(key)) cleanedWidths.delete(key);
+      }
+      const ids = applyLayout(api, state, cleanedWidths);
       set({
         ...ids,
         sidebarVisible: true,
         rightPanelsVisible: preset === "default",
+        pinnedWidths: cleanedWidths,
       });
       requestAnimationFrame(() => {
-        api.layout(api.width, api.height);
+        api.layout(safeWidth, safeHeight);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -335,6 +332,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
       if (!state?.columns) {
@@ -354,7 +353,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const hasRight = colCount > sidebarCols + 1;
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       requestAnimationFrame(() => {
-        api.layout(api.width, api.height);
+        api.layout(safeWidth, safeHeight);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -537,7 +536,16 @@ function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
   api: null,
-  setApi: (api) => set({ api }),
+  activeFilePath: null,
+  setApi: (api) => {
+    set({ api, activeFilePath: null });
+    if (api) {
+      api.onDidActivePanelChange((event) => {
+        const id = event?.id;
+        set({ activeFilePath: id?.startsWith("file:") ? id.slice(5) : null });
+      });
+    }
+  },
   activeGroupId: null,
   selectedDiff: null,
   setSelectedDiff: (diff) => set({ selectedDiff: diff }),
@@ -571,10 +579,19 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   switchSessionLayout: (oldSessionId, newSessionId) => {
     const { api, currentLayoutSessionId } = get();
     if (!api || currentLayoutSessionId === newSessionId) return;
+    const safeWidth = api.width;
+    const safeHeight = api.height;
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
-      performSessionSwitch(api, oldSessionId, newSessionId, (a) => get().buildDefaultLayout(a));
-      if (getSessionLayout(newSessionId)) set(applyLayoutFixups(api));
+      const ids = performSessionSwitch({
+        api,
+        oldSessionId,
+        newSessionId,
+        safeWidth,
+        safeHeight,
+        buildDefault: (a) => get().buildDefaultLayout(a),
+      });
+      set(ids);
     } finally {
       set({ isRestoringLayout: false });
     }

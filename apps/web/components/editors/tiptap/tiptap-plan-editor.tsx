@@ -278,7 +278,7 @@ export function TipTapPlanEditor({
     immediatelyRender: false,
     extensions,
     content: value,
-    editorProps: { attributes: { class: "tiptap-plan-editor" } },
+    editorProps: { attributes: { class: "tiptap-plan-editor", spellcheck: "false" } },
     onUpdate: ({ editor: ed }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const md = (ed.storage as any).markdown?.getMarkdown?.() as string | undefined;

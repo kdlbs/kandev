@@ -11,7 +11,6 @@ import {
   type ChatInputContainerHandle,
   type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
-import { type QueuedMessageIndicatorHandle } from "@/components/task/chat/queued-message-indicator";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
@@ -243,7 +242,6 @@ After completing the implementation, provide a summary of what was done.
 
 type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
-  queuedMessageRef: React.RefObject<QueuedMessageIndicatorHandle | null>;
   clarificationKey: number;
   onClarificationResolved: () => void;
   handleSubmit: (
@@ -253,8 +251,6 @@ type ChatInputAreaProps = {
     inlineMentions?: ContextFile[],
   ) => Promise<void>;
   handleCancelTurn: () => Promise<void>;
-  handleCancelQueue: () => Promise<void>;
-  handleQueueEditComplete: () => void;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   isPanelFocused?: boolean;
@@ -264,13 +260,10 @@ type ChatInputAreaProps = {
 
 export function ChatInputArea({
   chatInputRef,
-  queuedMessageRef,
   clarificationKey,
   onClarificationResolved,
   handleSubmit,
   handleCancelTurn,
-  handleCancelQueue,
-  handleQueueEditComplete,
   showRequestChangesTooltip,
   onRequestChangesTooltipDismiss,
   isPanelFocused,
@@ -294,9 +287,6 @@ export function ChatInputArea({
     pendingCommentsByFile,
     chatSubmitKey,
     agentCommands,
-    isQueued,
-    queuedMessage,
-    updateQueueContent,
     contextItems,
     planContextEnabled,
     todoItems,
@@ -345,18 +335,12 @@ export function ChatInputArea({
         submitKey={chatSubmitKey}
         hasAgentCommands={!!(agentCommands && agentCommands.length > 0)}
         isFailed={isFailed}
-        isQueued={isQueued}
         contextItems={contextItems}
         planContextEnabled={planContextEnabled}
         contextFiles={contextFiles}
         onToggleContextFile={handleToggleContextFile}
         onAddContextFile={handleAddContextFile}
         todoItems={todoItems}
-        queuedMessage={queuedMessage?.content}
-        onCancelQueue={handleCancelQueue}
-        updateQueueContent={updateQueueContent}
-        queuedMessageRef={queuedMessageRef}
-        onQueueEditComplete={handleQueueEditComplete}
         isPanelFocused={isPanelFocused}
         onImplementPlan={handleImplementPlan}
       />

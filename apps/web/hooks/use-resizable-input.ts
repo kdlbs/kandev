@@ -7,17 +7,29 @@ const MIN_HEIGHT = 100;
 const DEFAULT_HEIGHT = 134;
 const MAX_ABSOLUTE = 450;
 
-export function useResizableInput(sessionId: string | undefined) {
+function clampHeight(value: number): number {
+  const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
+  return Math.min(Math.max(value, MIN_HEIGHT), maxHeight);
+}
+
+/** Measure the natural content height of an editor inside its container. */
+function measureContentHeight(container: HTMLElement, content: HTMLElement): number {
+  const chrome = container.offsetHeight - content.offsetHeight;
+  const prev = content.style.height;
+  content.style.height = "0px";
+  const naturalHeight = content.scrollHeight;
+  content.style.height = prev;
+  return clampHeight(naturalHeight + chrome);
+}
+
+export function useResizableInput(
+  sessionId: string | undefined,
+  getContentElement?: () => HTMLElement | null,
+) {
   const [height, setHeight] = useState(() => {
-    const maxHeight =
-      typeof window !== "undefined"
-        ? Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE)
-        : MAX_ABSOLUTE;
-    if (sessionId) {
-      const saved = getChatInputHeight(sessionId);
-      return saved ? Math.min(saved, maxHeight) : DEFAULT_HEIGHT;
-    }
-    return DEFAULT_HEIGHT;
+    if (typeof window === "undefined" || !sessionId) return DEFAULT_HEIGHT;
+    const saved = getChatInputHeight(sessionId);
+    return saved ? clampHeight(saved) : DEFAULT_HEIGHT;
   });
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -29,13 +41,8 @@ export function useResizableInput(sessionId: string | undefined) {
     if (sessionId === prevSessionRef.current) return;
     prevSessionRef.current = sessionId;
     /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
-    if (sessionId) {
-      const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
-      const saved = getChatInputHeight(sessionId);
-      setHeight(saved ? Math.min(saved, maxHeight) : DEFAULT_HEIGHT);
-    } else {
-      setHeight(DEFAULT_HEIGHT);
-    }
+    const saved = sessionId ? getChatInputHeight(sessionId) : null;
+    setHeight(saved ? clampHeight(saved) : DEFAULT_HEIGHT);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [sessionId]);
 
@@ -66,18 +73,11 @@ export function useResizableInput(sessionId: string | undefined) {
     persistHeight(DEFAULT_HEIGHT);
   }, [persistHeight]);
 
-  const handleDoubleClick = useCallback(() => {
-    resetHeight();
-  }, [resetHeight]);
-
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
-      // Dragging UP (clientY decreases) increases height
       const delta = startY.current - e.clientY;
-      const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
-      const newHeight = Math.min(Math.max(startHeight.current + delta, MIN_HEIGHT), maxHeight);
-      setHeight(newHeight);
+      setHeight(clampHeight(startHeight.current + delta));
     };
 
     const handleMouseUp = () => {
@@ -100,17 +100,16 @@ export function useResizableInput(sessionId: string | undefined) {
     };
   }, [persistHeight]);
 
-  /** Expand the input to fit content, clamped to max height. Does not shrink below user-set height. */
   const autoExpand = useCallback(() => {
-    const el = containerRef.current;
-    if (!el || isDragging.current) return;
-    const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
-    if (el.scrollHeight > height) {
-      const next = Math.min(el.scrollHeight, maxHeight);
-      setHeight(next);
-      persistHeight(next);
+    const container = containerRef.current;
+    const content = getContentElement?.();
+    if (!container || !content || isDragging.current) return;
+    const needed = measureContentHeight(container, content);
+    if (needed !== height) {
+      setHeight(needed);
+      persistHeight(needed);
     }
-  }, [height, persistHeight]);
+  }, [height, persistHeight, getContentElement]);
 
   return {
     height,
@@ -119,7 +118,7 @@ export function useResizableInput(sessionId: string | undefined) {
     containerRef,
     resizeHandleProps: {
       onMouseDown: handleMouseDown,
-      onDoubleClick: handleDoubleClick,
+      onDoubleClick: resetHeight,
     },
   };
 }

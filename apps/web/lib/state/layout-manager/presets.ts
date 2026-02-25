@@ -1,5 +1,13 @@
 import type { LayoutState } from "./types";
-import { LAYOUT_SIDEBAR_MAX_PX, LAYOUT_RIGHT_MAX_PX, panel } from "./constants";
+import {
+  LAYOUT_SIDEBAR_MAX_PX,
+  LAYOUT_RIGHT_MAX_PX,
+  SIDEBAR_GROUP,
+  CENTER_GROUP,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
+  panel,
+} from "./constants";
 
 export function defaultLayout(): LayoutState {
   return {
@@ -8,19 +16,20 @@ export function defaultLayout(): LayoutState {
         id: "sidebar",
         pinned: true,
         maxWidth: LAYOUT_SIDEBAR_MAX_PX,
-        groups: [{ panels: [panel("sidebar")] }],
+        groups: [{ id: SIDEBAR_GROUP, panels: [panel("sidebar")] }],
       },
       {
         id: "center",
-        groups: [{ panels: [panel("chat")] }],
+        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
       },
       {
         id: "right",
         pinned: true,
-        maxWidth: LAYOUT_SIDEBAR_MAX_PX,
+        width: 350,
+        maxWidth: LAYOUT_RIGHT_MAX_PX,
         groups: [
-          { panels: [panel("files"), panel("changes")] },
-          { panels: [panel("terminal-default")] },
+          { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes")] },
+          { id: RIGHT_BOTTOM_GROUP, panels: [panel("terminal-default")] },
         ],
       },
     ],
@@ -34,11 +43,11 @@ export function planLayout(): LayoutState {
         id: "sidebar",
         pinned: true,
         maxWidth: LAYOUT_SIDEBAR_MAX_PX,
-        groups: [{ panels: [panel("sidebar")] }],
+        groups: [{ id: SIDEBAR_GROUP, panels: [panel("sidebar")] }],
       },
       {
         id: "center",
-        groups: [{ panels: [panel("chat")] }],
+        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
       },
       {
         id: "plan",
@@ -55,11 +64,11 @@ export function previewLayout(): LayoutState {
         id: "sidebar",
         pinned: true,
         maxWidth: LAYOUT_SIDEBAR_MAX_PX,
-        groups: [{ panels: [panel("sidebar")] }],
+        groups: [{ id: SIDEBAR_GROUP, panels: [panel("sidebar")] }],
       },
       {
         id: "center",
-        groups: [{ panels: [panel("chat")] }],
+        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
       },
       {
         id: "preview",
@@ -76,11 +85,11 @@ export function vscodeLayout(): LayoutState {
         id: "sidebar",
         pinned: true,
         maxWidth: LAYOUT_SIDEBAR_MAX_PX,
-        groups: [{ panels: [panel("sidebar")] }],
+        groups: [{ id: SIDEBAR_GROUP, panels: [panel("sidebar")] }],
       },
       {
         id: "center",
-        groups: [{ panels: [panel("chat")] }],
+        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
       },
       {
         id: "right",

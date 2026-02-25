@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
+import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -165,6 +166,7 @@ export function FileBrowser({
   activeFilePath,
 }: FileBrowserProps) {
   const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
+  const repository = useRepository(session?.repository_id ?? null);
   const gitStatus = useSessionGitStatus(sessionId);
   const { open: openFolder } = useOpenSessionFolder(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
@@ -180,7 +182,7 @@ export function FileBrowser({
       new Map(Object.entries(gitStatus?.files ?? {}).map(([path, info]) => [path, info.status])),
     [gitStatus?.files],
   );
-  const fullPath = session?.worktree_path ?? "";
+  const fullPath = session?.worktree_path || repository?.local_path || "";
   const displayPath = fullPath.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 
   const {
@@ -192,6 +194,24 @@ export function FileBrowser({
     openFileByPath,
     handleCancelCreate,
   } = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
+
+  // Auto-expand ancestor directories when the active file changes
+  useEffect(() => {
+    if (!activeFilePath) return;
+    const parts = activeFilePath.split("/");
+    if (parts.length <= 1) return;
+    const ancestors: string[] = [];
+    for (let i = 1; i < parts.length; i++) {
+      ancestors.push(parts.slice(0, i).join("/"));
+    }
+    treeState.setExpandedPaths((prev) => {
+      const allExpanded = ancestors.every((p) => prev.has(p));
+      if (allExpanded) return prev;
+      const next = new Set(prev);
+      for (const p of ancestors) next.add(p);
+      return next;
+    });
+  }, [activeFilePath, treeState]);
 
   return (
     <div className="flex flex-col h-full">

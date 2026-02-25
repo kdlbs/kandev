@@ -64,20 +64,6 @@ function buildModelOptions(
   return options;
 }
 
-function NoModelButton() {
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 gap-1 px-2 cursor-not-allowed opacity-50 whitespace-nowrap"
-      disabled
-    >
-      <span className="text-xs">No model</span>
-      <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-    </Button>
-  );
-}
-
 export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
   useSettingsData(true);
 
@@ -103,7 +89,7 @@ export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSel
     setActiveModel(sessionId, modelId);
   };
 
-  if (!sessionId || !currentModel) return <NoModelButton />;
+  if (!sessionId || !currentModel) return null;
 
   const displayName = modelOptions.find((m) => m.id === currentModel)?.name || currentModel;
 

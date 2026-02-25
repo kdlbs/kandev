@@ -17,6 +17,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         state: task.state,
         repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
         primarySessionId: task.primary_session_id ?? undefined,
+        primarySessionState: task.primary_session_state ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         updatedAt: task.updated_at,

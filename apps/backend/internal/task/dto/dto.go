@@ -123,6 +123,7 @@ type TaskDTO struct {
 	PrimaryExecutorID   *string                `json:"primary_executor_id,omitempty"`
 	PrimaryExecutorType *string                `json:"primary_executor_type,omitempty"`
 	PrimaryExecutorName *string                `json:"primary_executor_name,omitempty"`
+	PrimarySessionState *string                `json:"primary_session_state,omitempty"`
 	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
 	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt           time.Time              `json:"created_at"`
@@ -451,7 +452,7 @@ func FromTask(task *models.Task) TaskDTO {
 
 // FromTaskWithPrimarySession converts a task model to a TaskDTO, including the primary session ID.
 func FromTaskWithPrimarySession(task *models.Task, primarySessionID *string) TaskDTO {
-	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil, nil, nil, nil)
+	return FromTaskWithSessionInfo(task, primarySessionID, nil, nil, nil, nil, nil, nil)
 }
 
 // FromTaskWithSessionInfo converts a task model to a TaskDTO, including session information.
@@ -463,6 +464,7 @@ func FromTaskWithSessionInfo(
 	primaryExecutorID *string,
 	primaryExecutorType *string,
 	primaryExecutorName *string,
+	primarySessionState *string,
 ) TaskDTO {
 	// Convert repositories
 	var repositories []TaskRepositoryDTO
@@ -496,6 +498,7 @@ func FromTaskWithSessionInfo(
 		PrimaryExecutorID:   primaryExecutorID,
 		PrimaryExecutorType: primaryExecutorType,
 		PrimaryExecutorName: primaryExecutorName,
+		PrimarySessionState: primarySessionState,
 		IsRemoteExecutor:    primaryExecutorType != nil && (*primaryExecutorType == string(models.ExecutorTypeSprites) || *primaryExecutorType == string(models.ExecutorTypeRemoteDocker)),
 		ArchivedAt:          task.ArchivedAt,
 		CreatedAt:           task.CreatedAt,

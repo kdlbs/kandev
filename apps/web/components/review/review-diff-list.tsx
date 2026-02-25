@@ -258,11 +258,9 @@ function FileDiffSection({
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
-  useEffect(() => {
-    setCollapsed(isReviewed);
-  }, [isReviewed]);
   // Force-expand when the user explicitly navigates to this file
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing collapsed state from parent selection prop
     if (isSelected) setCollapsed(false);
   }, [isSelected]);
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);

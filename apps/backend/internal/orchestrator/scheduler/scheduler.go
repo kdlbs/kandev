@@ -4,6 +4,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -283,7 +284,15 @@ func (s *Scheduler) processTasks(ctx context.Context) {
 			s.logger.Error("failed to update task state to IN_PROGRESS",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
-			// Re-enqueue the task
+
+			// Don't re-enqueue if task was deleted from DB
+			if strings.Contains(err.Error(), "not found") {
+				s.logger.Warn("task no longer exists, dropping from queue",
+					zap.String("task_id", task.ID))
+				continue
+			}
+
+			// Re-enqueue for transient errors
 			if enqErr := s.queue.Enqueue(task); enqErr != nil {
 				s.logger.Error("failed to re-enqueue task after state update failure",
 					zap.String("task_id", task.ID),
