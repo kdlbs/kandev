@@ -81,7 +81,9 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     if (hasMore && !isLoadingMore && !loadCooldownRef.current) {
       loadCooldownRef.current = true;
       loadMore().finally(() => {
-        setTimeout(() => { loadCooldownRef.current = false; }, 500);
+        setTimeout(() => {
+          loadCooldownRef.current = false;
+        }, 500);
       });
     }
   }, [hasMore, isLoadingMore, loadMore]);
@@ -92,7 +94,8 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
         if (item.type === "turn_group") return item.messages.some((m) => m.id === messageId);
         return item.message?.id === messageId;
       });
-      if (idx >= 0) virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + idx, align: "center" });
+      if (idx >= 0)
+        virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + idx, align: "center" });
     },
     [items, firstItemIndex],
   );
@@ -130,7 +133,21 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
         </div>
       );
     },
-    [items, firstItemIndex, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId, worktreePath, onOpenFile, lastTurnGroupId, isRunning, messages, sessionState, handleScrollToMessage],
+    [
+      items,
+      firstItemIndex,
+      sessionId,
+      permissionsByToolCallId,
+      childrenByParentToolCallId,
+      taskId,
+      worktreePath,
+      onOpenFile,
+      lastTurnGroupId,
+      isRunning,
+      messages,
+      sessionState,
+      handleScrollToMessage,
+    ],
   );
 
   return { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem };

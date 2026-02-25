@@ -16,6 +16,7 @@ import {
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import { buildFileStateActions } from "./dockview-file-state";
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -172,14 +173,17 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   return useDockviewStore.getState().pinnedWidths;
 }
 
-function performSessionSwitch(
-  api: DockviewApi,
-  oldSessionId: string | null,
-  newSessionId: string,
-  safeWidth: number,
-  safeHeight: number,
-  buildDefault: (api: DockviewApi) => void,
-): LayoutGroupIds | null {
+type SessionSwitchParams = {
+  api: DockviewApi;
+  oldSessionId: string | null;
+  newSessionId: string;
+  safeWidth: number;
+  safeHeight: number;
+  buildDefault: (api: DockviewApi) => void;
+};
+
+function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | null {
+  const { api, oldSessionId, newSessionId, safeWidth, safeHeight, buildDefault } = params;
   if (oldSessionId) {
     try {
       setSessionLayout(oldSessionId, api.toJSON());
@@ -191,7 +195,6 @@ function performSessionSwitch(
   if (saved) {
     try {
       api.fromJSON(saved as SerializedDockview);
-      // Force correct dimensions — fromJSON may use a stale container size
       api.layout(safeWidth, safeHeight);
       return applyLayoutFixups(api);
     } catch {
@@ -200,37 +203,6 @@ function performSessionSwitch(
   }
   buildDefault(api);
   return null;
-}
-
-function buildFileStateActions(set: StoreSet) {
-  return {
-    setFileState: (path: string, state: FileEditorState) => {
-      set((prev) => {
-        const m = new Map(prev.openFiles);
-        m.set(path, state);
-        return { openFiles: m };
-      });
-    },
-    updateFileState: (path: string, updates: Partial<FileEditorState>) => {
-      set((prev) => {
-        const e = prev.openFiles.get(path);
-        if (!e) return prev;
-        const m = new Map(prev.openFiles);
-        m.set(path, { ...e, ...updates });
-        return { openFiles: m };
-      });
-    },
-    removeFileState: (path: string) => {
-      set((prev) => {
-        const m = new Map(prev.openFiles);
-        m.delete(path);
-        return { openFiles: m };
-      });
-    },
-    clearFileStates: () => {
-      set({ openFiles: new Map() });
-    },
-  };
 }
 
 function applyLayoutAndSet(
@@ -283,7 +255,8 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
           columns: current.columns.filter(
-            (c) => !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
+            (c) =>
+              !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
           ),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
@@ -608,7 +581,14 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     const safeHeight = api.height;
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
-      const ids = performSessionSwitch(api, oldSessionId, newSessionId, safeWidth, safeHeight, (a) => get().buildDefaultLayout(a));
+      const ids = performSessionSwitch({
+        api,
+        oldSessionId,
+        newSessionId,
+        safeWidth,
+        safeHeight,
+        buildDefault: (a) => get().buildDefaultLayout(a),
+      });
       if (ids) set(ids);
     } finally {
       set({ isRestoringLayout: false });

@@ -85,9 +85,7 @@ function useLazyLoadSentinel(
       (entries) => {
         const { hasMore, isLoadingMore } = stateRef.current;
         const isIntersecting = entries[0]?.isIntersecting;
-        console.log("[NativeList] sentinel intersection", { isIntersecting, hasMore, isLoadingMore });
         if (isIntersecting && hasMore && !isLoadingMore) {
-          console.log("[NativeList] → triggering loadMore");
           loadMore();
         }
       },
@@ -97,7 +95,6 @@ function useLazyLoadSentinel(
     // If sentinel already mounted before this effect ran, observe it now
     if (sentinelNodeRef.current) {
       observer.observe(sentinelNodeRef.current);
-      console.log("[NativeList] sentinel connected (from effect)");
     }
     return () => {
       observer.disconnect();
@@ -113,7 +110,6 @@ function useLazyLoadSentinel(
       observer.disconnect();
       if (node) {
         observer.observe(node);
-        console.log("[NativeList] sentinel connected (from ref)");
       }
     }
   }, []);

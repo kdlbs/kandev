@@ -111,9 +111,7 @@ const markdownComponents = {
     <ul className="list-disc pl-5 my-4">{children}</ul>
   ),
   li: ({ children }: { children?: ReactNode }) => <li className="my-0.5">{children}</li>,
-  p: ({ children }: { children?: ReactNode }) => (
-    <p className="leading-[1.625]">{children}</p>
-  ),
+  p: ({ children }: { children?: ReactNode }) => <p className="leading-[1.625]">{children}</p>,
   h1: ({ children }: { children?: ReactNode }) => (
     <h1 className="mt-5 mb-1.5 font-bold text-xl first:mt-0">{children}</h1>
   ),

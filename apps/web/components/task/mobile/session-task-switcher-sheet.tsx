@@ -128,7 +128,8 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
-        sessionState: sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
+        sessionState:
+          sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,

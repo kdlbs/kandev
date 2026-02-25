@@ -130,10 +130,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
   const [contextPopoverOpen, setContextPopoverOpen] = useState(false);
 
   const tiptapRef = useRef<TipTapInputHandle | null>(null);
-  const getContentElement = useCallback(
-    () => tiptapRef.current?.getTextareaElement() ?? null,
-    [],
-  );
+  const getContentElement = useCallback(() => tiptapRef.current?.getTextareaElement() ?? null, []);
   const { height, resetHeight, autoExpand, containerRef, resizeHandleProps } = useResizableInput(
     sessionId ?? undefined,
     getContentElement,
@@ -150,7 +147,9 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
       onSubmit,
     });
 
-  tiptapRef.current = inputRef.current;
+  useEffect(() => {
+    tiptapRef.current = inputRef.current;
+  });
 
   useInputHandle(ref, inputRef);
 

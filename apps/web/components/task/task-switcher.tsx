@@ -7,7 +7,10 @@ import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { truncateRepoPath } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 
-const SECTION_ICONS: Record<string, { Icon: ComponentType<{ className?: string }>; className: string }> = {
+const SECTION_ICONS: Record<
+  string,
+  { Icon: ComponentType<{ className?: string }>; className: string }
+> = {
   Review: { Icon: IconCircleCheck, className: "text-green-500" },
   "In Progress": { Icon: IconProgress, className: "text-yellow-500" },
   Backlog: { Icon: IconCircleDashed, className: "text-muted-foreground" },

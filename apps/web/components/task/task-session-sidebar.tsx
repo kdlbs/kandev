@@ -170,7 +170,8 @@ function useSidebarData(workspaceId: string | null) {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
-        sessionState: sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
+        sessionState:
+          sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
         description: task.description,
         workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,
@@ -357,7 +358,9 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
       </PanelBody>
       <TaskRenameDialog
         open={renamingTask !== null}
-        onOpenChange={(open) => { if (!open) setRenamingTask(null); }}
+        onOpenChange={(open) => {
+          if (!open) setRenamingTask(null);
+        }}
         currentTitle={renamingTask?.title ?? ""}
         onSubmit={handleRenameSubmit}
       />
