@@ -20,12 +20,14 @@
   "devDependencies": {
     "@types/node": "^20",
     "tsx": "^4.15.7",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^1.6.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
+    "test": "vitest run",
     "prepublishOnly": "pnpm build"
   }
 }

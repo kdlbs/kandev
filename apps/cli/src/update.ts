@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import https from "node:https";
 import readline from "node:readline";
 
+import { compareVersions } from "./version";
+
 function requestJson<T>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers: { "User-Agent": "kandev-npx" } }, (res) => {
@@ -30,18 +32,6 @@ async function getLatestNpmVersion(): Promise<string | undefined> {
     "https://registry.npmjs.org/kandev",
   );
   return data?.["dist-tags"]?.latest;
-}
-
-function compareVersions(a: string, b: string): number {
-  const pa = String(a).replace(/^v/, "").split(".").map(Number);
-  const pb = String(b).replace(/^v/, "").split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const av = pa[i] ?? 0;
-    const bv = pb[i] ?? 0;
-    if (av > bv) return 1;
-    if (av < bv) return -1;
-  }
-  return 0;
 }
 
 function promptYesNo(question: string, defaultYes = false): Promise<boolean> {

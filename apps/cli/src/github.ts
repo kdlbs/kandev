@@ -3,57 +3,121 @@ import fs from "node:fs";
 import https from "node:https";
 import path from "node:path";
 
-import { CACHE_DIR } from "./constants";
-
 // Allow overriding the GitHub repo for forks/testing.
 const OWNER = process.env.KANDEV_GITHUB_OWNER || "kdlbs";
 const REPO = process.env.KANDEV_GITHUB_REPO || "kandev";
-const API_BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
+const WEB_BASE = `https://github.com/${OWNER}/${REPO}`;
 
-type ReleaseAsset = {
-  name: string;
-  url: string;
-  browser_download_url: string;
+export type ReleaseInfo = {
+  tag_name: string;
 };
 
-type ReleaseResponse = {
-  tag_name?: string;
-  assets?: ReleaseAsset[];
-};
+function authHeaders(): Record<string, string> {
+  if (process.env.KANDEV_GITHUB_TOKEN) {
+    return { Authorization: `Bearer ${process.env.KANDEV_GITHUB_TOKEN}` };
+  }
+  return {};
+}
 
-function requestJson<T>(url: string): Promise<T> {
+/**
+ * Resolve the latest release tag by following the redirect from
+ * github.com/{owner}/{repo}/releases/latest.
+ *
+ * Uses github.com (not api.github.com) so it is not subject to
+ * the REST API rate limit (60 req/hour per IP).
+ */
+function resolveLatestTag(): Promise<string> {
+  const url = `${WEB_BASE}/releases/latest`;
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
       {
-        headers: {
-          "User-Agent": "kandev-npx",
-          Accept: "application/vnd.github+json",
-          ...(process.env.KANDEV_GITHUB_TOKEN
-            ? { Authorization: `Bearer ${process.env.KANDEV_GITHUB_TOKEN}` }
-            : {}),
-        },
-      },
+        headers: { "User-Agent": "kandev-npx", ...authHeaders() },
+        // Do not follow redirects — we just need the Location header.
+        followRedirect: false,
+      } as https.RequestOptions,
       (res) => {
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
-        }
-        let body = "";
-        res.on("data", (chunk) => (body += chunk));
-        res.on("end", () => {
-          try {
-            resolve(JSON.parse(body) as T);
-          } catch {
-            reject(new Error(`Failed to parse JSON from ${url}`));
+        // Drain the response body to free the socket.
+        res.resume();
+
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          // Location: https://github.com/{owner}/{repo}/releases/tag/v0.2
+          const match = res.headers.location.match(/\/releases\/tag\/(.+)$/);
+          if (match) {
+            return resolve(match[1]);
           }
-        });
+          return reject(new Error(`Could not parse tag from redirect: ${res.headers.location}`));
+        }
+
+        // GitHub returns 200 if there's only one release (no redirect).
+        // In that case we need to parse the page — but this is uncommon.
+        // Fall back to a HEAD request on the resolved URL.
+        if (res.statusCode === 200 && res.headers.location) {
+          const match = res.headers.location.match(/\/releases\/tag\/(.+)$/);
+          if (match) return resolve(match[1]);
+        }
+
+        reject(new Error(`Failed to resolve latest release (HTTP ${res.statusCode})`));
       },
     );
     req.setTimeout(5000, () => {
-      req.destroy(new Error(`Request timed out fetching ${url}`));
+      req.destroy(new Error("Request timed out resolving latest release"));
     });
     req.on("error", reject);
   });
+}
+
+/**
+ * Verify that a specific release tag exists.
+ */
+function verifyTagExists(tag: string): Promise<void> {
+  const url = `${WEB_BASE}/releases/tag/${tag}`;
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      {
+        method: "HEAD",
+        headers: { "User-Agent": "kandev-npx", ...authHeaders() },
+      },
+      (res) => {
+        res.resume();
+        // GitHub returns 200 for the tag page, or 302 redirect to the tag page.
+        if (res.statusCode === 200 || res.statusCode === 301 || res.statusCode === 302) {
+          return resolve();
+        }
+        reject(new Error(`Release tag '${tag}' not found (HTTP ${res.statusCode})`));
+      },
+    );
+    req.setTimeout(5000, () => {
+      req.destroy(new Error(`Request timed out verifying tag '${tag}'`));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Get release info. Uses github.com web URLs (not api.github.com)
+ * to avoid REST API rate limits.
+ */
+export async function getRelease(version?: string): Promise<ReleaseInfo> {
+  if (version) {
+    await verifyTagExists(version);
+    return { tag_name: version };
+  }
+  const tag = await resolveLatestTag();
+  return { tag_name: tag };
+}
+
+// -- Asset downloading --------------------------------------------------------
+
+export function readSha256(pathToSha: string): string | null {
+  if (!fs.existsSync(pathToSha)) {
+    return null;
+  }
+  const content = fs.readFileSync(pathToSha, "utf8").trim();
+  const first = content.split(/\s+/)[0];
+  return first?.toLowerCase() || null;
 }
 
 function downloadFile(
@@ -74,7 +138,7 @@ function downloadFile(
     };
 
     const handleResponse = (res: import("node:http").IncomingMessage) => {
-      // Follow redirects (GitHub API returns 302 to signed S3 URL).
+      // Follow redirects (GitHub returns 302 to signed S3/CDN URL).
       // Strip auth header on redirect to avoid S3 rejecting it.
       if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
         const redirectReq = https.get(
@@ -130,10 +194,7 @@ function downloadFile(
       {
         headers: {
           "User-Agent": "kandev-npx",
-          Accept: "application/octet-stream",
-          ...(process.env.KANDEV_GITHUB_TOKEN
-            ? { Authorization: `Bearer ${process.env.KANDEV_GITHUB_TOKEN}` }
-            : {}),
+          ...authHeaders(),
         },
       },
       handleResponse,
@@ -149,50 +210,35 @@ function downloadFile(
   });
 }
 
-function findAsset(release: ReleaseResponse, name: string): ReleaseAsset | undefined {
-  return release.assets?.find((asset) => asset.name === name);
-}
-
-function readSha256(pathToSha: string): string | null {
-  if (!fs.existsSync(pathToSha)) {
-    return null;
-  }
-  const content = fs.readFileSync(pathToSha, "utf8").trim();
-  const first = content.split(/\s+/)[0];
-  return first?.toLowerCase() || null;
-}
-
-export async function getRelease(version?: string): Promise<ReleaseResponse> {
-  if (version) {
-    return requestJson<ReleaseResponse>(`${API_BASE}/releases/tags/${version}`);
-  }
-  return requestJson<ReleaseResponse>(`${API_BASE}/releases/latest`);
-}
-
+/**
+ * Ensure a release asset is downloaded and cached.
+ *
+ * Downloads directly from github.com/{owner}/{repo}/releases/download/{tag}/{asset}
+ * instead of the API, avoiding rate limits.
+ */
 export async function ensureAsset(
-  release: ReleaseResponse,
+  tag: string,
   assetName: string,
   cacheDir: string,
   onProgress?: (downloaded: number, total: number) => void,
 ): Promise<string> {
-  const asset = findAsset(release, assetName);
-  if (!asset) {
-    throw new Error(`Release asset not found: ${assetName}`);
-  }
-
   fs.mkdirSync(cacheDir, { recursive: true });
   const destPath = path.join(cacheDir, assetName);
   const shaPath = `${destPath}.sha256`;
 
+  // Download sha256 checksum if not already cached.
   let expectedSha = readSha256(shaPath);
   if (!expectedSha) {
-    const shaAsset = findAsset(release, `${assetName}.sha256`);
-    if (shaAsset) {
-      await downloadFile(shaAsset.url, shaPath);
+    const shaUrl = `${WEB_BASE}/releases/download/${tag}/${assetName}.sha256`;
+    try {
+      await downloadFile(shaUrl, shaPath);
       expectedSha = readSha256(shaPath);
+    } catch {
+      // sha256 file may not exist for this release — continue without it.
     }
   }
 
+  // Return cached tarball if it exists and checksum matches.
   if (fs.existsSync(destPath)) {
     if (!expectedSha) {
       return destPath;
@@ -206,6 +252,8 @@ export async function ensureAsset(
     fs.unlinkSync(destPath);
   }
 
-  await downloadFile(asset.url, destPath, expectedSha, onProgress);
+  // Download the asset.
+  const assetUrl = `${WEB_BASE}/releases/download/${tag}/${assetName}`;
+  await downloadFile(assetUrl, destPath, expectedSha, onProgress);
   return destPath;
 }

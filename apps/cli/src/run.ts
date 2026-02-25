@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { ensureExtracted, findBundleRoot, resolveWebServerPath } from "./bundle";
 import {
+  CACHE_DIR,
   DATA_DIR,
   DEFAULT_AGENTCTL_PORT,
   DEFAULT_BACKEND_PORT,
@@ -11,9 +12,9 @@ import {
   HEALTH_TIMEOUT_MS_RELEASE,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
-import { CACHE_DIR } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
+import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { attachBackendExitHandler, logStartupInfo } from "./shared";
@@ -39,26 +40,112 @@ type PreparedRelease = {
   logLevel: string;
 };
 
+/**
+ * Find a cached release binary to use when GitHub is unreachable.
+ * If version is specified, checks that exact tag. Otherwise, picks
+ * the highest semver tag available in the cache.
+ */
+export function findCachedRelease(
+  platformDir: string,
+  version?: string,
+): { cacheDir: string; tag: string } | null {
+  if (version) {
+    const cacheDir = path.join(CACHE_DIR, version, platformDir);
+    const bundleDir = path.join(cacheDir, "kandev");
+    const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
+    if (fs.existsSync(backendBin)) {
+      return { cacheDir, tag: version };
+    }
+    return null;
+  }
+
+  // No version specified — scan for cached tags and pick the latest.
+  if (!fs.existsSync(CACHE_DIR)) return null;
+
+  const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+  if (entries.length === 0) return null;
+
+  const sorted = sortVersionsDesc(entries);
+
+  for (const tag of sorted) {
+    const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+    const bundleDir = path.join(cacheDir, "kandev");
+    const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
+    if (fs.existsSync(backendBin)) {
+      return { cacheDir, tag };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Remove old cached releases, keeping only the 2 most recent tags.
+ * Runs after a successful download so we don't accumulate stale versions.
+ * The previous version is kept as a fallback for offline use.
+ */
+export function cleanOldReleases(currentTag: string) {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) return;
+    const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+    if (entries.length <= 2) return;
+
+    const sorted = sortVersionsDesc(entries);
+
+    // Always keep currentTag + the next most recent.
+    const keep = new Set<string>([currentTag, sorted[0], sorted[1]]);
+    for (const entry of entries) {
+      if (!keep.has(entry)) {
+        fs.rmSync(path.join(CACHE_DIR, entry), { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // Non-critical — don't fail the launch if cleanup errors.
+  }
+}
+
 async function prepareReleaseBundle({
   version,
   backendPort,
   webPort,
 }: RunOptions): Promise<PreparedRelease> {
   const platformDir = getPlatformDir();
-  const release = await getRelease(version);
-  const tag = release.tag_name || "latest";
-  const assetName = `kandev-${platformDir}.tar.gz`;
-  const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+  let tag: string;
+  let cacheDir: string;
 
-  const archivePath = await ensureAsset(release, assetName, cacheDir, (downloaded, total) => {
-    const percent = total ? Math.round((downloaded / total) * 100) : 0;
-    const mb = (downloaded / (1024 * 1024)).toFixed(1);
-    const totalMb = total ? (total / (1024 * 1024)).toFixed(1) : "?";
-    process.stderr.write(`\r   Downloading: ${mb}MB / ${totalMb}MB (${percent}%)`);
-  });
-  process.stderr.write("\n");
+  try {
+    const release = await getRelease(version);
+    tag = release.tag_name;
+    const assetName = `kandev-${platformDir}.tar.gz`;
+    cacheDir = path.join(CACHE_DIR, tag, platformDir);
 
-  ensureExtracted(archivePath, cacheDir);
+    const archivePath = await ensureAsset(tag, assetName, cacheDir, (downloaded, total) => {
+      const percent = total ? Math.round((downloaded / total) * 100) : 0;
+      const mb = (downloaded / (1024 * 1024)).toFixed(1);
+      const totalMb = total ? (total / (1024 * 1024)).toFixed(1) : "?";
+      process.stderr.write(`\r   Downloading: ${mb}MB / ${totalMb}MB (${percent}%)`);
+    });
+    process.stderr.write("\n");
+
+    ensureExtracted(archivePath, cacheDir);
+    cleanOldReleases(tag);
+  } catch (err) {
+    // GitHub unreachable — try to launch from cache.
+    const cached = findCachedRelease(platformDir, version);
+    if (!cached) {
+      const target = version ? `version ${version}` : "latest version";
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to fetch ${target} and no cached release found.\n` +
+          `  Reason: ${reason}\n` +
+          `  Run kandev once while online to cache a release for offline use.`,
+      );
+    }
+    tag = cached.tag;
+    cacheDir = cached.cacheDir;
+    process.stderr.write(`[kandev] GitHub unreachable — using cached release ${tag}\n`);
+  }
+
   const bundleDir = findBundleRoot(cacheDir);
 
   const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));

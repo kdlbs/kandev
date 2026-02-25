@@ -74,9 +74,10 @@ help:
 	@echo "  install-web      Install web dependencies (uses pnpm workspace)"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test             Run all tests (backend + web)"
+	@echo "  test             Run all tests (backend + web + cli)"
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
+	@echo "  test-cli         Run CLI tests"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  lint             Run linters for both components"
@@ -192,7 +193,7 @@ install-web:
 #
 
 .PHONY: test
-test: test-backend test-web
+test: test-backend test-web test-cli
 	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
 
 .PHONY: test-sprites-e2e
@@ -208,6 +209,11 @@ test-backend:
 test-web:
 	@printf "$(CYAN)Running web app tests...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web test
+
+.PHONY: test-cli
+test-cli:
+	@printf "$(CYAN)Running CLI tests...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter kandev test
 
 #
 # Code Quality
