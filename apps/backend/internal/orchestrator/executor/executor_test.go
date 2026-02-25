@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 type mockAgentManager struct {
 	launchAgentFunc             func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error)
 	startAgentProcessFunc       func(ctx context.Context, agentExecutionID string) error
+	stopAgentFunc               func(ctx context.Context, agentExecutionID string, force bool) error
 	resolveAgentProfileFunc     func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc func(ctx context.Context, agentExecutionID string, description string) error
 }
@@ -45,6 +47,9 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 }
 
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
+	if m.stopAgentFunc != nil {
+		return m.stopAgentFunc(ctx, agentExecutionID, force)
+	}
 	return nil
 }
 
@@ -970,6 +975,78 @@ func TestApplyPreferredShellEnv(t *testing.T) {
 			t.Fatal("did not expect SHELL for sprites executor")
 		}
 	})
+}
+
+func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
+	repo := newMockRepository()
+
+	// Pre-create session so state updates work
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID:     "session-123",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateStarting,
+	}
+
+	var stopCalled atomic.Bool
+	var stopForce atomic.Bool
+	var stoppedExecutionID atomic.Value
+
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			stopCalled.Store(true)
+			stopForce.Store(force)
+			stoppedExecutionID.Store(agentExecutionID)
+			return nil
+		},
+	}
+
+	exec := newTestExecutor(t, agentManager, repo)
+
+	done := make(chan struct{})
+	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		return repo.UpdateTaskState(ctx, taskID, state)
+	})
+
+	// Use runAgentProcessAsync with a no-op onSuccess that should never be called
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456", func(ctx context.Context) {
+		t.Error("onSuccess should not be called when StartAgentProcess fails")
+		close(done)
+	})
+
+	// Wait for the async goroutine to finish
+	deadline := time.After(5 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for StopAgent to be called")
+		case <-tick.C:
+			if stopCalled.Load() {
+				goto verified
+			}
+		}
+	}
+
+verified:
+	if !stopForce.Load() {
+		t.Error("expected StopAgent to be called with force=true")
+	}
+	if id, ok := stoppedExecutionID.Load().(string); !ok || id != "exec-456" {
+		t.Errorf("expected StopAgent called with execution ID exec-456, got %v", stoppedExecutionID.Load())
+	}
+
+	// Verify session was marked as FAILED
+	session := repo.sessions["session-123"]
+	if session.State != models.TaskSessionStateFailed {
+		t.Errorf("expected session state FAILED, got %s", session.State)
+	}
 }
 
 func TestRepositoryCloneURL(t *testing.T) {
