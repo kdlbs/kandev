@@ -652,8 +652,30 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.AgentProfileID = session.AgentProfileID
 	s.populateExecutorStatusInfo(ctx, session, &resp)
 
-	// Extract resume token from executor runtime state.
-	resumeToken := s.populateResumeInfo(ctx, sessionID, &resp)
+	running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	resumeToken := ""
+	if runErr == nil && running != nil {
+		resumeToken = running.ResumeToken
+		resp.ACPSessionID = running.ResumeToken
+		resp.Runtime = running.Runtime
+		if running.Resumable {
+			resp.IsResumable = true
+		}
+		s.applyRemoteRuntimeStatus(ctx, sessionID, &resp)
+	}
+
+	if shouldHealStuckStartingSession(session, running) {
+		s.logger.Info("healing stale STARTING session state from ready runtime status",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", session.AgentExecutionID))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		refreshedSession, refreshErr := s.repo.GetTaskSession(ctx, sessionID)
+		if refreshErr == nil && refreshedSession != nil {
+			session = refreshedSession
+			resp.State = string(session.State)
+		}
+	}
 
 	// Extract worktree info
 	populateWorktreeInfo(session, &resp)
@@ -682,7 +704,6 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	// NeedsResume triggers the frontend to auto-resume, which launches agentctl and the agent
 	// process (idle, no prompt). For agents with HistoryContextInjection, conversation history
 	// is injected into the user's first message.
-	running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if runErr == nil && running != nil && isActiveSessionState(session.State) {
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
@@ -695,22 +716,6 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.IsResumable = false
 	resp.NeedsResume = false
 	return resp, nil
-}
-
-// populateResumeInfo extracts resume token from executor runtime state and populates resp fields.
-// Returns the resume token (may be empty).
-func (s *Service) populateResumeInfo(ctx context.Context, sessionID string, resp *dto.TaskSessionStatusResponse) string {
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
-		return ""
-	}
-	resp.ACPSessionID = running.ResumeToken
-	resp.Runtime = running.Runtime
-	if running.Resumable {
-		resp.IsResumable = true
-	}
-	s.applyRemoteRuntimeStatus(ctx, sessionID, resp)
-	return running.ResumeToken
 }
 
 func (s *Service) populateExecutorStatusInfo(ctx context.Context, session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
@@ -781,6 +786,22 @@ func isActiveSessionState(state models.TaskSessionState) bool {
 		return true
 	}
 	return false
+}
+
+func shouldHealStuckStartingSession(session *models.TaskSession, running *models.ExecutorRunning) bool {
+	if session == nil || running == nil {
+		return false
+	}
+	if session.State != models.TaskSessionStateStarting {
+		return false
+	}
+	if running.Status != "ready" {
+		return false
+	}
+	if session.AgentExecutionID != "" && running.AgentExecutionID != "" && session.AgentExecutionID != running.AgentExecutionID {
+		return false
+	}
+	return true
 }
 
 // validateResumeEligibility performs final checks before marking a session as resumable.

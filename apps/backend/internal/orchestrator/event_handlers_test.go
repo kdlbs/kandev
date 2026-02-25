@@ -374,6 +374,27 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("moves STARTING session to waiting for input", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		taskRepo := newMockTaskRepo()
+		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateStarting
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateWaitingForInput {
+			t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+		}
+		if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+			t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
+		}
+	})
+
 	t.Run("ignores ready while reset is in progress", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
