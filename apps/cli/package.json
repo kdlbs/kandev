@@ -1,6 +1,6 @@
 {
   "name": "kandev",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": false,
   "description": "NPX launcher for Kandev",
   "license": "AGPL-3.0-only",
