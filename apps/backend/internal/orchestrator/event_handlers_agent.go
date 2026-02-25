@@ -122,6 +122,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
+	if session.State == models.TaskSessionStateStarting {
+		s.logger.Info("agent.ready received while session is STARTING; marking session idle",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		s.completeTurnForSession(ctx, data.SessionID)
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
+		return
+	}
+
 	if session.State != models.TaskSessionStateRunning {
 		s.logger.Debug("ignoring agent.ready while session is not running",
 			zap.String("task_id", data.TaskID),

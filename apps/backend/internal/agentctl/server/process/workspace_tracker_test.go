@@ -64,8 +64,15 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	// Use git -C flag to ensure we're in the right directory
 	// This is more reliable than cmd.Dir as it prevents git from
 	// walking up to find a parent .git directory
-	fullArgs := append([]string{"-C", dir}, args...)
+	// Force unsigned commits/tags for test repos so tests are hermetic and do not
+	// depend on user-level signing keys (GPG/SSH).
+	fullArgs := append([]string{
+		"-C", dir,
+		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
+	}, args...)
 	cmd := exec.Command("git", fullArgs...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)
@@ -78,6 +85,30 @@ func writeFile(t *testing.T, dir, name, content string) {
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write file %s: %v", name, err)
+	}
+}
+
+func TestRunGit_DisablesCommitSigning(t *testing.T) {
+	repoDir, err := os.MkdirTemp("", "test-signing-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(repoDir) }()
+
+	runGit(t, repoDir, "init", "--initial-branch=main")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "commit.gpgsign", "true")
+	runGit(t, repoDir, "config", "gpg.format", "ssh")
+	runGit(t, repoDir, "config", "user.signingkey", "~/.ssh/id_ed25519.pub")
+
+	writeFile(t, repoDir, "README.md", "# Signing Override Test")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "Unsigned test commit")
+
+	head := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	if head == "" {
+		t.Fatal("expected HEAD commit SHA to be present")
 	}
 }
 
