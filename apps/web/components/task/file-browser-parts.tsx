@@ -149,30 +149,12 @@ function getGitStatusTextClass(status: GitFileStatus): string {
   switch (status) {
     case "added":
     case "untracked":
-      return "text-emerald-600";
+      return "text-green-700 dark:text-green-600";
     case "modified":
       return "text-yellow-600";
     default:
       return "";
   }
-}
-
-function getGitStatusDotClass(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-    case "untracked":
-      return "bg-emerald-500";
-    case "modified":
-      return "bg-yellow-500";
-    default:
-      return "bg-transparent";
-  }
-}
-
-function TreeNodeGitStatusDot({ status }: { status: GitFileStatus }) {
-  if (!status || (status !== "added" && status !== "untracked" && status !== "modified"))
-    return null;
-  return <span className={cn("h-1.5 w-1.5 rounded-full", getGitStatusDotClass(status))} />;
 }
 
 /** Delete button shown on hover for file nodes. */
@@ -266,17 +248,14 @@ export function TreeNodeItem({
         >
           {node.name}
         </span>
-        {!node.is_dir && (
+        {!node.is_dir && onDeleteFile && (
           <div className="ml-auto flex items-center gap-1">
-            <TreeNodeGitStatusDot status={gitStatus} />
-            {onDeleteFile && (
-              <TreeNodeDeleteButton
-                node={node}
-                tree={tree}
-                setTree={setTree}
-                onDeleteFile={onDeleteFile}
-              />
-            )}
+            <TreeNodeDeleteButton
+              node={node}
+              tree={tree}
+              setTree={setTree}
+              onDeleteFile={onDeleteFile}
+            />
           </div>
         )}
       </div>
@@ -365,9 +344,7 @@ export function SearchResultsList({
               {folder && <span>{folder}/</span>}
               <span>{name}</span>
             </span>
-            <div className="ml-auto flex items-center">
-              <TreeNodeGitStatusDot status={gitStatus} />
-            </div>
+            <div className="ml-auto flex items-center" />
           </div>
         );
       })}

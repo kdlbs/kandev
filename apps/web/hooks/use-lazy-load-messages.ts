@@ -33,6 +33,8 @@ export function useLazyLoadMessages(sessionId: string | null) {
       return 0;
     }
 
+    // Update ref synchronously so concurrent calls are blocked immediately
+    stateRef.current.isLoading = true;
     setMessagesMetadata(sessionId, { isLoading: true });
     try {
       const response = await listTaskSessionMessages(sessionId, {
@@ -43,7 +45,13 @@ export function useLazyLoadMessages(sessionId: string | null) {
       const orderedMessages = [...(response.messages ?? [])].reverse();
       // After reversing, orderedMessages[0] is the oldest message in this batch
       const newOldestCursor = orderedMessages[0]?.id ?? null;
-      console.log("[LazyLoad] fetched", orderedMessages.length, "messages, hasMore:", response.has_more, "newOldestCursor:", newOldestCursor);
+      // Sync ref immediately so the next intersection callback sees correct state
+      // (the useEffect sync may not have run yet between store update and next observer fire)
+      stateRef.current = {
+        hasMore: response.has_more,
+        oldestCursor: newOldestCursor,
+        isLoading: false,
+      };
       prependMessages(sessionId, orderedMessages, {
         hasMore: response.has_more,
         oldestCursor: newOldestCursor,
@@ -51,6 +59,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
       return orderedMessages.length;
     } catch (error) {
       console.error("[useLazyLoadMessages] Error loading messages:", error);
+      stateRef.current.isLoading = false;
       setMessagesMetadata(sessionId, { isLoading: false });
       return 0;
     }

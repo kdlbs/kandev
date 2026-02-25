@@ -8,7 +8,7 @@ import {
   QueuedMessageIndicator,
   type QueuedMessageIndicatorHandle,
 } from "@/components/task/chat/queued-message-indicator";
-import { VirtualizedMessageList } from "@/components/task/chat/virtualized-message-list";
+import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
@@ -110,7 +110,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   return (
     <PanelRoot>
       <PanelBody padding={false}>
-        <VirtualizedMessageList
+        <MessageList
           items={groupedItems}
           messages={allMessages}
           permissionsByToolCallId={permissionsByToolCallId}
