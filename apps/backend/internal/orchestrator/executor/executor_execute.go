@@ -40,6 +40,13 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 					zap.String("task_id", taskID),
 					zap.Error(updateErr))
 			}
+			// Clean up the execution environment (e.g., destroy remote Sprites instance).
+			// Use force=true since the agent process never fully started.
+			if stopErr := e.agentManager.StopAgent(updateCtx, agentExecutionID, true); stopErr != nil {
+				e.logger.Warn("failed to clean up agent after start failure",
+					zap.String("agent_execution_id", agentExecutionID),
+					zap.Error(stopErr))
+			}
 			return
 		}
 
