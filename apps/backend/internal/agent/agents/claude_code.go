@@ -132,6 +132,15 @@ func (a *ClaudeCode) RemoteAuth() *RemoteAuth {
 				Type:      "env",
 				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
 				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
+				SetupScript: `mkdir -p "${HOME}/.claude"
+cat > "${HOME}/.claude/.credentials.json" <<CREDS
+{"claudeAiOauth":{"accessToken":"${CLAUDE_CODE_OAUTH_TOKEN}","expiresAt":4102444800000}}
+CREDS
+cat > "${HOME}/.claude.json" <<'JSON'
+{"hasCompletedOnboarding":true}
+JSON
+chmod 600 "${HOME}/.claude/.credentials.json"
+chmod 600 "${HOME}/.claude.json"`,
 			},
 		},
 	}

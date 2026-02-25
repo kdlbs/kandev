@@ -29,6 +29,7 @@ type Method struct {
 	TargetRelDir  string   `json:"target_rel_dir,omitempty"`
 	Label         string   `json:"label,omitempty"`
 	HasLocalFiles bool     `json:"has_local_files,omitempty"`
+	SetupScript   string   `json:"setup_script,omitempty"`
 }
 
 // Spec groups auth methods for one integration or agent.
@@ -110,11 +111,12 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 					continue
 				}
 				entry := Method{
-					MethodID:  fmt.Sprintf("agent:%s:env:%s", ag.ID(), method.EnvVar),
-					Type:      "env",
-					EnvVar:    method.EnvVar,
-					SetupHint: method.SetupHint,
-					Label:     method.Label,
+					MethodID:    fmt.Sprintf("agent:%s:env:%s", ag.ID(), method.EnvVar),
+					Type:        "env",
+					EnvVar:      method.EnvVar,
+					SetupHint:   method.SetupHint,
+					Label:       method.Label,
+					SetupScript: method.SetupScript,
 				}
 				spec.Methods = append(spec.Methods, entry)
 				methodsByID[entry.MethodID] = entry

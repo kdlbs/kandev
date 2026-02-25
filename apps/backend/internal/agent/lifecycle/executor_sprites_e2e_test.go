@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -504,70 +505,106 @@ func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 	client := instance.Client
 
 	t.Run("GitIdentityCopiedFromHost", func(t *testing.T) {
-		gotName := strings.TrimSpace(runSpriteCmd(t, client, localPort, log,
-			"git config --global --get user.name 2>&1", 30*time.Second))
-		gotEmail := strings.TrimSpace(runSpriteCmd(t, client, localPort, log,
-			"git config --global --get user.email 2>&1", 30*time.Second))
+		res := runSpriteCmd(t, client, localPort, log,
+			"git config --global --get user.name 2>&1", 30*time.Second)
+		require.Equal(t, 0, res.ExitCode, "git config user.name should succeed")
+		require.Equal(t, gitUserName, strings.TrimSpace(res.Output), "sprite git user.name mismatch")
 
-		require.Equal(t, gitUserName, gotName, "sprite git user.name mismatch")
-		require.Equal(t, gitUserEmail, gotEmail, "sprite git user.email mismatch")
+		res = runSpriteCmd(t, client, localPort, log,
+			"git config --global --get user.email 2>&1", 30*time.Second)
+		require.Equal(t, 0, res.ExitCode, "git config user.email should succeed")
+		require.Equal(t, gitUserEmail, strings.TrimSpace(res.Output), "sprite git user.email mismatch")
 	})
 
 	t.Run("GhCliAuth", func(t *testing.T) {
-		// GITHUB_TOKEN is injected via gh_cli_token auto-detect — verify gh can use it
-		output := runSpriteCmd(t, client, localPort, log, "gh auth status 2>&1", 30*time.Second)
-		t.Logf("gh auth status output:\n%s", output)
+		if !hasCredential(credIDs, "gh_cli_token") {
+			t.Skip("gh_cli_token not selected")
+		}
+		// GITHUB_TOKEN is injected via gh_cli_token auto-detect — verify gh can use it.
+		// gh auth status makes a network call that can be slow on sprites; retry with short timeout.
+		var res spriteCmdResult
+		for attempt := 1; attempt <= 2; attempt++ {
+			res = runSpriteCmdNoFail(t, client, localPort, log, "gh auth status 2>&1", 10*time.Second)
+			if res.Output != "" {
+				break
+			}
+			t.Logf("gh auth status attempt %d timed out, retrying...", attempt)
+		}
+		t.Logf("gh auth status output:\n%s", res.Output)
+		require.NotEmpty(t, res.Output, "gh auth status should produce output")
+		lower := strings.ToLower(res.Output)
 		require.True(t,
-			strings.Contains(output, "Logged in") || strings.Contains(output, "logged in") ||
-				strings.Contains(output, "GITHUB_TOKEN"),
-			"gh auth status should indicate logged in or GITHUB_TOKEN active, got: %s", output)
+			strings.Contains(lower, "logged in") || strings.Contains(lower, "github_token"),
+			"gh auth status should indicate logged in or GITHUB_TOKEN active, got: %s", res.Output)
 	})
 
-	// t.Run("AuggieAuth", func(t *testing.T) {
-	// 	if !hasCredentialPrefix(credIDs, "agent:auggie:files:") {
-	// 		t.Skip("auggie file auth credential not available on host")
-	// 	}
-	// 	output := runSpriteCmd(t, client, localPort, log,
-	// 		"npx -y @augmentcode/auggie -p hello 2>&1", 180*time.Second)
-	// 	t.Logf("auggie output:\n%s", output)
-	// 	require.NotContains(t, strings.ToLower(output), "authentication",
-	// 		"auggie should not show auth errors")
-	// })
+	t.Run("AuggieAuth", func(t *testing.T) {
+		if !hasCredentialPrefix(credIDs, "agent:auggie:files:") {
+			t.Skip("auggie file auth credential not available on host")
+		}
+		res := runSpriteCmd(t, client, localPort, log,
+			"npx -y @augmentcode/auggie -p hello 2>&1", 180*time.Second)
+		t.Logf("auggie output:\n%s", res.Output)
+		require.Equal(t, 0, res.ExitCode, "auggie should exit with code 0")
+		require.NotContains(t, strings.ToLower(res.Output), "authentication",
+			"auggie should not show auth errors")
+	})
 
-	// t.Run("CodexAuth", func(t *testing.T) {
-	// 	if !hasAgentFileCredential(credIDs, "codex") {
-	// 		t.Skip("codex file auth credential not available on host")
-	// 	}
-	// 	output := runSpriteCmd(t, client, localPort, log,
-	// 		"npx -y @openai/codex exec \"hello\" 2>&1", 180*time.Second)
-	// 	t.Logf("codex output:\n%s", output)
-	// 	require.NotContains(t, strings.ToLower(output), "unauthorized",
-	// 		"codex should not show auth errors")
-	// })
+	t.Run("CodexAuth", func(t *testing.T) {
+		if !hasAgentFileCredential(credIDs, "codex") {
+			t.Skip("codex file auth credential not available on host")
+		}
+		res := runSpriteCmd(t, client, localPort, log,
+			"npx -y @openai/codex exec \"hello\" 2>&1", 180*time.Second)
+		t.Logf("codex output:\n%s", res.Output)
+		require.Equal(t, 0, res.ExitCode, "codex should exit with code 0")
+		require.NotContains(t, strings.ToLower(res.Output), "unauthorized",
+			"codex should not show auth errors")
+	})
 
-	// t.Run("GeminiAuth", func(t *testing.T) {
-	// 	if !hasAgentFileCredential(credIDs, "gemini") {
-	// 		t.Skip("gemini file auth credential not available on host")
-	// 	}
-	// 	output := runSpriteCmd(t, client, localPort, log,
-	// 		"npx -y @google/gemini-cli --model flash -p hello 2>&1", 180*time.Second)
-	// 	t.Logf("gemini output:\n%s", output)
-	// 	require.NotContains(t, strings.ToLower(output), "unauthenticated",
-	// 		"gemini should not show auth errors")
-	// })
+	t.Run("GeminiAuth", func(t *testing.T) {
+		if !hasAgentFileCredential(credIDs, "gemini") {
+			t.Skip("gemini file auth credential not available on host")
+		}
+		res := runSpriteCmd(t, client, localPort, log,
+			"npx -y @google/gemini-cli --model flash -p hello 2>&1", 180*time.Second)
+		t.Logf("gemini output:\n%s", res.Output)
+		// require.Equal(t, 0, res.ExitCode, "gemini should exit with code 0")
+		require.NotContains(t, strings.ToLower(res.Output), "unauthenticated",
+			"gemini should not show auth errors")
+	})
 
 	t.Run("ClaudeCodeAuth", func(t *testing.T) {
 		if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
 			t.Skip("CLAUDE_CODE_OAUTH_TOKEN not set, skipping Claude Code auth test")
 		}
+
+		// Verify credential files were created by the auth setup script
+		res := runSpriteCmd(t, client, localPort, log,
+			`test -f ~/.claude/.credentials.json && echo CREDS_OK || echo CREDS_MISSING`, 30*time.Second)
+		require.Contains(t, res.Output, "CREDS_OK", "credential file should exist")
+
+		res = runSpriteCmd(t, client, localPort, log,
+			`test -f ~/.claude.json && echo ONBOARD_OK || echo ONBOARD_MISSING`, 30*time.Second)
+		require.Contains(t, res.Output, "ONBOARD_OK", "onboarding file should exist")
+
 		// Token is injected via ExecutorCreateRequest.Env and inherited by sprite processes.
 		// Keep command text free of secrets so logs do not expose token values.
-		output := runSpriteCmd(t, client, localPort, log,
+		res = runSpriteCmd(t, client, localPort, log,
 			"npx -y @anthropic-ai/claude-code --verbose -p hello 2>&1",
 			180*time.Second)
-		t.Logf("claude-code output:\n%s", output)
-		require.NotContains(t, strings.ToLower(output), "invalid_api_key",
-			"claude-code should not show auth errors")
+		t.Logf("claude-code output:\n%s", res.Output)
+		require.Equal(t, 0, res.ExitCode, "claude-code should exit with code 0")
+		lower := strings.ToLower(res.Output)
+		for _, errPattern := range []string{
+			"authentication_error",
+			"invalid_api_key",
+			"invalid bearer token",
+			"failed to authenticate",
+		} {
+			require.NotContains(t, lower, errPattern,
+				"claude-code should not show auth errors")
+		}
 	})
 
 	// Interactive mode
@@ -582,7 +619,13 @@ func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 	}
 }
 
-// runSpriteCmd runs a command on the sprite and returns its combined output.
+// spriteCmdResult holds the output and exit code of a command run on a sprite.
+type spriteCmdResult struct {
+	Output   string
+	ExitCode int
+}
+
+// runSpriteCmd runs a command on the sprite and returns its combined output and exit code.
 // It uses a workspace stream with an end marker to reliably capture all output.
 func runSpriteCmd(
 	t *testing.T,
@@ -591,7 +634,7 @@ func runSpriteCmd(
 	log *logger.Logger,
 	cmd string,
 	timeout time.Duration,
-) string {
+) spriteCmdResult {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -622,8 +665,8 @@ func runSpriteCmd(
 		t.Fatal("workspace stream connection timed out")
 	}
 
-	// Wrap command to echo end marker when done
-	wrappedCmd := fmt.Sprintf("(%s); echo %s", cmd, marker)
+	// Wrap command to capture exit code and echo end marker when done
+	wrappedCmd := fmt.Sprintf("(%s); _ec=$?; echo \"%s EXIT_CODE=$_ec\"", cmd, marker)
 	_, err = client.StartProcess(ctx, agentctl.StartProcessRequest{
 		SessionID: "e2e-creds-session",
 		Command:   wrappedCmd,
@@ -641,12 +684,106 @@ func runSpriteCmd(
 	fullOutput := output.String()
 	mu.Unlock()
 
-	// Strip the end marker from output
+	// Parse exit code and strip the marker line from output
+	exitCode := -1
 	idx := strings.Index(fullOutput, marker)
 	if idx >= 0 {
-		return strings.TrimSpace(fullOutput[:idx])
+		markerLine := fullOutput[idx:]
+		if ecIdx := strings.Index(markerLine, "EXIT_CODE="); ecIdx >= 0 {
+			ecStr := strings.TrimSpace(markerLine[ecIdx+len("EXIT_CODE="):])
+			if n, err := strconv.Atoi(strings.Split(ecStr, "\n")[0]); err == nil {
+				exitCode = n
+			}
+		}
+		return spriteCmdResult{
+			Output:   strings.TrimSpace(fullOutput[:idx]),
+			ExitCode: exitCode,
+		}
 	}
-	return strings.TrimSpace(fullOutput)
+	return spriteCmdResult{
+		Output:   strings.TrimSpace(fullOutput),
+		ExitCode: exitCode,
+	}
+}
+
+// runSpriteCmdNoFail is like runSpriteCmd but returns an empty result on timeout instead of failing.
+func runSpriteCmdNoFail(
+	t *testing.T,
+	client *agentctl.Client,
+	localPort int,
+	log *logger.Logger,
+	cmd string,
+	timeout time.Duration,
+) spriteCmdResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	marker := "END_MARKER_" + randomSuffix()
+
+	var output strings.Builder
+	var mu sync.Mutex
+	connected := make(chan struct{})
+
+	streamClient := agentctl.NewClient("127.0.0.1", localPort, log)
+	defer streamClient.Close()
+
+	stream, err := streamClient.StreamWorkspace(ctx, agentctl.WorkspaceStreamCallbacks{
+		OnConnected: func() { close(connected) },
+		OnProcessOutput: func(o *agentctl.ProcessOutput) {
+			mu.Lock()
+			output.WriteString(o.Data)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		return spriteCmdResult{ExitCode: -1}
+	}
+	defer stream.Close()
+
+	select {
+	case <-connected:
+	case <-ctx.Done():
+		return spriteCmdResult{ExitCode: -1}
+	}
+
+	wrappedCmd := fmt.Sprintf("(%s); _ec=$?; echo \"%s EXIT_CODE=$_ec\"", cmd, marker)
+	if _, err = client.StartProcess(ctx, agentctl.StartProcessRequest{
+		SessionID: "e2e-creds-session",
+		Command:   wrappedCmd,
+	}); err != nil {
+		return spriteCmdResult{ExitCode: -1}
+	}
+
+	// Wait for marker — return empty on timeout
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			return spriteCmdResult{ExitCode: -1}
+		case <-time.After(500 * time.Millisecond):
+			mu.Lock()
+			if strings.Contains(output.String(), marker) {
+				fullOutput := output.String()
+				mu.Unlock()
+
+				exitCode := -1
+				idx := strings.Index(fullOutput, marker)
+				if idx >= 0 {
+					markerLine := fullOutput[idx:]
+					if ecIdx := strings.Index(markerLine, "EXIT_CODE="); ecIdx >= 0 {
+						ecStr := strings.TrimSpace(markerLine[ecIdx+len("EXIT_CODE="):])
+						if n, parseErr := strconv.Atoi(strings.Split(ecStr, "\n")[0]); parseErr == nil {
+							exitCode = n
+						}
+					}
+					return spriteCmdResult{Output: strings.TrimSpace(fullOutput[:idx]), ExitCode: exitCode}
+				}
+				return spriteCmdResult{Output: strings.TrimSpace(fullOutput), ExitCode: exitCode}
+			}
+			mu.Unlock()
+		}
+	}
 }
 
 func hasCredentialPrefix(credIDs []string, prefix string) bool {
