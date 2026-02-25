@@ -12,13 +12,13 @@ import {
   HEALTH_TIMEOUT_MS_RELEASE,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
-import { resolveHealthTimeoutMs, waitForHealth } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { attachBackendExitHandler, logStartupInfo } from "./shared";
-import { launchWebApp } from "./web";
+import { launchWebApp, openBrowser } from "./web";
 
 export type RunOptions = {
   version?: string;
@@ -241,26 +241,29 @@ function launchReleaseApps(prepared: PreparedRelease): {
     throw new Error("Web server entry (server.js) not found in bundle");
   }
 
-  const webUrl = `http://localhost:${prepared.webPort}`;
-  launchWebApp({
-    command: "node",
-    args: [webServerPath],
-    cwd: path.dirname(webServerPath),
-    env: prepared.webEnv,
-    url: webUrl,
-    supervisor,
-    label: "web",
-  });
-
   return { supervisor, backendProc, webServerPath };
 }
 
 export async function runRelease({ version, backendPort, webPort }: RunOptions): Promise<void> {
   const prepared = await prepareReleaseBundle({ version, backendPort, webPort });
-  const { backendProc } = launchReleaseApps(prepared);
-  // Wait for backend before announcing the web URL.
+  const { supervisor, backendProc, webServerPath } = launchReleaseApps(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
+  console.log("[kandev] starting backend...");
   await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${prepared.backendUrl}`);
-  console.log(`[kandev] web ready at http://localhost:${prepared.webPort}`);
+
+  const webUrl = `http://localhost:${prepared.webPort}`;
+  console.log("[kandev] starting web...");
+  const webProc = launchWebApp({
+    command: "node",
+    args: [webServerPath],
+    cwd: path.dirname(webServerPath),
+    env: prepared.webEnv,
+    supervisor,
+    label: "web",
+    quiet: true,
+  });
+  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
+  console.log(`[kandev] web ready at ${webUrl}`);
+  openBrowser(webUrl);
 }

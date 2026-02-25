@@ -47,3 +47,24 @@ export async function waitForHealth(
   }
   throw new Error(`Backend healthcheck timed out after ${timeoutMs}ms`);
 }
+
+export async function waitForUrlReady(
+  url: string,
+  proc: { exitCode: number | null },
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (proc.exitCode !== null) {
+      throw new Error("Web process exited before URL became reachable");
+    }
+    try {
+      await fetch(url);
+      return;
+    } catch {
+      // ignore until timeout
+    }
+    await delay(300);
+  }
+  throw new Error(`Web URL readiness timed out after ${timeoutMs}ms (${url})`);
+}

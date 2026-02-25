@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 import { HEALTH_TIMEOUT_MS_DEV } from "./constants";
-import { resolveHealthTimeoutMs, waitForHealth } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { createProcessSupervisor } from "./process";
 import {
   attachBackendExitHandler,
@@ -11,7 +11,7 @@ import {
   logStartupInfo,
   pickPorts,
 } from "./shared";
-import { launchWebApp } from "./web";
+import { launchWebApp, openBrowser } from "./web";
 
 export type DevOptions = {
   repoRoot: string;
@@ -52,18 +52,21 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
+  console.log("[kandev] starting backend...");
   await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   const webUrl = `http://localhost:${ports.webPort}`;
-  launchWebApp({
+  console.log("[kandev] starting web...");
+  const webProc = launchWebApp({
     command: "pnpm",
     args: ["-C", "apps", "--filter", "@kandev/web", "dev"],
     cwd: repoRoot,
     env: webEnv,
-    url: webUrl,
     supervisor,
     label: "web",
   });
+  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log(`[kandev] web ready at ${webUrl}`);
+  openBrowser(webUrl);
 }

@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
-import { resolveHealthTimeoutMs, waitForHealth } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
 import {
@@ -26,7 +26,7 @@ import {
   logStartupInfo,
   pickPorts,
 } from "./shared";
-import { launchWebApp } from "./web";
+import { launchWebApp, openBrowser } from "./web";
 
 export type StartOptions = {
   /** Path to the repository root directory */
@@ -149,21 +149,24 @@ export async function runStart({
   attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
+  console.log("[kandev] starting backend...");
   await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   // Use standalone server.js directly (not pnpm start)
   const webUrl = `http://localhost:${ports.webPort}`;
-  launchWebApp({
+  console.log("[kandev] starting web...");
+  const webProc = launchWebApp({
     command: "node",
     args: [webServerPath],
     cwd: webStandaloneDir,
     env: webEnv,
-    url: webUrl,
     supervisor,
     label: "web",
     quiet: !showOutput,
   });
 
-  console.log(`[kandev] backend ready at ${ports.backendUrl}`);
+  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log(`[kandev] web ready at ${webUrl}`);
+  openBrowser(webUrl);
 }

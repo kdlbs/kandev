@@ -20,7 +20,6 @@ export type WebLaunchOptions = {
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
-  url: string;
   supervisor: ReturnType<typeof createProcessSupervisor>;
   label: string;
   /** Suppress stdout/stderr output */
@@ -48,7 +47,6 @@ export function launchWebApp({
   args,
   cwd,
   env,
-  url,
   supervisor,
   label,
   quiet = false,
@@ -68,6 +66,5 @@ export function launchWebApp({
     void supervisor.shutdown(`${label} exit`).then(() => process.exit(exitCode));
   });
 
-  openBrowser(url);
   return proc;
 }
