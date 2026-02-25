@@ -44,8 +44,8 @@ type ReviewWatchDialogProps = {
 };
 
 const QUERY_TEMPLATES = {
-  meAndTeams: "type:pr state:open review-requested:@me",
-  me: "type:pr state:open user-review-requested:@me",
+  meAndTeams: "type:pr state:open review-requested:@me -is:draft",
+  me: "type:pr state:open user-review-requested:@me -is:draft",
 } as const;
 
 type FormState = {
@@ -171,7 +171,13 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  return { workflows, agentProfiles, allExecutorProfiles };
+  // Filter out passthrough/TUI profiles — they don't accept initial prompts
+  const filteredAgentProfiles = useMemo(
+    () => agentProfiles.filter((p) => !p.cli_passthrough),
+    [agentProfiles],
+  );
+
+  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
 
 // --- Section header ---

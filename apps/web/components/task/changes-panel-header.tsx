@@ -106,6 +106,7 @@ function PullDropdown({
 export function ChangesPanelHeader({
   hasChanges,
   hasCommits,
+  hasPRFiles,
   displayBranch,
   baseBranchDisplay,
   behindCount,
@@ -117,6 +118,7 @@ export function ChangesPanelHeader({
 }: {
   hasChanges: boolean;
   hasCommits: boolean;
+  hasPRFiles?: boolean;
   displayBranch: string | null;
   baseBranchDisplay: string;
   behindCount: number;
@@ -126,10 +128,11 @@ export function ChangesPanelHeader({
   onPull: () => void;
   onRebase: () => void;
 }) {
+  const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
     <PanelHeaderBarSplit
       left={
-        hasChanges || hasCommits ? (
+        showDiffReview ? (
           <>
             <Button
               size="sm"

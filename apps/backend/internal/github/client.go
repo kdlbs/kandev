@@ -47,4 +47,14 @@ type Client interface {
 
 	// GetPRFeedback fetches aggregated feedback (reviews, comments, checks) for a PR.
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error)
+
+	// ListPRFiles lists files changed in a pull request.
+	ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error)
+
+	// ListPRCommits lists commits in a pull request.
+	ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error)
+
+	// SubmitReview submits a review on a pull request.
+	// event is one of "APPROVE", "COMMENT", "REQUEST_CHANGES".
+	SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error
 }

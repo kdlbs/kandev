@@ -1,13 +1,7 @@
 import { IconCheck, IconX, IconClock } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import type { PRReview } from "@/lib/types/github";
-import {
-  CollapsibleSection,
-  AddToContextButton,
-  AuthorAvatar,
-  AuthorLink,
-  formatTimeAgo,
-} from "./pr-shared";
+import type { PRReview, RequestedReviewer } from "@/lib/types/github";
+import { CollapsibleSection, FeedbackItemRow } from "./pr-shared";
 
 function ReviewStateIcon({ state }: { state: string }) {
   if (state === "APPROVED") return <IconCheck className="h-3.5 w-3.5 text-green-500 shrink-0" />;
@@ -65,6 +59,11 @@ function buildAllReviewsMessage(reviews: PRReview[], prUrl: string): string {
   return parts.join("\n");
 }
 
+function formatPendingReviewer(reviewer: RequestedReviewer): string {
+  if (reviewer.type === "team") return `${reviewer.login} (team)`;
+  return reviewer.login;
+}
+
 function formatReviewSummary(reviews: PRReview[]): string {
   const approved = reviews.filter((r) => r.state === "APPROVED").length;
   const changes = reviews.filter((r) => r.state === "CHANGES_REQUESTED").length;
@@ -76,23 +75,87 @@ function formatReviewSummary(reviews: PRReview[]): string {
   return parts.join(", ");
 }
 
+function computeSectionSummary(
+  reviews: PRReview[],
+  requestedReviewers: RequestedReviewer[],
+  pendingReviewCount: number,
+) {
+  const submittedSummary = reviews.length > 0 ? formatReviewSummary(reviews) : "";
+  const pendingCount =
+    requestedReviewers.length > 0 ? requestedReviewers.length : pendingReviewCount;
+  const summaryParts: string[] = [];
+  if (submittedSummary) summaryParts.push(submittedSummary);
+  if (pendingCount > 0) summaryParts.push(`${pendingCount} pending`);
+  const summary = summaryParts.length > 0 ? ` \u2014 ${summaryParts.join(", ")}` : "";
+  return { pendingCount, summary, totalCount: reviews.length + pendingCount };
+}
+
+function ReviewMetaBadge({ state }: { state: string }) {
+  return (
+    <>
+      <ReviewStateIcon state={state} />
+      <span className="text-[10px] text-muted-foreground truncate">{reviewStateLabel(state)}</span>
+    </>
+  );
+}
+
+function SubmittedReviewRow({
+  review,
+  prUrl,
+  onAddAsContext,
+}: {
+  review: PRReview;
+  prUrl: string;
+  onAddAsContext: (message: string) => void;
+}) {
+  const hasActionable = review.state === "CHANGES_REQUESTED" || !!review.body;
+  return (
+    <FeedbackItemRow
+      author={review.author}
+      authorAvatar={review.author_avatar}
+      body={review.body || undefined}
+      createdAt={review.created_at}
+      metaBadge={<ReviewMetaBadge state={review.state} />}
+      onAddAsContext={
+        hasActionable ? () => onAddAsContext(buildReviewMessage(review, prUrl)) : undefined
+      }
+    />
+  );
+}
+
+function PendingReviewRow({ reviewer }: { reviewer: RequestedReviewer }) {
+  return (
+    <div className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30">
+      <div className="flex items-center gap-2">
+        <IconClock className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+        <span className="text-xs font-medium">{formatPendingReviewer(reviewer)}</span>
+        <span className="text-[10px] text-muted-foreground truncate">Pending review</span>
+      </div>
+    </div>
+  );
+}
+
 export function ReviewsSection({
   reviews,
+  requestedReviewers,
   prUrl,
   reviewState,
-  reviewCount,
   pendingReviewCount,
   onAddAsContext,
 }: {
   reviews: PRReview[];
+  requestedReviewers: RequestedReviewer[];
   prUrl: string;
   reviewState: string;
-  reviewCount: number;
   pendingReviewCount: number;
   onAddAsContext: (message: string) => void;
 }) {
-  const summary = reviews.length > 0 ? ` \u2014 ${formatReviewSummary(reviews)}` : "";
-  const pendingText = pendingReviewCount > 0 ? ` (${pendingReviewCount} pending)` : "";
+  const { pendingCount, summary, totalCount } = computeSectionSummary(
+    reviews,
+    requestedReviewers,
+    pendingReviewCount,
+  );
+  const pendingText = pendingCount > 0 ? ` (${pendingCount} pending)` : "";
 
   const subtitle = reviewState ? (
     <div className="text-[10px] text-muted-foreground px-2 pb-1">
@@ -104,40 +167,29 @@ export function ReviewsSection({
   return (
     <CollapsibleSection
       title={`Reviews${summary}`}
-      count={reviewCount}
+      count={totalCount}
       defaultOpen
       subtitle={subtitle}
-      onAddAll={() => onAddAsContext(buildAllReviewsMessage(reviews, prUrl))}
+      onAddAll={
+        reviews.length > 0
+          ? () => onAddAsContext(buildAllReviewsMessage(reviews, prUrl))
+          : undefined
+      }
       addAllLabel="Add all reviews to chat context"
     >
-      {reviews.length === 0 && (
+      {reviews.length === 0 && pendingCount === 0 && (
         <p className="text-xs text-muted-foreground px-2 py-2">No reviews yet</p>
       )}
       {reviews.map((review) => (
-        <div
+        <SubmittedReviewRow
           key={review.id}
-          className="px-2.5 py-2 rounded-md border border-border bg-muted/30 space-y-1"
-        >
-          <div className="flex items-center gap-2">
-            <AuthorAvatar src={review.author_avatar} author={review.author} />
-            <ReviewStateIcon state={review.state} />
-            <AuthorLink author={review.author} />
-            <span className="text-[10px] text-muted-foreground truncate">
-              {reviewStateLabel(review.state)}
-            </span>
-            <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-              {formatTimeAgo(review.created_at)}
-            </span>
-            {(review.state === "CHANGES_REQUESTED" || review.body) && (
-              <AddToContextButton
-                onClick={() => onAddAsContext(buildReviewMessage(review, prUrl))}
-              />
-            )}
-          </div>
-          {review.body && (
-            <p className="text-xs text-muted-foreground pl-7 line-clamp-4">{review.body}</p>
-          )}
-        </div>
+          review={review}
+          prUrl={prUrl}
+          onAddAsContext={onAddAsContext}
+        />
+      ))}
+      {requestedReviewers.map((reviewer) => (
+        <PendingReviewRow key={`pending-${reviewer.type}-${reviewer.login}`} reviewer={reviewer} />
       ))}
     </CollapsibleSection>
   );

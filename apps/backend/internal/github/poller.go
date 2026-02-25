@@ -240,6 +240,13 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 	}
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
+		p.logger.Debug("polling review watch",
+			zap.String("watch_id", watch.ID),
+			zap.String("workspace_id", watch.WorkspaceID),
+			zap.String("custom_query", watch.CustomQuery),
+			zap.Int("repo_filters", len(watch.Repos)),
+			zap.String("review_scope", watch.ReviewScope))
+
 		newPRs, err := p.service.CheckReviewWatch(ctx, watch)
 		if err != nil {
 			p.logger.Debug("failed to check review watch",

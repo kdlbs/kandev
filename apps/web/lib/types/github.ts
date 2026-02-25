@@ -11,6 +11,7 @@ export type GitHubStatus = {
 export type GitHubPR = {
   number: number;
   title: string;
+  body?: string;
   url: string;
   html_url: string;
   state: "open" | "closed" | "merged";
@@ -23,10 +24,16 @@ export type GitHubPR = {
   mergeable: boolean;
   additions: number;
   deletions: number;
+  requested_reviewers: RequestedReviewer[];
   created_at: string;
   updated_at: string;
   merged_at: string | null;
   closed_at: string | null;
+};
+
+export type RequestedReviewer = {
+  login: string;
+  type: "user" | "team";
 };
 
 export type PRReview = {
@@ -42,10 +49,12 @@ export type PRComment = {
   id: number;
   author: string;
   author_avatar: string;
+  author_is_bot: boolean;
   body: string;
   path: string;
   line: number;
   side: string;
+  comment_type: "review" | "issue";
   created_at: string;
   updated_at: string;
   in_reply_to: number | null;
@@ -53,6 +62,7 @@ export type PRComment = {
 
 export type CheckRun = {
   name: string;
+  source: "check_run" | "status_context";
   status: string;
   conclusion: string;
   html_url: string;
@@ -199,3 +209,24 @@ export type CreateReviewWatchRequest = {
 };
 
 export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "workspace_id">>;
+
+// PR diff file (from GitHub API)
+export type PRDiffFile = {
+  filename: string;
+  status: string; // added, removed, modified, renamed, copied, changed, unchanged
+  additions: number;
+  deletions: number;
+  patch: string;
+  old_path?: string;
+};
+
+// PR commit info (from GitHub API)
+export type PRCommitInfo = {
+  sha: string;
+  message: string;
+  author_login: string;
+  author_date: string;
+  additions: number;
+  deletions: number;
+  files_changed: number;
+};

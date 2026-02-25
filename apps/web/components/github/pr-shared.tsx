@@ -1,7 +1,9 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { IconMessagePlus, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 
 export function formatTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -148,5 +150,80 @@ export function AddToContextButton({
       </TooltipTrigger>
       <TooltipContent>{tooltip ?? "Add to chat context"}</TooltipContent>
     </Tooltip>
+  );
+}
+
+export function PRMarkdownBody({ body }: { body: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-1.5 prose-p:leading-relaxed prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-pre:my-2 prose-headings:text-foreground prose-headings:font-bold prose-strong:text-foreground prose-strong:font-bold">
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        {body}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+export function getTimeAgoColor(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const hours = diff / (1000 * 60 * 60);
+  if (hours < 24) return "text-green-600 dark:text-green-400";
+  if (hours < 48) return "text-muted-foreground";
+  return "text-orange-600 dark:text-orange-400";
+}
+
+export function ExpandableBody({ body, className }: { body: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={className}>
+      <div className={expanded ? "" : "line-clamp-4"}>
+        <PRMarkdownBody body={body} />
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(!expanded);
+        }}
+        className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5 cursor-pointer"
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
+    </div>
+  );
+}
+
+export function FeedbackItemRow({
+  author,
+  authorAvatar,
+  body,
+  createdAt,
+  metaBadge,
+  onAddAsContext,
+  isReply,
+}: {
+  author: string;
+  authorAvatar: string;
+  body?: string;
+  createdAt: string;
+  metaBadge?: React.ReactNode;
+  onAddAsContext?: () => void;
+  isReply?: boolean;
+}) {
+  return (
+    <div className={isReply ? "ml-4 pl-2.5 border-l-2 border-border" : ""}>
+      <div className="px-2.5 py-2 rounded-md border border-border bg-muted/30 space-y-1">
+        <div className="flex items-center gap-2">
+          <AuthorAvatar src={authorAvatar} author={author} />
+          <AuthorLink author={author} />
+          {metaBadge}
+          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+            {formatTimeAgo(createdAt)}
+          </span>
+          {onAddAsContext && <AddToContextButton onClick={onAddAsContext} />}
+        </div>
+        {body && <ExpandableBody body={body} className="pl-7" />}
+      </div>
+    </div>
   );
 }

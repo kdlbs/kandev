@@ -29,6 +29,37 @@ const (
 	checkConclusionFail  = "failure"
 )
 
+// Check source identifiers.
+const (
+	checkSourceCheckRun      = "check_run"
+	checkSourceStatusContext = "status_context"
+)
+
+// PR comment source identifiers.
+const (
+	commentTypeReview = "review"
+	commentTypeIssue  = "issue"
+)
+
+// Reviewer types.
+const (
+	reviewerTypeUser = "user"
+	reviewerTypeTeam = "team"
+)
+
+// GitHub user type identifiers.
+const (
+	githubUserTypeBot = "Bot"
+)
+
+// Commit status state values from /commits/:ref/status.
+const (
+	commitStatusSuccess = "success"
+	commitStatusPending = "pending"
+	commitStatusFailure = "failure"
+	commitStatusError   = "error"
+)
+
 // Watch poll interval bounds in seconds (stored in the database).
 const (
 	defaultWatchPollIntervalSec = 300

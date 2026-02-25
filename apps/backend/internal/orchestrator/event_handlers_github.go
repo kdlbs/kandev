@@ -110,6 +110,13 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 	pr := evt.PR
 	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
 
+	s.logger.Debug("creating review task from PR",
+		zap.String("repo", repoSlug),
+		zap.Int("pr_number", pr.Number),
+		zap.String("head_branch", pr.HeadBranch),
+		zap.String("base_branch", pr.BaseBranch),
+		zap.String("review_watch_id", evt.ReviewWatchID))
+
 	title := fmt.Sprintf("PR #%d: %s", pr.Number, pr.Title)
 	description := interpolateReviewPrompt(evt.Prompt, pr)
 
@@ -220,19 +227,31 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 	if s.repositoryResolver == nil {
 		return nil
 	}
+	repoSlug := fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)
+	s.logger.Debug("resolving review repository",
+		zap.String("repo", repoSlug),
+		zap.String("pr_base_branch", pr.BaseBranch),
+		zap.String("pr_head_branch", pr.HeadBranch))
+
 	repoID, baseBranch, err := s.repositoryResolver.ResolveForReview(
 		ctx, workspaceID, "github", pr.RepoOwner, pr.RepoName, pr.BaseBranch,
 	)
 	if err != nil {
 		s.logger.Warn("failed to resolve repository for review task (continuing without repo)",
-			zap.String("repo", fmt.Sprintf("%s/%s", pr.RepoOwner, pr.RepoName)),
+			zap.String("repo", repoSlug),
 			zap.Error(err))
 		return nil
 	}
 	if repoID == "" {
 		return nil
 	}
-	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch}}
+	s.logger.Debug("resolved review repository",
+		zap.String("repo", repoSlug),
+		zap.String("repo_id", repoID),
+		zap.String("base_branch", baseBranch))
+	// Use the PR's head branch so the worktree checks out the PR code, not the merge target.
+	// The actual base branch is preserved in the TaskPR record for reference.
+	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: pr.HeadBranch}}
 }
 
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on

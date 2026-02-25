@@ -275,6 +275,81 @@ func TestCountPendingReviews(t *testing.T) {
 	}
 }
 
+func TestCountPendingRequestedReviewers(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   *PR
+		want int
+	}{
+		{"nil pr", nil, 0},
+		{"none", &PR{}, 0},
+		{
+			"with requested reviewers",
+			&PR{
+				RequestedReviewers: []RequestedReviewer{
+					{Login: "alice", Type: reviewerTypeUser},
+					{Login: "core-team", Type: reviewerTypeTeam},
+				},
+			},
+			2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countPendingRequestedReviewers(tt.pr)
+			if got != tt.want {
+				t.Errorf("countPendingRequestedReviewers() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveReviewSyncState(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		pr        *PR
+		reviews   []PRReview
+		wantState string
+		wantCount int
+	}{
+		{
+			name:      "uses requested reviewers before review-derived pending",
+			pr:        &PR{RequestedReviewers: []RequestedReviewer{{Login: "alice", Type: reviewerTypeUser}}},
+			reviews:   []PRReview{{Author: "alice", State: reviewStateCommented, CreatedAt: t1}},
+			wantState: computedReviewStatePending,
+			wantCount: 1,
+		},
+		{
+			name:      "fallback to review-derived pending when no requests",
+			pr:        &PR{},
+			reviews:   []PRReview{{Author: "alice", State: reviewStateCommented, CreatedAt: t1}},
+			wantState: computedReviewStatePending,
+			wantCount: 1,
+		},
+		{
+			name:      "no submitted reviews but pending requests yields pending state",
+			pr:        &PR{RequestedReviewers: []RequestedReviewer{{Login: "core", Type: reviewerTypeTeam}}},
+			reviews:   nil,
+			wantState: computedReviewStatePending,
+			wantCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotState, gotCount := deriveReviewSyncState(tt.pr, tt.reviews)
+			if gotState != tt.wantState {
+				t.Errorf("deriveReviewSyncState() state = %q, want %q", gotState, tt.wantState)
+			}
+			if gotCount != tt.wantCount {
+				t.Errorf("deriveReviewSyncState() pending count = %d, want %d", gotCount, tt.wantCount)
+			}
+		})
+	}
+}
+
 func TestFindLatestCommentTime(t *testing.T) {
 	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	t2 := time.Date(2025, 1, 5, 0, 0, 0, 0, time.UTC)

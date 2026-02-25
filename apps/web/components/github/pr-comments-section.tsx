@@ -1,12 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import type { PRComment } from "@/lib/types/github";
-import {
-  CollapsibleSection,
-  AddToContextButton,
-  AuthorAvatar,
-  AuthorLink,
-  formatTimeAgo,
-} from "./pr-shared";
+import { CollapsibleSection, AddToContextButton, FeedbackItemRow } from "./pr-shared";
 
 function buildCommentMessage(comment: PRComment, prUrl: string): string {
   const location = comment.path
@@ -72,6 +67,21 @@ function buildThreads(comments: PRComment[]): CommentThread[] {
   }));
 }
 
+function CommentMetaBadge({ comment, isReply }: { comment: PRComment; isReply?: boolean }) {
+  if (comment.path) {
+    return (
+      <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">
+        {comment.path}
+        {comment.line > 0 && `:${comment.line}`}
+      </span>
+    );
+  }
+  if (!isReply) {
+    return <span className="text-[10px] text-muted-foreground">(general)</span>;
+  }
+  return null;
+}
+
 function CommentItem({
   comment,
   prUrl,
@@ -84,28 +94,15 @@ function CommentItem({
   isReply?: boolean;
 }) {
   return (
-    <div className={isReply ? "ml-4 pl-2.5 border-l-2 border-border" : ""}>
-      <div className="px-2.5 py-2 rounded-md border border-border bg-muted/30 space-y-1">
-        <div className="flex items-center gap-2">
-          <AuthorAvatar src={comment.author_avatar} author={comment.author} />
-          <AuthorLink author={comment.author} />
-          {comment.path && (
-            <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">
-              {comment.path}
-              {comment.line > 0 && `:${comment.line}`}
-            </span>
-          )}
-          {!comment.path && !isReply && (
-            <span className="text-[10px] text-muted-foreground">(general)</span>
-          )}
-          <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-            {formatTimeAgo(comment.created_at)}
-          </span>
-          <AddToContextButton onClick={() => onAddAsContext(buildCommentMessage(comment, prUrl))} />
-        </div>
-        <p className="text-xs text-muted-foreground pl-7 line-clamp-4">{comment.body}</p>
-      </div>
-    </div>
+    <FeedbackItemRow
+      author={comment.author}
+      authorAvatar={comment.author_avatar}
+      body={comment.body}
+      createdAt={comment.created_at}
+      metaBadge={<CommentMetaBadge comment={comment} isReply={isReply} />}
+      onAddAsContext={() => onAddAsContext(buildCommentMessage(comment, prUrl))}
+      isReply={isReply}
+    />
   );
 }
 
@@ -154,7 +151,17 @@ export function CommentsSection({
   prUrl: string;
   onAddAsContext: (message: string) => void;
 }) {
-  const threads = useMemo(() => buildThreads(comments), [comments]);
+  const [showBotComments, setShowBotComments] = useState(false);
+  const humanComments = useMemo(
+    () => comments.filter((comment) => !comment.author_is_bot),
+    [comments],
+  );
+  const botComments = useMemo(
+    () => comments.filter((comment) => comment.author_is_bot),
+    [comments],
+  );
+  const humanThreads = useMemo(() => buildThreads(humanComments), [humanComments]);
+  const botThreads = useMemo(() => buildThreads(botComments), [botComments]);
 
   return (
     <CollapsibleSection
@@ -167,14 +174,37 @@ export function CommentsSection({
       {comments.length === 0 && (
         <p className="text-xs text-muted-foreground px-2 py-2">No comments yet</p>
       )}
-      {threads.map((thread) => (
+      {humanThreads.map((thread) => (
         <ThreadBlock
-          key={thread.root.id}
+          key={`human-${thread.root.id}`}
           thread={thread}
           prUrl={prUrl}
           onAddAsContext={onAddAsContext}
         />
       ))}
+      {botComments.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowBotComments((current) => !current)}
+          className="w-full px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 cursor-pointer"
+        >
+          {showBotComments ? (
+            <IconChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <IconChevronRight className="h-3.5 w-3.5" />
+          )}
+          Bot comments ({botComments.length})
+        </button>
+      )}
+      {showBotComments &&
+        botThreads.map((thread) => (
+          <ThreadBlock
+            key={`bot-${thread.root.id}`}
+            thread={thread}
+            prUrl={prUrl}
+            onAddAsContext={onAddAsContext}
+          />
+        ))}
     </CollapsibleSection>
   );
 }

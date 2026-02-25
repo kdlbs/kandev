@@ -9,6 +9,12 @@ import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
+function prIconColor(state: string): string {
+  if (state === "merged") return "text-purple-500";
+  if (state === "closed") return "text-red-500";
+  return "text-green-600";
+}
+
 function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (pr.checks_state === "failure" || pr.review_state === "changes_requested") {
     return <IconX className="h-3 w-3 text-red-500" />;
@@ -46,7 +52,7 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
           className="cursor-pointer gap-1.5 px-2"
           onClick={addPRPanel}
         >
-          <IconGitPullRequest className="h-4 w-4" />
+          <IconGitPullRequest className={`h-4 w-4 ${prIconColor(pr.state)}`} />
           <span className="text-xs font-medium">#{pr.pr_number}</span>
           <PRStatusIcon pr={pr} />
         </Button>

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -47,24 +48,34 @@ func (c *GHClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// ghRequestedReviewer is a user/team requested reviewer returned by gh pr view.
+type ghRequestedReviewer struct {
+	TypeName string `json:"__typename"`
+	Login    string `json:"login"`
+	Slug     string `json:"slug"`
+	Name     string `json:"name"`
+}
+
 // ghPR is the JSON shape returned by gh pr list/view.
 type ghPR struct {
-	Number      int       `json:"number"`
-	Title       string    `json:"title"`
-	URL         string    `json:"url"`
-	State       string    `json:"state"`
-	HeadRefName string    `json:"headRefName"`
-	HeadRefOid  string    `json:"headRefOid"`
-	BaseRefName string    `json:"baseRefName"`
-	IsDraft     bool      `json:"isDraft"`
-	Mergeable   string    `json:"mergeable"`
-	Additions   int       `json:"additions"`
-	Deletions   int       `json:"deletions"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	MergedAt    string    `json:"mergedAt"`
-	ClosedAt    string    `json:"closedAt"`
-	Author      struct {
+	Number         int                   `json:"number"`
+	Title          string                `json:"title"`
+	URL            string                `json:"url"`
+	State          string                `json:"state"`
+	Body           string                `json:"body"`
+	HeadRefName    string                `json:"headRefName"`
+	HeadRefOid     string                `json:"headRefOid"`
+	BaseRefName    string                `json:"baseRefName"`
+	IsDraft        bool                  `json:"isDraft"`
+	Mergeable      string                `json:"mergeable"`
+	Additions      int                   `json:"additions"`
+	Deletions      int                   `json:"deletions"`
+	CreatedAt      time.Time             `json:"createdAt"`
+	UpdatedAt      time.Time             `json:"updatedAt"`
+	MergedAt       string                `json:"mergedAt"`
+	ClosedAt       string                `json:"closedAt"`
+	ReviewRequests []ghRequestedReviewer `json:"reviewRequests"`
+	Author         struct {
 		Login string `json:"login"`
 	} `json:"author"`
 }
@@ -72,7 +83,7 @@ type ghPR struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
 	if err != nil {
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
@@ -249,23 +260,30 @@ type ghComment struct {
 	User      struct {
 		Login     string `json:"login"`
 		AvatarURL string `json:"avatar_url"`
+		Type      string `json:"type"`
 	} `json:"user"`
 }
 
 func (c *GHClient) ListPRComments(ctx context.Context, owner, repo string, number int, since *time.Time) ([]PRComment, error) {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/comments", owner, repo, number)
-	if since != nil {
-		endpoint += "?since=" + since.Format(time.RFC3339)
-	}
-	out, err := c.run(ctx, "api", endpoint, "--paginate")
+	reviewEndpoint := appendSinceQuery(fmt.Sprintf("repos/%s/%s/pulls/%d/comments", owner, repo, number), since)
+	reviewOut, err := c.run(ctx, "api", reviewEndpoint, "--paginate")
 	if err != nil {
 		return nil, fmt.Errorf("list PR comments: %w", err)
 	}
-	var raw []ghComment
-	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+	var reviewRaw []ghComment
+	if err := json.Unmarshal([]byte(reviewOut), &reviewRaw); err != nil {
 		return nil, fmt.Errorf("parse comments: %w", err)
 	}
-	return convertRawComments(raw), nil
+	issueEndpoint := appendSinceQuery(fmt.Sprintf("repos/%s/%s/issues/%d/comments", owner, repo, number), since)
+	issueOut, err := c.run(ctx, "api", issueEndpoint, "--paginate")
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments: %w", err)
+	}
+	var issueRaw []ghIssueComment
+	if err := json.Unmarshal([]byte(issueOut), &issueRaw); err != nil {
+		return nil, fmt.Errorf("parse issue comments: %w", err)
+	}
+	return mergeAndSortPRComments(convertRawComments(reviewRaw), convertRawIssueComments(issueRaw)), nil
 }
 
 // ghCheckRun is the JSON shape from the check-runs API.
@@ -283,21 +301,67 @@ type ghCheckRun struct {
 }
 
 func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
-	out, err := c.run(ctx, "api",
+	checkRunsOut, err := c.run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/commits/%s/check-runs", owner, repo, ref),
 		"--jq", ".check_runs")
 	if err != nil {
 		return nil, fmt.Errorf("list check runs: %w", err)
 	}
-	var raw []ghCheckRun
-	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+	var checkRunsRaw []ghCheckRun
+	if err := json.Unmarshal([]byte(checkRunsOut), &checkRunsRaw); err != nil {
 		return nil, fmt.Errorf("parse check runs: %w", err)
 	}
-	return convertRawCheckRuns(raw), nil
+	statusOut, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/commits/%s/status", owner, repo, ref),
+		"--jq", ".statuses")
+	if err != nil {
+		return nil, fmt.Errorf("list status contexts: %w", err)
+	}
+	var statusRaw []ghStatusContext
+	if err := json.Unmarshal([]byte(statusOut), &statusRaw); err != nil {
+		return nil, fmt.Errorf("parse status contexts: %w", err)
+	}
+	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
 }
 
 func (c *GHClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	return getPRFeedback(ctx, c, owner, repo, number)
+}
+
+func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/pulls/%d/files", owner, repo, number),
+		"--paginate")
+	if err != nil {
+		return nil, fmt.Errorf("list PR files: %w", err)
+	}
+	return parsePRFilesJSON(out)
+}
+
+func (c *GHClient) ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/pulls/%d/commits", owner, repo, number),
+		"--paginate")
+	if err != nil {
+		return nil, fmt.Errorf("list PR commits: %w", err)
+	}
+	return parsePRCommitsJSON(out)
+}
+
+func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
+	args := []string{"api",
+		fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", owner, repo, number),
+		"-X", "POST",
+		"-f", "event=" + event,
+	}
+	if body != "" {
+		args = append(args, "-f", "body="+body)
+	}
+	_, err := c.run(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("submit review on PR #%d: %w", number, err)
+	}
+	return nil
 }
 
 // run executes a gh CLI command and returns its stdout output.
@@ -365,27 +429,52 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		state = prStateMerged
 	}
 	pr := &PR{
-		Number:      raw.Number,
-		Title:       raw.Title,
-		URL:         raw.URL,
-		HTMLURL:     raw.URL,
-		State:       state,
-		HeadBranch:  raw.HeadRefName,
-		HeadSHA:     raw.HeadRefOid,
-		BaseBranch:  raw.BaseRefName,
-		AuthorLogin: raw.Author.Login,
-		RepoOwner:   owner,
-		RepoName:    repo,
-		Draft:       raw.IsDraft,
-		Mergeable:   raw.Mergeable == "MERGEABLE",
-		Additions:   raw.Additions,
-		Deletions:   raw.Deletions,
-		CreatedAt:   raw.CreatedAt,
-		UpdatedAt:   raw.UpdatedAt,
-		MergedAt:    parseTimePtr(raw.MergedAt),
-		ClosedAt:    parseTimePtr(raw.ClosedAt),
+		Number:             raw.Number,
+		Title:              raw.Title,
+		URL:                raw.URL,
+		HTMLURL:            raw.URL,
+		State:              state,
+		Body:               raw.Body,
+		HeadBranch:         raw.HeadRefName,
+		HeadSHA:            raw.HeadRefOid,
+		BaseBranch:         raw.BaseRefName,
+		AuthorLogin:        raw.Author.Login,
+		RepoOwner:          owner,
+		RepoName:           repo,
+		Draft:              raw.IsDraft,
+		Mergeable:          raw.Mergeable == "MERGEABLE",
+		Additions:          raw.Additions,
+		Deletions:          raw.Deletions,
+		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),
+		CreatedAt:          raw.CreatedAt,
+		UpdatedAt:          raw.UpdatedAt,
+		MergedAt:           parseTimePtr(raw.MergedAt),
+		ClosedAt:           parseTimePtr(raw.ClosedAt),
 	}
 	return pr
+}
+
+func convertGHRequestedReviewers(raw []ghRequestedReviewer) []RequestedReviewer {
+	reviewers := make([]RequestedReviewer, 0, len(raw))
+	for _, req := range raw {
+		switch req.TypeName {
+		case "Team":
+			login := req.Slug
+			if login == "" {
+				login = req.Name
+			}
+			if login == "" {
+				continue
+			}
+			reviewers = append(reviewers, RequestedReviewer{Login: login, Type: reviewerTypeTeam})
+		default:
+			if req.Login == "" {
+				continue
+			}
+			reviewers = append(reviewers, RequestedReviewer{Login: req.Login, Type: reviewerTypeUser})
+		}
+	}
+	return reviewers
 }
 
 func parseTimePtr(s string) *time.Time {
@@ -407,4 +496,11 @@ func parseRepoURL(url string) (string, string) {
 		return "", ""
 	}
 	return parts[len(parts)-2], parts[len(parts)-1]
+}
+
+func appendSinceQuery(endpoint string, since *time.Time) string {
+	if since == nil {
+		return endpoint
+	}
+	return endpoint + "?since=" + url.QueryEscape(since.Format(time.RFC3339))
 }

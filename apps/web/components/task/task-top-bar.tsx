@@ -90,7 +90,7 @@ const TaskTopBar = memo(function TaskTopBar({
   const displayBranch = worktreeBranch || baseBranch;
 
   return (
-    <header className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
+    <header className="@container/topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
       <TopBarLeft
         taskTitle={taskTitle}
         repositoryName={repositoryName}
@@ -199,9 +199,9 @@ function BranchPathPopover({
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors">
-              <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">{displayBranch}</span>
+            <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-full">
+              <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground truncate">{displayBranch}</span>
               <CopyIconButton
                 copied={copiedBranch}
                 onClick={(e) => {
@@ -296,10 +296,10 @@ function TopBarLeft({
   remoteStatusError?: string | null;
 }) {
   return (
-    <div className="flex items-center gap-2.5 min-w-0">
-      <Breadcrumb>
-        <BreadcrumbList className="flex-nowrap text-sm">
-          <BreadcrumbItem>
+    <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
+      <Breadcrumb className="min-w-0">
+        <BreadcrumbList className="flex-nowrap text-sm min-w-0">
+          <BreadcrumbItem className="shrink-0">
             <BreadcrumbLink asChild>
               <Link
                 href="/"
@@ -311,24 +311,38 @@ function TopBarLeft({
           </BreadcrumbItem>
           {repositoryName && (
             <>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <span className="text-muted-foreground">{repositoryName}</span>
+              <BreadcrumbSeparator className="shrink-0 @max-[900px]/topbar:hidden" />
+              <BreadcrumbItem className="min-w-0 @max-[900px]/topbar:hidden">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-muted-foreground truncate block">{repositoryName}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>{repositoryName}</TooltipContent>
+                </Tooltip>
               </BreadcrumbItem>
             </>
           )}
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage className="font-medium">{taskTitle ?? "Task details"}</BreadcrumbPage>
+          <BreadcrumbSeparator className="shrink-0" />
+          <BreadcrumbItem className="min-w-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <BreadcrumbPage className="font-medium truncate">
+                  {taskTitle ?? "Task details"}
+                </BreadcrumbPage>
+              </TooltipTrigger>
+              <TooltipContent>{taskTitle ?? "Task details"}</TooltipContent>
+            </Tooltip>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
-      <BranchPathPopover
-        displayBranch={displayBranch}
-        repositoryPath={repositoryPath}
-        worktreePath={worktreePath}
-      />
+      <div className="shrink-0 @max-[1352px]/topbar:hidden">
+        <BranchPathPopover
+          displayBranch={displayBranch}
+          repositoryPath={repositoryPath}
+          worktreePath={worktreePath}
+        />
+      </div>
 
       <RemoteExecutorIndicator
         isRemoteExecutor={isRemoteExecutor}

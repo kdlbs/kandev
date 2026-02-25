@@ -293,6 +293,8 @@ const (
 	ActionGitHubReviewTriggerAll  = "github.review_watches.trigger_all"
 	ActionGitHubPRWatchesList     = "github.pr_watches.list"
 	ActionGitHubPRWatchDelete     = "github.pr_watches.delete"
+	ActionGitHubPRFilesGet        = "github.pr_files.get"
+	ActionGitHubPRCommitsGet      = "github.pr_commits.get"
 	ActionGitHubTaskPRUpdated     = "github.task_pr.updated"      // Notification
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification

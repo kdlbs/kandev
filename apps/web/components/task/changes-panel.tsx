@@ -16,8 +16,15 @@ import {
   CommitsSection,
   ActionButtonsSection,
   ReviewProgressBar,
+  PRFilesSection,
+  PRCommitsSection,
 } from "./changes-panel-timeline";
+import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
+import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
+import type { PRDiffFile } from "@/lib/types/github";
 
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string) => void;
@@ -53,20 +60,33 @@ type CumulativeDiffFiles = Record<
   { diff?: string; status?: string; additions?: number; deletions?: number }
 >;
 
+function addUncommittedPaths(paths: Set<string>, files: FileInfo[]) {
+  for (const file of files) {
+    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
+  }
+}
+
+function addCumulativePaths(paths: Set<string>, files: CumulativeDiffFiles) {
+  for (const [path, file] of Object.entries(files)) {
+    if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+  }
+}
+
+function addPRPaths(paths: Set<string>, files: PRDiffFile[]) {
+  for (const file of files) {
+    if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
+  }
+}
+
 function collectReviewPaths(
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
+  prFiles?: PRDiffFile[],
 ): Set<string> {
   const paths = new Set<string>();
-  for (const file of uncommittedFiles) {
-    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
-  }
-  if (cumulativeDiffFiles) {
-    for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
-      if (paths.has(path)) continue;
-      if (file.diff && normalizeDiffContent(file.diff)) paths.add(path);
-    }
-  }
+  addUncommittedPaths(paths, uncommittedFiles);
+  if (cumulativeDiffFiles) addCumulativePaths(paths, cumulativeDiffFiles);
+  if (prFiles) addPRPaths(paths, prFiles);
   return paths;
 }
 
@@ -74,11 +94,16 @@ function getDiffForPath(
   path: string,
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
+  prFiles?: PRDiffFile[],
 ): string {
   const uncommitted = uncommittedFiles.find((f) => f.path === path);
   if (uncommitted?.diff) return normalizeDiffContent(uncommitted.diff);
   const cumDiff = cumulativeDiffFiles?.[path]?.diff;
   if (cumDiff) return normalizeDiffContent(cumDiff);
+  if (prFiles) {
+    const prFile = prFiles.find((f) => f.filename === path);
+    if (prFile?.patch) return normalizeDiffContent(prFile.patch);
+  }
   return "";
 }
 
@@ -86,14 +111,15 @@ function computeReviewProgress(
   uncommittedFiles: FileInfo[],
   cumulativeDiff: { files?: CumulativeDiffFiles } | null,
   reviews: Map<string, { reviewed: boolean; diffHash?: string }>,
+  prFiles?: PRDiffFile[],
 ) {
   const cumulativeDiffFiles = cumulativeDiff?.files;
-  const paths = collectReviewPaths(uncommittedFiles, cumulativeDiffFiles);
+  const paths = collectReviewPaths(uncommittedFiles, cumulativeDiffFiles, prFiles);
   let reviewed = 0;
   for (const path of paths) {
     const state = reviews.get(path);
     if (!state?.reviewed) continue;
-    const diffContent = getDiffForPath(path, uncommittedFiles, cumulativeDiffFiles);
+    const diffContent = getDiffForPath(path, uncommittedFiles, cumulativeDiffFiles, prFiles);
     if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }
@@ -112,6 +138,32 @@ function computeStagedStats(stagedFiles: FileInfo[]) {
     stagedAdditions: additions,
     stagedDeletions: deletions,
   };
+}
+
+function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
+  return files.map((file) => {
+    let status: FileInfo["status"];
+    switch (file.status) {
+      case "added":
+        status = "added";
+        break;
+      case "removed":
+        status = "deleted";
+        break;
+      case "renamed":
+        status = "renamed";
+        break;
+      default:
+        status = "modified";
+    }
+    return {
+      path: file.filename,
+      status,
+      plus: file.additions,
+      minus: file.deletions,
+      oldPath: file.old_path,
+    };
+  });
 }
 
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
@@ -140,11 +192,15 @@ type ChangesPanelBodyProps = {
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
+  hasPRFiles: boolean;
+  hasPRCommits: boolean;
   canPush: boolean;
   canCreatePR: boolean;
   existingPrUrl: string | undefined;
   unstagedFiles: ChangedFile[];
   stagedFiles: ChangedFile[];
+  prFiles: PRChangedFile[];
+  prCommits: { sha: string; message: string; author_login: string; author_date: string }[];
   commits: ReturnType<typeof useSessionGit>["commits"];
   pendingStageFiles: Set<string>;
   reviewedCount: number;
@@ -224,46 +280,43 @@ function ChangesPanelDialogsSection({
   );
 }
 
-function ChangesPanelTimeline(
-  props: Pick<
-    ChangesPanelBodyProps,
-    | "hasAnything"
-    | "hasUnstaged"
-    | "hasStaged"
-    | "hasCommits"
-    | "canPush"
-    | "canCreatePR"
-    | "existingPrUrl"
-    | "unstagedFiles"
-    | "stagedFiles"
-    | "commits"
-    | "pendingStageFiles"
-    | "aheadCount"
-    | "isLoading"
-    | "dialogs"
-    | "onOpenDiffFile"
-    | "onEditFile"
-    | "onOpenCommitDetail"
-    | "onRevertCommit"
-    | "onStageAll"
-    | "onStage"
-    | "onUnstage"
-    | "onPush"
-    | "onForcePush"
-  >,
-) {
-  if (!props.hasAnything) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        Your changed files will appear here
-      </div>
-    );
-  }
+type TimelineProps = Pick<
+  ChangesPanelBodyProps,
+  | "hasAnything"
+  | "hasUnstaged"
+  | "hasStaged"
+  | "hasCommits"
+  | "hasPRFiles"
+  | "hasPRCommits"
+  | "canPush"
+  | "canCreatePR"
+  | "existingPrUrl"
+  | "unstagedFiles"
+  | "stagedFiles"
+  | "prFiles"
+  | "prCommits"
+  | "commits"
+  | "pendingStageFiles"
+  | "aheadCount"
+  | "isLoading"
+  | "dialogs"
+  | "onOpenDiffFile"
+  | "onEditFile"
+  | "onOpenCommitDetail"
+  | "onRevertCommit"
+  | "onStageAll"
+  | "onStage"
+  | "onUnstage"
+  | "onPush"
+  | "onForcePush"
+>;
+
+function TimelineLocalChanges(props: TimelineProps) {
   const showStaged = props.hasUnstaged || props.hasStaged;
   const showCommits = props.hasStaged || props.hasCommits;
 
   return (
-    <div className="flex flex-col">
+    <>
       {props.hasUnstaged && (
         <FileListSection
           variant="unstaged"
@@ -314,6 +367,38 @@ function ChangesPanelTimeline(
           onForcePush={props.onForcePush}
         />
       )}
+    </>
+  );
+}
+
+function ChangesPanelTimeline(props: TimelineProps) {
+  if (!props.hasAnything) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+        Your changed files will appear here
+      </div>
+    );
+  }
+
+  const hasLocalChanges = props.hasUnstaged || props.hasStaged || props.hasCommits;
+
+  return (
+    <div className="flex flex-col">
+      {props.hasPRFiles && (
+        <PRFilesSection
+          files={props.prFiles}
+          isLast={!props.hasPRCommits && !hasLocalChanges}
+          onOpenDiff={props.onOpenDiffFile}
+        />
+      )}
+      {props.hasPRCommits && (
+        <PRCommitsSection
+          commits={props.prCommits}
+          isLast={!hasLocalChanges}
+          onOpenCommitDetail={props.onOpenCommitDetail}
+        />
+      )}
+      <TimelineLocalChanges {...props} />
     </div>
   );
 }
@@ -342,6 +427,24 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
   );
 }
 
+function useChangesPanelPRData() {
+  const taskPR = useActiveTaskPR();
+  const { files: prDiffFiles } = usePRDiff(
+    taskPR?.owner ?? null,
+    taskPR?.repo ?? null,
+    taskPR?.pr_number ?? null,
+  );
+  const { commits: prCommitsList } = usePRCommits(
+    taskPR?.owner ?? null,
+    taskPR?.repo ?? null,
+    taskPR?.pr_number ?? null,
+  );
+  const hasPRFiles = prDiffFiles.length > 0;
+  const hasPRCommits = prCommitsList.length > 0;
+  const prFiles = useMemo(() => mapPRFilesToChangedFiles(prDiffFiles), [prDiffFiles]);
+  return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
+}
+
 const ChangesPanel = memo(function ChangesPanel({
   onOpenDiffFile,
   onEditFile,
@@ -355,29 +458,26 @@ const ChangesPanel = memo(function ChangesPanel({
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
+  const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
 
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
   const stagedFiles = useMemo(() => mapToChangedFiles(git.stagedFiles), [git.stagedFiles]);
 
   const { reviewedCount, totalFileCount } = useMemo(
-    () => computeReviewProgress(git.allFiles, git.cumulativeDiff, reviews),
-    [git.allFiles, git.cumulativeDiff, reviews],
+    () => computeReviewProgress(git.allFiles, git.cumulativeDiff, reviews, prDiffFiles),
+    [git.allFiles, git.cumulativeDiff, reviews, prDiffFiles],
   );
-  const { stagedFileCount, stagedAdditions, stagedDeletions } = useMemo(
-    () => computeStagedStats(git.stagedFiles),
-    [git.stagedFiles],
-  );
+  const staged = useMemo(() => computeStagedStats(git.stagedFiles), [git.stagedFiles]);
 
-  const {
-    handleGitOperation,
-    handlePull,
-    handleRebase,
-    handlePush,
-    handleForcePush,
-    handleRevertCommit,
-  } = useChangesGitHandlers(git, toast, baseBranch);
-  const dialogs = useChangesDialogHandlers(git, toast, handleGitOperation, taskTitle, baseBranch);
+  const gitHandlers = useChangesGitHandlers(git, toast, baseBranch);
+  const dialogs = useChangesDialogHandlers(
+    git,
+    toast,
+    gitHandlers.handleGitOperation,
+    taskTitle,
+    baseBranch,
+  );
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -386,25 +486,30 @@ const ChangesPanel = memo(function ChangesPanel({
       <ChangesPanelHeader
         hasChanges={git.hasChanges}
         hasCommits={git.hasCommits}
+        hasPRFiles={hasPRFiles}
         displayBranch={git.branch}
         baseBranchDisplay={baseBranchDisplay}
         behindCount={git.behind}
         isLoading={git.isLoading}
         onOpenDiffAll={onOpenDiffAll}
         onOpenReview={onOpenReview}
-        onPull={handlePull}
-        onRebase={handleRebase}
+        onPull={gitHandlers.handlePull}
+        onRebase={gitHandlers.handleRebase}
       />
       <ChangesPanelBody
-        hasAnything={git.hasAnything}
+        hasAnything={git.hasAnything || hasPRFiles || hasPRCommits}
         hasUnstaged={git.hasUnstaged}
         hasStaged={git.hasStaged}
         hasCommits={git.hasCommits}
+        hasPRFiles={hasPRFiles}
+        hasPRCommits={hasPRCommits}
         canPush={git.canPush}
         canCreatePR={git.canCreatePR}
         existingPrUrl={existingPrUrl}
         unstagedFiles={unstagedFiles}
         stagedFiles={stagedFiles}
+        prFiles={prFiles}
+        prCommits={prCommitsList}
         commits={git.commits}
         pendingStageFiles={git.pendingStageFiles}
         reviewedCount={reviewedCount}
@@ -415,16 +520,16 @@ const ChangesPanel = memo(function ChangesPanel({
         onOpenDiffFile={onOpenDiffFile}
         onEditFile={onEditFile}
         onOpenCommitDetail={onOpenCommitDetail}
-        onRevertCommit={handleRevertCommit}
+        onRevertCommit={gitHandlers.handleRevertCommit}
         onOpenReview={onOpenReview}
         onStageAll={git.stageAll}
         onStage={(path) => git.stage([path]).then(() => undefined)}
         onUnstage={(path) => git.unstage([path]).then(() => undefined)}
-        onPush={handlePush}
-        onForcePush={handleForcePush}
-        stagedFileCount={stagedFileCount}
-        stagedAdditions={stagedAdditions}
-        stagedDeletions={stagedDeletions}
+        onPush={gitHandlers.handlePush}
+        onForcePush={gitHandlers.handleForcePush}
+        stagedFileCount={staged.stagedFileCount}
+        stagedAdditions={staged.stagedAdditions}
+        stagedDeletions={staged.stagedDeletions}
         displayBranch={git.branch}
         baseBranch={baseBranch}
       />

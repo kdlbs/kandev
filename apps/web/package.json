@@ -95,6 +95,7 @@
     "react-virtuoso": "^4.18.1",
     "recharts": "2.15.4",
     "remark-breaks": "^4.0.0",
+    "remark-gemoji": "^8.0.0",
     "remark-gfm": "^4.0.1",
     "shadcn": "^3.6.3",
     "shiki": "^3.22.0",

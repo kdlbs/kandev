@@ -6,25 +6,33 @@ import "time"
 
 // PR represents a GitHub Pull Request.
 type PR struct {
-	Number      int        `json:"number"`
-	Title       string     `json:"title"`
-	URL         string     `json:"url"`
-	HTMLURL     string     `json:"html_url"`
-	State       string     `json:"state"` // open, closed, merged
-	HeadBranch  string     `json:"head_branch"`
-	HeadSHA     string     `json:"head_sha"`
-	BaseBranch  string     `json:"base_branch"`
-	AuthorLogin string     `json:"author_login"`
-	RepoOwner   string     `json:"repo_owner"`
-	RepoName    string     `json:"repo_name"`
-	Draft       bool       `json:"draft"`
-	Mergeable   bool       `json:"mergeable"`
-	Additions   int        `json:"additions"`
-	Deletions   int        `json:"deletions"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	MergedAt    *time.Time `json:"merged_at,omitempty"`
-	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	Number             int                 `json:"number"`
+	Title              string              `json:"title"`
+	URL                string              `json:"url"`
+	HTMLURL            string              `json:"html_url"`
+	State              string              `json:"state"` // open, closed, merged
+	HeadBranch         string              `json:"head_branch"`
+	HeadSHA            string              `json:"head_sha"`
+	BaseBranch         string              `json:"base_branch"`
+	AuthorLogin        string              `json:"author_login"`
+	RepoOwner          string              `json:"repo_owner"`
+	RepoName           string              `json:"repo_name"`
+	Body               string              `json:"body"`
+	Draft              bool                `json:"draft"`
+	Mergeable          bool                `json:"mergeable"`
+	Additions          int                 `json:"additions"`
+	Deletions          int                 `json:"deletions"`
+	RequestedReviewers []RequestedReviewer `json:"requested_reviewers"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+	MergedAt           *time.Time          `json:"merged_at,omitempty"`
+	ClosedAt           *time.Time          `json:"closed_at,omitempty"`
+}
+
+// RequestedReviewer represents a pending reviewer request on a PR.
+type RequestedReviewer struct {
+	Login string `json:"login"`
+	Type  string `json:"type"` // user, team
 }
 
 // PRReview represents a review on a PR.
@@ -42,10 +50,12 @@ type PRComment struct {
 	ID           int64     `json:"id"`
 	Author       string    `json:"author"`
 	AuthorAvatar string    `json:"author_avatar"`
+	AuthorIsBot  bool      `json:"author_is_bot"`
 	Body         string    `json:"body"`
 	Path         string    `json:"path"`
 	Line         int       `json:"line"`
 	Side         string    `json:"side"` // LEFT, RIGHT
+	CommentType  string    `json:"comment_type"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	InReplyTo    *int64    `json:"in_reply_to,omitempty"`
@@ -54,6 +64,7 @@ type PRComment struct {
 // CheckRun represents a CI check result.
 type CheckRun struct {
 	Name        string     `json:"name"`
+	Source      string     `json:"source"`     // check_run, status_context
 	Status      string     `json:"status"`     // queued, in_progress, completed
 	Conclusion  string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
 	HTMLURL     string     `json:"html_url"`
@@ -253,6 +264,27 @@ type PRStats struct {
 	ApprovalRate        float64      `json:"approval_rate"`
 	AvgTimeToMergeHours float64      `json:"avg_time_to_merge_hours"`
 	PRsByDay            []DailyCount `json:"prs_by_day"`
+}
+
+// PRFile represents a file changed in a pull request.
+type PRFile struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"` // added, removed, modified, renamed, copied, changed, unchanged
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch,omitempty"`
+	OldPath   string `json:"old_path,omitempty"`
+}
+
+// PRCommitInfo represents a commit in a pull request.
+type PRCommitInfo struct {
+	SHA          string `json:"sha"`
+	Message      string `json:"message"`
+	AuthorLogin  string `json:"author_login"`
+	AuthorDate   string `json:"author_date"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	FilesChanged int    `json:"files_changed"`
 }
 
 // DailyCount holds a date and count for chart data.
