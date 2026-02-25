@@ -789,8 +789,6 @@
 
 /* Paragraphs */
 .tiptap-plan-wrapper .tiptap p {
-  /* margin-top: 0.2rem !important; */
-  /* margin-bottom: 0.2rem !important; */
   line-height: 1.625 !important;
   font-size: 13px !important;
 }

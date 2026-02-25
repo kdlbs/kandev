@@ -344,7 +344,6 @@ export function SearchResultsList({
               {folder && <span>{folder}/</span>}
               <span>{name}</span>
             </span>
-            <div className="ml-auto flex items-center" />
           </div>
         );
       })}

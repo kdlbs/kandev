@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message } from "@/lib/types/http";
-import { GridSpinner } from "@/components/grid-spinner";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
@@ -211,15 +210,8 @@ export const NativeMessageList = memo(function NativeMessageList({
       {/* Sentinel for lazy loading older messages */}
       {hasMore && <div ref={sentinelRef} className="h-px" />}
 
-      {isLoadingMore && (
-        <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
-          <GridSpinner className="text-primary mr-2" />
-          <span>Loading older messages...</span>
-        </div>
-      )}
-
       <MessageListStatus
-        isLoadingMore={false}
+        isLoadingMore={isLoadingMore}
         hasMore={hasMore}
         showLoadingState={showLoadingState}
         messagesLoading={messagesLoading}

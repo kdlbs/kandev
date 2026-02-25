@@ -9,6 +9,7 @@ export type LayoutPanel = {
 
 /** A group within a column (vertical slice). Contains tabs. */
 export type LayoutGroup = {
+  id?: string;
   panels: LayoutPanel[];
   activePanel?: string;
 };

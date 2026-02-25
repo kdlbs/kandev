@@ -3,7 +3,9 @@ import type { FileEditorState } from "./dockview-store";
 type StoreSet = (
   partial:
     | { openFiles: Map<string, FileEditorState> }
-    | ((s: { openFiles: Map<string, FileEditorState> }) => { openFiles: Map<string, FileEditorState> }),
+    | ((s: { openFiles: Map<string, FileEditorState> }) => {
+        openFiles: Map<string, FileEditorState>;
+      }),
 ) => void;
 
 export function buildFileStateActions(set: StoreSet) {

@@ -27,9 +27,7 @@ export function useLazyLoadMessages(sessionId: string | null) {
   const loadMore = useCallback(async () => {
     const { hasMore, isLoading, oldestCursor } = stateRef.current;
 
-    console.log("[LazyLoad] loadMore called", { sessionId, hasMore, isLoading, oldestCursor });
     if (!sessionId || !hasMore || isLoading || !oldestCursor) {
-      console.log("[LazyLoad] loadMore skipped — guard failed");
       return 0;
     }
 

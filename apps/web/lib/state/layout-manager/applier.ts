@@ -25,16 +25,19 @@ export function getRootSplitview(api: DockviewApi): any | null {
   return sv?.resizeView && sv?.getViewSize ? sv : null;
 }
 
-export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
-  const sidebar = api.getPanel("sidebar");
-  const changes = api.getPanel("changes") ?? api.getPanel("diff-files");
-  const term = api.panels.find((p) => p.id.startsWith("terminal-") || p.id === TERMINAL_DEFAULT_ID);
+/** Find a group by well-known ID, falling back to panel-based lookup. */
+function findGroupId(api: DockviewApi, knownId: string, fallbackPanelId: string): string {
+  if (api.groups.some((g) => g.id === knownId)) return knownId;
+  const pnl = api.getPanel(fallbackPanelId);
+  return pnl?.group?.id ?? knownId;
+}
 
+export function resolveGroupIds(api: DockviewApi): LayoutGroupIds {
   return {
-    sidebarGroupId: sidebar?.group?.id ?? SIDEBAR_GROUP,
-    centerGroupId: api.getPanel("chat")?.group?.id ?? CENTER_GROUP,
-    rightTopGroupId: changes?.group?.id ?? RIGHT_TOP_GROUP,
-    rightBottomGroupId: term?.group?.id ?? RIGHT_BOTTOM_GROUP,
+    sidebarGroupId: findGroupId(api, SIDEBAR_GROUP, "sidebar"),
+    centerGroupId: findGroupId(api, CENTER_GROUP, "chat"),
+    rightTopGroupId: findGroupId(api, RIGHT_TOP_GROUP, "changes"),
+    rightBottomGroupId: findGroupId(api, RIGHT_BOTTOM_GROUP, TERMINAL_DEFAULT_ID),
   };
 }
 

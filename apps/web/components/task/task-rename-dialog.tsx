@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useCallback, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
@@ -61,7 +62,12 @@ function TaskRenameForm({
   );
 }
 
-export function TaskRenameDialog({ open, onOpenChange, currentTitle, onSubmit }: TaskRenameDialogProps) {
+export function TaskRenameDialog({
+  open,
+  onOpenChange,
+  currentTitle,
+  onSubmit,
+}: TaskRenameDialogProps): React.JSX.Element {
   const handleClose = useCallback(() => onOpenChange(false), [onOpenChange]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

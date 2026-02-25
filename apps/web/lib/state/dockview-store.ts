@@ -147,6 +147,7 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   if (!sv || sv.length < 2) return;
   try {
     const state = fromDockviewApi(api);
+    if (state.columns.length !== sv.length) return;
     const updates = new Map<string, number>();
     for (let i = 0; i < state.columns.length; i++) {
       const col = state.columns[i];
@@ -182,7 +183,7 @@ type SessionSwitchParams = {
   buildDefault: (api: DockviewApi) => void;
 };
 
-function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | null {
+function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds {
   const { api, oldSessionId, newSessionId, safeWidth, safeHeight, buildDefault } = params;
   if (oldSessionId) {
     try {
@@ -202,7 +203,8 @@ function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds | nul
     }
   }
   buildDefault(api);
-  return null;
+  api.layout(safeWidth, safeHeight);
+  return applyLayoutFixups(api);
 }
 
 function applyLayoutAndSet(
@@ -589,7 +591,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
         safeHeight,
         buildDefault: (a) => get().buildDefaultLayout(a),
       });
-      if (ids) set(ids);
+      set(ids);
     } finally {
       set({ isRestoringLayout: false });
     }

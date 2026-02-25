@@ -6,6 +6,7 @@ import {
   KNOWN_PANEL_IDS,
   STRUCTURAL_COMPONENTS,
   LAYOUT_SIDEBAR_MAX_PX,
+  LAYOUT_RIGHT_MAX_PX,
 } from "./constants";
 
 // Dockview serialized grid node types (internal format)
@@ -43,7 +44,7 @@ function serializeGroup(
   size: number,
   ctx: SerializationCtx,
 ): SerializedLeafNode {
-  const groupId = nextGroupId(ctx);
+  const groupId = group.id ?? nextGroupId(ctx);
   const views = group.panels.map((p) => p.id);
   const isSidebar = columnId === "sidebar";
   return {
@@ -204,7 +205,7 @@ function groupFromGridNode(node: any): LayoutGroup | null {
   const panels: LayoutPanel[] = (group.panels ?? []).map(panelFromDockviewPanel);
   if (panels.length === 0) return null;
 
-  return { panels, activePanel: group.activePanel?.id };
+  return { id: group.id, panels, activePanel: group.activePanel?.id };
 }
 
 /** Recursively capture a dockview grid node into a LayoutNode + flat groups. */
@@ -286,7 +287,12 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
 
     columns.push({
       id: columnId,
-      ...(isPinned ? { pinned: true, maxWidth: LAYOUT_SIDEBAR_MAX_PX } : {}),
+      ...(isPinned
+        ? {
+            pinned: true,
+            maxWidth: columnId === "right" ? LAYOUT_RIGHT_MAX_PX : LAYOUT_SIDEBAR_MAX_PX,
+          }
+        : {}),
       width,
       groups: flatGroups,
       // Only store tree for columns with nested structure (branches)

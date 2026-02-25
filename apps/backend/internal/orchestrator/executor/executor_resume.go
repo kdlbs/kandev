@@ -315,6 +315,15 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 			e.logger.Info("found resume token for session resumption",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
+		} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
+			// Fresh-start resume (no resume token): don't auto-prompt with the task description.
+			// The original prompt may be outdated. The agent boots idle; for agents that opt into
+			// HistoryContextInjection (e.g. Auggie), conversation history is injected on the
+			// user's first message via dispatchInitialPrompt → shouldInjectResumeContext.
+			req.TaskDescription = ""
+			e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID))
 		}
 	}
 

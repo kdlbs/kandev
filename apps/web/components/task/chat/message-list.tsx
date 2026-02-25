@@ -11,7 +11,13 @@ const strategies: Record<string, ComponentType<MessageListProps>> = {
   virtuoso: VirtuosoMessageList,
 };
 
-/** Change to "virtuoso" to switch back to react-virtuoso rendering. */
+/**
+ * Rendering strategy for the message list.
+ * - "native": simple DOM rendering with overflow-anchor for scroll pinning.
+ *   Better for short/medium conversations; avoids Virtuoso measurement quirks.
+ * - "virtuoso": react-virtuoso windowed rendering.
+ *   Better for very long conversations (1000+ messages) where DOM node count matters.
+ */
 const STRATEGY = "native";
 
 export const MessageList = memo(function MessageList(props: MessageListProps) {

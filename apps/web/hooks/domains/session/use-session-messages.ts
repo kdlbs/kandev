@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
@@ -201,13 +201,17 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     };
   }, [taskSessionId, connectionStatus]);
 
-  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, {
-    store,
-    setIsLoading,
-    setIsWaitingForInitialMessages,
-    initialFetchStartRef,
-    lastFetchedSessionIdRef,
-  });
+  const terminalFetchRefs = useMemo(
+    () => ({
+      store,
+      setIsLoading,
+      setIsWaitingForInitialMessages,
+      initialFetchStartRef,
+      lastFetchedSessionIdRef,
+    }),
+    [store],
+  );
+  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, terminalFetchRefs);
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,

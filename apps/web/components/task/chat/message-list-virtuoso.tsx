@@ -164,6 +164,7 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
   return (
     <Virtuoso
       ref={virtuosoRef}
+      /* Suppress Virtuoso's verbose internal logging in all environments */
       logLevel={Number.MAX_SAFE_INTEGER}
       customScrollParent={scrollParent}
       totalCount={itemCount}

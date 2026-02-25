@@ -679,13 +679,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	// 4. No resume token, but session may still be startable as a fresh session
 	// if there's an ExecutorRunning record (worktree info) and session is in an active state.
-	// Don't set NeedsResume — agent will be launched lazily when the user sends their next message
-	// via ensureSessionRunning(). This avoids auto-starting agents that can't natively resume.
+	// NeedsResume triggers the frontend to auto-resume, which launches agentctl and the agent
+	// process (idle, no prompt). For agents with HistoryContextInjection, conversation history
+	// is injected into the user's first message.
 	running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if runErr == nil && running != nil && isActiveSessionState(session.State) {
 		resp.IsAgentRunning = false
 		resp.IsResumable = true
-		resp.NeedsResume = false
+		resp.NeedsResume = true
 		resp.ResumeReason = "agent_not_running_fresh_start"
 		return resp, nil
 	}
