@@ -669,6 +669,19 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID, se
 		return false
 	}
 
+	// Guard: skip engine evaluation when session has no workflow step (mirrors legacy path)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for engine on_turn_complete",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return false
+	}
+
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:       taskID,
 		SessionID:    sessionID,
@@ -756,6 +769,17 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID, sessi
 	}
 
 	if sessionID == "" || s.workflowStepGetter == nil {
+		return false
+	}
+
+	// Guard: skip engine evaluation when session has no workflow step (mirrors legacy path)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get session for engine on_turn_start",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if session.WorkflowStepID == nil || *session.WorkflowStepID == "" {
 		return false
 	}
 
