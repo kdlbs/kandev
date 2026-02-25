@@ -53,33 +53,12 @@ func (s *workflowStore) LoadState(ctx context.Context, taskID, sessionID string)
 		return engine.MachineState{}, fmt.Errorf("load session %s: %w", sessionID, err)
 	}
 
-	currentStepID := ""
-	if session.WorkflowStepID != nil {
-		currentStepID = *session.WorkflowStepID
-	}
-
-	var data map[string]any
-	if session.Metadata != nil {
-		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
-			data = wd
-		}
-	}
-
 	isPassthrough := false
 	if s.agentManager != nil {
 		isPassthrough = s.agentManager.IsPassthroughSession(ctx, sessionID)
 	}
 
-	return engine.MachineState{
-		TaskID:          taskID,
-		SessionID:       sessionID,
-		WorkflowID:      task.WorkflowID,
-		CurrentStepID:   currentStepID,
-		SessionState:    string(session.State),
-		TaskDescription: task.Description,
-		IsPassthrough:   isPassthrough,
-		Data:            data,
-	}, nil
+	return assembleMachineState(task, session, isPassthrough), nil
 }
 
 func (s *workflowStore) LoadStep(ctx context.Context, _, stepID string) (engine.StepSpec, error) {
@@ -182,7 +161,7 @@ func (s *workflowStore) PersistData(ctx context.Context, sessionID string, data 
 	}
 	session.Metadata["workflow_data"] = existing
 
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.repo.UpdateSessionMetadata(ctx, sessionID, session.Metadata); err != nil {
 		return fmt.Errorf("persist workflow data: %w", err)
 	}
 	return nil

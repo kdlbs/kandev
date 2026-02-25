@@ -26,10 +26,18 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	// Process on_turn_start workflow events (step transitions).
 	// For ACP sessions this happens in the message handler before PromptTask;
 	// for passthrough it happens here when the PTY detects user input.
-	s.processOnTurnStartViaEngine(ctx, data.TaskID, data.SessionID)
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for agent running",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
 
 	// Move session to running and task to in progress
-	s.setSessionRunning(ctx, data.TaskID, data.SessionID)
+	s.setSessionRunning(ctx, data.TaskID, data.SessionID, session)
 }
 
 // publishQueueStatusEvent publishes a queue status changed event for the given session
@@ -145,7 +153,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
 	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-	s.processOnTurnCompleteViaEngine(ctx, data.TaskID, data.SessionID)
+	s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
 	// ALWAYS check for queued messages after agent becomes ready, regardless of workflow transition
 	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
@@ -188,7 +196,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// PromptTask rejects while session is RUNNING; queued follow-ups should be
 	// treated like fresh user input after turn completion.
-	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false, session)
 
 	// Publish queue status changed event to notify frontend
 	s.publishQueueStatusEvent(ctx, data.SessionID)
@@ -282,7 +290,15 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	s.scheduler.RemoveTask(data.TaskID)
 
 	// Check for workflow transition based on session's current step.
-	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, data.SessionID)
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for agent completed",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {

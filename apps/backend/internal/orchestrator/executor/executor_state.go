@@ -103,6 +103,8 @@ type executorConfig struct {
 	SetupScript   string            // Setup script from profile
 	CleanupScript string            // Cleanup script from profile (terminal teardown)
 	ProfileEnv    map[string]string // Resolved env vars from profile (secrets decrypted)
+	Resumable     bool              // Whether the executor supports session resume
+	RuntimeName   string            // Runtime name from the executor type (e.g. "local_pc")
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
@@ -138,6 +140,8 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		ExecutorType: string(executor.Type),
 		ExecutorCfg:  executor.Config,
 		Metadata:     metadata,
+		Resumable:    executor.Resumable,
+		RuntimeName:  string(executor.Type),
 	}
 
 	// Load profile by ID if specified in metadata, otherwise skip

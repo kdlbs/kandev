@@ -60,6 +60,10 @@ type HandleInput struct {
 	Trigger      Trigger
 	OperationID  string
 	EvaluateOnly bool // when true, skip ApplyTransition and PersistData; caller handles persistence
+
+	// PreloadedState, when set, skips the LoadState call in the engine.
+	// Use this to avoid redundant DB reads when the caller already loaded the session and task.
+	PreloadedState *MachineState
 }
 
 // HandleResult summarizes engine work for a trigger.
@@ -162,9 +166,15 @@ func (e *Engine) markOperationApplied(ctx context.Context, operationID string) e
 }
 
 func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (MachineState, StepSpec, error) {
-	state, err := e.store.LoadState(ctx, in.TaskID, in.SessionID)
-	if err != nil {
-		return MachineState{}, StepSpec{}, err
+	var state MachineState
+	if in.PreloadedState != nil {
+		state = *in.PreloadedState
+	} else {
+		var err error
+		state, err = e.store.LoadState(ctx, in.TaskID, in.SessionID)
+		if err != nil {
+			return MachineState{}, StepSpec{}, err
+		}
 	}
 	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
 	if err != nil {

@@ -18,30 +18,35 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 	if err != nil {
 		return ErrExecutionNotFound
 	}
+	return e.stopWithSession(ctx, session, reason, force)
+}
+
+// stopWithSession stops an active execution using an already-loaded session.
+func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
 	if session.AgentExecutionID == "" {
 		return ErrExecutionNotFound
 	}
 
 	e.logger.Info("stopping execution",
 		zap.String("task_id", session.TaskID),
-		zap.String("session_id", sessionID),
+		zap.String("session_id", session.ID),
 		zap.String("agent_execution_id", session.AgentExecutionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	err = e.agentManager.StopAgentWithReason(ctx, session.AgentExecutionID, reason, force)
+	err := e.agentManager.StopAgentWithReason(ctx, session.AgentExecutionID, reason, force)
 	if err != nil {
 		// Log the error but continue to clean up execution state
 		// The agent instance may already be gone (container stopped externally)
 		e.logger.Warn("failed to stop agent (may already be stopped)",
-			zap.String("session_id", sessionID),
+			zap.String("session_id", session.ID),
 			zap.Error(err))
 	}
 
 	// Update database
-	if dbErr := e.repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+	if dbErr := e.repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
 		e.logger.Error("failed to update agent session status in database",
-			zap.String("session_id", sessionID),
+			zap.String("session_id", session.ID),
 			zap.Error(dbErr))
 	}
 
@@ -84,7 +89,7 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 	var lastErr error
 	stoppedCount := 0
 	for _, session := range sessions {
-		if err := e.Stop(ctx, session.ID, reason, force); err != nil {
+		if err := e.stopWithSession(ctx, session, reason, force); err != nil {
 			e.logger.Warn("failed to stop session",
 				zap.String("task_id", taskID),
 				zap.String("session_id", session.ID),
@@ -105,10 +110,16 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
-func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
-	session, err := e.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return nil, ErrExecutionNotFound
+func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else {
+		var err error
+		session, err = e.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, ErrExecutionNotFound
+		}
 	}
 	if session.TaskID != taskID {
 		return nil, ErrExecutionNotFound
@@ -143,14 +154,14 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	session, task, acpSessionID, err := e.prepareModelSwitch(ctx, taskID, sessionID)
+	session, task, acpSessionID, existingRunning, err := e.prepareModelSwitch(ctx, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, nil)
 
-	req, err := e.buildSwitchModelRequest(ctx, task, session, sessionID, newModel, prompt, acpSessionID, execConfig)
+	req, err := e.buildSwitchModelRequest(ctx, task, session, sessionID, newModel, prompt, acpSessionID, execConfig, existingRunning)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +177,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(ctx, task.ID, sessionID, newModel, session, req); err != nil {
+	if err := e.launchModelSwitchAgent(ctx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
 		return nil, err
 	}
 
@@ -179,26 +190,28 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 }
 
 // prepareModelSwitch validates the session/task and stops the current agent.
-// Returns the session, task, ACP session ID, and any error.
-func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID string) (*models.TaskSession, *models.Task, string, error) {
+// Returns the session, task, ACP session ID, existing ExecutorRunning record, and any error.
+func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID string) (*models.TaskSession, *models.Task, string, *models.ExecutorRunning, error) {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to get session: %w", err)
+		return nil, nil, "", nil, fmt.Errorf("failed to get session: %w", err)
 	}
 	if session.TaskID != taskID {
-		return nil, nil, "", fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+		return nil, nil, "", nil, fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
 	}
 	if session.AgentExecutionID == "" {
-		return nil, nil, "", ErrExecutionNotFound
+		return nil, nil, "", nil, ErrExecutionNotFound
 	}
 
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to get task: %w", err)
+		return nil, nil, "", nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
 	var acpSessionID string
+	var existingRunning *models.ExecutorRunning
 	if running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); runErr == nil && running != nil {
+		existingRunning = running
 		acpSessionID = running.ResumeToken
 	}
 
@@ -210,11 +223,11 @@ func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID str
 			zap.String("agent_execution_id", session.AgentExecutionID))
 	}
 
-	return session, task, acpSessionID, nil
+	return session, task, acpSessionID, existingRunning, nil
 }
 
 // launchModelSwitchAgent launches the new agent, persists state, and starts the process.
-func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID, newModel string, session *models.TaskSession, req *LaunchAgentRequest) error {
+func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID, newModel string, session *models.TaskSession, req *LaunchAgentRequest, existingRunning *models.ExecutorRunning) error {
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
 		e.logger.Error("failed to launch agent with new model",
@@ -224,7 +237,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
 
-	e.persistModelSwitchState(ctx, taskID, sessionID, session, resp, newModel)
+	e.persistModelSwitchState(ctx, taskID, sessionID, session, resp, newModel, existingRunning)
 
 	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 		e.logger.Error("failed to start agent process after model switch",
@@ -245,7 +258,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying
 // repository and worktree config from the existing session.
-func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig) (*LaunchAgentRequest, error) {
+func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		SessionID:       sessionID,
@@ -265,10 +278,8 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 	e.applyWorktreeToSwitchRequest(req, session, execConfig, repositoryPath)
 
 	// Override repository URL with the running worktree path if available
-	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
-		if running.WorktreePath != "" {
-			req.RepositoryURL = running.WorktreePath
-		}
+	if running != nil && running.WorktreePath != "" {
+		req.RepositoryURL = running.WorktreePath
 	}
 
 	return req, nil
@@ -318,7 +329,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 }
 
 // persistModelSwitchState updates session and executor running records after a model switch launch.
-func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, newModel string) {
+func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, newModel string, existingRunning *models.ExecutorRunning) {
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
 	session.State = models.TaskSessionStateStarting
@@ -336,11 +347,11 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 			zap.Error(err))
 	}
 
-	if running, err := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && running != nil {
-		running.AgentExecutionID = resp.AgentExecutionID
-		running.ContainerID = resp.ContainerID
-		running.Status = "starting"
-		if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
+	if existingRunning != nil {
+		existingRunning.AgentExecutionID = resp.AgentExecutionID
+		existingRunning.ContainerID = resp.ContainerID
+		existingRunning.Status = "starting"
+		if err := e.repo.UpsertExecutorRunning(ctx, existingRunning); err != nil {
 			e.logger.Warn("failed to update executor running after model switch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

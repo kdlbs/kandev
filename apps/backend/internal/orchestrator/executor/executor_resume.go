@@ -56,7 +56,8 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 }
 
 // persistLaunchState updates the session and executor running records after a successful agent launch.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
+// If existingRunning is provided, resume token and message UUID are carried forward without a DB read.
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
 	if startAgent {
@@ -72,31 +73,23 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 			zap.Error(err))
 	}
 
-	resumable := true
-	runtimeName := ""
-	if session.ExecutorID != "" {
-		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
-			resumable = executor.Resumable
-			runtimeName = string(executor.Type)
-		}
-	}
 	running := &models.ExecutorRunning{
 		ID:               session.ID,
 		SessionID:        session.ID,
 		TaskID:           taskID,
 		ExecutorID:       session.ExecutorID,
-		Runtime:          runtimeName,
+		Runtime:          execCfg.RuntimeName,
 		Status:           "starting",
-		Resumable:        resumable,
+		Resumable:        execCfg.Resumable,
 		AgentExecutionID: resp.AgentExecutionID,
 		ContainerID:      resp.ContainerID,
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
 	}
-	if existing, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && existing != nil {
-		running.ResumeToken = existing.ResumeToken
-		running.LastMessageUUID = existing.LastMessageUUID
+	if existingRunning != nil {
+		running.ResumeToken = existingRunning.ResumeToken
+		running.LastMessageUUID = existingRunning.LastMessageUUID
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after launch",
@@ -137,7 +130,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 	defer unlock()
 
-	req, repositoryID, err := e.buildResumeRequest(ctx, task, session, startAgent)
+	req, repositoryID, execCfg, existingRunning, err := e.buildResumeRequest(ctx, task, session, startAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +154,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	e.persistResumeState(ctx, task.ID, session, resp, startAgent)
+	e.persistResumeState(ctx, task.ID, session, resp, startAgent, execCfg, existingRunning)
 	e.persistResumeWorktree(ctx, task.ID, session, repositoryID, resp)
 
 	worktreePath := resp.WorktreePath
@@ -239,7 +232,8 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 
 // buildResumeRequest constructs the LaunchAgentRequest for a session resume, resolving executor config,
 // repository details, worktree settings, and ACP resume token.
-func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, error) {
+// Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
+func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.ExecutorRunning, error) {
 	req := &LaunchAgentRequest{
 		TaskID:          task.ID,
 		SessionID:       session.ID,
@@ -262,10 +256,24 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
 
+	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+
+	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req)
+	if err != nil {
+		return nil, "", execConfig, nil, err
+	}
+
+	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
+
+	return req, repositoryID, execConfig, existingRunning, nil
+}
+
+// applyExecutorConfigToResumeRequest resolves executor config and applies it to the
+// resume request, persisting executor assignment if newly resolved.
+func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
 	session.ExecutorID = execConfig.ExecutorID
-	metadata = execConfig.Metadata
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
 	req.SetupScript = execConfig.SetupScript
@@ -285,49 +293,50 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 				zap.String("session_id", session.ID),
 				zap.String("executor_id", session.ExecutorID),
 				zap.Error(err))
-			// Continue anyway - this is not fatal
 		}
 	}
-	if len(metadata) > 0 {
-		req.Metadata = metadata
+	if len(execConfig.Metadata) > 0 {
+		req.Metadata = execConfig.Metadata
 	}
 
-	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req)
-	if err != nil {
-		return nil, "", err
+	return execConfig
+}
+
+// applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
+// resume-related fields (remote reconnect, resume token) to the request.
+func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, startAgent bool) *models.ExecutorRunning {
+	running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if runErr != nil || running == nil {
+		return nil
 	}
 
-	if running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); runErr == nil && running != nil {
-		if req.ExecutorType == string(models.ExecutorTypeSprites) && running.AgentExecutionID != "" {
-			if req.Metadata == nil {
-				req.Metadata = make(map[string]interface{})
-			}
-			req.Metadata[lifecycle.MetadataKeyRemoteReconnect] = true
-			req.Metadata[lifecycle.MetadataKeyRemoteExecID] = running.AgentExecutionID
-			req.Metadata[lifecycle.MetadataKeyRemoteName] = spriteNameFromExecutionID(running.AgentExecutionID)
+	if req.ExecutorType == string(models.ExecutorTypeSprites) && running.AgentExecutionID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
 		}
-		if running.ResumeToken != "" && startAgent {
-			req.ACPSessionID = running.ResumeToken
-			// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
-			// The session context is restored via ACP session/load; sending a prompt here would
-			// cause the agent to start working immediately instead of waiting for user input.
-			req.TaskDescription = ""
-			e.logger.Info("found resume token for session resumption",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID))
-		} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
-			// Fresh-start resume (no resume token): don't auto-prompt with the task description.
-			// The original prompt may be outdated. The agent boots idle; for agents that opt into
-			// HistoryContextInjection (e.g. Auggie), conversation history is injected on the
-			// user's first message via dispatchInitialPrompt → shouldInjectResumeContext.
-			req.TaskDescription = ""
-			e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", session.ID))
-		}
+		req.Metadata[lifecycle.MetadataKeyRemoteReconnect] = true
+		req.Metadata[lifecycle.MetadataKeyRemoteExecID] = running.AgentExecutionID
+		req.Metadata[lifecycle.MetadataKeyRemoteName] = spriteNameFromExecutionID(running.AgentExecutionID)
 	}
 
-	return req, repositoryID, nil
+	if running.ResumeToken != "" && startAgent {
+		req.ACPSessionID = running.ResumeToken
+		// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
+		// The session context is restored via ACP session/load; sending a prompt here would
+		// cause the agent to start working immediately instead of waiting for user input.
+		req.TaskDescription = ""
+		e.logger.Info("found resume token for session resumption",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID))
+	} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
+		// Fresh-start resume (no resume token): don't auto-prompt with the task description.
+		req.TaskDescription = ""
+		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID))
+	}
+
+	return running
 }
 
 func spriteNameFromExecutionID(executionID string) string {
@@ -406,7 +415,7 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 }
 
 // persistResumeState updates session and executor running records after a successful resume launch.
-func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool) {
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
 	session.AgentExecutionID = resp.AgentExecutionID
 	session.ContainerID = resp.ContainerID
 	session.ErrorMessage = ""
@@ -422,31 +431,23 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.Error(err))
 	}
 
-	resumable := true
-	runtimeName := ""
-	if session.ExecutorID != "" {
-		if executor, err := e.repo.GetExecutor(ctx, session.ExecutorID); err == nil && executor != nil {
-			resumable = executor.Resumable
-			runtimeName = string(executor.Type)
-		}
-	}
 	running := &models.ExecutorRunning{
 		ID:               session.ID,
 		SessionID:        session.ID,
 		TaskID:           taskID,
 		ExecutorID:       session.ExecutorID,
-		Runtime:          runtimeName,
+		Runtime:          execCfg.RuntimeName,
 		Status:           "starting",
-		Resumable:        resumable,
+		Resumable:        execCfg.Resumable,
 		AgentExecutionID: resp.AgentExecutionID,
 		ContainerID:      resp.ContainerID,
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
 	}
-	if existing, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID); err == nil && existing != nil {
-		running.ResumeToken = existing.ResumeToken
-		running.LastMessageUUID = existing.LastMessageUUID
+	if existingRunning != nil {
+		running.ResumeToken = existingRunning.ResumeToken
+		running.LastMessageUUID = existingRunning.LastMessageUUID
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after resume",

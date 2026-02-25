@@ -437,7 +437,7 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 				return existing, nil
 			}
 		}
-		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false)
+		s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
 		if stateErr := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after resume error",
 				zap.String("task_id", taskID),
@@ -570,7 +570,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			return nil // Agent is already running, nothing to do
 		}
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false)
+		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
 		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
 				zap.String("task_id", session.TaskID),
@@ -922,14 +922,14 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 	previousSessionState := session.State
 
-	s.setSessionRunning(ctx, taskID, sessionID)
+	s.setSessionRunning(ctx, taskID, sessionID, session)
 	s.startTurnForSession(ctx, sessionID)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments)
+	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, session)
 	if err != nil {
 		expectedResetInterrupt := false
 		if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
@@ -993,7 +993,7 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 	if err != nil {
 		return nil, true, fmt.Errorf("model switch failed: %w", err)
 	}
-	s.setSessionRunning(ctx, taskID, sessionID)
+	s.setSessionRunning(ctx, taskID, sessionID, session)
 	return &PromptResult{
 		StopReason:   switchResult.StopReason,
 		AgentMessage: switchResult.AgentMessage,
@@ -1048,7 +1048,7 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 				zap.Error(err))
 			return nil
 		}
-		s.setSessionRunning(ctx, session.TaskID, sessionID)
+		s.setSessionRunning(ctx, session.TaskID, sessionID, session)
 	}
 
 	return nil
@@ -1073,7 +1073,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
 	if session != nil {
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true)
+		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
 	}
 
 	// Record cancellation in the message history

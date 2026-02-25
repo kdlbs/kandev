@@ -317,7 +317,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, err
 	}
 
-	req, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
+	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, err)
 	}
 
-	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, repoInfo, resp, startAgent)
+	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, repoInfo, resp, startAgent, execCfg)
 }
 
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.
@@ -359,9 +359,10 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
-func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool) (*TaskExecution, error) {
+func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
+	// On initial launch there is no existing ExecutorRunning record to carry forward.
+	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now, execCfg, nil)
 	e.persistWorktreeAssociation(ctx, task.ID, session.ID, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -394,7 +395,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
-func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo) (*LaunchAgentRequest, error) {
+func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo) (*LaunchAgentRequest, executorConfig, error) {
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
 		if metadata == nil {
@@ -447,7 +448,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
-			return nil, ErrRemoteDockerNoRepoURL
+			return nil, execConfig, ErrRemoteDockerNoRepoURL
 		}
 		req.RepositoryURL = cloneURL
 	}
@@ -456,7 +457,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.Metadata = metadata
 	}
 
-	return req, nil
+	return req, execConfig, nil
 }
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session

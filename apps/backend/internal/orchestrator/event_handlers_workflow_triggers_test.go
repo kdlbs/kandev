@@ -28,7 +28,7 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		_ = repo.CreateTaskSession(ctx, session)
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if got {
 			t.Error("expected false when session has no workflow step")
 		}
@@ -46,7 +46,8 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if got {
 			t.Error("expected false when step has no on_turn_complete actions")
 		}
@@ -72,15 +73,16 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if !got {
 			t.Error("expected true when move_to_next transitions")
 		}
 
 		// Verify the session was updated to step2
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", session.WorkflowStepID)
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
+			t.Errorf("expected session workflow step to be 'step2', got %v", updated.WorkflowStepID)
 		}
 	})
 
@@ -104,14 +106,15 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if !got {
 			t.Error("expected true when move_to_step transitions")
 		}
 
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step3" {
-			t.Errorf("expected session workflow step to be 'step3', got %v", session.WorkflowStepID)
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step3" {
+			t.Errorf("expected session workflow step to be 'step3', got %v", updated.WorkflowStepID)
 		}
 	})
 
@@ -131,7 +134,8 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if got {
 			t.Error("expected false when at last step with move_to_next (no next step)")
 		}
@@ -159,14 +163,15 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if got {
 			t.Error("expected false when only action requires_approval")
 		}
 
 		// Verify session step was NOT changed
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step1" {
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
 			t.Error("expected session to stay on step1")
 		}
 	})
@@ -197,7 +202,8 @@ func TestProcessOnTurnComplete(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnComplete(ctx, "t1", "s1")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnComplete(ctx, "t1", session)
 		if !got {
 			t.Error("expected true when transition occurs alongside disable_plan_mode")
 		}
@@ -226,7 +232,8 @@ func TestProcessOnTurnStart(t *testing.T) {
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
-		got := svc.processOnTurnStart(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnStart(ctx, "t1", session)
 		if got {
 			t.Error("expected false when step has no on_turn_start actions")
 		}
@@ -252,14 +259,15 @@ func TestProcessOnTurnStart(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, stepGetter, taskRepo)
-		got := svc.processOnTurnStart(ctx, "t1", "s1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnStart(ctx, "t1", session)
 		if !got {
 			t.Error("expected true when move_to_next transitions")
 		}
 
-		session, _ := repo.GetTaskSession(ctx, "s1")
-		if session.WorkflowStepID == nil || *session.WorkflowStepID != "step2" {
-			t.Errorf("expected session workflow step to be 'step2', got %v", session.WorkflowStepID)
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
+			t.Errorf("expected session workflow step to be 'step2', got %v", updated.WorkflowStepID)
 		}
 	})
 }
@@ -283,9 +291,10 @@ func TestProcessOnEnter(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
-
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "test task")
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata == nil {
 			t.Fatal("expected metadata to be set")
 		}
@@ -311,7 +320,8 @@ func TestProcessOnEnter(t *testing.T) {
 			Events: wfmodels.StepEvents{}, // no enable_plan_mode
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "test task")
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
@@ -337,7 +347,8 @@ func TestProcessOnEnter(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "queued prompt content")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "queued prompt content")
 
 		deadline := time.Now().Add(2 * time.Second)
 		for {
@@ -370,9 +381,10 @@ func TestSetSessionPlanMode(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", true)
-
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.setSessionPlanMode(ctx, session, true)
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata == nil {
 			t.Fatal("expected metadata to be set")
 		}
@@ -391,7 +403,8 @@ func TestSetSessionPlanMode(t *testing.T) {
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", false)
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.setSessionPlanMode(ctx, session, false)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
@@ -406,9 +419,10 @@ func TestSetSessionPlanMode(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		svc.setSessionPlanMode(ctx, "s1", true)
-
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.setSessionPlanMode(ctx, session, true)
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata == nil {
 			t.Fatal("expected metadata to be initialized")
 		}
@@ -427,13 +441,14 @@ func TestProcessOnExit(t *testing.T) {
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
+		session, _ := repo.GetTaskSession(ctx, "s1")
 		step := &wfmodels.WorkflowStep{
 			ID: "step1", WorkflowID: "wf1", Name: "Step 1",
 			Events: wfmodels.StepEvents{},
 		}
 
 		// Should not panic or modify anything
-		svc.processOnExit(ctx, "t1", "s1", step)
+		svc.processOnExit(ctx, "t1", session, step)
 	})
 
 	t.Run("disable_plan_mode clears plan mode", func(t *testing.T) {
@@ -456,7 +471,7 @@ func TestProcessOnExit(t *testing.T) {
 			},
 		}
 
-		svc.processOnExit(ctx, "t1", "s1", step)
+		svc.processOnExit(ctx, "t1", session, step)
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.Metadata != nil {
@@ -486,7 +501,7 @@ func TestProcessOnExit(t *testing.T) {
 			},
 		}
 
-		svc.processOnExit(ctx, "t1", "s1", step)
+		svc.processOnExit(ctx, "t1", session, step)
 
 		// plan_mode should still be set
 		updated, _ := repo.GetTaskSession(ctx, "s1")
@@ -517,9 +532,10 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
-
 		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "test task")
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		if session.Metadata != nil {
 			if _, hasPlanMode := session.Metadata["plan_mode"]; hasPlanMode {
 				t.Error("expected plan_mode NOT to be set for passthrough session")
@@ -543,7 +559,8 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 			Events: wfmodels.StepEvents{}, // no enable_plan_mode
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "test task")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "test task")
 
 		// plan_mode should still be set since passthrough sessions skip plan mode management
 		updated, _ := repo.GetTaskSession(ctx, "s1")
@@ -581,7 +598,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "review task")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
 
 		// Verify RestartAgentProcess was called with the correct execution ID
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -616,7 +634,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "review task")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
 
 		// Verify RestartAgentProcess was NOT called (no execution ID)
 		if len(agentMgr.restartProcessCalls) != 0 {
@@ -645,7 +664,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "review task")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
 
 		// Verify RestartAgentProcess was called even for passthrough sessions
 		if len(agentMgr.restartProcessCalls) != 1 {
@@ -677,7 +697,8 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			},
 		}
 
-		svc.processOnEnter(ctx, "t1", "s1", step, "review task")
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "review task")
 
 		updated, _ := repo.GetTaskSession(ctx, "s1")
 		if updated.State != models.TaskSessionStateWaitingForInput {

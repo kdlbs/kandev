@@ -219,12 +219,17 @@ func runSingleEvent(
 	// Drain queue from previous event if needed
 	svc.messageQueue.TakeQueued(ctx, "s1")
 
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+
 	var transitioned bool
 	switch ev.Trigger {
 	case engine.TriggerOnTurnComplete:
-		transitioned = svc.processOnTurnCompleteViaEngine(ctx, "t1", "s1")
+		transitioned = svc.processOnTurnCompleteViaEngine(ctx, "t1", session)
 	case engine.TriggerOnTurnStart:
-		transitioned = svc.processOnTurnStartViaEngine(ctx, "t1", "s1")
+		transitioned = svc.processOnTurnStartViaEngine(ctx, "t1", session)
 	default:
 		t.Fatalf("unsupported trigger: %s", ev.Trigger)
 	}
