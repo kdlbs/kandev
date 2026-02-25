@@ -173,7 +173,9 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 	v.cmd = exec.Command(binaryPath, args...)
 	v.cmd.Dir = workDir
 	v.workDir = workDir
-	setProcGroup(v.cmd)
+	// Do NOT set a new process group for code-server.
+	// It inherits agentctl's process group so that a force-kill of agentctl's
+	// process group also terminates code-server and its Node.js workers.
 
 	stderr, err := v.cmd.StderrPipe()
 	if err != nil {
@@ -324,13 +326,12 @@ func (v *VscodeManager) Stop(ctx context.Context) error {
 	v.mu.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
-		// Try graceful shutdown via process group kill
-		pid := cmd.Process.Pid
-		if err := killProcessGroup(pid); err != nil {
-			v.logger.Debug("failed to kill code-server process group, trying single process", zap.Error(err))
-			if err := cmd.Process.Kill(); err != nil {
-				v.logger.Warn("failed to kill code-server process", zap.Error(err))
-			}
+		// Kill code-server directly. code-server shares agentctl's process group,
+		// so we must not use killProcessGroup here (that would kill agentctl itself).
+		// Worker processes inheriting the same pgid are cleaned up when agentctl's
+		// process group is force-killed on shutdown.
+		if err := cmd.Process.Kill(); err != nil {
+			v.logger.Warn("failed to kill code-server process", zap.Error(err))
 		}
 	}
 
