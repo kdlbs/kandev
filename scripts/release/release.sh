@@ -52,6 +52,22 @@ APP_BUMP=""
 NEXT_CLI_VERSION=""
 NEXT_APP_TAG=""
 
+# -- Formatting helpers -------------------------------------------------------
+
+bold() { printf '\033[1m%s\033[0m' "$*"; }
+dim() { printf '\033[2m%s\033[0m' "$*"; }
+green() { printf '\033[32m%s\033[0m' "$*"; }
+yellow() { printf '\033[33m%s\033[0m' "$*"; }
+red() { printf '\033[31m%s\033[0m' "$*"; }
+cyan() { printf '\033[36m%s\033[0m' "$*"; }
+
+log() { echo "  $(dim ">>") $*"; }
+log_step() { echo; echo "$(bold "[$1]") $2"; }
+log_ok() { echo "  $(green "ok") $*"; }
+log_skip() { echo "  $(dim "skip") $*"; }
+
+# -- Core helpers --------------------------------------------------------------
+
 usage() {
   cat <<'EOF'
 Usage: scripts/release/release.sh [options]
@@ -84,7 +100,7 @@ EOF
 }
 
 die() {
-  echo "Error: $*" >&2
+  echo "$(red "Error:") $*" >&2
   exit 1
 }
 
@@ -94,7 +110,7 @@ command_exists() {
 
 run_cmd() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] $*"
+    echo "  $(yellow "[dry-run]") $*"
     return 0
   fi
   "$@"
@@ -105,8 +121,9 @@ confirm() {
   if [[ "$AUTO_YES" -eq 1 ]]; then
     return 0
   fi
+  echo
   local answer
-  read -r -p "$prompt [y/N]: " answer
+  read -r -p "$(bold "$prompt") [y/N]: " answer
   answer="$(echo "${answer:-}" | tr '[:upper:]' '[:lower:]')"
   [[ "$answer" == "y" || "$answer" == "yes" ]]
 }
@@ -117,6 +134,8 @@ validate_bump() {
     *) die "Invalid bump '$1'. Use 'minor' or 'major'." ;;
   esac
 }
+
+# -- Target selection ----------------------------------------------------------
 
 parse_target() {
   case "$1" in
@@ -139,19 +158,28 @@ parse_target() {
 }
 
 select_target_interactive() {
-  echo "Select release target:"
-  echo "  1) cli"
-  echo "  2) app"
-  echo "  3) both"
+  echo
+  echo "$(bold "What do you want to release?")"
+  echo "  $(cyan "1)") cli   $(dim "- npm publish apps/cli")"
+  echo "  $(cyan "2)") app   $(dim "- git tag for GitHub Actions release")"
+  echo "  $(cyan "3)") both  $(dim "- cli + app together")"
+  echo
   local choice
-  read -r -p "Choice [1/2/3]: " choice
+  read -r -p "$(bold "Choice") [1=cli / 2=app / 3=both]: " choice
   case "$choice" in
-    1) parse_target "cli" ;;
-    2) parse_target "app" ;;
-    3) parse_target "both" ;;
-    *) die "Invalid choice '$choice'." ;;
+    1|cli)  parse_target "cli" ;;
+    2|app)  parse_target "app" ;;
+    3|both) parse_target "both" ;;
+    *) die "Invalid choice '$choice'. Enter 1, 2, 3, cli, app, or both." ;;
   esac
+
+  local selected=""
+  [[ "$CLI_SELECTED" -eq 1 ]] && selected+="cli "
+  [[ "$APP_SELECTED" -eq 1 ]] && selected+="app "
+  log "Selected target: $(bold "$selected")"
 }
+
+# -- Version parsing -----------------------------------------------------------
 
 parse_cli_version() {
   local version="$1"
@@ -167,6 +195,7 @@ detect_current_cli_version() {
   [[ -f "$CLI_PACKAGE_JSON" ]] || die "Missing $CLI_PACKAGE_JSON"
   CURRENT_CLI_VERSION="$(node -p "require('$CLI_PACKAGE_JSON').version")"
   parse_cli_version "$CURRENT_CLI_VERSION"
+  log "Current CLI version: $(bold "$CURRENT_CLI_VERSION") $(dim "(from apps/cli/package.json)")"
 }
 
 detect_current_app_version() {
@@ -195,7 +224,15 @@ detect_current_app_version() {
   CURRENT_APP_MAJOR="$best_major"
   CURRENT_APP_MINOR="$best_minor"
   CURRENT_APP_TAG="v${CURRENT_APP_MAJOR}.${CURRENT_APP_MINOR}"
+
+  if [[ "$found" -eq 1 ]]; then
+    log "Current app tag:     $(bold "$CURRENT_APP_TAG") $(dim "(latest git tag matching vM.m)")"
+  else
+    log "Current app tag:     $(dim "none found") $(dim "(will start at v0.1)")"
+  fi
 }
+
+# -- Bump selection ------------------------------------------------------------
 
 next_minor_pair() {
   local major="$1"
@@ -228,17 +265,20 @@ choose_bump() {
     return
   fi
 
-  echo "$subject version: $current"
-  echo "  1) minor -> $next_minor (default)"
-  echo "  2) major -> $next_major"
+  echo >&2
+  echo "$(bold "$subject version bump") $(dim "(current: $current)")" >&2
+  echo "  $(cyan "1)") minor -> $(bold "$next_minor") $(dim "(default)")" >&2
+  echo "  $(cyan "2)") major -> $(bold "$next_major")" >&2
   local choice
-  read -r -p "Choose bump [1/2]: " choice
+  read -r -p "$(bold "Bump") [1=minor / 2=major]: " choice
   case "${choice:-1}" in
-    1) echo "minor" ;;
-    2) echo "major" ;;
-    *) die "Invalid bump choice '$choice'." ;;
+    1|minor) echo "minor" ;;
+    2|major) echo "major" ;;
+    *) die "Invalid bump choice '$choice'. Enter 1, 2, minor, or major." ;;
   esac
 }
+
+# -- Version computation -------------------------------------------------------
 
 compute_next_versions() {
   if [[ "$CLI_SELECTED" -eq 1 ]]; then
@@ -255,6 +295,7 @@ compute_next_versions() {
     else
       NEXT_CLI_VERSION="${cli_major_pair}.0"
     fi
+    log "CLI bump: $CLI_BUMP -> $(bold "$NEXT_CLI_VERSION")"
   fi
 
   if [[ "$APP_SELECTED" -eq 1 ]]; then
@@ -270,29 +311,44 @@ compute_next_versions() {
     else
       NEXT_APP_TAG="v${app_major_pair}"
     fi
+    log "App bump: $APP_BUMP -> $(bold "$NEXT_APP_TAG")"
   fi
 }
 
+# -- Preconditions -------------------------------------------------------------
+
 ensure_prerequisites() {
-  # Keep release operations deterministic and reproducible.
-  command_exists git || die "git is required."
-  command_exists node || die "node is required."
-  command_exists npm || die "npm is required."
-  command_exists pnpm || die "pnpm is required."
+  log_step "1/5" "Checking prerequisites"
+
+  for tool in git node npm pnpm; do
+    if command_exists "$tool"; then
+      log_ok "$tool"
+    else
+      die "$tool is required but not found in PATH."
+    fi
+  done
 
   CURRENT_BRANCH="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
-  [[ "$CURRENT_BRANCH" == "main" ]] || die "Release must run from main branch (current: $CURRENT_BRANCH)."
+  if [[ "$CURRENT_BRANCH" == "main" ]]; then
+    log_ok "On branch $(bold "main")"
+  else
+    die "Release must run from main branch (current: $CURRENT_BRANCH)."
+  fi
 
   if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
     die "Working tree is not clean. Commit or stash changes before releasing."
   fi
+  log_ok "Working tree is clean"
 
+  log "Fetching tags from origin..."
   run_cmd git -C "$ROOT_DIR" fetch --tags
+  log_ok "Tags fetched"
 }
 
 ensure_app_tag_available() {
   [[ "$APP_SELECTED" -eq 1 ]] || return 0
 
+  log "Checking tag $(bold "$NEXT_APP_TAG") is available..."
   if git -C "$ROOT_DIR" rev-parse "$NEXT_APP_TAG" >/dev/null 2>&1; then
     die "Tag $NEXT_APP_TAG already exists locally."
   fi
@@ -300,21 +356,43 @@ ensure_app_tag_available() {
   if git -C "$ROOT_DIR" ls-remote --tags origin "refs/tags/$NEXT_APP_TAG" | grep -q .; then
     die "Tag $NEXT_APP_TAG already exists on origin."
   fi
+  log_ok "Tag $(bold "$NEXT_APP_TAG") is available"
 }
+
+# -- Release plan --------------------------------------------------------------
 
 print_plan() {
   echo
-  echo "Release plan:"
-  echo "  branch: $CURRENT_BRANCH"
+  echo "$(bold "=== Release Plan ===")"
+  echo "  branch:   $(bold "$CURRENT_BRANCH")"
   if [[ "$CLI_SELECTED" -eq 1 ]]; then
-    echo "  cli: $CURRENT_CLI_VERSION -> $NEXT_CLI_VERSION (${CLI_BUMP})"
+    echo "  cli:      $(bold "$CURRENT_CLI_VERSION") -> $(green "$NEXT_CLI_VERSION") ($CLI_BUMP bump)"
   fi
   if [[ "$APP_SELECTED" -eq 1 ]]; then
-    echo "  app tag: $CURRENT_APP_TAG -> $NEXT_APP_TAG (${APP_BUMP})"
+    echo "  app tag:  $(bold "$CURRENT_APP_TAG") -> $(green "$NEXT_APP_TAG") ($APP_BUMP bump)"
   fi
-  echo "  dry-run: $DRY_RUN"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  mode:     $(yellow "DRY RUN") $(dim "(no changes will be made)")"
+  fi
+  echo
+
+  if [[ "$CLI_SELECTED" -eq 1 ]]; then
+    echo "  $(dim "Steps for CLI:")"
+    echo "    $(dim "1.") Bump version in apps/cli/package.json"
+    echo "    $(dim "2.") Install dependencies (pnpm install)"
+    echo "    $(dim "3.") Build CLI (pnpm build)"
+    echo "    $(dim "4.") Commit and push to main"
+    echo "    $(dim "5.") Publish to npm"
+  fi
+  if [[ "$APP_SELECTED" -eq 1 ]]; then
+    echo "  $(dim "Steps for App:")"
+    echo "    $(dim "1.") Create annotated git tag $NEXT_APP_TAG"
+    echo "    $(dim "2.") Push tag to origin (triggers GitHub Actions)"
+  fi
   echo
 }
+
+# -- Release actions -----------------------------------------------------------
 
 commit_message() {
   if [[ "$CLI_SELECTED" -eq 1 && "$APP_SELECTED" -eq 1 ]]; then
@@ -329,20 +407,31 @@ commit_message() {
 apply_cli_release() {
   [[ "$CLI_SELECTED" -eq 1 ]] || return 0
 
-  # Update only the published CLI package version. Runtime app release is tag-based.
+  log_step "3/5" "Building CLI release"
+
+  log "Bumping CLI version to $(bold "$NEXT_CLI_VERSION")..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] cd $ROOT_DIR/apps/cli && npm version --no-git-tag-version $NEXT_CLI_VERSION"
+    echo "  $(yellow "[dry-run]") npm version --no-git-tag-version $NEXT_CLI_VERSION"
   else
     (cd "$ROOT_DIR/apps/cli" && npm version --no-git-tag-version "$NEXT_CLI_VERSION")
   fi
+  log_ok "Version bumped in package.json"
 
+  log "Installing dependencies..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] pnpm -C $ROOT_DIR/apps install --frozen-lockfile"
-    echo "[dry-run] pnpm -C $ROOT_DIR/apps/cli build"
+    echo "  $(yellow "[dry-run]") pnpm install --frozen-lockfile"
   else
     pnpm -C "$ROOT_DIR/apps" install --frozen-lockfile
+  fi
+  log_ok "Dependencies installed"
+
+  log "Building CLI..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  $(yellow "[dry-run]") pnpm -C apps/cli build"
+  else
     pnpm -C "$ROOT_DIR/apps/cli" build
   fi
+  log_ok "CLI built"
 }
 
 commit_and_push_if_needed() {
@@ -350,44 +439,71 @@ commit_and_push_if_needed() {
   msg="$(commit_message)"
   [[ -n "$msg" ]] || return 0
 
+  log_step "4/5" "Committing and pushing"
+
   # App-only releases are tag-only and do not require a version commit.
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] git -C $ROOT_DIR add apps/cli/package.json"
-    echo "[dry-run] git -C $ROOT_DIR commit -m \"$msg\""
-    echo "[dry-run] git -C $ROOT_DIR push origin $CURRENT_BRANCH"
+    echo "  $(yellow "[dry-run]") git add apps/cli/package.json"
+    echo "  $(yellow "[dry-run]") git commit -m \"$msg\""
+    echo "  $(yellow "[dry-run]") git push origin $CURRENT_BRANCH"
     return 0
   fi
 
+  log "Staging apps/cli/package.json..."
   git -C "$ROOT_DIR" add apps/cli/package.json
   if git -C "$ROOT_DIR" diff --cached --quiet; then
-    echo "No staged changes to commit."
+    log_skip "No staged changes to commit"
     return 0
   fi
 
+  log "Committing: $(dim "$msg")"
   git -C "$ROOT_DIR" commit -m "$msg"
+  log_ok "Committed"
+
+  log "Pushing to origin/$CURRENT_BRANCH..."
   git -C "$ROOT_DIR" push origin "$CURRENT_BRANCH"
+  log_ok "Pushed"
 }
 
 create_and_push_app_tag() {
   [[ "$APP_SELECTED" -eq 1 ]] || return 0
+
+  if [[ "$CLI_SELECTED" -eq 0 ]]; then
+    log_step "3/5" "Creating app tag"
+  else
+    log_step "4/5" "Creating app tag"
+  fi
+
+  log "Creating annotated tag $(bold "$NEXT_APP_TAG")..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] git -C $ROOT_DIR tag -a $NEXT_APP_TAG -m \"release: $NEXT_APP_TAG\""
-    echo "[dry-run] git -C $ROOT_DIR push origin $NEXT_APP_TAG"
+    echo "  $(yellow "[dry-run]") git tag -a $NEXT_APP_TAG -m \"release: $NEXT_APP_TAG\""
+    echo "  $(yellow "[dry-run]") git push origin $NEXT_APP_TAG"
     return 0
   fi
 
   git -C "$ROOT_DIR" tag -a "$NEXT_APP_TAG" -m "release: $NEXT_APP_TAG"
+  log_ok "Tag created"
+
+  log "Pushing tag to origin..."
   git -C "$ROOT_DIR" push origin "$NEXT_APP_TAG"
+  log_ok "Tag pushed (GitHub Actions release workflow will trigger)"
 }
 
 publish_cli() {
   [[ "$CLI_SELECTED" -eq 1 ]] || return 0
+
+  log_step "5/5" "Publishing CLI to npm"
+
+  log "Running npm publish --access public..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] cd $ROOT_DIR/apps/cli && npm publish --access public"
+    echo "  $(yellow "[dry-run]") npm publish --access public"
     return 0
   fi
   (cd "$ROOT_DIR/apps/cli" && npm publish --access public)
+  log_ok "Published to npm"
 }
+
+# -- Argument parsing ----------------------------------------------------------
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -421,13 +537,28 @@ parse_args() {
   done
 }
 
+# -- Main ----------------------------------------------------------------------
+
 main() {
   parse_args "$@"
   validate_bump "$DEFAULT_BUMP"
+
+  echo
+  echo "$(bold "Kandev Release")"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "$(yellow "  DRY RUN MODE - no changes will be made")"
+  fi
+
   ensure_prerequisites
+
+  log_step "2/5" "Selecting target and version"
 
   if [[ -n "$TARGET" ]]; then
     parse_target "$TARGET"
+    local selected=""
+    [[ "$CLI_SELECTED" -eq 1 ]] && selected+="cli "
+    [[ "$APP_SELECTED" -eq 1 ]] && selected+="app "
+    log "Target: $(bold "$selected") $(dim "(from --target flag)")"
   else
     # Interactive mode should prompt for target and bump choices.
     DEFAULT_BUMP=""
@@ -441,6 +572,7 @@ main() {
   print_plan
 
   if ! confirm "Proceed with release?"; then
+    echo
     echo "Release cancelled."
     exit 0
   fi
@@ -451,13 +583,14 @@ main() {
   publish_cli
 
   echo
-  echo "Release complete."
+  echo "$(green "$(bold "Release complete!")")"
   if [[ "$CLI_SELECTED" -eq 1 ]]; then
-    echo "  published CLI: $NEXT_CLI_VERSION"
+    echo "  $(green "cli:") published $NEXT_CLI_VERSION to npm"
   fi
   if [[ "$APP_SELECTED" -eq 1 ]]; then
-    echo "  pushed app tag: $NEXT_APP_TAG"
+    echo "  $(green "app:") pushed tag $NEXT_APP_TAG to origin"
   fi
+  echo
 }
 
 main "$@"
