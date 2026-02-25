@@ -250,6 +250,10 @@ type RemoteAuthMethod struct {
 	TargetRelDir string `json:"target_rel_dir,omitempty"`
 	// Label is a UI label for the file copy option (for type="files").
 	Label string `json:"label,omitempty"`
+	// SetupScript is an optional shell script that runs on the remote after the
+	// env var is resolved. Used to bootstrap credential files from env vars.
+	// Only meaningful for type="env". Can reference the env var by name.
+	SetupScript string `json:"setup_script,omitempty"`
 }
 
 // Command is a domain value type representing a CLI command with arguments.

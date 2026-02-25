@@ -210,7 +210,10 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	if reconnectRequired {
 		completeStepSkipped(&step)
 	} else {
-		if err := r.uploadCredentials(ctx, sprite, req); err != nil {
+		if err := r.uploadCredentials(ctx, sprite, req, func(output string) {
+			step.Output = output
+			report(step, 2)
+		}); err != nil {
 			r.logger.Warn("failed to upload credentials (non-fatal)", zap.Error(err))
 			completeStepSkipped(&step)
 		} else {
@@ -511,13 +514,21 @@ func (r *SpritesExecutor) createAgentInstance(
 }
 
 // uploadCredentials reads the remote_credentials metadata and uploads the selected
-// credential files to the sprite. Also handles gh_cli_token auto-detect and
-// secret-based auth via remote_auth_secrets.
-func (r *SpritesExecutor) uploadCredentials(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
+// credential files to the sprite. Also handles gh_cli_token auto-detect,
+// secret-based auth via remote_auth_secrets, and agent auth setup scripts.
+func (r *SpritesExecutor) uploadCredentials(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+	onOutput func(string),
+) error {
 	catalog := r.buildRemoteAuthCatalog()
 
 	// Handle secret-based auth (e.g., GITHUB_TOKEN from a stored secret)
 	r.resolveAuthSecrets(ctx, req, catalog)
+
+	// Run auth setup scripts for env-type methods (e.g., Claude Code credential files)
+	r.runAuthSetupScripts(ctx, sprite, req, catalog, onOutput)
 
 	credsJSON, _ := req.Metadata["remote_credentials"].(string)
 	if credsJSON == "" {
@@ -561,6 +572,51 @@ func (r *SpritesExecutor) uploadCredentials(ctx context.Context, sprite *sprites
 		return err
 	}
 	return UploadCredentialFiles(stepCtx, uploader, fileMethods, targetHomeDir, r.logger)
+}
+
+// runAuthSetupScripts executes setup scripts for env-type auth methods whose env var
+// is present in req.Env. This handles both secret-store-resolved and directly-injected env vars.
+// The optional onOutput callback streams output to the caller (e.g., progress UI).
+func (r *SpritesExecutor) runAuthSetupScripts(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+	catalog remoteauth.Catalog,
+	onOutput func(string),
+) {
+	for _, spec := range catalog.Specs {
+		for _, method := range spec.Methods {
+			if method.Type != "env" || method.SetupScript == "" || method.EnvVar == "" {
+				continue
+			}
+			if req.Env[method.EnvVar] == "" {
+				continue
+			}
+
+			if onOutput != nil {
+				onOutput(fmt.Sprintf("Setting up %s credentials...", spec.DisplayName))
+			}
+
+			stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			cmd := sprite.CommandContext(stepCtx, "sh", "-c", method.SetupScript)
+			cmd.Env = r.buildSpriteEnv(req.Env)
+			out, err := cmd.CombinedOutput()
+			cancel()
+
+			if err != nil {
+				r.logger.Warn("auth setup script failed",
+					zap.String("method_id", method.MethodID),
+					zap.String("output", strings.TrimSpace(string(out))),
+					zap.Error(err))
+				if onOutput != nil {
+					onOutput(fmt.Sprintf("Warning: %s credential setup failed", spec.DisplayName))
+				}
+			} else {
+				r.logger.Debug("auth setup script completed",
+					zap.String("method_id", method.MethodID))
+			}
+		}
+	}
 }
 
 // resolveGHToken handles the gh_cli_token credential: detects the token locally
