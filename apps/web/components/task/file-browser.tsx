@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useCallback, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
@@ -194,6 +194,24 @@ export function FileBrowser({
     openFileByPath,
     handleCancelCreate,
   } = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
+
+  // Auto-expand ancestor directories when the active file changes
+  useEffect(() => {
+    if (!activeFilePath) return;
+    const parts = activeFilePath.split("/");
+    if (parts.length <= 1) return;
+    const ancestors: string[] = [];
+    for (let i = 1; i < parts.length; i++) {
+      ancestors.push(parts.slice(0, i).join("/"));
+    }
+    treeState.setExpandedPaths((prev) => {
+      const allExpanded = ancestors.every((p) => prev.has(p));
+      if (allExpanded) return prev;
+      const next = new Set(prev);
+      for (const p of ancestors) next.add(p);
+      return next;
+    });
+  }, [activeFilePath, treeState]);
 
   return (
     <div className="flex flex-col h-full">

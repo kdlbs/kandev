@@ -110,6 +110,7 @@ type DockviewStore = {
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
   setUserDefaultLayout: (layout: LayoutState | null) => void;
+  activeFilePath: string | null;
 };
 
 type StoreGet = () => DockviewStore;
@@ -560,7 +561,16 @@ function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
   api: null,
-  setApi: (api) => set({ api }),
+  activeFilePath: null,
+  setApi: (api) => {
+    set({ api, activeFilePath: null });
+    if (api) {
+      api.onDidActivePanelChange((event) => {
+        const id = event?.id;
+        set({ activeFilePath: id?.startsWith("file:") ? id.slice(5) : null });
+      });
+    }
+  },
   activeGroupId: null,
   selectedDiff: null,
   setSelectedDiff: (diff) => set({ selectedDiff: diff }),
