@@ -123,6 +123,7 @@ type sessionExecutorStore interface {
 	ClearSessionExecutionID(ctx context.Context, id string) error
 	UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
+	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error

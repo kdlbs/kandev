@@ -323,11 +323,22 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	}
 }
 
-func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool) {
+// updateTaskSessionState transitions a session to nextState with guard checks.
+// When a preloadedSession is provided, its State is used for guard conditions (terminal-state
+// check, same-state check). This is an optimistic fast-path: between load and check another
+// goroutine may have changed the state in the DB. The guards are best-effort to avoid
+// unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
+func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) {
 
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else {
+		var err error
+		session, err = s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return
+		}
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && nextState == models.TaskSessionStateRunning && !allowWakeFromWaiting {
 		return
@@ -373,8 +384,8 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	}
 }
 
-func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
+func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, preloadedSession...)
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
 		s.logger.Error("failed to update task state to REVIEW",
@@ -386,8 +397,8 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	}
 }
 
-func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string) {
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
+func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, preloadedSession...)
 
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		s.logger.Error("failed to update task state to IN_PROGRESS",
@@ -407,8 +418,21 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		zap.Int("text_length", len(payload.Data.Text)),
 		zap.Bool("has_text", payload.Data.Text != ""))
 
+	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
+	var session *models.TaskSession
+	if payload.SessionID != "" {
+		var err error
+		session, err = s.repo.GetTaskSession(ctx, payload.SessionID)
+		if err != nil {
+			s.logger.Warn("skipping complete-event processing; session lookup failed",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
+				zap.Error(err))
+			return
+		}
+	}
+
 	// Update resume token with latest ACP session ID and message UUID on every turn.
-	// This ensures the token stays current after session compaction.
 	if payload.SessionID != "" && payload.Data.ACPSessionID != "" {
 		var lastMsgUUID string
 		if data, ok := payload.Data.Data.(map[string]interface{}); ok {
@@ -416,7 +440,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 				lastMsgUUID = uuid
 			}
 		}
-		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.Data.ACPSessionID, lastMsgUUID)
+		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.Data.ACPSessionID, lastMsgUUID, session)
 	}
 
 	s.saveAgentTextIfPresent(ctx, payload)
@@ -424,22 +448,14 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
-	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
-	if err != nil {
-		s.logger.Warn("skipping complete-event terminal state update; session lookup failed",
-			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID),
-			zap.Error(err))
-		return
-	}
-	if session.State == models.TaskSessionStateRunning {
+	if session != nil && session.State == models.TaskSessionStateRunning {
 		s.logger.Debug("skipping complete-event terminal state update while session is running",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID))
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID)
+	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
 }
 
 // handleAvailableCommandsEvent broadcasts available_commands events to the WebSocket for the frontend.

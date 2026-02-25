@@ -42,14 +42,20 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // This is called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
 // The optional lastMessageUUID is persisted alongside the token for --resume-session-at support.
 // The resume token is only stored for agents that support native session resume (ACP session/load).
-func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string) {
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to load task session for resume token storage",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return
+func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string, preloadedSession ...*models.TaskSession) {
+	var session *models.TaskSession
+	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
+		session = preloadedSession[0]
+	} else {
+		var err error
+		session, err = s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to load task session for resume token storage",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
 	}
 
 	// Clear the resume token for agents that don't support native session resume (ACP session/load).

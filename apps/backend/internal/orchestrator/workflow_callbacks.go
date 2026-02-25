@@ -30,7 +30,11 @@ func (c *enablePlanModeCallback) Execute(ctx context.Context, in engine.ActionIn
 	if in.State.IsPassthrough {
 		return engine.ActionResult{}, nil
 	}
-	c.svc.setSessionPlanMode(ctx, in.State.SessionID, true)
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for enable plan mode: %w", err)
+	}
+	c.svc.setSessionPlanMode(ctx, session, true)
 	return engine.ActionResult{}, nil
 }
 
@@ -43,7 +47,11 @@ func (c *disablePlanModeCallback) Execute(ctx context.Context, in engine.ActionI
 	if in.State.IsPassthrough {
 		return engine.ActionResult{}, nil
 	}
-	c.svc.clearSessionPlanMode(ctx, in.State.SessionID)
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for disable plan mode: %w", err)
+	}
+	c.svc.clearSessionPlanMode(ctx, session)
 	return engine.ActionResult{}, nil
 }
 
@@ -53,7 +61,11 @@ type resetAgentContextCallback struct {
 }
 
 func (c *resetAgentContextCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
-	ok := c.svc.resetAgentContext(ctx, in.State.TaskID, in.State.SessionID, in.Step.Name)
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for reset agent context: %w", err)
+	}
+	ok := c.svc.resetAgentContext(ctx, in.State.TaskID, session, in.Step.Name)
 	if !ok {
 		return engine.ActionResult{}, fmt.Errorf("failed to reset agent context for session %s", in.State.SessionID)
 	}
@@ -70,6 +82,11 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 		return engine.ActionResult{}, nil
 	}
 
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for auto-start: %w", err)
+	}
+
 	// Reconstruct the workflow step to build the prompt.
 	// The step's prompt template and plan mode flag drive prompt construction.
 	step, err := c.svc.workflowStepGetter.GetStep(ctx, in.Step.ID)
@@ -80,7 +97,7 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 	effectivePrompt := c.svc.buildWorkflowPrompt(in.State.TaskDescription, step, in.State.TaskID)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
-	err = c.svc.autoStartStepPrompt(ctx, in.State.TaskID, in.State.SessionID, in.Step.Name, effectivePrompt, planMode, true)
+	err = c.svc.autoStartStepPrompt(ctx, in.State.TaskID, session, in.Step.Name, effectivePrompt, planMode, true)
 	if err != nil {
 		return engine.ActionResult{}, fmt.Errorf("auto-start prompt failed: %w", err)
 	}

@@ -405,6 +405,27 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	return nil
 }
 
+// UpdateSessionMetadata updates only the metadata column of a session,
+// avoiding a full-row overwrite that could clobber concurrent field updates.
+func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error {
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata: %w", err)
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET metadata = ?, updated_at = ? WHERE id = ?
+	`), string(metadataJSON), now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // ClearSessionExecutionID clears the agent_execution_id for a session.
 // This is used when a stale execution ID needs to be removed (e.g., after a failed resume on startup).
 func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) error {

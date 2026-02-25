@@ -362,6 +362,9 @@ func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionI
 func (m *mockRepository) UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error {
 	return nil
 }
+func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error {
+	return nil
+}
 
 // Task Session Worktree operations
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
