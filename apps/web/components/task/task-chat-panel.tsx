@@ -81,6 +81,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const {
     resolvedSessionId,
     session,
+    task,
     taskId,
     isWorking,
     messagesLoading,
@@ -120,6 +121,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           messagesLoading={messagesLoading}
           isWorking={isWorking}
           sessionState={session?.state}
+          taskState={task?.state}
           worktreePath={session?.worktree_path}
           onOpenFile={onOpenFile}
         />

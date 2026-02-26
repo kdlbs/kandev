@@ -5,6 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getLocalStorage } from "@/lib/local-storage";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { preserveChatScrollDuringLayout } from "@/lib/state/dockview-scroll-preserve";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
@@ -69,19 +70,13 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
 
-  // Re-focus chat input and preserve scroll position after dockview layout rebuild
+  // Preserve scroll position and re-focus chat input after dockview layout rebuild
   const refocusChatAfterLayout = useCallback(() => {
-    // Capture scroll position before layout rebuild completes
-    const scrollEl = document.querySelector<HTMLElement>(".chat-message-list");
-    const savedScrollTop = scrollEl?.scrollTop ?? 0;
-
+    preserveChatScrollDuringLayout();
     const unsub = useDockviewStore.subscribe((state) => {
       if (!state.isRestoringLayout) {
         unsub();
         requestAnimationFrame(() => {
-          // Restore chat scroll position after layout rebuild
-          const el = document.querySelector<HTMLElement>(".chat-message-list");
-          if (el) el.scrollTop = savedScrollTop;
           document.querySelector<HTMLElement>(".tiptap.ProseMirror")?.focus();
         });
       }

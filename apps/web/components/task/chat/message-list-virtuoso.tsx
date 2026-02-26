@@ -70,7 +70,15 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
-  const { worktreePath, onOpenFile, lastTurnGroupId, isRunning, messages, sessionState } = props;
+  const {
+    worktreePath,
+    onOpenFile,
+    lastTurnGroupId,
+    isRunning,
+    messages,
+    sessionState,
+    taskState,
+  } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
@@ -128,6 +136,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             isTurnActive={isRunning}
             messages={messages}
             sessionState={sessionState}
+            taskState={taskState}
             onScrollToMessage={handleScrollToMessage}
           />
         </div>
@@ -146,6 +155,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       isRunning,
       messages,
       sessionState,
+      taskState,
       handleScrollToMessage,
     ],
   );

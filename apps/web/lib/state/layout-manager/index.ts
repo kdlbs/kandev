@@ -7,6 +7,8 @@ export type {
   LayoutNode,
   LayoutLeafNode,
   LayoutBranchNode,
+  LayoutIntent,
+  LayoutIntentPanel,
 } from "./types";
 
 // Constants
@@ -42,3 +44,6 @@ export type { LayoutGroupIds } from "./applier";
 
 // Merger
 export { mergeCurrentPanelsIntoPreset } from "./merger";
+
+// Intent
+export { injectIntentPanels, applyActivePanelOverrides } from "./intent";

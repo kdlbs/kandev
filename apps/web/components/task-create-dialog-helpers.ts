@@ -76,13 +76,7 @@ export function activatePlanMode({
   router,
 }: ActivatePlanModeArgs) {
   setActiveDocument(sessionId, { type: "plan", taskId });
-  useDockviewStore.getState().queuePanelAction({
-    id: "plan",
-    component: "plan",
-    title: "Plan",
-    placement: "right",
-    referencePanel: "chat",
-  });
+  useDockviewStore.getState().setLayoutIntent({ preset: "plan" });
   setPlanMode(sessionId, true);
   useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
   router.push(linkToSession(sessionId));

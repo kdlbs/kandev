@@ -1,7 +1,7 @@
 "use client";
 
 import { GridSpinner } from "@/components/grid-spinner";
-import type { Message, TaskSessionState } from "@/lib/types/http";
+import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
@@ -16,6 +16,7 @@ export type MessageListProps = {
   messagesLoading: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
+  taskState?: TaskState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 };
@@ -85,6 +86,7 @@ export function MessageItem({
   isTurnActive,
   messages,
   sessionState,
+  taskState,
   onScrollToMessage,
 }: {
   item: RenderItem;
@@ -98,6 +100,7 @@ export function MessageItem({
   isTurnActive: boolean;
   messages: Message[];
   sessionState?: TaskSessionState;
+  taskState?: TaskState;
   onScrollToMessage: (id: string) => void;
 }) {
   if (item.type === "turn_group") {
@@ -122,6 +125,7 @@ export function MessageItem({
       comment={item.message}
       isTaskDescription={item.message.id === "task-description"}
       sessionState={sessionState}
+      taskState={taskState}
       taskId={taskId}
       permissionsByToolCallId={permissionsByToolCallId}
       childrenByParentToolCallId={childrenByParentToolCallId}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { Message } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { PrepareProgress } from "@/components/session/prepare-progress";
@@ -153,7 +154,10 @@ function useAutoScroll(
   // Auto-scroll on new messages if near bottom
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && isNearBottomRef.current) {
+    if (!el) return;
+    // Skip auto-scroll when a layout rebuild scroll restore is pending
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) return;
+    if (isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages, scrollRef]);
@@ -176,6 +180,7 @@ export const NativeMessageList = memo(function NativeMessageList({
   messagesLoading,
   isWorking,
   sessionState,
+  taskState,
   worktreePath,
   onOpenFile,
 }: MessageListProps) {
@@ -199,10 +204,15 @@ export const NativeMessageList = memo(function NativeMessageList({
   useEffect(() => {
     if (didInitialScroll.current || items.length === 0) return;
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // If a layout rebuild scroll restore is pending, skip initial scroll
+    // (the restore handler will set the correct position)
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
       didInitialScroll.current = true;
+      return;
     }
+    el.scrollTop = el.scrollHeight;
+    didInitialScroll.current = true;
   }, [items.length]);
 
   return (
@@ -235,6 +245,7 @@ export const NativeMessageList = memo(function NativeMessageList({
               isTurnActive={isRunning}
               messages={messages}
               sessionState={sessionState}
+              taskState={taskState}
               onScrollToMessage={handleScrollToMessage}
             />
           </div>
