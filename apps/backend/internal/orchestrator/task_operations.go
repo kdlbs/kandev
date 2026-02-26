@@ -185,7 +185,8 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 // StartCreatedSession starts agent execution for a task using a session that is in CREATED state.
 // This is used when a session was prepared (via PrepareSession) but the agent was not launched,
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string) (*executor.TaskExecution, error) {
+// When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -237,7 +238,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, false)
+		if skipMessageRecord {
+			s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
+		} else {
+			s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, false)
+		}
 	}
 
 	return execution, nil

@@ -137,7 +137,7 @@ func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Messag
 
 	// If session_id is provided without a workflow step, start a CREATED session with prompt
 	if req.SessionID != "" {
-		execution, err := h.service.StartCreatedSession(ctx, req.TaskID, req.SessionID, req.AgentProfileID, req.Prompt)
+		execution, err := h.service.StartCreatedSession(ctx, req.TaskID, req.SessionID, req.AgentProfileID, req.Prompt, false)
 		if err != nil {
 			h.logger.Error("failed to start created session", zap.String("task_id", req.TaskID), zap.String("session_id", req.SessionID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start session: "+err.Error(), nil)
