@@ -248,6 +248,26 @@ func TestErrorClassificationFunctions(t *testing.T) {
 		}
 	})
 
+	t.Run("isAgentAlreadyRunningError", func(t *testing.T) {
+		tests := []struct {
+			name string
+			err  error
+			want bool
+		}{
+			{"nil error", nil, false},
+			{"unrelated error", errors.New("something else"), false},
+			{"lifecycle manager error", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1"), true},
+			{"wrapped error", fmt.Errorf("failed to resume session: %w", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1")), true},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := isAgentAlreadyRunningError(tc.err); got != tc.want {
+					t.Errorf("isAgentAlreadyRunningError(%v) = %v, want %v", tc.err, got, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("isTransientPromptError", func(t *testing.T) {
 		tests := []struct {
 			name string

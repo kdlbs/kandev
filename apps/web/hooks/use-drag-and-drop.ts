@@ -6,15 +6,6 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
-import type { WorkflowStepDTO, MoveTaskResponse } from "@/lib/types/http";
-import { getWebSocketClient } from "@/lib/ws/connection";
-
-export type WorkflowAutomation = {
-  taskId: string;
-  sessionId: string | null;
-  workflowStep: WorkflowStepDTO;
-  taskDescription: string;
-};
 
 export type MoveTaskError = {
   message: string;
@@ -24,11 +15,10 @@ export type MoveTaskError = {
 
 export type DragAndDropOptions = {
   visibleTasks: Task[];
-  onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-type UseDragAndDropRefsInput = Pick<DragAndDropOptions, "onWorkflowAutomation" | "onMoveError">;
+type UseDragAndDropRefsInput = Pick<DragAndDropOptions, "onMoveError">;
 
 /** Compute optimistic task list after a move. */
 function applyOptimisticMove(
@@ -57,71 +47,21 @@ function calcNextPosition(
     ).length;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function triggerAutoStart(task: Task, response: any): Promise<void> {
-  const sessionId = task.primarySessionId ?? null;
-  if (!sessionId) return;
-  const client = getWebSocketClient();
-  if (!client) return;
-  try {
-    await client.request(
-      "orchestrator.start",
-      { task_id: task.id, session_id: sessionId, workflow_step_id: response.workflow_step.id },
-      15000,
-    );
-  } catch (err) {
-    console.error("Failed to auto-start session for workflow step:", err);
-  }
-}
-
-function useDragAndDropRefs({ onWorkflowAutomation, onMoveError }: UseDragAndDropRefsInput) {
-  const onWorkflowAutomationRef = useRef(onWorkflowAutomation);
+function useDragAndDropRefs({ onMoveError }: UseDragAndDropRefsInput) {
   const onMoveErrorRef = useRef(onMoveError);
   useEffect(() => {
-    onWorkflowAutomationRef.current = onWorkflowAutomation;
     onMoveErrorRef.current = onMoveError;
-  }, [onMoveError, onWorkflowAutomation]);
-  return { onWorkflowAutomationRef, onMoveErrorRef };
+  }, [onMoveError]);
+  return { onMoveErrorRef };
 }
 
-async function maybeHandleWorkflowAutomation(
-  task: Task,
-  response: MoveTaskResponse,
-  onWorkflowAutomationRef: {
-    current: DragAndDropOptions["onWorkflowAutomation"];
-  },
-) {
-  const hasAutoStart = response.workflow_step?.events?.on_enter?.some(
-    (a: { type: string }) => a.type === "auto_start_agent",
-  );
-  if (!hasAutoStart) return;
-  const sessionId = task.primarySessionId ?? null;
-  if (sessionId) {
-    await triggerAutoStart(task, response);
-    return;
-  }
-  onWorkflowAutomationRef.current?.({
-    taskId: task.id,
-    sessionId: null,
-    workflowStep: response.workflow_step,
-    taskDescription: task.description ?? "",
-  });
-}
-
-export function useDragAndDrop({
-  visibleTasks,
-  onWorkflowAutomation,
-  onMoveError,
-}: DragAndDropOptions) {
+export function useDragAndDrop({ visibleTasks, onMoveError }: DragAndDropOptions) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [isMovingTask, setIsMovingTask] = useState(false);
   const { moveTaskById } = useTaskActions();
   const kanban = useAppStore((state) => state.kanban);
   const store = useAppStoreApi();
-  const { onWorkflowAutomationRef, onMoveErrorRef } = useDragAndDropRefs({
-    onWorkflowAutomation,
-    onMoveError,
-  });
+  const { onMoveErrorRef } = useDragAndDropRefs({ onMoveError });
   const performTaskMove = useCallback(
     async (task: Task, targetStepId: string) => {
       const currentKanban = store.getState().kanban;
@@ -136,12 +76,11 @@ export function useDragAndDrop({
       });
       try {
         setIsMovingTask(true);
-        const response = await moveTaskById(task.id, {
+        await moveTaskById(task.id, {
           workflow_id: currentKanban.workflowId,
           workflow_step_id: targetStepId,
           position: nextPosition,
         });
-        await maybeHandleWorkflowAutomation(task, response, onWorkflowAutomationRef);
       } catch (error) {
         store.getState().hydrate({ kanban: { ...store.getState().kanban, tasks: originalTasks } });
         const message = error instanceof Error ? error.message : "Failed to move task";
@@ -154,7 +93,7 @@ export function useDragAndDrop({
         setIsMovingTask(false);
       }
     },
-    [moveTaskById, onMoveErrorRef, onWorkflowAutomationRef, store],
+    [moveTaskById, onMoveErrorRef, store],
   );
   const handleDragStart = (event: DragStartEvent) => {
     setActiveTaskId(event.active.id as string);

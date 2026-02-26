@@ -7,14 +7,13 @@ import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Task as BackendTask } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { type WorkflowAutomation, type MoveTaskError } from "@/hooks/use-drag-and-drop";
+import { type MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { SwimlaneContainer } from "./kanban/swimlane-container";
 import { KanbanHeader } from "./kanban/kanban-header";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { HomepageCommands } from "./homepage-commands";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { linkToSession } from "@/lib/links";
 import {
   AlertDialog,
@@ -88,15 +87,8 @@ function useWorkflowSelection({
   ]);
 }
 
-function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
-  const [workflowAutomation, setWorkflowAutomation] = useState<WorkflowAutomation | null>(null);
-  const [isWorkflowDialogOpen, setIsWorkflowDialogOpen] = useState(false);
+function useMoveErrorState(router: ReturnType<typeof useRouter>) {
   const [moveError, setMoveError] = useState<MoveTaskError | null>(null);
-
-  const handleWorkflowAutomation = useCallback((automation: WorkflowAutomation) => {
-    setWorkflowAutomation(automation);
-    setIsWorkflowDialogOpen(true);
-  }, []);
 
   const handleMoveError = useCallback((error: MoveTaskError) => {
     setMoveError(error);
@@ -109,44 +101,11 @@ function useWorkflowAutomationState(router: ReturnType<typeof useRouter>) {
     setMoveError(null);
   }, [moveError, router]);
 
-  const handleWorkflowSessionCreate = useCallback(
-    async (data: { prompt: string; agentProfileId: string; executorId: string }) => {
-      if (!workflowAutomation) return;
-      const client = getWebSocketClient();
-      if (!client) return;
-      try {
-        await client.request(
-          "orchestrator.start",
-          {
-            task_id: workflowAutomation.taskId,
-            agent_profile_id: data.agentProfileId,
-            executor_id: data.executorId,
-            prompt: data.prompt.trim(),
-            workflow_step_id: workflowAutomation.workflowStep.id,
-          },
-          15000,
-        );
-      } catch (err) {
-        console.error("Failed to start session for workflow step:", err);
-      } finally {
-        setWorkflowAutomation(null);
-        setIsWorkflowDialogOpen(false);
-      }
-    },
-    [workflowAutomation],
-  );
-
   return {
-    workflowAutomation,
-    setWorkflowAutomation,
-    isWorkflowDialogOpen,
-    setIsWorkflowDialogOpen,
     moveError,
     setMoveError,
-    handleWorkflowAutomation,
     handleMoveError,
     handleGoToTask,
-    handleWorkflowSessionCreate,
   };
 }
 
@@ -254,7 +213,7 @@ function useKanbanBoardSetup(
     setIsDialogOpen: hooks.setIsDialogOpen,
     setTaskSessionAvailability: hooks.setTaskSessionAvailability,
   });
-  const automation = useWorkflowAutomationState(router);
+  const automation = useMoveErrorState(router);
 
   useWorkflowSelection({
     store,
@@ -311,11 +270,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         stepOptions={stepOptions}
         editingTask={s.editingTask}
         handleDialogSuccess={s.handleDialogSuccess}
-        isWorkflowDialogOpen={s.isWorkflowDialogOpen}
-        setIsWorkflowDialogOpen={s.setIsWorkflowDialogOpen}
-        setWorkflowAutomation={s.setWorkflowAutomation}
-        workflowAutomation={s.workflowAutomation}
-        handleWorkflowSessionCreate={s.handleWorkflowSessionCreate}
         moveError={s.moveError}
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
@@ -328,7 +282,6 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onEditTask={s.handleEdit}
         onDeleteTask={s.handleDelete}
         onMoveError={s.handleMoveError}
-        onWorkflowAutomation={s.handleWorkflowAutomation}
         deletingTaskId={s.deletingTaskId}
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
@@ -354,15 +307,6 @@ type KanbanBoardDialogsProps = {
   }>;
   editingTask: Task | null;
   handleDialogSuccess: (task: BackendTask, mode: "create" | "edit") => void;
-  isWorkflowDialogOpen: boolean;
-  setIsWorkflowDialogOpen: (open: boolean) => void;
-  setWorkflowAutomation: (automation: WorkflowAutomation | null) => void;
-  workflowAutomation: WorkflowAutomation | null;
-  handleWorkflowSessionCreate: (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-  }) => Promise<void>;
   moveError: MoveTaskError | null;
   setMoveError: (error: MoveTaskError | null) => void;
   handleGoToTask: () => void;
@@ -377,11 +321,6 @@ function KanbanBoardDialogs({
   stepOptions,
   editingTask,
   handleDialogSuccess,
-  isWorkflowDialogOpen,
-  setIsWorkflowDialogOpen,
-  setWorkflowAutomation,
-  workflowAutomation,
-  handleWorkflowSessionCreate,
   moveError,
   setMoveError,
   handleGoToTask,
@@ -419,24 +358,6 @@ function KanbanBoardDialogs({
             : undefined
         }
         mode={editingTask ? "edit" : "create"}
-      />
-      <TaskCreateDialog
-        open={isWorkflowDialogOpen}
-        onOpenChange={(open) => {
-          setIsWorkflowDialogOpen(open);
-          if (!open) setWorkflowAutomation(null);
-        }}
-        mode="session"
-        workspaceId={workspaceId}
-        workflowId={workflowId}
-        defaultStepId={workflowAutomation?.workflowStep.id ?? null}
-        steps={stepOptions}
-        editingTask={null}
-        onCreateSession={handleWorkflowSessionCreate}
-        initialValues={{
-          title: "",
-          description: workflowAutomation?.taskDescription ?? "",
-        }}
       />
       <ApprovalWarningDialog
         moveError={moveError}

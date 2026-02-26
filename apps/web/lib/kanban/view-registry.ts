@@ -4,7 +4,7 @@ import { SwimlaneKanbanContent } from "@/components/kanban/swimlane-kanban-conte
 import { SwimlaneGraph2Content } from "@/components/kanban/swimlane-graph2-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
   workflowId: string;
@@ -15,7 +15,6 @@ export type ViewContentProps = {
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
-  onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   deletingTaskId?: string | null;
   showMaximizeButton?: boolean;
 };

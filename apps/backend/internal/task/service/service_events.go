@@ -8,6 +8,7 @@ import (
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -75,6 +76,28 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish task event",
 			zap.String("event_type", eventType),
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+}
+
+// publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
+// on_exit/on_enter actions for the new workflow step.
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromStepID, toStepID, sessionID string) {
+	if s.eventBus == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"task_id":          task.ID,
+		"from_step_id":     fromStepID,
+		"to_step_id":       toStepID,
+		"session_id":       sessionID,
+		"workflow_id":      task.WorkflowID,
+		"task_description": task.Description,
+	}
+	event := bus.NewEvent(events.TaskMoved, "task-service", data)
+	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
+		s.logger.Error("failed to publish task.moved event",
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	}

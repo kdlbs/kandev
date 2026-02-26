@@ -229,6 +229,9 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 		return nil, err
 	}
 
+	oldStepID := task.WorkflowStepID
+	stepChanged := oldStepID != workflowStepID
+
 	oldState := task.State
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
@@ -240,13 +243,18 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 		return nil, err
 	}
 
-	s.syncActiveSessionWorkflowStep(ctx, id, task.WorkflowStepID)
+	sessionID := s.syncActiveSessionWorkflowStep(ctx, id, task.WorkflowStepID)
 
 	// Publish state_changed event if state changed, otherwise just updated
 	if oldState != task.State {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	} else {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	}
+
+	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
+	if stepChanged {
+		s.publishTaskMovedEvent(ctx, task, oldStepID, workflowStepID, sessionID)
 	}
 
 	s.logger.Info("task moved",
@@ -291,16 +299,17 @@ func (s *Service) checkMoveTaskApproval(ctx context.Context, taskID, currentStep
 
 // syncActiveSessionWorkflowStep updates the active session's workflow_step_id to match the
 // task's new step when they differ. Failures are logged but do not abort the move.
-func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, workflowStepID string) {
+// Returns the active session ID (empty if none exists).
+func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, workflowStepID string) string {
 	if workflowStepID == "" {
-		return
+		return ""
 	}
 	activeSession, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err != nil || activeSession == nil {
-		return
+		return ""
 	}
 	if activeSession.WorkflowStepID != nil && *activeSession.WorkflowStepID == workflowStepID {
-		return
+		return activeSession.ID
 	}
 	if err := s.sessions.UpdateSessionWorkflowStep(ctx, activeSession.ID, workflowStepID); err != nil {
 		s.logger.Warn("failed to update session workflow step after task move",
@@ -308,12 +317,13 @@ func (s *Service) syncActiveSessionWorkflowStep(ctx context.Context, taskID, wor
 			zap.String("session_id", activeSession.ID),
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
-		return
+		return activeSession.ID
 	}
 	s.logger.Info("updated session workflow step to match moved task",
 		zap.String("task_id", taskID),
 		zap.String("session_id", activeSession.ID),
 		zap.String("workflow_step_id", workflowStepID))
+	return activeSession.ID
 }
 
 // CountTasksByWorkflow returns the number of tasks in a workflow

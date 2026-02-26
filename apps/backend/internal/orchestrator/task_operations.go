@@ -48,6 +48,10 @@ func isTransientPromptError(err error) bool {
 		strings.Contains(msg, "use of closed network connection")
 }
 
+func isAgentAlreadyRunningError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already has an agent running")
+}
+
 func validateSessionWorktrees(session *models.TaskSession) error {
 	for _, wt := range session.Worktrees {
 		if wt.WorktreePath == "" {

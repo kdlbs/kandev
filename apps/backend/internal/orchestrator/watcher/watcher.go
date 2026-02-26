@@ -58,6 +58,16 @@ type PermissionRequestData struct {
 // Kept for backwards compatibility with existing handler signatures.
 type GitEventData = lifecycle.GitEventPayload
 
+// TaskMovedEventData contains data from task.moved events (manual step changes).
+type TaskMovedEventData struct {
+	TaskID          string `json:"task_id"`
+	FromStepID      string `json:"from_step_id"`
+	ToStepID        string `json:"to_step_id"`
+	SessionID       string `json:"session_id"`
+	WorkflowID      string `json:"workflow_id"`
+	TaskDescription string `json:"task_description"`
+}
+
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
 	TaskID                 string  `json:"task_id"`
@@ -77,6 +87,7 @@ type EventHandlers struct {
 	OnTaskUpdated      func(ctx context.Context, data TaskEventData)
 	OnTaskStateChanged func(ctx context.Context, data TaskEventData)
 	OnTaskDeleted      func(ctx context.Context, data TaskEventData)
+	OnTaskMoved        func(ctx context.Context, data TaskMovedEventData)
 
 	// Agent events
 	OnAgentStarted      func(ctx context.Context, data AgentEventData)
@@ -243,6 +254,21 @@ func (w *Watcher) subscribeToTaskEvents() error {
 		}
 		w.subscriptions = append(w.subscriptions, sub)
 	}
+
+	// Subscribe to task.moved events (different data type from TaskEventData)
+	if w.handlers.OnTaskMoved != nil {
+		handler := w.handlers.OnTaskMoved
+		sub, err := w.eventBus.QueueSubscribe(events.TaskMoved, w.queue, w.createTaskMovedEventHandler(handler))
+		if err != nil {
+			w.logger.Error("Failed to subscribe to task moved event",
+				zap.String("subject", events.TaskMoved),
+				zap.String("queue", w.queue),
+				zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
+	}
+
 	return nil
 }
 
@@ -332,6 +358,28 @@ func (w *Watcher) createTaskEventHandler(handler func(ctx context.Context, data 
 		w.logger.Debug("Handling task event",
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID))
+
+		handler(ctx, data)
+		return nil
+	}
+}
+
+// createTaskMovedEventHandler creates a bus.EventHandler for task.moved events
+func (w *Watcher) createTaskMovedEventHandler(handler func(ctx context.Context, data TaskMovedEventData)) bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var data TaskMovedEventData
+		if err := w.parseEventData(event.Data, &data); err != nil {
+			w.logger.Error("Failed to parse task moved event data",
+				zap.String("event_type", event.Type),
+				zap.String("event_id", event.ID),
+				zap.Error(err))
+			return nil
+		}
+
+		w.logger.Debug("Handling task moved event",
+			zap.String("task_id", data.TaskID),
+			zap.String("from_step", data.FromStepID),
+			zap.String("to_step", data.ToStepID))
 
 		handler(ctx, data)
 		return nil
