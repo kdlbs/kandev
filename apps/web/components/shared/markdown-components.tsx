@@ -6,6 +6,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
 import { InlineCode } from "@/components/task/chat/messages/inline-code";
 import { CodeBlock } from "@/components/task/chat/messages/code-block";
+import { MermaidBlock } from "@/components/shared/mermaid-block";
+import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-extension";
 
 /** Shared remark plugins used by all markdown renderers */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -44,6 +46,10 @@ export function getTextContent(children: ReactNode): string {
 export const markdownComponents = {
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
     const content = getTextContent(children).replace(/\n$/, "");
+    const lang = className?.replace("language-", "") ?? null;
+    if (isMermaidContent(lang, content)) {
+      return <MermaidBlock code={content} />;
+    }
     const hasLanguage = className?.startsWith("language-");
     const hasNewlines = content.includes("\n");
     if (hasLanguage || hasNewlines) {

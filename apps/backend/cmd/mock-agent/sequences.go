@@ -398,6 +398,49 @@ func emitTodo(enc *json.Encoder, model string) {
 	})
 }
 
+// emitMermaidSequence emits a rich markdown message containing mermaid diagrams.
+func emitMermaidSequence(enc *json.Encoder, model string) {
+	emitThinking(enc, model)
+	randomDelay(model)
+
+	emitTextBlock(enc, "Here's an overview of the system architecture with diagrams:\n\n"+
+		"## System Flow\n\n"+
+		"The following flowchart shows the request processing pipeline:\n\n"+
+		"```mermaid\n"+
+		"flowchart TD\n"+
+		"    A([Client Request]) --> B{Auth Check}\n"+
+		"    B -->|Valid| C[API Gateway]\n"+
+		"    B -->|Invalid| D[401 Unauthorized]\n"+
+		"    C --> E[Load Balancer]\n"+
+		"    E --> F[Service A]\n"+
+		"    E --> G[Service B]\n"+
+		"    F --> H[(Database)]\n"+
+		"    G --> H\n"+
+		"    H --> I[Response Builder]\n"+
+		"    I --> J([Client Response])\n"+
+		"```\n\n"+
+		"## Sequence Diagram\n\n"+
+		"Here's how the authentication flow works between components:\n\n"+
+		"```mermaid\n"+
+		"sequenceDiagram\n"+
+		"    participant U as User\n"+
+		"    participant FE as Frontend\n"+
+		"    participant API as API Server\n"+
+		"    participant DB as Database\n"+
+		"    U->>FE: Login Request\n"+
+		"    FE->>API: POST /auth/login\n"+
+		"    API->>DB: Verify Credentials\n"+
+		"    DB-->>API: User Record\n"+
+		"    API-->>FE: JWT Token\n"+
+		"    FE-->>U: Redirect to Dashboard\n"+
+		"```\n\n"+
+		"### Key Points\n\n"+
+		"- All requests go through the **API Gateway** for rate limiting\n"+
+		"- Authentication uses **JWT tokens** with a 24h expiry\n"+
+		"- Services communicate via `gRPC` internally\n"+
+		"- Database connections use a **connection pool** (max 50)\n", "")
+}
+
 // emitWebFetch emits a WebFetch tool_use followed by a tool_result.
 func emitWebFetch(enc *json.Encoder, model string) {
 	toolID := nextToolID()

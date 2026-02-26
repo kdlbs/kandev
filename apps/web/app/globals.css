@@ -995,9 +995,10 @@
 
 /* Mermaid diagram styles */
 .tiptap-plan-wrapper .mermaid-container {
-  margin: 0.75rem 0 !important;
-  padding: 0.5rem !important;
-  overflow-x: auto !important;
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.75rem auto !important;
 }
 
 .tiptap-plan-wrapper .mermaid-container svg {
@@ -1010,6 +1011,111 @@
   font-size: 0.75rem !important;
   padding: 0.5rem !important;
   white-space: pre-wrap !important;
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view {
+  margin: 0 !important;
+  padding: 0.75rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1.6 !important;
+  white-space: pre-wrap !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view code {
+  color: var(--foreground) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 0.75rem !important;
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-keyword {
+  color: oklch(0.65 0.2 300);
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-arrow {
+  color: oklch(0.7 0.15 60);
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-label {
+  color: oklch(0.7 0.15 150);
+}
+
+.tiptap-plan-wrapper .tiptap pre.mermaid-code-view .mm-text {
+  color: var(--muted-foreground);
+}
+
+.tiptap-plan-wrapper:not(.dark) .tiptap pre.mermaid-code-view .mm-keyword {
+  color: oklch(0.45 0.2 280);
+}
+
+.tiptap-plan-wrapper:not(.dark) .tiptap pre.mermaid-code-view .mm-arrow {
+  color: oklch(0.5 0.15 40);
+}
+
+.tiptap-plan-wrapper:not(.dark) .tiptap pre.mermaid-code-view .mm-label {
+  color: oklch(0.4 0.15 150);
+}
+
+.tiptap-plan-wrapper .mermaid-toolbar {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid oklch(from var(--border) l c h / 0.5);
+  background: oklch(from var(--background) l c h / 0.8);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.tiptap-plan-wrapper .mermaid-container:hover .mermaid-toolbar {
+  opacity: 1;
+}
+
+.tiptap-plan-wrapper .mermaid-zoom-btn {
+  padding: 0.125rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.tiptap-plan-wrapper .mermaid-zoom-btn:hover {
+  color: var(--foreground);
+}
+
+.tiptap-plan-wrapper .mermaid-zoom-label {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: center;
+}
+
+.tiptap-plan-wrapper .mermaid-zoom-label:hover {
+  color: var(--foreground);
+}
+
+.tiptap-plan-wrapper .mermaid-toolbar-sep {
+  width: 1px;
+  height: 0.875rem;
+  background: oklch(from var(--border) l c h / 0.5);
+  margin: 0 0.125rem;
+}
+
+/* Mermaid diagram in markdown renderer (chat messages, PR comments) */
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Placeholder for empty plan editor */
