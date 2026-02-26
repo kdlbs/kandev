@@ -23,35 +23,35 @@ func TestBuildReviewSearchQuery(t *testing.T) {
 		{
 			name:  "user scope without filter",
 			scope: ReviewScopeUser,
-			want:  "type:pr state:open user-review-requested:@me",
+			want:  "type:pr state:open user-review-requested:@me -is:draft",
 		},
 		{
 			name:   "user scope with repo filter",
 			scope:  ReviewScopeUser,
 			filter: "repo:owner/repo",
-			want:   "type:pr state:open user-review-requested:@me repo:owner/repo",
+			want:   "type:pr state:open user-review-requested:@me -is:draft repo:owner/repo",
 		},
 		{
 			name:  "user_and_teams scope without filter",
 			scope: ReviewScopeUserAndTeams,
-			want:  "type:pr state:open review-requested:@me",
+			want:  "type:pr state:open review-requested:@me -is:draft",
 		},
 		{
 			name:   "user_and_teams scope with org filter",
 			scope:  ReviewScopeUserAndTeams,
 			filter: "org:myorg",
-			want:   "type:pr state:open review-requested:@me org:myorg",
+			want:   "type:pr state:open review-requested:@me -is:draft org:myorg",
 		},
 		{
 			name:  "empty scope defaults to user_and_teams",
 			scope: "",
-			want:  "type:pr state:open review-requested:@me",
+			want:  "type:pr state:open review-requested:@me -is:draft",
 		},
 		{
 			name:        "empty customQuery falls through to scope logic",
 			scope:       ReviewScopeUserAndTeams,
 			customQuery: "",
-			want:        "type:pr state:open review-requested:@me",
+			want:        "type:pr state:open review-requested:@me -is:draft",
 		},
 	}
 
@@ -103,6 +103,9 @@ func TestConvertRawCheckRuns(t *testing.T) {
 	if checks[0].Name != "ci/test" {
 		t.Errorf("expected name ci/test, got %s", checks[0].Name)
 	}
+	if checks[0].Source != checkSourceCheckRun {
+		t.Errorf("expected source %q, got %q", checkSourceCheckRun, checks[0].Source)
+	}
 	if checks[0].Conclusion != "success" {
 		t.Errorf("expected conclusion success, got %s", checks[0].Conclusion)
 	}
@@ -143,7 +146,8 @@ func TestConvertRawComments(t *testing.T) {
 			User: struct {
 				Login     string `json:"login"`
 				AvatarURL string `json:"avatar_url"`
-			}{Login: "alice", AvatarURL: "https://avatar.example.com/alice"},
+				Type      string `json:"type"`
+			}{Login: "alice", AvatarURL: "https://avatar.example.com/alice", Type: "User"},
 		},
 	}
 
@@ -160,6 +164,103 @@ func TestConvertRawComments(t *testing.T) {
 	}
 	if comments[0].Line != 42 {
 		t.Errorf("expected line 42, got %d", comments[0].Line)
+	}
+	if comments[0].CommentType != commentTypeReview {
+		t.Errorf("expected comment type %q, got %q", commentTypeReview, comments[0].CommentType)
+	}
+	if comments[0].AuthorIsBot {
+		t.Error("expected non-bot comment")
+	}
+}
+
+func TestConvertRawIssueComments(t *testing.T) {
+	now := time.Now()
+	raw := []ghIssueComment{
+		{
+			ID:        10,
+			Body:      "Snyk report",
+			CreatedAt: now,
+			UpdatedAt: now,
+			User: struct {
+				Login     string `json:"login"`
+				AvatarURL string `json:"avatar_url"`
+				Type      string `json:"type"`
+			}{
+				Login:     "snyk-io",
+				AvatarURL: "https://avatar.example.com/snyk",
+				Type:      "Bot",
+			},
+		},
+	}
+
+	comments := convertRawIssueComments(raw)
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(comments))
+	}
+	if comments[0].CommentType != commentTypeIssue {
+		t.Errorf("expected comment type %q, got %q", commentTypeIssue, comments[0].CommentType)
+	}
+	if !comments[0].AuthorIsBot {
+		t.Error("expected bot comment")
+	}
+}
+
+func TestMergeAndSortPRComments(t *testing.T) {
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+	t3 := time.Date(2025, 1, 3, 0, 0, 0, 0, time.UTC)
+	review := []PRComment{
+		{ID: 2, CommentType: commentTypeReview, CreatedAt: t2},
+		{ID: 3, CommentType: commentTypeReview, CreatedAt: t3},
+	}
+	issue := []PRComment{
+		{ID: 1, CommentType: commentTypeIssue, CreatedAt: t1},
+	}
+
+	got := mergeAndSortPRComments(review, issue)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 comments, got %d", len(got))
+	}
+	if got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Errorf("unexpected merge/sort order: %#v", got)
+	}
+}
+
+func TestConvertRawStatusContextsAndMergeChecks(t *testing.T) {
+	conclusion := "success"
+	checkRuns := []ghCheckRun{
+		{
+			Name:       "ci/test",
+			Status:     "completed",
+			Conclusion: &conclusion,
+			HTMLURL:    "https://github.com/owner/repo/runs/1",
+		},
+	}
+	statuses := []ghStatusContext{
+		{
+			Context:   "ci/test",
+			State:     "pending",
+			TargetURL: "https://github.com/owner/repo/runs/1",
+		},
+		{
+			Context:   "license/snyk",
+			State:     "success",
+			TargetURL: "https://app.snyk.io/check/2",
+		},
+	}
+
+	merged := mergeChecks(convertRawCheckRuns(checkRuns), convertRawStatusContexts(statuses))
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 checks after dedupe, got %d", len(merged))
+	}
+	if merged[0].Name != "ci/test" || merged[0].Source != checkSourceCheckRun {
+		t.Errorf("expected check_run to win dedupe, got %#v", merged[0])
+	}
+	if merged[1].Name != "license/snyk" || merged[1].Source != checkSourceStatusContext {
+		t.Errorf("expected status_context entry, got %#v", merged[1])
+	}
+	if merged[1].Conclusion != checkStatusSuccess {
+		t.Errorf("expected success conclusion, got %q", merged[1].Conclusion)
 	}
 }
 

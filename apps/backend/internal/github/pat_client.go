@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -191,28 +192,101 @@ func (c *PATClient) ListPRReviews(ctx context.Context, owner, repo string, numbe
 func (c *PATClient) ListPRComments(ctx context.Context, owner, repo string, number int, since *time.Time) ([]PRComment, error) {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments?per_page=100", owner, repo, number)
 	if since != nil {
-		endpoint += "&since=" + since.Format(time.RFC3339)
+		endpoint += "&since=" + url.QueryEscape(since.Format(time.RFC3339))
 	}
-	var raw []ghComment
-	if err := c.get(ctx, endpoint, &raw); err != nil {
+	var reviewRaw []ghComment
+	if err := c.get(ctx, endpoint, &reviewRaw); err != nil {
 		return nil, err
 	}
-	return convertRawComments(raw), nil
+	issueEndpoint := fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", owner, repo, number)
+	if since != nil {
+		issueEndpoint += "&since=" + url.QueryEscape(since.Format(time.RFC3339))
+	}
+	var issueRaw []ghIssueComment
+	if err := c.get(ctx, issueEndpoint, &issueRaw); err != nil {
+		return nil, err
+	}
+	return mergeAndSortPRComments(convertRawComments(reviewRaw), convertRawIssueComments(issueRaw)), nil
 }
 
 func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
-	var result struct {
+	var checkRunsResult struct {
 		CheckRuns []ghCheckRun `json:"check_runs"`
 	}
 	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, repo, ref)
-	if err := c.get(ctx, endpoint, &result); err != nil {
+	if err := c.get(ctx, endpoint, &checkRunsResult); err != nil {
 		return nil, err
 	}
-	return convertRawCheckRuns(result.CheckRuns), nil
+	var statusResult struct {
+		Statuses []ghStatusContext `json:"statuses"`
+	}
+	statusEndpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/status", owner, repo, ref)
+	if err := c.get(ctx, statusEndpoint, &statusResult); err != nil {
+		return nil, err
+	}
+	return mergeChecks(
+		convertRawCheckRuns(checkRunsResult.CheckRuns),
+		convertRawStatusContexts(statusResult.Statuses),
+	), nil
 }
 
 func (c *PATClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	return getPRFeedback(ctx, c, owner, repo, number)
+}
+
+func (c *PATClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
+	var raw []ghPRFile
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/files?per_page=100", owner, repo, number)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("list PR files: %w", err)
+	}
+	return convertRawPRFiles(raw), nil
+}
+
+func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
+	var raw []ghPRCommit
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/commits?per_page=100", owner, repo, number)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("list PR commits: %w", err)
+	}
+	return convertRawPRCommits(raw), nil
+}
+
+func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number)
+	payload := map[string]string{"event": event}
+	if body != "" {
+		payload["body"] = body
+	}
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal review payload: %w", err)
+	}
+	return c.post(ctx, endpoint, jsonBody)
+}
+
+func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request POST %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("GitHub API POST %s returned %d: %s", endpoint, resp.StatusCode, string(respBody))
+	}
+	return nil
 }
 
 func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}) error {
@@ -240,19 +314,27 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 // patPR is the JSON shape from the GitHub REST API for PRs.
 type patPR struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	HTMLURL   string    `json:"html_url"`
-	State     string    `json:"state"`
-	Draft     bool      `json:"draft"`
-	Mergeable *bool     `json:"mergeable"`
-	Additions int       `json:"additions"`
-	Deletions int       `json:"deletions"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	MergedAt  *string   `json:"merged_at"`
-	ClosedAt  *string   `json:"closed_at"`
-	User      struct {
+	Number             int       `json:"number"`
+	Title              string    `json:"title"`
+	HTMLURL            string    `json:"html_url"`
+	Body               string    `json:"body"`
+	State              string    `json:"state"`
+	Draft              bool      `json:"draft"`
+	Mergeable          *bool     `json:"mergeable"`
+	Additions          int       `json:"additions"`
+	Deletions          int       `json:"deletions"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	MergedAt           *string   `json:"merged_at"`
+	ClosedAt           *string   `json:"closed_at"`
+	RequestedReviewers []struct {
+		Login string `json:"login"`
+	} `json:"requested_reviewers"`
+	RequestedTeams []struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	} `json:"requested_teams"`
+	User struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Head struct {
@@ -288,22 +370,24 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		mergeable = *raw.Mergeable
 	}
 	pr := &PR{
-		Number:      raw.Number,
-		Title:       raw.Title,
-		HTMLURL:     raw.HTMLURL,
-		State:       state,
-		HeadBranch:  raw.Head.Ref,
-		HeadSHA:     raw.Head.SHA,
-		BaseBranch:  raw.Base.Ref,
-		AuthorLogin: raw.User.Login,
-		RepoOwner:   owner,
-		RepoName:    repo,
-		Draft:       raw.Draft,
-		Mergeable:   mergeable,
-		Additions:   raw.Additions,
-		Deletions:   raw.Deletions,
-		CreatedAt:   raw.CreatedAt,
-		UpdatedAt:   raw.UpdatedAt,
+		Number:             raw.Number,
+		Title:              raw.Title,
+		HTMLURL:            raw.HTMLURL,
+		Body:               raw.Body,
+		State:              state,
+		HeadBranch:         raw.Head.Ref,
+		HeadSHA:            raw.Head.SHA,
+		BaseBranch:         raw.Base.Ref,
+		AuthorLogin:        raw.User.Login,
+		RepoOwner:          owner,
+		RepoName:           repo,
+		Draft:              raw.Draft,
+		Mergeable:          mergeable,
+		Additions:          raw.Additions,
+		Deletions:          raw.Deletions,
+		RequestedReviewers: convertPatRequestedReviewers(raw),
+		CreatedAt:          raw.CreatedAt,
+		UpdatedAt:          raw.UpdatedAt,
 	}
 	if raw.MergedAt != nil {
 		pr.MergedAt = parseTimePtr(*raw.MergedAt)
@@ -312,4 +396,25 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		pr.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return pr
+}
+
+func convertPatRequestedReviewers(raw *patPR) []RequestedReviewer {
+	reviewers := make([]RequestedReviewer, 0, len(raw.RequestedReviewers)+len(raw.RequestedTeams))
+	for _, reviewer := range raw.RequestedReviewers {
+		if reviewer.Login == "" {
+			continue
+		}
+		reviewers = append(reviewers, RequestedReviewer{Login: reviewer.Login, Type: reviewerTypeUser})
+	}
+	for _, team := range raw.RequestedTeams {
+		login := team.Slug
+		if login == "" {
+			login = team.Name
+		}
+		if login == "" {
+			continue
+		}
+		reviewers = append(reviewers, RequestedReviewer{Login: login, Type: reviewerTypeTeam})
+	}
+	return reviewers
 }

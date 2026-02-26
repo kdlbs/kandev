@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import {
   IconRefresh,
@@ -8,6 +8,7 @@ import {
   IconMinus,
   IconAlertTriangle,
   IconGitMerge,
+  IconCheck,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -22,8 +23,15 @@ import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
+import { submitPRReview } from "@/lib/api/domains/github-api";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
-import { formatTimeAgo, AuthorLink } from "./pr-shared";
+import {
+  formatTimeAgo,
+  AuthorLink,
+  getTimeAgoColor,
+  CollapsibleSection,
+  PRMarkdownBody,
+} from "./pr-shared";
 import { ReviewStateBadge } from "./pr-reviews-section";
 import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";
@@ -83,15 +91,132 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
   return { addAsContext };
 }
 
+type PRPanelMetrics = {
+  reviewCount: number;
+  pendingReviewCount: number;
+  commentCount: number;
+  reviewState: TaskPR["review_state"];
+};
+
+function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["review_state"]) {
+  const requestedReviewers = feedback.pr.requested_reviewers ?? [];
+  if (feedback.reviews.length === 0) {
+    return requestedReviewers.length > 0 ? "pending" : fallbackState || "";
+  }
+  const latestByAuthor = new Map<string, { state: string; createdAt: number }>();
+  for (const review of feedback.reviews) {
+    const current = latestByAuthor.get(review.author);
+    const createdAt = new Date(review.created_at).getTime();
+    if (!current || createdAt > current.createdAt) {
+      latestByAuthor.set(review.author, { state: review.state, createdAt });
+    }
+  }
+  let hasChangesRequested = false;
+  let allApproved = true;
+  for (const review of latestByAuthor.values()) {
+    if (review.state === "CHANGES_REQUESTED") hasChangesRequested = true;
+    if (review.state !== "APPROVED") allApproved = false;
+  }
+  if (hasChangesRequested) return "changes_requested";
+  if (allApproved) return "approved";
+  return "pending";
+}
+
+function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPanelMetrics {
+  if (!feedback) {
+    return {
+      reviewCount: taskPR.review_count,
+      pendingReviewCount: taskPR.pending_review_count,
+      commentCount: taskPR.comment_count,
+      reviewState: taskPR.review_state,
+    };
+  }
+  const pendingReviewCount = feedback.pr.requested_reviewers?.length ?? taskPR.pending_review_count;
+  return {
+    reviewCount: feedback.reviews.length,
+    pendingReviewCount,
+    commentCount: feedback.comments.length,
+    reviewState: computeLiveReviewState(feedback, taskPR.review_state),
+  };
+}
+
 // --- Main content ---
+
+function DescriptionSection({ body }: { body: string }) {
+  if (!body) return null;
+  return (
+    <CollapsibleSection title="Description" count={1} defaultOpen={false}>
+      <div className="px-2">
+        <PRMarkdownBody body={body} />
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+function ApproveButton({
+  taskPR,
+  feedback,
+  onRefresh,
+}: {
+  taskPR: TaskPR;
+  feedback: PRFeedback | null;
+  onRefresh: () => void;
+}) {
+  const { toast } = useToast();
+  const [submitting, setSubmitting] = useState(false);
+
+  if (taskPR.state !== "open") return null;
+
+  const alreadyApproved = feedback?.reviews.some(
+    (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
+  );
+  if (alreadyApproved) return null;
+
+  const handleApprove = async () => {
+    setSubmitting(true);
+    try {
+      await submitPRReview(taskPR.owner, taskPR.repo, taskPR.pr_number, "APPROVE");
+      toast({ description: "PR approved", variant: "success" });
+      onRefresh();
+    } catch (e) {
+      toast({
+        title: "Failed to approve",
+        description: e instanceof Error ? e.message : "An error occurred",
+        variant: "error",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="cursor-pointer gap-1.5 text-green-600 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-900/20"
+      onClick={handleApprove}
+      disabled={submitting}
+    >
+      <IconCheck className="h-3.5 w-3.5" />
+      {submitting ? "Approving..." : "Approve"}
+    </Button>
+  );
+}
 
 function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
+  const metrics = derivePanelMetrics(taskPR, feedback);
 
   return (
     <div className="flex flex-col h-full">
-      <PRHeader taskPR={taskPR} feedback={feedback} loading={loading} onRefresh={refresh} />
+      <PRHeader
+        taskPR={taskPR}
+        feedback={feedback}
+        metrics={metrics}
+        loading={loading}
+        onRefresh={refresh}
+      />
       <Separator />
       <ScrollArea className="flex-1 overflow-hidden">
         <div className="p-3 space-y-1">
@@ -102,12 +227,13 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
           )}
           {feedback && (
             <>
+              <DescriptionSection body={feedback.pr.body ?? ""} />
               <ReviewsSection
                 reviews={feedback.reviews}
+                requestedReviewers={feedback.pr.requested_reviewers ?? []}
                 prUrl={taskPR.pr_url}
-                reviewState={taskPR.review_state}
-                reviewCount={taskPR.review_count}
-                pendingReviewCount={taskPR.pending_review_count}
+                reviewState={metrics.reviewState}
+                pendingReviewCount={metrics.pendingReviewCount}
                 onAddAsContext={(msg) => addAsContext("review", msg)}
               />
               <ChecksSection
@@ -194,7 +320,9 @@ function HeaderDateLine({ taskPR }: { taskPR: TaskPR }) {
         by <AuthorLink author={taskPR.author_login} />
       </span>
       <span>&middot;</span>
-      <span>opened {formatTimeAgo(taskPR.created_at)}</span>
+      <span className={getTimeAgoColor(taskPR.created_at)}>
+        opened {formatTimeAgo(taskPR.created_at)}
+      </span>
       {taskPR.merged_at && (
         <>
           <span>&middot;</span>
@@ -214,7 +342,7 @@ function HeaderDateLine({ taskPR }: { taskPR: TaskPR }) {
   );
 }
 
-function HeaderStatsLine({ taskPR }: { taskPR: TaskPR }) {
+function HeaderStatsLine({ taskPR, metrics }: { taskPR: TaskPR; metrics: PRPanelMetrics }) {
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
       <span className="flex items-center gap-1">
@@ -227,19 +355,19 @@ function HeaderStatsLine({ taskPR }: { taskPR: TaskPR }) {
       </span>
       <span>&middot;</span>
       <span>
-        {taskPR.review_count} review{taskPR.review_count !== 1 ? "s" : ""}
-        {taskPR.pending_review_count > 0 && (
+        {metrics.reviewCount} review{metrics.reviewCount !== 1 ? "s" : ""}
+        {metrics.pendingReviewCount > 0 && (
           <span className="text-yellow-600 dark:text-yellow-400">
             {" "}
-            ({taskPR.pending_review_count} pending)
+            ({metrics.pendingReviewCount} pending)
           </span>
         )}
       </span>
       <span>&middot;</span>
       <span>
-        {taskPR.comment_count} comment{taskPR.comment_count !== 1 ? "s" : ""}
+        {metrics.commentCount} comment{metrics.commentCount !== 1 ? "s" : ""}
       </span>
-      {taskPR.review_state && <ReviewStateBadge state={taskPR.review_state} />}
+      {metrics.reviewState && <ReviewStateBadge state={metrics.reviewState} />}
     </div>
   );
 }
@@ -247,11 +375,13 @@ function HeaderStatsLine({ taskPR }: { taskPR: TaskPR }) {
 function PRHeader({
   taskPR,
   feedback,
+  metrics,
   loading,
   onRefresh,
 }: {
   taskPR: TaskPR;
   feedback: PRFeedback | null;
+  metrics: PRPanelMetrics;
   loading: boolean;
   onRefresh: () => void;
 }) {
@@ -261,13 +391,22 @@ function PRHeader({
 
   return (
     <div className="p-3 space-y-2">
-      <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
+        </div>
+        <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
+      </div>
       <div className="flex items-center gap-1.5 flex-wrap">
         <StateBadge state={taskPR.state} />
         <span className="text-xs text-muted-foreground">#{taskPR.pr_number}</span>
-        <span className="text-xs text-muted-foreground">
-          {taskPR.head_branch} &rarr; {taskPR.base_branch}
-        </span>
+        <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
+          {taskPR.head_branch}
+        </code>
+        <span className="text-muted-foreground mx-0.5">&rarr;</span>
+        <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
+          {taskPR.base_branch}
+        </code>
       </div>
       {showWarnings && (
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -288,7 +427,7 @@ function PRHeader({
         </div>
       )}
       <HeaderDateLine taskPR={taskPR} />
-      <HeaderStatsLine taskPR={taskPR} />
+      <HeaderStatsLine taskPR={taskPR} metrics={metrics} />
     </div>
   );
 }

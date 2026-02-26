@@ -27,8 +27,11 @@ function conclusionLabel(check: CheckRun): string | null {
 }
 
 function checkDurationText(check: CheckRun): string | null {
-  if (check.started_at && check.completed_at)
+  if (check.started_at && check.completed_at) {
+    const ms = new Date(check.completed_at).getTime() - new Date(check.started_at).getTime();
+    if (ms < 1000) return null;
     return formatDuration(check.started_at, check.completed_at);
+  }
   if (check.started_at && !check.completed_at) return `${formatElapsed(check.started_at)} running`;
   return null;
 }
@@ -91,33 +94,32 @@ export function ChecksSection({
       {checks.map((check) => {
         const label = conclusionLabel(check);
         const duration = checkDurationText(check);
+        const checkKey = `${check.name}-${check.html_url}-${check.source}-${check.started_at ?? ""}`;
         return (
-          <div key={check.name} className="px-2.5 py-2 rounded-md border border-border bg-muted/30">
-            <div className="flex items-center gap-2 text-xs">
-              <CheckStatusIcon check={check} />
-              {check.html_url ? (
-                <a
-                  href={check.html_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium truncate hover:underline cursor-pointer"
-                >
-                  {check.name}
-                </a>
-              ) : (
-                <span className="font-medium truncate">{check.name}</span>
-              )}
-              {isFailedCheck(check) && (
-                <div className="ml-auto shrink-0">
-                  <AddToContextButton onClick={() => onAddAsContext(buildCheckMessage(check))} />
-                </div>
-              )}
-            </div>
-            {(label || duration) && (
-              <div className="flex items-center gap-1 pl-5.5 mt-0.5 text-[10px] text-muted-foreground">
-                {label && <span>{label}</span>}
-                {label && duration && <span>&middot;</span>}
-                {duration && <span>{duration}</span>}
+          <div
+            key={checkKey}
+            className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30 flex items-center gap-2 text-xs"
+          >
+            <CheckStatusIcon check={check} />
+            {check.html_url ? (
+              <a
+                href={check.html_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium truncate hover:underline cursor-pointer min-w-0"
+              >
+                {check.name}
+              </a>
+            ) : (
+              <span className="font-medium truncate min-w-0">{check.name}</span>
+            )}
+            {label && <span className="text-[10px] text-muted-foreground shrink-0">{label}</span>}
+            {duration && (
+              <span className="text-[10px] text-muted-foreground shrink-0">{duration}</span>
+            )}
+            {isFailedCheck(check) && (
+              <div className="ml-auto shrink-0">
+                <AddToContextButton onClick={() => onAddAsContext(buildCheckMessage(check))} />
               </div>
             )}
           </div>

@@ -16,6 +16,17 @@ func TestConvertPatPR(t *testing.T) {
 		Deletions: 30,
 		CreatedAt: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2025, 3, 2, 0, 0, 0, 0, time.UTC),
+		RequestedReviewers: []struct {
+			Login string `json:"login"`
+		}{
+			{Login: "alice-reviewer"},
+		},
+		RequestedTeams: []struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		}{
+			{Slug: "platform-team"},
+		},
 		User: struct {
 			Login string `json:"login"`
 		}{Login: "bob"},
@@ -47,6 +58,15 @@ func TestConvertPatPR(t *testing.T) {
 	}
 	if pr.Mergeable {
 		t.Error("expected mergeable = false when nil")
+	}
+	if len(pr.RequestedReviewers) != 2 {
+		t.Fatalf("requested reviewers = %d, want 2", len(pr.RequestedReviewers))
+	}
+	if pr.RequestedReviewers[0] != (RequestedReviewer{Login: "alice-reviewer", Type: reviewerTypeUser}) {
+		t.Errorf("unexpected first requested reviewer: %#v", pr.RequestedReviewers[0])
+	}
+	if pr.RequestedReviewers[1] != (RequestedReviewer{Login: "platform-team", Type: reviewerTypeTeam}) {
+		t.Errorf("unexpected second requested reviewer: %#v", pr.RequestedReviewers[1])
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
@@ -102,5 +122,38 @@ func TestConvertPatPR_Mergeable(t *testing.T) {
 	pr := convertPatPR(raw, "o", "r")
 	if !pr.Mergeable {
 		t.Error("expected mergeable = true")
+	}
+}
+
+func TestConvertPatRequestedReviewers(t *testing.T) {
+	raw := &patPR{
+		RequestedReviewers: []struct {
+			Login string `json:"login"`
+		}{
+			{Login: "alice"},
+			{},
+		},
+		RequestedTeams: []struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		}{
+			{Slug: "my-team"},
+			{Name: "fallback-team"},
+			{},
+		},
+	}
+
+	got := convertPatRequestedReviewers(raw)
+	if len(got) != 3 {
+		t.Fatalf("requested reviewers = %d, want 3", len(got))
+	}
+	if got[0] != (RequestedReviewer{Login: "alice", Type: reviewerTypeUser}) {
+		t.Errorf("unexpected first reviewer: %#v", got[0])
+	}
+	if got[1] != (RequestedReviewer{Login: "my-team", Type: reviewerTypeTeam}) {
+		t.Errorf("unexpected second reviewer: %#v", got[1])
+	}
+	if got[2] != (RequestedReviewer{Login: "fallback-team", Type: reviewerTypeTeam}) {
+		t.Errorf("unexpected third reviewer: %#v", got[2])
 	}
 }

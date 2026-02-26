@@ -61,6 +61,14 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	return status, nil
 }
 
+// SubmitReview submits a review on a pull request.
+func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
+	if s.client == nil {
+		return fmt.Errorf("github client not configured")
+	}
+	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
+}
+
 // --- PR Watch operations ---
 
 // CreatePRWatch creates a new PR watch for a session.
@@ -309,9 +317,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, feedback *PRFee
 	tp.ClosedAt = feedback.PR.ClosedAt
 	tp.CommentCount = len(feedback.Comments)
 	tp.ReviewCount = len(feedback.Reviews)
-	tp.ReviewState = computeOverallReviewState(feedback.Reviews)
+	reviewState, pendingReviewCount := deriveReviewSyncState(feedback.PR, feedback.Reviews)
+	tp.ReviewState = reviewState
 	tp.ChecksState = computeOverallCheckStatus(feedback.Checks)
-	tp.PendingReviewCount = countPendingReviews(feedback.Reviews)
+	tp.PendingReviewCount = pendingReviewCount
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
@@ -336,6 +345,24 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 		return nil, fmt.Errorf("github client not available")
 	}
 	return s.client.GetPRFeedback(ctx, owner, repo, number)
+}
+
+// --- PR files and commits (live) ---
+
+// GetPRFiles fetches files changed in a PR from GitHub.
+func (s *Service) GetPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.ListPRFiles(ctx, owner, repo, number)
+}
+
+// GetPRCommits fetches commits in a PR from GitHub.
+func (s *Service) GetPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.ListPRCommits(ctx, owner, repo, number)
 }
 
 // --- Review Watch operations ---
@@ -463,7 +490,10 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 
 	s.logger.Debug("checking review watch for pending PRs",
 		zap.String("watch_id", watch.ID),
-		zap.Int("repo_filters", len(watch.Repos)))
+		zap.Int("repo_filters", len(watch.Repos)),
+		zap.String("custom_query", watch.CustomQuery),
+		zap.String("review_scope", watch.ReviewScope),
+		zap.Bool("enabled", watch.Enabled))
 
 	prs, err := s.fetchReviewPRs(ctx, watch)
 	if err != nil {
@@ -482,10 +512,25 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 			s.logger.Error("failed to check review PR task", zap.Error(err))
 			continue
 		}
-		if !exists {
+		if exists {
+			s.logger.Debug("skipping already-tracked PR",
+				zap.String("watch_id", watch.ID),
+				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
+				zap.Int("pr_number", pr.Number))
+		} else {
 			newPRs = append(newPRs, pr)
 		}
 	}
+
+	// Enrich new PRs with full details (branch info) from the PR API,
+	// since the search API does not return head/base branch.
+	s.enrichPRDetails(ctx, newPRs)
+
+	s.logger.Debug("review watch check complete",
+		zap.String("watch_id", watch.ID),
+		zap.Int("total_fetched", len(prs)),
+		zap.Int("new_prs", len(newPRs)),
+		zap.Int("already_tracked", len(prs)-len(newPRs)))
 
 	// Update last polled
 	now := time.Now().UTC()
@@ -496,35 +541,69 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 }
 
 // fetchReviewPRs fetches PRs needing review based on the watch configuration.
-// If CustomQuery is set, it is used as the full search query (bypassing scope and repo filters).
-// Otherwise, scope + repo filters determine the query.
+// When repo filters are set, they are always applied — even when a custom query is present
+// (the filter qualifier is appended to the query for each repo).
 func (s *Service) fetchReviewPRs(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {
-	customQuery := watch.CustomQuery
-	scope := watch.ReviewScope
+	hasRepos := len(watch.Repos) > 0
 
-	if customQuery != "" {
-		return s.client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+	s.logger.Debug("fetchReviewPRs: starting",
+		zap.String("watch_id", watch.ID),
+		zap.String("custom_query", watch.CustomQuery),
+		zap.String("scope", watch.ReviewScope),
+		zap.Int("repo_count", len(watch.Repos)),
+		zap.Bool("has_repos", hasRepos))
+
+	// No repo filters: use query verbatim (custom or scope-based)
+	if !hasRepos {
+		if watch.CustomQuery != "" {
+			s.logger.Debug("fetchReviewPRs: using custom query (all repos)",
+				zap.String("query", watch.CustomQuery))
+			return s.client.ListReviewRequestedPRs(ctx, "", "", watch.CustomQuery)
+		}
+		s.logger.Debug("fetchReviewPRs: using scope (all repos)",
+			zap.String("scope", watch.ReviewScope))
+		return s.client.ListReviewRequestedPRs(ctx, watch.ReviewScope, "", "")
 	}
 
-	if len(watch.Repos) == 0 {
-		return s.client.ListReviewRequestedPRs(ctx, scope, "", "")
-	}
+	// Has repo filters: iterate repos, appending filter to customQuery or scope
+	prs := s.fetchReviewPRsWithFilter(ctx, watch)
+	return prs, nil
+}
 
+// fetchReviewPRsWithFilter queries each repo filter individually and deduplicates results.
+// When customQuery is set, the repo qualifier is appended to it; otherwise scope+filter is used.
+func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, watch *ReviewWatch) []*PR {
 	var allPRs []*PR
 	seen := make(map[string]bool)
+
 	for _, repo := range watch.Repos {
-		var filter string
-		if repo.Name == "" {
-			filter = "org:" + repo.Owner
+		qualifier := repoFilterToQualifier(repo)
+
+		var prs []*PR
+		var err error
+		if watch.CustomQuery != "" {
+			query := watch.CustomQuery + " " + qualifier
+			s.logger.Debug("fetchReviewPRs: querying with custom query + filter",
+				zap.String("watch_id", watch.ID),
+				zap.String("query", query))
+			prs, err = s.client.ListReviewRequestedPRs(ctx, "", "", query)
 		} else {
-			filter = fmt.Sprintf("repo:%s/%s", repo.Owner, repo.Name)
+			s.logger.Debug("fetchReviewPRs: querying with scope + filter",
+				zap.String("watch_id", watch.ID),
+				zap.String("scope", watch.ReviewScope),
+				zap.String("filter", qualifier))
+			prs, err = s.client.ListReviewRequestedPRs(ctx, watch.ReviewScope, qualifier, "")
 		}
-		prs, err := s.client.ListReviewRequestedPRs(ctx, scope, filter, "")
 		if err != nil {
 			s.logger.Error("failed to list review PRs",
-				zap.String("filter", filter), zap.Error(err))
+				zap.String("filter", qualifier), zap.Error(err))
 			continue
 		}
+
+		s.logger.Debug("fetchReviewPRs: got results for filter",
+			zap.String("filter", qualifier),
+			zap.Int("count", len(prs)))
+
 		for _, pr := range prs {
 			key := fmt.Sprintf("%s/%s#%d", pr.RepoOwner, pr.RepoName, pr.Number)
 			if !seen[key] {
@@ -533,7 +612,42 @@ func (s *Service) fetchReviewPRs(ctx context.Context, watch *ReviewWatch) ([]*PR
 			}
 		}
 	}
-	return allPRs, nil
+	return allPRs
+}
+
+// repoFilterToQualifier converts a RepoFilter to a GitHub search qualifier string.
+func repoFilterToQualifier(repo RepoFilter) string {
+	if repo.Name == "" {
+		return "org:" + repo.Owner
+	}
+	return fmt.Sprintf("repo:%s/%s", repo.Owner, repo.Name)
+}
+
+// enrichPRDetails fetches full PR details for PRs missing branch info (from the search API).
+func (s *Service) enrichPRDetails(ctx context.Context, prs []*PR) {
+	for _, pr := range prs {
+		if pr.HeadBranch != "" && pr.BaseBranch != "" {
+			continue
+		}
+		s.logger.Debug("enriching PR with full details (missing branch info)",
+			zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
+			zap.Int("pr_number", pr.Number))
+
+		full, err := s.client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
+		if err != nil {
+			s.logger.Warn("failed to fetch full PR details, branch info will be empty",
+				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
+				zap.Int("pr_number", pr.Number),
+				zap.Error(err))
+			continue
+		}
+		pr.HeadBranch = full.HeadBranch
+		pr.HeadSHA = full.HeadSHA
+		pr.BaseBranch = full.BaseBranch
+		pr.Additions = full.Additions
+		pr.Deletions = full.Deletions
+		pr.Mergeable = full.Mergeable
+	}
 }
 
 // ListUserOrgs returns the authenticated user's orgs, prepending their own username.
@@ -700,4 +814,23 @@ func countPendingReviews(reviews []PRReview) int {
 		}
 	}
 	return count
+}
+
+func countPendingRequestedReviewers(pr *PR) int {
+	if pr == nil {
+		return 0
+	}
+	return len(pr.RequestedReviewers)
+}
+
+func deriveReviewSyncState(pr *PR, reviews []PRReview) (string, int) {
+	pendingReviewCount := countPendingRequestedReviewers(pr)
+	if pendingReviewCount == 0 {
+		pendingReviewCount = countPendingReviews(reviews)
+	}
+	reviewState := computeOverallReviewState(reviews)
+	if reviewState == "" && pendingReviewCount > 0 {
+		reviewState = computedReviewStatePending
+	}
+	return reviewState, pendingReviewCount
 }

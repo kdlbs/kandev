@@ -1,8 +1,11 @@
 "use client";
 
-import { memo, type ReactElement } from "react";
+import { memo, useState, useCallback, type ReactElement } from "react";
+import { IconPlayerPlay } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -29,6 +32,37 @@ type AdapterContext = {
   allMessages?: Message[];
   onScrollToMessage?: (messageId: string) => void;
 };
+
+function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
+  const [isStarting, setIsStarting] = useState(false);
+  const handleStart = useCallback(async () => {
+    const client = getWebSocketClient();
+    if (!client) return;
+    setIsStarting(true);
+    try {
+      await client.request("orchestrator.start", { task_id: taskId, session_id: sessionId }, 15000);
+    } catch (error) {
+      console.error("Failed to start agent:", error);
+    } finally {
+      setIsStarting(false);
+    }
+  }, [taskId, sessionId]);
+
+  return (
+    <div className="flex justify-end mt-1.5">
+      <Button
+        size="sm"
+        variant="default"
+        className="cursor-pointer gap-1.5"
+        onClick={handleStart}
+        disabled={isStarting}
+      >
+        <IconPlayerPlay className="h-3.5 w-3.5" />
+        {isStarting ? "Starting…" : "Start agent"}
+      </Button>
+    </div>
+  );
+}
 
 type MessageAdapter = {
   matches: (comment: Message, ctx: AdapterContext) => boolean;
@@ -160,14 +194,21 @@ const adapters: MessageAdapter[] = [
         comment.author_type === "user" ||
         (ctx.isTaskDescription && ctx.sessionState !== "FAILED")
       ) {
+        const showStartButton =
+          ctx.isTaskDescription && ctx.sessionState === "CREATED" && ctx.taskId && ctx.sessionId;
         return (
-          <ChatMessage
-            comment={comment}
-            label="You"
-            className="bg-primary/10 text-foreground border-primary/30"
-            allMessages={ctx.allMessages}
-            onScrollToMessage={ctx.onScrollToMessage}
-          />
+          <>
+            <ChatMessage
+              comment={comment}
+              label="You"
+              className="bg-primary/10 text-foreground border-primary/30"
+              allMessages={ctx.allMessages}
+              onScrollToMessage={ctx.onScrollToMessage}
+            />
+            {showStartButton && (
+              <TaskDescriptionStartButton taskId={ctx.taskId!} sessionId={ctx.sessionId!} />
+            )}
+          </>
         );
       }
       return (

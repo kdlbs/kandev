@@ -18,6 +18,9 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
+import { LineStat } from "@/components/diff-stat";
+import { FileStatusIcon } from "./file-status-icon";
+import { FileRow } from "./changes-panel-file-row";
 
 // --- Timeline visual components ---
 
@@ -35,6 +38,7 @@ const DOT_COLORS = {
   unstaged: "bg-yellow-500",
   staged: "bg-emerald-500",
   commits: "bg-blue-500",
+  pr: "bg-purple-500",
   action: "bg-muted-foreground/25",
 } as const;
 
@@ -119,7 +123,7 @@ export function CommitsSection({
       <ul className="space-y-0.5">
         {commits.map((commit, index) => (
           <li
-            key={commit.commit_sha}
+            key={`${commit.commit_sha}-${index}`}
             className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
             onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
           >
@@ -251,8 +255,6 @@ export function ActionButtonsSection({
 
 // --- File list sections (Unstaged / Staged) ---
 
-import { FileRow } from "./changes-panel-file-row";
-
 type FileListSectionProps = {
   variant: "unstaged" | "staged";
   files: ChangedFile[];
@@ -313,6 +315,123 @@ export function FileListSection({
           </Button>
         </div>
       )}
+    </TimelineSection>
+  );
+}
+
+// --- PR files section (read-only, from GitHub PR diff) ---
+
+export type PRChangedFile = {
+  path: string;
+  status: FileInfo["status"];
+  plus: number | undefined;
+  minus: number | undefined;
+  oldPath: string | undefined;
+};
+
+type PRFilesSectionProps = {
+  files: PRChangedFile[];
+  isLast: boolean;
+  onOpenDiff: (path: string) => void;
+};
+
+export function PRFilesSection({ files, isLast, onOpenDiff }: PRFilesSectionProps) {
+  return (
+    <TimelineSection
+      dotColor={DOT_COLORS.pr}
+      label="PR Changes"
+      count={files.length}
+      isLast={isLast}
+    >
+      {files.length > 0 && (
+        <ul className="space-y-0.5">
+          {files.map((file) => (
+            <PRFileRow key={file.path} file={file} onOpenDiff={onOpenDiff} />
+          ))}
+        </ul>
+      )}
+    </TimelineSection>
+  );
+}
+
+function PRFileRow({
+  file,
+  onOpenDiff,
+}: {
+  file: PRChangedFile;
+  onOpenDiff: (path: string) => void;
+}) {
+  const lastSlash = file.path.lastIndexOf("/");
+  const folder = lastSlash === -1 ? "" : file.path.slice(0, lastSlash);
+  const name = lastSlash === -1 ? file.path : file.path.slice(lastSlash + 1);
+
+  return (
+    <li
+      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
+      onClick={() => onOpenDiff(file.path)}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="flex-shrink-0 flex items-center justify-center size-4">
+          <IconGitPullRequest className="h-3 w-3 text-purple-500" />
+        </div>
+        <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
+          <p className="flex text-foreground text-xs min-w-0">
+            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
+            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
+          </p>
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <LineStat added={file.plus} removed={file.minus} />
+        <FileStatusIcon status={file.status} />
+      </div>
+    </li>
+  );
+}
+
+// --- PR commits section ---
+
+type PRCommitItem = {
+  sha: string;
+  message: string;
+  author_login: string;
+  author_date: string;
+};
+
+type PRCommitsSectionProps = {
+  commits: PRCommitItem[];
+  isLast: boolean;
+  onOpenCommitDetail?: (sha: string) => void;
+};
+
+export function PRCommitsSection({ commits, isLast, onOpenCommitDetail }: PRCommitsSectionProps) {
+  return (
+    <TimelineSection
+      dotColor={DOT_COLORS.pr}
+      label="PR Commits"
+      count={commits.length}
+      isLast={isLast}
+    >
+      <ul className="space-y-0.5">
+        {commits.map((commit, index) => (
+          <li
+            key={`${commit.sha}-${index}`}
+            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
+            onClick={() => onOpenCommitDetail?.(commit.sha)}
+          >
+            <IconGitCommit className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+            <code className="font-mono text-muted-foreground text-[11px]">
+              {commit.sha.slice(0, 7)}
+            </code>
+            <span className="flex-1 min-w-0 truncate text-foreground">{commit.message}</span>
+            {commit.author_login && (
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {commit.author_login}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </TimelineSection>
   );
 }

@@ -101,6 +101,10 @@ func TestConvertGHPR(t *testing.T) {
 		Deletions:   50,
 		CreatedAt:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC),
+		ReviewRequests: []ghRequestedReviewer{
+			{TypeName: "User", Login: "alice-reviewer"},
+			{TypeName: "Team", Slug: "core-platform"},
+		},
 		Author: struct {
 			Login string `json:"login"`
 		}{Login: "alice"},
@@ -128,6 +132,15 @@ func TestConvertGHPR(t *testing.T) {
 	}
 	if pr.Additions != 100 {
 		t.Errorf("additions = %d, want 100", pr.Additions)
+	}
+	if len(pr.RequestedReviewers) != 2 {
+		t.Fatalf("requested reviewers = %d, want 2", len(pr.RequestedReviewers))
+	}
+	if pr.RequestedReviewers[0].Type != reviewerTypeUser {
+		t.Errorf("first reviewer type = %q, want %q", pr.RequestedReviewers[0].Type, reviewerTypeUser)
+	}
+	if pr.RequestedReviewers[1].Type != reviewerTypeTeam {
+		t.Errorf("second reviewer type = %q, want %q", pr.RequestedReviewers[1].Type, reviewerTypeTeam)
 	}
 	if pr.MergedAt != nil {
 		t.Error("expected nil MergedAt")
@@ -168,5 +181,28 @@ func TestConvertGHPR_NotMergeable(t *testing.T) {
 
 	if pr.Mergeable {
 		t.Error("expected mergeable = false for CONFLICTING")
+	}
+}
+
+func TestConvertGHRequestedReviewers(t *testing.T) {
+	raw := []ghRequestedReviewer{
+		{TypeName: "User", Login: "alice"},
+		{TypeName: "Team", Slug: "my-team"},
+		{TypeName: "Team", Name: "fallback-team-name"},
+		{TypeName: "User"},
+	}
+
+	got := convertGHRequestedReviewers(raw)
+	if len(got) != 3 {
+		t.Fatalf("requested reviewers = %d, want 3", len(got))
+	}
+	if got[0] != (RequestedReviewer{Login: "alice", Type: reviewerTypeUser}) {
+		t.Errorf("unexpected first reviewer: %#v", got[0])
+	}
+	if got[1] != (RequestedReviewer{Login: "my-team", Type: reviewerTypeTeam}) {
+		t.Errorf("unexpected second reviewer: %#v", got[1])
+	}
+	if got[2] != (RequestedReviewer{Login: "fallback-team-name", Type: reviewerTypeTeam}) {
+		t.Errorf("unexpected third reviewer: %#v", got[2])
 	}
 }

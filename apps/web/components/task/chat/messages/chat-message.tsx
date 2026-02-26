@@ -1,45 +1,14 @@
 "use client";
 
-import { memo, isValidElement, useState, useCallback, type ReactNode } from "react";
+import { memo, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
-import { InlineCode } from "@/components/task/chat/messages/inline-code";
-import { CodeBlock } from "@/components/task/chat/messages/code-block";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
 import { useMessageNavigation } from "@/hooks/use-message-navigation";
-
-/**
- * Recursively extracts text content from React children.
- * Optimized with fast paths for common cases (string/number).
- */
-function getTextContent(children: ReactNode): string {
-  // Fast path: most common cases first
-  if (typeof children === "string") return children;
-  if (typeof children === "number") return String(children);
-  if (children == null) return "";
-
-  // Use loop instead of map().join() to avoid intermediate array allocation
-  if (Array.isArray(children)) {
-    let result = "";
-    for (let i = 0; i < children.length; i++) {
-      result += getTextContent(children[i]);
-    }
-    return result;
-  }
-
-  if (isValidElement(children)) {
-    const props = children.props as { children?: ReactNode };
-    if (props.children) {
-      return getTextContent(props.children);
-    }
-  }
-  return "";
-}
+import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 
 type ChatMessageProps = {
   comment: Message;
@@ -92,69 +61,7 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [content];
 }
 
-// ── Markdown component overrides (stable reference) ─────────────────
-
-const markdownComponents = {
-  code: ({ className, children }: { className?: string; children?: ReactNode }) => {
-    const content = getTextContent(children).replace(/\n$/, "");
-    const hasLanguage = className?.startsWith("language-");
-    const hasNewlines = content.includes("\n");
-    if (hasLanguage || hasNewlines) {
-      return <CodeBlock className={className}>{content}</CodeBlock>;
-    }
-    return <InlineCode>{content}</InlineCode>;
-  },
-  ol: ({ children }: { children?: ReactNode }) => (
-    <ol className="list-decimal pl-5 my-4">{children}</ol>
-  ),
-  ul: ({ children }: { children?: ReactNode }) => (
-    <ul className="list-disc pl-5 my-4">{children}</ul>
-  ),
-  li: ({ children }: { children?: ReactNode }) => <li className="my-0.5">{children}</li>,
-  p: ({ children }: { children?: ReactNode }) => <p className="leading-[1.625]">{children}</p>,
-  h1: ({ children }: { children?: ReactNode }) => (
-    <h1 className="mt-5 mb-1.5 font-bold text-xl first:mt-0">{children}</h1>
-  ),
-  h2: ({ children }: { children?: ReactNode }) => (
-    <h2 className="mt-5 mb-1.5 font-bold text-[1.0625rem] first:mt-0">{children}</h2>
-  ),
-  h3: ({ children }: { children?: ReactNode }) => (
-    <h3 className="mt-5 mb-1.5 font-bold text-[0.9375rem] first:mt-0">{children}</h3>
-  ),
-  h4: ({ children }: { children?: ReactNode }) => (
-    <h4 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h4>
-  ),
-  h5: ({ children }: { children?: ReactNode }) => (
-    <h5 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h5>
-  ),
-  hr: ({ children }: { children?: ReactNode }) => <hr className="my-5">{children}</hr>,
-  table: ({ children }: { children?: ReactNode }) => (
-    <div className="my-3 overflow-x-auto">
-      <table className="border-collapse border border-border rounded-lg overflow-hidden">
-        {children}
-      </table>
-    </div>
-  ),
-  thead: ({ children }: { children?: ReactNode }) => (
-    <thead className="bg-muted/50">{children}</thead>
-  ),
-  tbody: ({ children }: { children?: ReactNode }) => (
-    <tbody className="divide-y divide-border">{children}</tbody>
-  ),
-  tr: ({ children }: { children?: ReactNode }) => (
-    <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">{children}</tr>
-  ),
-  th: ({ children }: { children?: ReactNode }) => (
-    <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
-      {children}
-    </th>
-  ),
-  td: ({ children }: { children?: ReactNode }) => (
-    <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
-      {children}
-    </td>
-  ),
-};
+// ── Markdown component overrides imported from shared/markdown-components ─────
 
 function renderUserMessageBody(
   hasContent: boolean,
@@ -352,10 +259,7 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
           </pre>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkBreaks]}
-              components={markdownComponents}
-            >
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
               {comment.content || "(empty)"}
             </ReactMarkdown>
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}

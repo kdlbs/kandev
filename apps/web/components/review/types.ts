@@ -5,7 +5,7 @@ export type ReviewFile = {
   additions: number;
   deletions: number;
   staged: boolean;
-  source: "uncommitted" | "committed";
+  source: "uncommitted" | "committed" | "pr";
 };
 
 export type FileTreeNode = {

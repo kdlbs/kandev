@@ -4,6 +4,7 @@ import { memo, useMemo, useCallback, createRef, useState, useRef, useEffect } fr
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
+import type { PRDiffFile } from "@/lib/types/github";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
@@ -51,11 +52,36 @@ function addCommittedFiles(fileMap: Map<string, ReviewFile>, files: CumulativeDi
   }
 }
 
+function prFileStatus(status: string): "added" | "deleted" | "modified" {
+  if (status === "added") return "added";
+  if (status === "removed") return "deleted";
+  return "modified";
+}
+
+function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
+  for (const file of files) {
+    if (fileMap.has(file.filename)) continue;
+    const diff = file.patch ? normalizeDiffContent(file.patch) : "";
+    if (diff)
+      fileMap.set(file.filename, {
+        path: file.filename,
+        diff,
+        status: prFileStatus(file.status),
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        staged: false,
+        source: "pr",
+      });
+  }
+}
+
 function buildAllFiles(
   gitStatusFiles: Record<string, FileInfo> | null,
   cumulativeDiff: CumulativeDiff | null,
+  prDiffFiles?: PRDiffFile[],
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
   if (cumulativeDiff?.files) addCommittedFiles(fileMap, cumulativeDiff.files);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
@@ -70,6 +96,7 @@ type ReviewDialogProps = {
   onOpenFile?: (filePath: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
+  prDiffFiles?: PRDiffFile[];
 };
 
 function computeReviewSets(
@@ -192,7 +219,15 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
 }
 
 function useReviewDialogState(props: ReviewDialogProps) {
-  const { open, onOpenChange, sessionId, onSendComments, gitStatusFiles, cumulativeDiff } = props;
+  const {
+    open,
+    onOpenChange,
+    sessionId,
+    onSendComments,
+    gitStatusFiles,
+    cumulativeDiff,
+    prDiffFiles,
+  } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [splitView, setSplitView] = useState(() =>
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
@@ -210,8 +245,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
   const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
-    () => buildAllFiles(gitStatusFiles, cumulativeDiff),
-    [gitStatusFiles, cumulativeDiff],
+    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles),
+    [gitStatusFiles, cumulativeDiff, prDiffFiles],
   );
   const filteredFiles = useMemo(() => {
     if (!filter.trim()) return allFiles;

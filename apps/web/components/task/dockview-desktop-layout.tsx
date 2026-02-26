@@ -41,6 +41,8 @@ import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -537,6 +539,12 @@ function useReviewDialog(effectiveSessionId: string | null) {
   const reviewGitStatus = useSessionGitStatus(effectiveSessionId);
   const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
   const { openFile: reviewOpenFile } = useFileEditors();
+  const reviewTaskPR = useActiveTaskPR();
+  const { files: reviewPRDiffFiles } = usePRDiff(
+    reviewTaskPR?.owner ?? null,
+    reviewTaskPR?.repo ?? null,
+    reviewTaskPR?.pr_number ?? null,
+  );
 
   const handleReviewSendComments = useCallback(
     (comments: DiffComment[]) => {
@@ -574,6 +582,7 @@ function useReviewDialog(effectiveSessionId: string | null) {
     baseBranch,
     reviewGitStatus,
     reviewCumulativeDiff,
+    reviewPRDiffFiles,
     reviewOpenFile,
     handleReviewSendComments,
   };
@@ -725,6 +734,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
           onOpenFile={review.reviewOpenFile}
           gitStatusFiles={review.reviewGitStatus?.files ?? null}
           cumulativeDiff={review.reviewCumulativeDiff}
+          prDiffFiles={review.reviewPRDiffFiles}
         />
       )}
     </div>

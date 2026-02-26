@@ -41,6 +41,25 @@ export async function getPRFeedback(
   return fetchJson<PRFeedback>(`/api/v1/github/prs/${owner}/${repo}/${number}`, options);
 }
 
+// Submit PR review
+export async function submitPRReview(
+  owner: string,
+  repo: string,
+  number: number,
+  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES",
+  body?: string,
+) {
+  return fetchJson<{ submitted: boolean }>(
+    `/api/v1/github/prs/${owner}/${repo}/${number}/reviews`,
+    {
+      init: {
+        method: "POST",
+        body: JSON.stringify({ event, body: body ?? "" }),
+      },
+    },
+  );
+}
+
 // PR watches
 export async function listPRWatches(options?: ApiRequestOptions) {
   return fetchJson<PRWatchesResponse>("/api/v1/github/watches/pr", options);

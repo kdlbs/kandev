@@ -6,6 +6,8 @@ import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
@@ -15,6 +17,7 @@ import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/form
 import { ReviewDiffList } from "@/components/review/review-diff-list";
 import type { ReviewFile } from "@/components/review/types";
 import { hashDiff, normalizeDiffContent } from "@/components/review/types";
+import type { PRDiffFile } from "@/lib/types/github";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { ChangesTopBar } from "./changes-top-bar";
 import type { SelectedDiff } from "./task-layout";
@@ -80,12 +83,37 @@ function addCumulativeFiles(
   }
 }
 
-/** Merge uncommitted + committed files into a single sorted list */
+function prFileStatus(status: string): "added" | "deleted" | "modified" {
+  if (status === "added") return "added";
+  if (status === "removed") return "deleted";
+  return "modified";
+}
+
+function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
+  for (const file of files) {
+    if (fileMap.has(file.filename)) continue;
+    const diff = file.patch ? normalizeDiffContent(file.patch) : "";
+    if (diff)
+      fileMap.set(file.filename, {
+        path: file.filename,
+        diff,
+        status: prFileStatus(file.status),
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        staged: false,
+        source: "pr",
+      });
+  }
+}
+
+/** Merge PR + uncommitted + committed files into a single sorted list */
 function mergeReviewFiles(
   gitStatus: ReturnType<typeof useSessionGitStatus>,
   cumulativeDiff: { files?: Record<string, CumulativeFile> } | null,
+  prDiffFiles?: PRDiffFile[],
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
   if (gitStatus?.files)
     addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
   if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files);
@@ -96,6 +124,12 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
+  const pr = useActiveTaskPR();
+  const { files: prDiffFiles } = usePRDiff(
+    pr?.owner ?? null,
+    pr?.repo ?? null,
+    pr?.pr_number ?? null,
+  );
   const { reviews } = useSessionFileReviews(activeSessionId);
   const byId = useCommentsStore((s) => s.byId);
   const commentSessionIds = useCommentsStore((s) =>
@@ -103,8 +137,9 @@ function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () =
   );
 
   const allFiles = useMemo<ReviewFile[]>(
-    () => mergeReviewFiles(gitStatus, cumulativeDiff),
-    [gitStatus, cumulativeDiff],
+    () =>
+      mergeReviewFiles(gitStatus, cumulativeDiff, prDiffFiles.length > 0 ? prDiffFiles : undefined),
+    [gitStatus, cumulativeDiff, prDiffFiles],
   );
 
   const { reviewedFiles, staleFiles } = useMemo(() => {

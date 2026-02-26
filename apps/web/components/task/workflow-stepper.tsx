@@ -66,7 +66,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   if (sortedSteps.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0">
+    <div className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0 mx-2">
       {sortedSteps.map((step, index) => (
         <WorkflowStepItem
           key={step.id}

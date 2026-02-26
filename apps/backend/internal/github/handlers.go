@@ -31,6 +31,8 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubReviewTriggerAll, wsTriggerAllReviewChecks(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchesList, wsListPRWatches(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
 }
 
@@ -260,5 +262,52 @@ func wsGetStats(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, stats)
+	}
+}
+
+// parsePRParams extracts owner, repo, and number from a WS message payload.
+// Returns a non-nil error response message if the payload is invalid or required fields are missing.
+func parsePRParams(msg *ws.Message) (string, string, int, *ws.Message) {
+	payload, parseErr := parseMap(msg)
+	if parseErr != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+		return "", "", 0, resp
+	}
+	owner, _ := payload["owner"].(string)
+	repo, _ := payload["repo"].(string)
+	numberF, _ := payload["number"].(float64)
+	number := int(numberF)
+	if owner == "" || repo == "" || number == 0 {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "owner, repo, number required", nil)
+		return "", "", 0, resp
+	}
+	return owner, repo, number, nil
+}
+
+func wsGetPRFiles(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		owner, repo, number, errResp := parsePRParams(msg)
+		if errResp != nil {
+			return errResp, nil
+		}
+		files, err := svc.GetPRFiles(ctx, owner, repo, number)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"files": files})
+	}
+}
+
+func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		owner, repo, number, errResp := parsePRParams(msg)
+		if errResp != nil {
+			return errResp, nil
+		}
+		commits, err := svc.GetPRCommits(ctx, owner, repo, number)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commits": commits})
 	}
 }

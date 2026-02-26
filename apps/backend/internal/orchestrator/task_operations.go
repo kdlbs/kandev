@@ -92,6 +92,18 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		return "", err
 	}
 
+	// Resolve agent/executor profile from task metadata if not explicitly provided
+	if agentProfileID == "" {
+		if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
+			agentProfileID = v
+		}
+	}
+	if executorProfileID == "" {
+		if v, ok := task.Metadata["executor_profile_id"].(string); ok && v != "" {
+			executorProfileID = v
+		}
+	}
+
 	// Create session entry in database
 	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
