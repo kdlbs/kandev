@@ -276,6 +276,7 @@ func NewService(
 		OnPermissionRequest:    s.handlePermissionRequest,
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
+		OnTaskMoved:            s.handleTaskMoved,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 

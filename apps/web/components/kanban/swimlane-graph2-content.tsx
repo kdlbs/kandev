@@ -13,12 +13,10 @@ export function SwimlaneGraph2Content({
   onEditTask,
   onDeleteTask,
   onMoveError,
-  onWorkflowAutomation,
   deletingTaskId,
 }: ViewContentProps) {
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
-    onWorkflowAutomation,
   });
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
 

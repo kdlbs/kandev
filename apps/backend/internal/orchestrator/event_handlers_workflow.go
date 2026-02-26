@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -264,34 +265,142 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			zap.Error(err))
 	}
 
-	// Clear review status when transitioning
-	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-		s.logger.Warn("failed to clear session review status",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("from_step", fromStep.Name),
 		zap.String("to_step", targetStep.Name),
 		zap.Bool("trigger_on_enter", triggerOnEnter))
-	// Process on_enter for the target step (skip if triggerOnEnter is false,
-	// e.g. on_turn_start transitions where the user is about to send a message)
+
 	if triggerOnEnter {
-		session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
-		if sessErr != nil {
-			s.logger.Warn("failed to load session for on_enter",
-				zap.String("session_id", sessionID), zap.Error(sessErr))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID)
-			return
-		}
-		s.processOnEnter(ctx, taskID, session, targetStep, task.Description)
+		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description)
 	} else {
-		// Legacy path: no session in scope, let setSessionWaitingForInput read from DB.
+		// on_turn_start transitions: user is about to send a message, no on_enter needed.
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 	}
+}
+
+// handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").
+// It processes on_exit for the source step and on_enter for the target step,
+// including auto_start_agent, enable_plan_mode, and reset_agent_context.
+// When no session exists yet, it checks if the target step has auto_start_agent
+// and creates a new session via StartTask if needed.
+func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEventData) {
+	if data.FromStepID == "" || data.ToStepID == "" {
+		s.logger.Debug("task.moved: skipping (missing step IDs)",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	if s.workflowStepGetter == nil {
+		return
+	}
+
+	// No session yet — check if we need to create one via auto-start
+	if data.SessionID == "" {
+		s.handleTaskMovedNoSession(ctx, data)
+		return
+	}
+
+	s.handleTaskMovedWithSession(ctx, data)
+}
+
+// handleTaskMovedNoSession handles the case where a task is moved but has no session.
+// If the target step has auto_start_agent, it creates a session and starts the agent
+// using agent/executor profile IDs from the task's metadata.
+func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
+	if !s.shouldAutoStartStep(ctx, data.ToStepID) {
+		s.logger.Debug("task.moved: no session and target step has no auto-start",
+			zap.String("task_id", data.TaskID),
+			zap.String("to_step_id", data.ToStepID))
+		return
+	}
+
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil {
+		s.logger.Warn("task.moved: failed to load task for auto-start",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+		return
+	}
+
+	agentProfileID, _ := task.Metadata["agent_profile_id"].(string)
+	executorProfileID, _ := task.Metadata["executor_profile_id"].(string)
+
+	s.logger.Info("task.moved: starting task (no session, auto-start step)",
+		zap.String("task_id", data.TaskID),
+		zap.String("to_step_id", data.ToStepID),
+		zap.String("agent_profile_id", agentProfileID),
+		zap.String("executor_profile_id", executorProfileID))
+
+	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, false)
+	if err != nil {
+		s.logger.Error("task.moved: failed to auto-start task",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+	}
+}
+
+// handleTaskMovedWithSession handles the case where a task with an existing session
+// is moved between steps. It processes on_exit for the source step and on_enter
+// for the target step.
+func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.TaskMovedEventData) {
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("task.moved: failed to load session",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+
+	s.processStepExitAndEnter(ctx, data.TaskID, session, data.FromStepID, data.ToStepID, data.TaskDescription)
+}
+
+// processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
+// sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
+// already persisted the step change in the DB).
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) {
+	// Process on_exit for the step we're leaving
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
+	if err != nil || fromStep == nil {
+		s.logger.Warn("failed to load from-step for on_exit",
+			zap.String("step_id", fromStepID),
+			zap.Error(err))
+	} else {
+		s.processOnExit(ctx, taskID, session, fromStep)
+	}
+
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
+	if err != nil || targetStep == nil {
+		s.logger.Warn("failed to load target step for on_enter",
+			zap.String("step_id", toStepID),
+			zap.Error(err))
+		return
+	}
+
+	s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription)
+}
+
+// finalizeStepEnter clears review status, reloads the session, and processes on_enter
+// actions for the target step. Shared by executeStepTransition and processStepExitAndEnter.
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string) {
+	// Clear review status when moving to a new step
+	if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+		s.logger.Warn("failed to clear session review status",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	// Reload session after on_exit may have changed metadata
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for on_enter",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
+
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
 }
 
 // resolveStepPlanMode determines whether plan mode should be active for a step.
@@ -393,10 +502,23 @@ func (s *Service) autoStartStepPrompt(
 		}
 	}
 
+	// Record a user message so the auto-start prompt is visible in chat history.
+	s.recordAutoStartMessage(ctx, taskID, sessionID, prompt, planMode)
+
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		_, err := s.PromptTask(ctx, taskID, sessionID, prompt, "", planMode, nil)
 		if err == nil {
+			return nil
+		}
+
+		// "already has an agent running" means the execution store still tracks
+		// an active agent for this session (e.g. session state is CREATED but
+		// the agent was launched by a concurrent path). Queue instead of retrying.
+		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+				return queueErr
+			}
 			return nil
 		}
 
@@ -424,6 +546,32 @@ func (s *Service) autoStartStepPrompt(
 	}
 
 	return nil
+}
+
+// recordAutoStartMessage creates a user message for a workflow auto-start prompt
+// so it appears in the chat history. The prompt content includes system-injected
+// tags which are stripped when displayed to users via ToAPI().
+func (s *Service) recordAutoStartMessage(ctx context.Context, taskID, sessionID, prompt string, planMode bool) {
+	if s.messageCreator == nil || prompt == "" {
+		return
+	}
+	turnID := s.getActiveTurnID(sessionID)
+	if turnID == "" {
+		s.startTurnForSession(ctx, sessionID)
+		turnID = s.getActiveTurnID(sessionID)
+	}
+	meta := NewUserMessageMeta().WithPlanMode(planMode)
+	metaMap := meta.ToMap()
+	if metaMap == nil {
+		metaMap = make(map[string]interface{})
+	}
+	metaMap["workflow_auto_start"] = true
+	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, metaMap); err != nil {
+		s.logger.Error("failed to create auto-start user message",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) queueAutoStartPromptIfRunning(

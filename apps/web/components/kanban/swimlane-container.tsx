@@ -7,7 +7,7 @@ import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanba
 import { SwimlaneSection } from "./swimlane-section";
 import { getViewByStoredValue, getDefaultView } from "@/lib/kanban/view-registry";
 import type { Task } from "@/components/kanban-card";
-import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { Repository } from "@/lib/types/http";
 
 export type SwimlaneContainerProps = {
@@ -18,7 +18,6 @@ export type SwimlaneContainerProps = {
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
-  onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   deletingTaskId?: string | null;
   showMaximizeButton?: boolean;
   searchQuery?: string;
@@ -59,7 +58,6 @@ export function SwimlaneContainer({
   onEditTask,
   onDeleteTask,
   onMoveError,
-  onWorkflowAutomation,
   deletingTaskId,
   showMaximizeButton,
   searchQuery,
@@ -155,7 +153,6 @@ export function SwimlaneContainer({
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
               onMoveError={onMoveError}
-              onWorkflowAutomation={onWorkflowAutomation}
               deletingTaskId={deletingTaskId}
               showMaximizeButton={showMaximizeButton}
             />

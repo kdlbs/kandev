@@ -7,6 +7,7 @@ const (
 	TaskUpdated      = "task.updated"
 	TaskStateChanged = "task.state_changed"
 	TaskDeleted      = "task.deleted"
+	TaskMoved        = "task.moved" // Manual step change via MoveTask
 )
 
 // Event types for workspaces

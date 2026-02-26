@@ -1,42 +1,14 @@
 import { useCallback } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Task } from "@/components/kanban-card";
-import type { WorkflowAutomation, MoveTaskError } from "@/hooks/use-drag-and-drop";
+import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-
-function hasAutoStartEvent(response: {
-  workflow_step?: { events?: { on_enter?: Array<{ type: string }> } };
-}): boolean {
-  return (
-    response?.workflow_step?.events?.on_enter?.some((a) => a.type === "auto_start_agent") ?? false
-  );
-}
-
-async function triggerAutoStart(
-  taskId: string,
-  sessionId: string,
-  workflowStepId: string,
-): Promise<void> {
-  const client = getWebSocketClient();
-  if (!client) return;
-  try {
-    await client.request(
-      "orchestrator.start",
-      { task_id: taskId, session_id: sessionId, workflow_step_id: workflowStepId },
-      15000,
-    );
-  } catch (err) {
-    console.error("Failed to auto-start session for workflow step:", err);
-  }
-}
 
 export function useSwimlaneMove(
   workflowId: string,
   opts: {
     onMoveError?: (error: MoveTaskError) => void;
-    onWorkflowAutomation?: (automation: WorkflowAutomation) => void;
   },
 ) {
   const store = useAppStoreApi();
@@ -72,25 +44,13 @@ export function useSwimlaneMove(
       });
 
       try {
-        const response = await moveTaskById(task.id, {
+        await moveTaskById(task.id, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
           position: nextPosition,
         });
-
-        if (hasAutoStartEvent(response)) {
-          const sessionId = task.primarySessionId ?? null;
-          if (sessionId) {
-            await triggerAutoStart(task.id, sessionId, response.workflow_step.id);
-          } else {
-            opts.onWorkflowAutomation?.({
-              taskId: task.id,
-              sessionId: null,
-              workflowStep: response.workflow_step,
-              taskDescription: task.description ?? "",
-            });
-          }
-        }
+        // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
+        // via the task.moved event → orchestrator processOnEnter()
       } catch (error) {
         // Rollback
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
