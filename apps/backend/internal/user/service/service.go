@@ -26,20 +26,22 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID             *string
-	KanbanViewMode          *string
-	WorkflowFilterID        *string
-	RepositoryIDs           *[]string
-	InitialSetupComplete    *bool
-	PreferredShell          *string
-	DefaultEditorID         *string
-	EnablePreviewOnClick    *bool
-	ChatSubmitKey           *string
-	ReviewAutoMarkOnScroll  *bool
-	LspAutoStartLanguages   *[]string
-	LspAutoInstallLanguages *[]string
-	LspServerConfigs        *map[string]map[string]interface{}
-	SavedLayouts            *[]models.SavedLayout
+	WorkspaceID                 *string
+	KanbanViewMode              *string
+	WorkflowFilterID            *string
+	RepositoryIDs               *[]string
+	InitialSetupComplete        *bool
+	PreferredShell              *string
+	DefaultEditorID             *string
+	EnablePreviewOnClick        *bool
+	ChatSubmitKey               *string
+	ReviewAutoMarkOnScroll      *bool
+	ShowReleaseNotification     *bool
+	ReleaseNotesLastSeenVersion *string
+	LspAutoStartLanguages       *[]string
+	LspAutoInstallLanguages     *[]string
+	LspServerConfigs            *map[string]map[string]interface{}
+	SavedLayouts                *[]models.SavedLayout
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -129,6 +131,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
+	if req.ShowReleaseNotification != nil {
+		settings.ShowReleaseNotification = *req.ShowReleaseNotification
+	}
+	if req.ReleaseNotesLastSeenVersion != nil {
+		settings.ReleaseNotesLastSeenVersion = *req.ReleaseNotesLastSeenVersion
+	}
 	return nil
 }
 
@@ -191,22 +199,24 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":                    settings.UserID,
-		"workspace_id":               settings.WorkspaceID,
-		"kanban_view_mode":           settings.KanbanViewMode,
-		"workflow_filter_id":         settings.WorkflowFilterID,
-		"repository_ids":             settings.RepositoryIDs,
-		"initial_setup_complete":     settings.InitialSetupComplete,
-		"preferred_shell":            settings.PreferredShell,
-		"default_editor_id":          settings.DefaultEditorID,
-		"enable_preview_on_click":    settings.EnablePreviewOnClick,
-		"chat_submit_key":            settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
-		"lsp_auto_start_languages":   settings.LspAutoStartLanguages,
-		"lsp_auto_install_languages": settings.LspAutoInstallLanguages,
-		"lsp_server_configs":         settings.LspServerConfigs,
-		"saved_layouts":              settings.SavedLayouts,
-		"updated_at":                 settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                         settings.UserID,
+		"workspace_id":                    settings.WorkspaceID,
+		"kanban_view_mode":                settings.KanbanViewMode,
+		"workflow_filter_id":              settings.WorkflowFilterID,
+		"repository_ids":                  settings.RepositoryIDs,
+		"initial_setup_complete":          settings.InitialSetupComplete,
+		"preferred_shell":                 settings.PreferredShell,
+		"default_editor_id":               settings.DefaultEditorID,
+		"enable_preview_on_click":         settings.EnablePreviewOnClick,
+		"chat_submit_key":                 settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
+		"show_release_notification":       settings.ShowReleaseNotification,
+		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":        settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages":      settings.LspAutoInstallLanguages,
+		"lsp_server_configs":              settings.LspServerConfigs,
+		"saved_layouts":                   settings.SavedLayouts,
+		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

@@ -13,6 +13,7 @@ import {
   IconKey,
   IconMessageCircle,
   IconBrandGithub,
+  IconSparkles,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -299,6 +300,16 @@ export function SettingsAppSidebar() {
 
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
                 <SecretsSidebarSection pathname={pathname} />
+
+                {/* Changelog */}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/settings/changelog"}>
+                    <Link href="/settings/changelog">
+                      <IconSparkles className="h-4 w-4" />
+                      <span>Changelog</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

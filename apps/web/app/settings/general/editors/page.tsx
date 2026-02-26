@@ -1,6 +1,7 @@
 import { EditorsSettings } from "@/components/settings/editors-settings";
 import { StateProvider } from "@/components/state-provider";
 import { fetchUserSettings, listEditors } from "@/lib/api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
 export default async function GeneralEditorsPage() {
   let initialState = {};
@@ -9,25 +10,14 @@ export default async function GeneralEditorsPage() {
       listEditors({ cache: "no-store" }),
       fetchUserSettings({ cache: "no-store" }),
     ]);
-    const settings = settingsResponse.settings;
+    const mapped = mapUserSettingsResponse(settingsResponse);
     initialState = {
       editors: {
         items: editorsResponse.editors ?? [],
         loaded: true,
         loading: false,
       },
-      userSettings: settings
-        ? {
-            workspaceId: settings.workspace_id ?? null,
-            workflowId: settings.workflow_filter_id ?? null,
-            kanbanViewMode: settings.kanban_view_mode ?? null,
-            repositoryIds: settings.repository_ids ?? [],
-            preferredShell: settings.preferred_shell ?? null,
-            shellOptions: settingsResponse.shell_options ?? [],
-            defaultEditorId: settings.default_editor_id ?? null,
-            loaded: true,
-          }
-        : undefined,
+      userSettings: mapped.loaded ? mapped : undefined,
     };
   } catch {
     initialState = {};

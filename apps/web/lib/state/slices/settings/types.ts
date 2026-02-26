@@ -108,6 +108,8 @@ export type UserSettingsState = {
   enablePreviewOnClick: boolean;
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
+  showReleaseNotification: boolean;
+  releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;

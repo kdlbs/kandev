@@ -212,6 +212,8 @@ function mapEditorSettingsFields(
   return {
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
+    showReleaseNotification: s.show_release_notification ?? true,
+    releaseNotesLastSeenVersion: (s.release_notes_last_seen_version as string) || null,
     lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
     lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
     lspServerConfigs: s.lsp_server_configs ?? {},

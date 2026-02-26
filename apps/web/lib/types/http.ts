@@ -358,6 +358,8 @@ export type UserSettings = {
   enable_preview_on_click?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
   review_auto_mark_on_scroll?: boolean;
+  show_release_notification?: boolean;
+  release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;

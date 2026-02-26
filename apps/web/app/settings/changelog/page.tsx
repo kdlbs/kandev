@@ -1,9 +1,9 @@
-import { GeneralSettings } from "@/components/settings/general-settings";
+import { ChangelogSettings } from "@/components/settings/changelog-settings";
 import { StateProvider } from "@/components/state-provider";
 import { fetchUserSettings } from "@/lib/api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
-export default async function GeneralSettingsPage() {
+export default async function ChangelogPage() {
   let initialState = {};
   try {
     const response = await fetchUserSettings({ cache: "no-store" });
@@ -15,7 +15,7 @@ export default async function GeneralSettingsPage() {
 
   return (
     <StateProvider initialState={initialState}>
-      <GeneralSettings />
+      <ChangelogSettings />
     </StateProvider>
   );
 }

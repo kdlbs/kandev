@@ -347,6 +347,8 @@ export type UserSettingsUpdatedPayload = {
   enable_preview_on_click?: boolean;
   chat_submit_key?: string;
   review_auto_mark_on_scroll?: boolean;
+  show_release_notification?: boolean;
+  release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   saved_layouts?: SavedLayout[];

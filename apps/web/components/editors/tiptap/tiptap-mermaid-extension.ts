@@ -8,7 +8,13 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import mermaid from "mermaid";
-import { DEFAULT_SCALE, SCALE_STEP, MIN_SCALE, MAX_SCALE, getSvgDimensions } from "@/components/shared/mermaid-utils";
+import {
+  DEFAULT_SCALE,
+  SCALE_STEP,
+  MIN_SCALE,
+  MAX_SCALE,
+  getSvgDimensions,
+} from "@/components/shared/mermaid-utils";
 
 /**
  * Known mermaid diagram type keywords. If a code block's first line starts
