@@ -69,12 +69,19 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
 
-  // Re-focus chat input after dockview layout rebuild completes
+  // Re-focus chat input and preserve scroll position after dockview layout rebuild
   const refocusChatAfterLayout = useCallback(() => {
+    // Capture scroll position before layout rebuild completes
+    const scrollEl = document.querySelector<HTMLElement>(".chat-message-list");
+    const savedScrollTop = scrollEl?.scrollTop ?? 0;
+
     const unsub = useDockviewStore.subscribe((state) => {
       if (!state.isRestoringLayout) {
         unsub();
         requestAnimationFrame(() => {
+          // Restore chat scroll position after layout rebuild
+          const el = document.querySelector<HTMLElement>(".chat-message-list");
+          if (el) el.scrollTop = savedScrollTop;
           document.querySelector<HTMLElement>(".tiptap.ProseMirror")?.focus();
         });
       }

@@ -16,6 +16,7 @@ import {
   formatPRFeedbackAsMarkdown,
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
+import { setChatDraftContent } from "@/lib/local-storage";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
@@ -214,6 +215,9 @@ function useImplementPlan(
 
     const userText = chatInputRef.current?.getValue() ?? "";
     chatInputRef.current?.clear();
+    if (resolvedSessionId) {
+      setChatDraftContent(resolvedSessionId, null);
+    }
 
     const visibleText = userText.trim() || "Implement the plan";
     const content = `${visibleText}\n\n<kandev-system>
