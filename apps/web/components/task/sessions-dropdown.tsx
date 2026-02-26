@@ -13,7 +13,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { linkToSession } from "@/lib/links";
+import { replaceSessionUrl } from "@/lib/links";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
@@ -110,20 +110,16 @@ function useRunningSessionsClock(sessions: TaskSession[]) {
 function useSessionSelectionHandlers(taskId: string | null) {
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const updateUrl = useCallback((sessionId: string) => {
-    if (typeof window === "undefined") return;
-    window.history.replaceState({}, "", linkToSession(sessionId));
-  }, []);
   const handleSelectSession = useCallback(
     (sessionId: string, close: () => void) => {
       if (!taskId) return;
       const oldSessionId = appStore.getState().tasks.activeSessionId;
       setActiveSession(taskId, sessionId);
       performLayoutSwitch(oldSessionId, sessionId);
-      updateUrl(sessionId);
+      replaceSessionUrl(sessionId);
       close();
     },
-    [appStore, setActiveSession, taskId, updateUrl],
+    [appStore, setActiveSession, taskId],
   );
   return { handleSelectSession };
 }

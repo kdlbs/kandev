@@ -46,4 +46,10 @@ export type { LayoutGroupIds } from "./applier";
 export { mergeCurrentPanelsIntoPreset } from "./merger";
 
 // Intent
-export { injectIntentPanels, applyActivePanelOverrides } from "./intent";
+export {
+  INTENT_PLAN,
+  INTENT_PR_REVIEW,
+  injectIntentPanels,
+  applyActivePanelOverrides,
+  resolveNamedIntent,
+} from "./intent";

@@ -1,5 +1,33 @@
-import type { LayoutState, LayoutIntentPanel, LayoutPanel } from "./types";
+import type { LayoutState, LayoutIntent, LayoutIntentPanel, LayoutPanel } from "./types";
 import { CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP } from "./constants";
+
+/** Well-known intent name constants (used as URL ?layout= values). */
+export const INTENT_PLAN = "plan";
+export const INTENT_PR_REVIEW = "pr-review";
+
+/** Registry of named layout intents, keyed by URL param value. */
+const NAMED_INTENTS: Record<string, LayoutIntent> = {
+  [INTENT_PLAN]: { preset: "plan" },
+  [INTENT_PR_REVIEW]: {
+    panels: [
+      {
+        id: "pr-detail",
+        component: "pr-detail",
+        title: "Pull Request",
+        targetGroup: "center",
+      },
+    ],
+    activePanels: {
+      [CENTER_GROUP]: "pr-detail",
+      [RIGHT_TOP_GROUP]: "changes",
+    },
+  },
+};
+
+/** Resolve a named intent string (from URL param) to a LayoutIntent, or null if unknown. */
+export function resolveNamedIntent(name: string): LayoutIntent | null {
+  return NAMED_INTENTS[name] ?? null;
+}
 
 /** Map short aliases to well-known group IDs. */
 const GROUP_ALIASES: Record<string, string> = {

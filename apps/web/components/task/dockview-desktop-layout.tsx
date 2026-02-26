@@ -627,11 +627,13 @@ type DockviewDesktopLayoutProps = {
   repository?: Repository | null;
   initialScripts?: RepositoryScript[];
   initialTerminals?: Terminal[];
+  initialLayout?: string | null;
 };
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   sessionId,
   repository,
+  initialLayout,
 }: DockviewDesktopLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
@@ -672,9 +674,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setApi(api);
 
       const currentSessionId = sessionIdRef.current;
-      const restored = tryRestoreLayout(api, currentSessionId);
+      // If a layout intent was passed via URL, skip saved layout restoration
+      const restored = !initialLayout && tryRestoreLayout(api, currentSessionId);
       if (!restored) {
-        buildDefaultLayout(api);
+        buildDefaultLayout(api, initialLayout ?? undefined);
       }
 
       useDockviewStore.setState({ currentLayoutSessionId: currentSessionId });
@@ -693,7 +696,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
       setupPortalCleanup(api);
     },
-    [setApi, buildDefaultLayout],
+    [setApi, buildDefaultLayout, initialLayout],
   );
 
   // Release session-scoped portals + trigger layout switch on session change

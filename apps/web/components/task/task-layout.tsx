@@ -35,6 +35,7 @@ type TaskLayoutProps = {
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+  initialLayout?: string | null;
 };
 
 export const TaskLayout = memo(function TaskLayout({
@@ -55,6 +56,7 @@ export const TaskLayout = memo(function TaskLayout({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  initialLayout,
 }: TaskLayoutProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
 
@@ -101,6 +103,7 @@ export const TaskLayout = memo(function TaskLayout({
       repository={repository}
       initialScripts={initialScripts}
       initialTerminals={initialTerminals}
+      initialLayout={initialLayout}
     />
   );
 });

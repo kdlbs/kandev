@@ -4,9 +4,8 @@ import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { linkToSession } from "@/lib/links";
+import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { useAppStore } from "@/components/state-provider";
-import { useDockviewStore } from "@/lib/state/dockview-store";
-import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 import type { Task } from "@/components/kanban-card";
 
 type NavigationOptions = {
@@ -55,23 +54,6 @@ async function preparePRSession(taskId: string): Promise<string | null> {
   }
 }
 
-function setPRReviewLayoutIntent(): void {
-  useDockviewStore.getState().setLayoutIntent({
-    panels: [
-      {
-        id: "pr-detail",
-        component: "pr-detail",
-        title: "Pull Request",
-        targetGroup: "center",
-      },
-    ],
-    activePanels: {
-      [CENTER_GROUP]: "pr-detail",
-      [RIGHT_TOP_GROUP]: "changes",
-    },
-  });
-}
-
 export function useKanbanNavigation({
   enablePreviewOnClick,
   isMobile,
@@ -102,8 +84,7 @@ export function useKanbanNavigation({
       if (taskPRs[task.id]) {
         const sessionId = await preparePRSession(task.id);
         if (sessionId) {
-          setPRReviewLayoutIntent();
-          router.push(linkToSession(sessionId));
+          router.push(linkToSession(sessionId, INTENT_PR_REVIEW));
           return;
         }
       }

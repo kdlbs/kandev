@@ -15,8 +15,12 @@ import {
   defaultLayout,
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
-import type { BuiltInPreset, LayoutState, LayoutGroupIds, LayoutIntent } from "./layout-manager";
-import { injectIntentPanels, applyActivePanelOverrides } from "./layout-manager";
+import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import {
+  injectIntentPanels,
+  applyActivePanelOverrides,
+  resolveNamedIntent,
+} from "./layout-manager";
 import { buildFileStateActions } from "./dockview-file-state";
 import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
 
@@ -73,7 +77,7 @@ type DockviewStore = {
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   removeFileState: (path: string) => void;
   clearFileStates: () => void;
-  buildDefaultLayout: (api: DockviewApi) => void;
+  buildDefaultLayout: (api: DockviewApi, intentName?: string) => void;
   resetLayout: () => void;
   addChatPanel: () => void;
   addChangesPanel: (groupId?: string) => void;
@@ -113,8 +117,6 @@ type DockviewStore = {
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
   setUserDefaultLayout: (layout: LayoutState | null) => void;
-  layoutIntent: LayoutIntent | null;
-  setLayoutIntent: (intent: LayoutIntent | null) => void;
   activeFilePath: string | null;
   pendingChatScrollTop: number | null;
   setPendingChatScrollTop: (value: number | null) => void;
@@ -374,21 +376,27 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
-function performBuildDefault(api: DockviewApi, set: StoreSet, get: StoreGet): void {
-  const { userDefaultLayout, layoutIntent } = get();
+function performBuildDefault(
+  api: DockviewApi,
+  set: StoreSet,
+  get: StoreGet,
+  intentName?: string,
+): void {
+  const { userDefaultLayout } = get();
+  const intent = intentName ? resolveNamedIntent(intentName) : null;
   const freshPinned = new Map<string, number>();
-  set({ isRestoringLayout: true, pinnedWidths: freshPinned, layoutIntent: null });
+  set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
-  const basePreset = layoutIntent?.preset as BuiltInPreset | undefined;
+  const basePreset = intent?.preset as BuiltInPreset | undefined;
   let state = basePreset
     ? getPresetLayout(basePreset)
     : (userDefaultLayout ?? getPresetLayout("default"));
 
-  if (layoutIntent?.panels?.length) {
-    state = injectIntentPanels(state, layoutIntent.panels);
+  if (intent?.panels?.length) {
+    state = injectIntentPanels(state, intent.panels);
   }
-  if (layoutIntent?.activePanels) {
-    state = applyActivePanelOverrides(state, layoutIntent.activePanels);
+  if (intent?.activePanels) {
+    state = applyActivePanelOverrides(state, intent.activePanels);
   }
 
   const ids = applyLayout(api, state, freshPinned);
@@ -441,8 +449,6 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   },
   userDefaultLayout: null,
   setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
-  layoutIntent: null,
-  setLayoutIntent: (intent) => set({ layoutIntent: intent }),
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
   isRestoringLayout: false,
@@ -455,6 +461,19 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   switchSessionLayout: (oldSessionId, newSessionId) => {
     const { api, currentLayoutSessionId } = get();
     if (!api || currentLayoutSessionId === newSessionId) return;
+    // When the first session becomes active (oldSessionId is null and no prior
+    // layout session), onReady already built the correct layout (possibly with
+    // an intent). Just adopt the current layout for the new session without
+    // rebuilding, which would lose the intent-based layout.
+    if (!oldSessionId && !currentLayoutSessionId) {
+      set({ currentLayoutSessionId: newSessionId });
+      try {
+        setSessionLayout(newSessionId, api.toJSON());
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const safeWidth = api.width;
     const safeHeight = api.height;
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
@@ -472,7 +491,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       set({ isRestoringLayout: false });
     }
   },
-  buildDefaultLayout: (api) => performBuildDefault(api, set, get),
+  buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
   resetLayout: () => {
     const { api } = get();
     if (api) get().buildDefaultLayout(api);

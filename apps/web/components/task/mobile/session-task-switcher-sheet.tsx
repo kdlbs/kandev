@@ -8,7 +8,7 @@ import { TaskSwitcher } from "../task-switcher";
 import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { linkToSession } from "@/lib/links";
+import { replaceSessionUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useTaskActions } from "@/hooks/use-task-actions";
@@ -173,19 +173,11 @@ type SheetNavOptions = {
   ) => Promise<Array<{ id: string; updated_at?: string | null }>>;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
-  updateUrl: (sessionId: string) => void;
   onOpenChange: (open: boolean) => void;
 };
 
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
-  const {
-    store,
-    loadTaskSessionsForTask,
-    setActiveSession,
-    setActiveTask,
-    updateUrl,
-    onOpenChange,
-  } = opts;
+  const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
     const workflowsResponse = await listWorkflows(newWorkspaceId, { cache: "no-store" });
@@ -220,7 +212,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {
         setActiveSession(mostRecentTask.id, mostRecentSession.id);
-        updateUrl(mostRecentSession.id);
+        replaceSessionUrl(mostRecentSession.id);
       } else {
         setActiveTask(mostRecentTask.id);
       }
@@ -233,7 +225,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
 }
 
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
-  const { workspaceId, store, setActiveSession, setActiveTask, updateUrl, onOpenChange } = opts;
+  const { workspaceId, store, setActiveSession, setActiveTask, onOpenChange } = opts;
 
   const handleWorkspaceChange = useCallback(
     async (newWorkspaceId: string) => {
@@ -278,11 +270,11 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
-        updateUrl(meta.taskSessionId);
+        replaceSessionUrl(meta.taskSessionId);
       }
       onOpenChange(false);
     },
-    [store, setActiveTask, setActiveSession, updateUrl, onOpenChange],
+    [store, setActiveTask, setActiveSession, onOpenChange],
   );
 
   return { handleWorkspaceChange, handleTaskCreated };
@@ -296,18 +288,13 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
   const { deleteTaskById, archiveTaskById } = useTaskActions();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
 
-  const updateUrl = useCallback((sessionId: string) => {
-    if (typeof window === "undefined") return;
-    window.history.replaceState({}, "", linkToSession(sessionId));
-  }, []);
-
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const kanbanTasks = store.getState().kanban.tasks;
       const task = kanbanTasks.find((t) => t.id === taskId);
       if (task?.primarySessionId) {
         setActiveSession(taskId, task.primarySessionId);
-        updateUrl(task.primarySessionId);
+        replaceSessionUrl(task.primarySessionId);
         loadTaskSessionsForTask(taskId);
         onOpenChange(false);
         return;
@@ -320,11 +307,11 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
           return;
         }
         setActiveSession(taskId, sessionId);
-        updateUrl(sessionId);
+        replaceSessionUrl(sessionId);
         onOpenChange(false);
       });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, updateUrl, store, onOpenChange],
+    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange],
   );
 
   const handleArchiveTask = useCallback(
@@ -358,7 +345,6 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
     loadTaskSessionsForTask,
     setActiveSession,
     setActiveTask,
-    updateUrl,
     onOpenChange,
   });
 
