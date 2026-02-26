@@ -9,7 +9,7 @@ You must understand the code you submit. You're welcome to use AI tools to help 
 ## How to Contribute
 
 1. **Fork and branch.** Create a feature branch from `main`.
-2. **Keep PRs focused.** One logical change per PR. Small PRs get reviewed faster.
+2. **Keep PRs focused.** One logical change per PR. Small PRs get reviewed faster.sdfs
 3. **Test your changes.** Run `make typecheck test lint` before submitting. Manually verify that your feature works end-to-end, add screenshots or recordings to the PR if it has a UI component.
 
 ## Bug Reports

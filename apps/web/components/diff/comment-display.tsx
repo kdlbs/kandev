@@ -15,7 +15,7 @@ interface CommentDisplayProps {
   /** Whether to show the code content */
   showCode?: boolean;
   /** Compact mode for inline display */
-  compact?: boolean;
+  compact?: boolean;sdfs
 }
 
 export function CommentDisplay({
