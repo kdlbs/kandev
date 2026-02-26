@@ -190,8 +190,15 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		zap.String("execution_id", execution.ID),
 		zap.String("operation_id", event.OperationID))
 
-	m.handleCompleteEventMarkState(execution, event, isError)
+	// Signal promptDoneCh BEFORE publishing agent.ready via MarkReady.
+	// MarkReady publishes agent.ready synchronously, which triggers handleAgentReady
+	// in the orchestrator. If handleAgentReady launches a follow-up prompt (queued
+	// message), the new SendPrompt drains promptDoneCh. If we signal AFTER MarkReady,
+	// the drain races with the first SendPrompt's receive and can steal the signal,
+	// leaving the first SendPrompt hung and the second prompt's completion event
+	// never reaching the event bus.
 	handleCompleteEventSignal(execution, event, isError)
+	m.handleCompleteEventMarkState(execution, event, isError)
 }
 
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer

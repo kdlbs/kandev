@@ -519,12 +519,6 @@ func (sm *SessionManager) SendPrompt(
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
 
-	// Drain any stale signal from a previous prompt cycle
-	select {
-	case <-execution.promptDoneCh:
-	default:
-	}
-
 	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
 	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
 		if isAgentStreamNotConnectedErr(err) && sm.streamManager != nil {

@@ -16,8 +16,19 @@ import (
 // across parallel sessions.
 var sessionID = fmt.Sprintf("mock-session-%d", os.Getpid())
 
+// mcpServerDef describes an MCP server endpoint parsed from --mcp-config.
+type mcpServerDef struct {
+	URL  string `json:"url"`
+	Type string `json:"type"`
+}
+
+// mcpServers holds MCP server definitions from --mcp-config.
+var mcpServers map[string]mcpServerDef
+
 func main() {
 	model := parseModelFlag()
+	mcpServers = parseMCPConfigFlag()
+	defer closeMCPClients()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	buf := make([]byte, 0, 64*1024)
@@ -33,11 +44,13 @@ func main() {
 
 		var msg IncomingMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
+			fmt.Fprintf(os.Stderr, "mock-agent[%d]: unmarshal error: %v (line=%s)\n", os.Getpid(), err, string(line[:min(200, len(line))]))
 			continue
 		}
 
 		switch msg.Type {
 		case TypeControlRequest:
+			fmt.Fprintf(os.Stderr, "mock-agent[%d]: control_request (request_id=%s)\n", os.Getpid(), msg.RequestID)
 			handleControlRequest(enc, msg)
 		case TypeUser:
 			if msg.Message != nil {
@@ -63,11 +76,44 @@ func parseModelFromArgs(args []string) string {
 		if arg == "--model" && i+1 < len(args)-1 {
 			return args[i+2]
 		}
-		if strings.HasPrefix(arg, "--model=") {
-			return strings.TrimPrefix(arg, "--model=")
+		if v, ok := strings.CutPrefix(arg, "--model="); ok {
+			return v
 		}
 	}
 	return "mock-default"
+}
+
+// mcpConfigPayload is the JSON structure for --mcp-config.
+type mcpConfigPayload struct {
+	MCPServers map[string]mcpServerDef `json:"mcpServers"`
+}
+
+// parseMCPConfigFlag extracts --mcp-config value from command line args
+// and returns the parsed MCP server definitions.
+func parseMCPConfigFlag() map[string]mcpServerDef {
+	raw := parseMCPConfigFromArgs(os.Args)
+	if raw == "" {
+		return nil
+	}
+	var payload mcpConfigPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		fmt.Fprintf(os.Stderr, "mock-agent: failed to parse --mcp-config: %v\n", err)
+		return nil
+	}
+	return payload.MCPServers
+}
+
+// parseMCPConfigFromArgs extracts --mcp-config value from the given args slice.
+func parseMCPConfigFromArgs(args []string) string {
+	for i, arg := range args[1:] {
+		if arg == "--mcp-config" && i+1 < len(args)-1 {
+			return args[i+2]
+		}
+		if v, ok := strings.CutPrefix(arg, "--mcp-config="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // handleControlRequest responds to control requests from the backend.
@@ -100,6 +146,7 @@ func handleControlRequest(enc *json.Encoder, msg IncomingMessage) {
 						{Name: "e2e:subagent", Description: "E2E: subagent with child messages"},
 						{Name: "e2e:all-tools", Description: "E2E: one of each tool type"},
 						{Name: "e2e:multi-turn", Description: "E2E: minimal multi-turn response"},
+						{Name: "e2e:*", Description: "E2E: scripted commands (e2e:message, e2e:mcp:*, etc.)"},
 					},
 					Agents: []string{"Bash", "Read", "Edit", "Grep", "Glob", "Task"},
 				},

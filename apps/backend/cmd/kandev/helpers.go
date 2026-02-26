@@ -53,11 +53,36 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		}
 
 		var result []*ws.Message
+		result = appendSessionStateMessage(sessionID, session, result)
 		result = appendGitStatusMessage(ctx, taskRepo, sessionID, session, result)
 		result = appendContextWindowMessage(sessionID, session, result)
 		result = appendAvailableCommandsMessage(sessionID, session, lifecycleMgr, result)
 		return result, nil
 	}
+}
+
+// appendSessionStateMessage always sends the current session state so clients
+// that subscribe after a state change still receive the authoritative state.
+func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
+	payload := map[string]interface{}{
+		"session_id": sessionID,
+		"task_id":    session.TaskID,
+		"new_state":  string(session.State),
+	}
+	if session.ReviewStatus != nil && *session.ReviewStatus != "" {
+		payload["review_status"] = *session.ReviewStatus
+	}
+	if session.WorkflowStepID != nil && *session.WorkflowStepID != "" {
+		payload["workflow_step_id"] = *session.WorkflowStepID
+	}
+	if session.Metadata != nil {
+		payload["session_metadata"] = session.Metadata
+	}
+	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, payload)
+	if err == nil {
+		result = append(result, notification)
+	}
+	return result
 }
 
 // appendGitStatusMessage adds a git status notification from the latest snapshot to result.
@@ -341,6 +366,7 @@ func registerSecondaryRoutes(
 
 	if p.services.GitHub != nil {
 		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
+		github.RegisterMockRoutes(p.router, p.services.GitHub, p.log)
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
 	}
 

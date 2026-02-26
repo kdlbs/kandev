@@ -143,6 +143,15 @@ func (a *startStepResolverAdapter) ResolveStartStep(ctx context.Context, workflo
 	return step.ID, nil
 }
 
+// ResolveFirstStep implements taskservice.StartStepResolver.
+func (a *startStepResolverAdapter) ResolveFirstStep(ctx context.Context, workflowID string) (string, error) {
+	step, err := a.svc.ResolveFirstStep(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return step.ID, nil
+}
+
 // githubSecretAdapter adapts secrets.SecretStore to github.SecretProvider.
 type githubSecretAdapter struct {
 	store secrets.SecretStore

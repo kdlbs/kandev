@@ -138,6 +138,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:   convertToServiceRepos(repos),
 		Position:       req.Position,
 		Metadata:       req.Metadata,
+		PlanMode:       req.PlanMode && !req.StartAgent,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

@@ -403,7 +403,13 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		taskRepo := newMockTaskRepo()
-		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+		// Register the workflow step so processOnTurnComplete can resolve it.
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+		svc := createTestService(repo, stepGetter, taskRepo)
 
 		session, _ := repo.GetTaskSession(ctx, "s1")
 		session.State = models.TaskSessionStateStarting

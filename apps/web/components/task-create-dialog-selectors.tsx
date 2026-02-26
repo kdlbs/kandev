@@ -215,6 +215,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="task-name"
+      data-testid="task-title-input"
       size={Math.max(value.length, 9)}
       className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 -mx-1.5 hover:bg-muted focus:bg-muted transition-colors"
     />
@@ -295,6 +296,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         value={description}
         onChange={handleDescriptionChange}
         onKeyDown={onKeyDown}
+        data-testid="task-description-input"
         rows={2}
         className={
           isSessionMode

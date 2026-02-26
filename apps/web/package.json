@@ -9,7 +9,10 @@
     "build": "cross-env NODE_ENV=production next build",
     "start": "cross-env NODE_ENV=production next start",
     "lint": "eslint --max-warnings 0",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
@@ -110,6 +113,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/diff": "^8.0.0",
     "@types/node": "^20",

@@ -28,7 +28,13 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	// Auto-resolve start step if not provided
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
-		resolvedID, err := s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
+		var resolvedID string
+		var err error
+		if req.PlanMode {
+			resolvedID, err = s.startStepResolver.ResolveFirstStep(ctx, req.WorkflowID)
+		} else {
+			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
+		}
 		if err != nil {
 			s.logger.Warn("failed to resolve start step, using empty",
 				zap.String("workflow_id", req.WorkflowID),

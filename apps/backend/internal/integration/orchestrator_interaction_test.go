@@ -46,10 +46,12 @@ func TestOrchestratorPromptTask(t *testing.T) {
 	_, err = client.SendRequest("session-sub-1", ws.ActionSessionSubscribe, map[string]string{"session_id": sessionID})
 	require.NoError(t, err)
 
-	// Test 1: Verify that prompting while agent is RUNNING is rejected
-	time.Sleep(100 * time.Millisecond) // Give agent time to start
+	// Test 1: Verify that prompting while agent is not yet ready is rejected.
+	// The simulated agent takes ~310ms (50ms launch + 60ms ACP + 200ms execution) before
+	// publishing AgentReady, so at 100ms the session is still in CREATED state.
+	time.Sleep(100 * time.Millisecond)
 
-	// Attempt to send prompt while agent is still running - should be rejected
+	// Attempt to send prompt while agent is still initializing — should be rejected
 	promptResp1, err := client.SendRequest("prompt-rejected", ws.ActionOrchestratorPrompt, map[string]interface{}{
 		"task_id":    taskID,
 		"session_id": sessionID,
@@ -57,23 +59,12 @@ func TestOrchestratorPromptTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Should receive an error response
-	var errorPayload map[string]interface{}
-	require.NoError(t, promptResp1.ParsePayload(&errorPayload))
-	t.Logf("Prompt response payload: %+v", errorPayload)
-	// The response might be an error message type, check for common error fields
-	if errorMsg, hasError := errorPayload["error"]; hasError {
-		assert.Contains(t, errorMsg.(string), "processing", "Error message should mention agent is processing")
-		t.Log("Successfully rejected prompt while agent is running:", errorMsg)
-	} else if success, hasSuccess := errorPayload["success"]; hasSuccess {
-		assert.False(t, success.(bool), "Expected prompt to be rejected while agent is running")
-	} else if message, hasMessage := errorPayload["message"]; hasMessage {
-		assert.Contains(t, message.(string), "processing", "Error message should mention agent is processing")
-		t.Log("Successfully rejected prompt while agent is running:", message)
-	} else {
-		// Just log the payload and continue - the important thing is that the backend logged the error
-		t.Logf("Unexpected response format, but backend correctly rejected the prompt (see error log above)")
-	}
+	// Should receive an error response (type=error with ErrorPayload)
+	assert.Equal(t, ws.MessageTypeError, promptResp1.Type, "Expected error response when session is not ready")
+	var errPayload ws.ErrorPayload
+	require.NoError(t, promptResp1.ParsePayload(&errPayload))
+	t.Logf("Prompt rejection: code=%s message=%s", errPayload.Code, errPayload.Message)
+	assert.NotEmpty(t, errPayload.Message)
 
 	// Test 2: Wait for agent to complete, then send a valid prompt
 	// Wait for agent to reach COMPLETED or WAITING_FOR_INPUT state

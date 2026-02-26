@@ -10,6 +10,7 @@ import (
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -142,7 +143,7 @@ func TestStartCreatedSession_WrongTask(t *testing.T) {
 	// Session belongs to "task-other", not "task1"
 	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCreated)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false)
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
 	}
@@ -154,9 +155,173 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
+	}
+}
+
+// --- recordInitialMessage ---
+
+// mockMessageCreator implements MessageCreator for testing.
+// Only CreateUserMessage is tracked; all other methods are no-op stubs.
+type mockMessageCreator struct {
+	userMessages []mockUserMessage
+}
+
+type mockUserMessage struct {
+	taskID, content, sessionID, turnID string
+	metadata                           map[string]interface{}
+}
+
+func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
+func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string, string, string) error {
+	return nil
+}
+
+func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	return nil
+}
+
+func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	return nil
+}
+
+func (m *mockMessageCreator) CreateSessionMessage(context.Context, string, string, string, string, string, map[string]interface{}, bool) error {
+	return nil
+}
+
+func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
+	return "", nil
+}
+
+func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+	return nil
+}
+
+func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+	return nil
+}
+
+func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, string, string, string, string, string) error {
+	return nil
+}
+
+func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
+	return nil
+}
+
+func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false)
+
+	// Session state must remain STARTING — recordInitialMessage should not modify state.
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateStarting, session.State)
+	}
+
+	// User message should have been created.
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].content != "hello world" {
+		t.Fatalf("expected message content %q, got %q", "hello world", mc.userMessages[0].content)
+	}
+}
+
+func TestPostLaunchCreated_SkipMessage_DoesNotChangeSessionState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false)
+
+	// Session state must remain STARTING when skipMessage=true.
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateStarting, session.State)
+	}
+}
+
+func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false)
+
+	// Session state must remain STARTING — postLaunchCreated delegates to
+	// recordInitialMessage which only creates the message.
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateStarting, session.State)
+	}
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(mc.userMessages))
+	}
+}
+
+func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true)
+
+	// User message should have plan_mode metadata.
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].metadata["plan_mode"] != true {
+		t.Fatalf("expected plan_mode=true in metadata, got %v", mc.userMessages[0].metadata)
+	}
+
+	// Session metadata should contain plan_mode.
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if session.Metadata == nil {
+		t.Fatal("expected session metadata to be set")
+	}
+	if session.Metadata["plan_mode"] != true {
+		t.Fatalf("expected plan_mode=true in session metadata, got %v", session.Metadata["plan_mode"])
 	}
 }
 

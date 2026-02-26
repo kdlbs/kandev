@@ -7,11 +7,13 @@ import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import HardBreak from "@tiptap/extension-hard-break";
 import History from "@tiptap/extension-history";
-import Placeholder from "@tiptap/extension-placeholder";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Extension, isNodeEmpty } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
-import { Extension } from "@tiptap/core";
 import { cn } from "@/lib/utils";
 import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import { getMarkdownText, escapeHtml, handleEditorPaste } from "./tiptap-helpers";
@@ -32,6 +34,65 @@ export type TipTapInputHandle = {
 };
 
 const lowlightInstance = createLowlight(common);
+
+/**
+ * Custom Placeholder extension that reads the current placeholder from
+ * editor.storage instead of from the captured options object. TipTap's
+ * extension.options is a getter returning a fresh object each call, so the
+ * built-in Placeholder plugin's closure captures a stale options snapshot.
+ * This wrapper uses editor.storage.dynamicPlaceholder.text as the live source.
+ */
+const DynamicPlaceholder = Extension.create({
+  name: "dynamicPlaceholder",
+
+  addStorage() {
+    return { text: "" };
+  },
+
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    return [
+      new Plugin({
+        key: new PluginKey("dynamicPlaceholder"),
+        props: {
+          decorations: ({ doc, selection }) => {
+            if (!editor.isEditable) return null;
+            const { anchor } = selection;
+            const decorations: InstanceType<typeof Decoration>[] = [];
+            const isEmptyDoc = editor.isEmpty;
+            doc.descendants((node: ProseMirrorNode, pos: number) => {
+              const hasAnchor = anchor >= pos && anchor <= pos + node.nodeSize;
+              const isEmpty = !node.isLeaf && isNodeEmpty(node);
+              if (hasAnchor && isEmpty) {
+                const classes = ["is-empty"];
+                if (isEmptyDoc) classes.push("is-editor-empty");
+                decorations.push(
+                  Decoration.node(pos, pos + node.nodeSize, {
+                    class: classes.join(" "),
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    "data-placeholder": (editor.storage as any).dynamicPlaceholder.text,
+                  }),
+                );
+              }
+              return false;
+            });
+            return DecorationSet.create(doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+/** Update the dynamic placeholder text and trigger a redecoration. Extracted to a
+ *  standalone function so that the eslint react-hooks/immutability rule does not
+ *  flag it as a mutation of the `editor` hook argument. */
+function updateDynamicPlaceholder(ed: ReturnType<typeof useEditor>, text: string) {
+  if (!ed) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (ed.storage as any).dynamicPlaceholder.text = text;
+  ed.view.dispatch(ed.state.tr);
+}
 
 type UseTipTapEditorOptions = {
   value: string;
@@ -124,7 +185,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
           return ReactNodeViewRenderer(CodeBlockView);
         },
       }).configure({ lowlight: lowlightInstance }),
-      Placeholder.configure({ placeholder }),
+      DynamicPlaceholder,
       ContextMention.configure({ suggestions: [mentionSuggestion, slashSuggestion] }),
       SubmitKeymap,
     ],
@@ -203,15 +264,11 @@ function useSyncEditor({
     if (editor) editor.setEditable(!disabled);
   }, [editor, disabled]);
 
-  // Sync placeholder
+  // Sync placeholder via editor.storage. The DynamicPlaceholder extension reads
+  // from editor.storage.dynamicPlaceholder.text at decoration time.
   useEffect(() => {
     if (!editor) return;
-    editor.extensionManager.extensions.forEach((ext) => {
-      if (ext.name === "placeholder") {
-        ext.options.placeholder = placeholder;
-        editor.view.dispatch(editor.state.tr);
-      }
-    });
+    updateDynamicPlaceholder(editor, placeholder);
   }, [editor, placeholder]);
 
   // Reset sync flag when session changes

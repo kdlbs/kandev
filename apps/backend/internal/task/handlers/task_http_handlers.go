@@ -350,6 +350,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Repositories:   convertToServiceRepos(repos),
 		Position:       body.Position,
 		Metadata:       body.Metadata,
+		PlanMode:       body.PlanMode && !body.StartAgent,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -456,7 +457,7 @@ func (h *TaskHandlers) startAgentForNewTask(
 			SessionID:         sessionID,
 			AgentProfileID:    body.AgentProfileID,
 			Prompt:            description,
-			SkipMessageRecord: true,
+			SkipMessageRecord: false,
 			PlanMode:          body.PlanMode,
 		})
 		if err != nil {

@@ -133,7 +133,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode,
 	)
 	if err != nil {
 		return nil, err

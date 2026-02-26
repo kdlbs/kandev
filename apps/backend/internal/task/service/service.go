@@ -58,6 +58,7 @@ type WorkflowStepGetter interface {
 // StartStepResolver resolves the starting step for a workflow.
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
+	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
 }
 
 var (

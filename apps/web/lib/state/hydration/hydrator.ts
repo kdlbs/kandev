@@ -22,9 +22,40 @@ function mergeWithLoading(draft: any, source: any | undefined): void {
   mergeLoadingState(draft, source);
 }
 
+/** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
+function mergeKanbanTasks(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  draft: Draft<any>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  source: any[] | undefined,
+): void {
+  if (!source || source.length === 0) return;
+  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
+  const existingById = new Map(draftTasks.map((t) => [t.id, t]));
+
+  for (const incoming of source) {
+    const existing = existingById.get(incoming.id);
+    if (!existing) {
+      draftTasks.push(incoming);
+    } else {
+      const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+      const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
+      if (incomingTime >= existingTime) {
+        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
+        if (idx >= 0) draftTasks[idx] = incoming;
+      }
+    }
+  }
+}
+
 /** Hydrate kanban and workspace slices. */
 function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.kanban) deepMerge(draft.kanban, state.kanban);
+  if (state.kanban) {
+    // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
+    const { tasks, ...kanbanRest } = state.kanban;
+    if (Object.keys(kanbanRest).length > 0) deepMerge(draft.kanban, kanbanRest);
+    mergeKanbanTasks(draft.kanban, tasks);
+  }
   if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);

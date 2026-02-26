@@ -17,17 +17,25 @@ var mockLogoDark []byte
 var _ Agent = (*MockAgent)(nil)
 
 type MockAgent struct {
-	enabled    bool
-	binaryPath string
+	enabled     bool
+	binaryPath  string
+	supportsMCP bool
 }
 
-func NewMockAgent() *MockAgent { return &MockAgent{} }
+func NewMockAgent() *MockAgent { return &MockAgent{supportsMCP: true} }
 
 // SetEnabled enables or disables the mock agent at runtime.
 func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
 
 // SetBinaryPath overrides the mock-agent binary path.
 func (a *MockAgent) SetBinaryPath(path string) { a.binaryPath = path }
+
+// SetSupportsMCP controls whether the mock agent reports MCP support.
+// Defaults to true so plan mode workflow events work in E2E tests.
+func (a *MockAgent) SetSupportsMCP(v bool) { a.supportsMCP = v }
+
+// SupportsMCPEnabled reports the current MCP support setting.
+func (a *MockAgent) SupportsMCPEnabled() bool { return a.supportsMCP }
 
 func (a *MockAgent) ID() string          { return "mock-agent" }
 func (a *MockAgent) Name() string        { return "Mock Agent" }
@@ -46,8 +54,8 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 }
 
 func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Mock agent is always "available" when enabled (forced by settings controller)
-	return &DiscoveryResult{Available: false}, nil
+	// Mock agent is always "available" when enabled (forced by settings controller).
+	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
 }
 
 func (a *MockAgent) DefaultModel() string { return "mock-default" }

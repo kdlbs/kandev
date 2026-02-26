@@ -36,7 +36,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
 
   if (type === "dev-server" && processId) {
     return (
-      <PanelRoot>
+      <PanelRoot data-testid="terminal-panel">
         <PanelBody padding={false} scroll={false}>
           <ShellTerminal processOutput={devOutput} processId={processId} isStopping={isStopping} />
         </PanelBody>
@@ -45,7 +45,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   }
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="terminal-panel">
       <PanelBody padding={false} scroll={false}>
         <PassthroughTerminal
           sessionId={sessionId ?? undefined}

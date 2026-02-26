@@ -203,9 +203,8 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 }
 
 // ResolveStartStep resolves which step a task should start in for a workflow.
-// Fallback chain: is_start_step=true → first step with auto_start_agent → first step by position.
+// Fallback chain: is_start_step=true → first step by position.
 func (s *Service) ResolveStartStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
-	// Try explicit start step
 	startStep, err := s.repo.GetStartStep(ctx, workflowID)
 	if err != nil {
 		s.logger.Error("failed to get start step", zap.String("workflow_id", workflowID), zap.Error(err))
@@ -215,23 +214,20 @@ func (s *Service) ResolveStartStep(ctx context.Context, workflowID string) (*mod
 		return startStep, nil
 	}
 
-	// Fallback: first step with auto_start_agent
+	// Fallback: first step by position
+	return s.ResolveFirstStep(ctx, workflowID)
+}
+
+// ResolveFirstStep always returns the first step by position, ignoring is_start_step.
+func (s *Service) ResolveFirstStep(ctx context.Context, workflowID string) (*models.WorkflowStep, error) {
 	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
 	if err != nil {
-		s.logger.Error("failed to list steps for start step resolution", zap.String("workflow_id", workflowID), zap.Error(err))
+		s.logger.Error("failed to list steps for first step resolution", zap.String("workflow_id", workflowID), zap.Error(err))
 		return nil, err
 	}
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("workflow %s has no steps", workflowID)
 	}
-
-	for _, step := range steps {
-		if step.HasOnEnterAction(models.OnEnterAutoStartAgent) {
-			return step, nil
-		}
-	}
-
-	// Fallback: first step by position
 	return steps[0], nil
 }
 

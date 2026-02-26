@@ -30,6 +30,10 @@ on:
       - "!**/*.mdx"
       - "!**/*.markdown"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build

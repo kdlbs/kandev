@@ -240,20 +240,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 
 	// Publish task updated event
 	if s.eventBus != nil {
-		taskEventData := map[string]interface{}{
-			"task_id":          task.ID,
-			"workflow_id":      task.WorkflowID,
-			"workflow_step_id": task.WorkflowStepID,
-			"title":            task.Title,
-			"description":      task.Description,
-			"state":            string(task.State),
-			"priority":         task.Priority,
-			"position":         task.Position,
-		}
 		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
 			events.TaskUpdated,
 			"orchestrator",
-			taskEventData,
+			buildTaskEventPayload(task),
 		))
 	}
 
@@ -579,7 +569,7 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	taskID string, session *models.TaskSession, prompt string,
 	planMode bool,
 ) (bool, error) {
-	if session.State != models.TaskSessionStateRunning {
+	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
 	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode); err != nil {
@@ -744,6 +734,10 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		"workflow_step_id": stepID,
 		"new_state":        string(models.TaskSessionStateWaitingForInput),
 	}
+	// Include session metadata (e.g. plan_mode) so the frontend can react.
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && len(session.Metadata) > 0 {
+		eventData["session_metadata"] = session.Metadata
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
@@ -894,6 +888,10 @@ func (s *Service) applyEngineTransition(
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
+
+	// Update in-memory session so subsequent calls (e.g. setSessionWaitingForInput)
+	// include the new workflow_step_id in the session.state_changed WS event.
+	session.WorkflowStepID = &result.ToStepID
 
 	if len(result.DataPatch) > 0 {
 		if err := s.workflowStore.PersistData(ctx, session.ID, result.DataPatch); err != nil {

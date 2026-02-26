@@ -109,7 +109,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="session-chat">
       <PanelBody padding={false}>
         <MessageList
           items={groupedItems}

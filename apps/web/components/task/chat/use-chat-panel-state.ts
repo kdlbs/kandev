@@ -24,6 +24,8 @@ import { buildContextItems } from "../chat-context-items";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
+import type { ActiveDocument } from "@/lib/state/slices/ui/types";
+import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -39,6 +41,63 @@ export type CommentsState = {
   handleClearPRFeedback: () => void;
   clearSessionPlanComments: () => void;
 };
+
+/** Re-focus chat input after dockview layout rebuild. */
+function useRefocusChatAfterLayout() {
+  return useCallback(() => {
+    const unsub = useDockviewStore.subscribe((state) => {
+      if (!state.isRestoringLayout) {
+        unsub();
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(".tiptap.ProseMirror")?.focus();
+        });
+      }
+    });
+  }, []);
+}
+
+type AutoApplyPlanLayoutOpts = {
+  resolvedSessionId: string | null;
+  taskId: string | null;
+  sessionMetaPlanMode: boolean;
+  setActiveDocument: (sid: string, doc: ActiveDocument | null) => void;
+  applyBuiltInPreset: (preset: BuiltInPreset) => void;
+  setPlanMode: (sid: string, enabled: boolean) => void;
+  addContextFile: (sid: string, file: { path: string; name: string }) => void;
+};
+
+/** Auto-apply plan layout when session metadata has plan_mode enabled. */
+function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
+  const {
+    resolvedSessionId,
+    taskId,
+    sessionMetaPlanMode,
+    setActiveDocument,
+    applyBuiltInPreset,
+    setPlanMode,
+    addContextFile,
+  } = opts;
+  const autoAppliedPlanSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resolvedSessionId || !taskId) return;
+    if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
+    if (sessionMetaPlanMode) {
+      autoAppliedPlanSessionRef.current = resolvedSessionId;
+      setActiveDocument(resolvedSessionId, { type: "plan", taskId });
+      applyBuiltInPreset("plan");
+      setPlanMode(resolvedSessionId, true);
+      addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+    }
+  }, [
+    resolvedSessionId,
+    taskId,
+    sessionMetaPlanMode,
+    setActiveDocument,
+    applyBuiltInPreset,
+    setPlanMode,
+    addContextFile,
+  ]);
+}
 
 export function usePlanMode(resolvedSessionId: string | null, taskId: string | null) {
   const activeDocument = useAppStore((state) =>
@@ -57,6 +116,12 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false,
   );
 
+  const sessionMetaPlanMode = useAppStore((state) =>
+    resolvedSessionId
+      ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
+      : false,
+  );
+
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
 
@@ -69,18 +134,17 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
 
-  // Re-focus chat input after dockview layout rebuild.
-  // Scroll preservation is handled by the store layout actions (before DOM rebuild).
-  const refocusChatAfterLayout = useCallback(() => {
-    const unsub = useDockviewStore.subscribe((state) => {
-      if (!state.isRestoringLayout) {
-        unsub();
-        requestAnimationFrame(() => {
-          document.querySelector<HTMLElement>(".tiptap.ProseMirror")?.focus();
-        });
-      }
-    });
-  }, []);
+  useAutoApplyPlanLayout({
+    resolvedSessionId,
+    taskId,
+    sessionMetaPlanMode,
+    setActiveDocument,
+    applyBuiltInPreset,
+    setPlanMode,
+    addContextFile,
+  });
+
+  const refocusChatAfterLayout = useRefocusChatAfterLayout();
 
   // Toggle only the plan layout (plan panel + preset) without changing chat input plan mode state
   const togglePlanLayout = useCallback(

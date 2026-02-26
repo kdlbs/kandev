@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -16,6 +17,22 @@ const (
 	agentEventComplete = "complete"
 	agentEventError    = "error"
 )
+
+// buildTaskEventPayload builds the standard map payload for TaskUpdated events.
+// This is the single source of truth; all TaskUpdated publishers should call it.
+func buildTaskEventPayload(task *models.Task) map[string]interface{} {
+	return map[string]interface{}{
+		"task_id":          task.ID,
+		"workflow_id":      task.WorkflowID,
+		"workflow_step_id": task.WorkflowStepID,
+		"title":            task.Title,
+		"description":      task.Description,
+		"state":            string(task.State),
+		"priority":         task.Priority,
+		"position":         task.Position,
+		"updated_at":       task.UpdatedAt.Format(time.RFC3339Nano),
+	}
+}
 
 // toolKindToMessageType maps the normalized tool kind to a frontend message type.
 func toolKindToMessageType(normalized *streams.NormalizedPayload) string {

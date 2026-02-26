@@ -257,7 +257,7 @@ func TestResolveStartStep(t *testing.T) {
 		assert.True(t, start.IsStartStep)
 	})
 
-	t.Run("fallback to first step with auto_start_agent", func(t *testing.T) {
+	t.Run("auto_start_agent does not affect fallback (uses position 0)", func(t *testing.T) {
 		svc, db := setupTestService(t)
 		ctx := context.Background()
 
@@ -279,7 +279,8 @@ func TestResolveStartStep(t *testing.T) {
 		start, err := svc.ResolveStartStep(ctx, "wf-1")
 		require.NoError(t, err)
 		assert.NotNil(t, start)
-		assert.Equal(t, "Auto Start", start.Name)
+		assert.Equal(t, "Todo", start.Name)
+		assert.Equal(t, 0, start.Position)
 	})
 
 	t.Run("fallback to first step by position", func(t *testing.T) {
@@ -308,6 +309,37 @@ func TestResolveStartStep(t *testing.T) {
 		start, err := svc.ResolveStartStep(ctx, "wf-empty")
 		assert.Error(t, err)
 		assert.Nil(t, start)
+		assert.Contains(t, err.Error(), "has no steps")
+	})
+}
+
+func TestResolveFirstStep(t *testing.T) {
+	t.Run("returns first step by position ignoring is_start_step", func(t *testing.T) {
+		svc, db := setupTestService(t)
+		ctx := context.Background()
+
+		insertWorkflow(t, db, "wf-1", "Test Workflow")
+
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Todo", Position: 0})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Start Here", Position: 1, IsStartStep: true})
+		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Done", Position: 2})
+
+		first, err := svc.ResolveFirstStep(ctx, "wf-1")
+		require.NoError(t, err)
+		assert.NotNil(t, first)
+		assert.Equal(t, "Todo", first.Name)
+		assert.Equal(t, 0, first.Position)
+	})
+
+	t.Run("empty workflow returns error", func(t *testing.T) {
+		svc, db := setupTestService(t)
+		ctx := context.Background()
+
+		insertWorkflow(t, db, "wf-empty", "Empty Workflow")
+
+		first, err := svc.ResolveFirstStep(ctx, "wf-empty")
+		assert.Error(t, err)
+		assert.Nil(t, first)
 		assert.Contains(t, err.Error(), "has no steps")
 	})
 }

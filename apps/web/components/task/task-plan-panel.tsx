@@ -159,7 +159,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   const { textSelection, setTextSelection } = selectionState;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="plan-panel">
       <PanelBody
         padding={false}
         scroll={false}

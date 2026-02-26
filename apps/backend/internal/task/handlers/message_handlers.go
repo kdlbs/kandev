@@ -26,7 +26,7 @@ import (
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
-	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord bool) error
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 }
 
@@ -310,15 +310,15 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 // agent as a prompt in a background goroutine.
 func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession bool) {
 	// Process on_turn_start events synchronously BEFORE sending the prompt.
-	// This transitions the task to the right step (e.g., Review → In Progress)
-	// before the agent receives the message.
-	if !isCreatedSession {
-		if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
-			h.logger.Warn("failed to process on_turn_start",
-				zap.String("task_id", req.TaskID),
-				zap.String("session_id", req.TaskSessionID),
-				zap.Error(err))
-		}
+	// This transitions the task to the right step (e.g., Todo → In Progress
+	// or Review → In Progress) before the agent receives the message.
+	// This applies to all sessions, including CREATED sessions from plan mode
+	// where the user sends the first message to start the agent.
+	if err := h.orchestrator.ProcessOnTurnStart(ctx, req.TaskID, req.TaskSessionID); err != nil {
+		h.logger.Warn("failed to process on_turn_start",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.TaskSessionID),
+			zap.Error(err))
 	}
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
@@ -344,7 +344,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true); err != nil {
+		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode); err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

@@ -66,6 +66,7 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
+      data-testid={`kanban-column-${step.id}`}
       className={cn(
         "flex flex-col flex-1 h-full min-w-0 px-3 py-2 sm:min-h-[200px]",
         "border-r border-dashed border-border/50 last:border-r-0",

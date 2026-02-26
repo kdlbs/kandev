@@ -33,6 +33,18 @@ const eslintConfig = defineConfig([
       "unused-imports/no-unused-imports": "warn",
     },
   },
+  // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and
+  // `test.extend()` patterns are falsely flagged, and relax test-specific limits.
+  {
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "react-hooks/exhaustive-deps": "off",
+      "max-lines-per-function": "off",
+      "max-lines": "off",
+      "sonarjs/no-duplicate-string": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

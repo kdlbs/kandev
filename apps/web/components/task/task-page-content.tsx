@@ -121,6 +121,11 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
       ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true
       : false,
   );
+  const sessionWorkflowStepId = useAppStore((state) =>
+    effectiveSessionId
+      ? (state.taskSessions.items[effectiveSessionId]?.workflow_step_id ?? null)
+      : null,
+  );
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
   );
@@ -141,6 +146,7 @@ function useSessionPanelState(effectiveSessionId: string | null | undefined) {
   return {
     storeSessionState,
     isSessionPassthrough,
+    sessionWorkflowStepId,
     previewOpen,
     previewStage,
     previewUrl,
@@ -224,6 +230,17 @@ function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
   };
 }
 
+/** Pick the best step ID. Both session-level (from session.state_changed WS event) and
+ * task-level (from task.updated WS event + kanban snapshot) carry the same value, but
+ * session.state_changed is delivered directly while task.updated goes through the hub's
+ * broadcast channel, so the session value arrives first and is less likely to be stale. */
+function resolveCurrentStepId(
+  sessionStepId: string | null,
+  taskStepId: string | null,
+): string | null {
+  return sessionStepId || taskStepId || null;
+}
+
 function buildTaskTopBarProps(params: {
   taskProps: ReturnType<typeof resolveTaskProps>;
   agent: ReturnType<typeof useSessionAgent>;
@@ -233,6 +250,7 @@ function buildTaskTopBarProps(params: {
   onToggleDebugOverlay: () => void;
   effectiveSessionId: string | null;
   remote: ReturnType<typeof resolveRemoteExecutor>;
+  sessionWorkflowStepId: string | null;
 }) {
   const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
     params;
@@ -253,7 +271,7 @@ function buildTaskTopBarProps(params: {
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,
-    currentStepId: taskProps.workflowStepId,
+    currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
     isArchived: taskProps.isArchived,
     isRemoteExecutor: params.remote.isRemoteExecutor,
@@ -369,6 +387,7 @@ function TaskPageInner({
     onToggleDebugOverlay,
     effectiveSessionId,
     remote,
+    sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
   });
   const layoutProps = buildTaskLayoutProps({
     taskProps,

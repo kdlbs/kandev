@@ -108,6 +108,20 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		}
 	}
 
+	// Fall back to the task's current workflow step when the caller didn't provide one.
+	// This ensures sessions created via the kanban card (which doesn't send workflow_step_id)
+	// inherit the task's step and participate in workflow events.
+	if workflowStepID == "" {
+		dbTask, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		} else if dbTask.WorkflowStepID != "" {
+			workflowStepID = dbTask.WorkflowStepID
+		}
+	}
+
 	// Create session entry in database
 	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
@@ -178,6 +192,13 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+
+		if planModeActive {
+			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
+			if sessErr == nil {
+				s.setSessionPlanMode(ctx, sess, true)
+			}
+		}
 	}
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
@@ -190,7 +211,8 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 // This is used when a session was prepared (via PrepareSession) but the agent was not launched,
 // and the user now wants to start the agent with a prompt (e.g., from the plan panel or chat).
 // When skipMessageRecord is true, only the session state is updated (the caller already stored the user message).
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord bool) (*executor.TaskExecution, error) {
+// When planMode is true, plan mode instructions are injected into the prompt and session metadata is set.
+func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode bool) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -204,8 +226,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
-	if session.State != models.TaskSessionStateCreated {
-		return nil, fmt.Errorf("session is not in CREATED state (current: %s)", session.State)
+	// Accept CREATED (normal) or WAITING_FOR_INPUT (after on_turn_start step transition).
+	// When the user sends the first message to a prepared session, on_turn_start may fire
+	// and move the step, which sets the session to WAITING_FOR_INPUT before we get here.
+	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
+		return nil, fmt.Errorf("session is not in CREATED or WAITING_FOR_INPUT state (current: %s)", session.State)
 	}
 
 	// Use agent profile from request, fall back to session's stored value
@@ -234,6 +259,15 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		effectivePrompt = task.Description
 	}
 
+	// Apply workflow step prompt wrapping and plan mode injection.
+	// Called unconditionally so workflow-step prompt composition (prefix/suffix)
+	// applies even when plan mode is not requested.
+	stepID := ""
+	if session.WorkflowStepID != nil {
+		stepID = *session.WorkflowStepID
+	}
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, stepID, planMode)
+
 	executorID := session.ExecutorID
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true})
@@ -241,15 +275,29 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		return nil, err
 	}
 
-	if execution.SessionID != "" {
-		if skipMessageRecord {
-			s.updateTaskSessionState(ctx, taskID, execution.SessionID, models.TaskSessionStateRunning, "", true)
-		} else {
-			s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, false)
-		}
-	}
+	// Record the initial user message and set plan mode metadata after launch.
+	// Note: we do NOT set session state here — the executor sets it to STARTING,
+	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
+	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive)
 
 	return execution, nil
+}
+
+// postLaunchCreated handles post-launch bookkeeping for a created session:
+// records the initial user message (unless skipped) and sets plan mode metadata.
+// It does NOT modify session state — the executor sets STARTING, and event handlers
+// (handleAgentReady) handle the transition to WAITING_FOR_INPUT.
+func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prompt string, skipMessage, planModeActive bool) {
+	if !skipMessage {
+		s.recordInitialMessage(ctx, taskID, sessionID, prompt, planModeActive)
+	}
+
+	if planModeActive {
+		sess, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err == nil {
+			s.setSessionPlanMode(ctx, sess, true)
+		}
+	}
 }
 
 // StartTask manually starts agent execution for a task.
@@ -289,16 +337,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 				_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
 					events.TaskUpdated,
 					"orchestrator",
-					map[string]interface{}{
-						"task_id":          dbTask.ID,
-						"workflow_id":      dbTask.WorkflowID,
-						"workflow_step_id": dbTask.WorkflowStepID,
-						"title":            dbTask.Title,
-						"description":      dbTask.Description,
-						"state":            string(dbTask.State),
-						"priority":         dbTask.Priority,
-						"position":         dbTask.Position,
-					},
+					buildTaskEventPayload(dbTask),
 				))
 			}
 		}
@@ -333,6 +372,16 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+
+		// Set plan mode in session metadata so the frontend can detect it.
+		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
+		// the session metadata is needed for the frontend to switch the layout.
+		if planModeActive {
+			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
+			if err == nil {
+				s.setSessionPlanMode(ctx, session, true)
+			}
+		}
 	}
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
@@ -375,7 +424,6 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 
 // recordInitialMessage creates the initial user message and updates session state after launch.
 func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, prompt string, planModeActive bool) {
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true)
 	if s.messageCreator != nil && prompt != "" {
 		meta := NewUserMessageMeta().WithPlanMode(planModeActive)
 		if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, s.getActiveTurnID(sessionID), meta.ToMap()); err != nil {
@@ -953,18 +1001,27 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, ErrSessionResetInProgress
 	}
 
-	// Check if session is already processing a prompt (RUNNING state)
-	// This prevents concurrent prompts that can cause race conditions
+	// Only allow prompts when the session is ready for input.
+	// Reject when the agent is still starting, already processing, or in a terminal state.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
-	if session.State == models.TaskSessionStateRunning {
+	switch session.State {
+	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateCompleted:
+		// OK — session is ready for a new prompt
+	case models.TaskSessionStateRunning:
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("session_state", string(session.State)))
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	default:
+		s.logger.Warn("rejected prompt: session not ready for input",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(session.State)))
+		return nil, fmt.Errorf("%w, session is in %s state", ErrAgentPromptInProgress, session.State)
 	}
 
 	// Ensure the agent process is actually running. After a lazy backend restart,

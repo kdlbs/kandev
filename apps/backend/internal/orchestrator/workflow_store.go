@@ -104,20 +104,10 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	}
 
 	if s.eventBus != nil {
-		taskEventData := map[string]interface{}{
-			"task_id":          task.ID,
-			"workflow_id":      task.WorkflowID,
-			"workflow_step_id": task.WorkflowStepID,
-			"title":            task.Title,
-			"description":      task.Description,
-			"state":            string(task.State),
-			"priority":         task.Priority,
-			"position":         task.Position,
-		}
 		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
 			events.TaskUpdated,
 			"orchestrator",
-			taskEventData,
+			buildTaskEventPayload(task),
 		))
 	}
 

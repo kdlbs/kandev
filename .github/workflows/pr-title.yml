@@ -5,6 +5,10 @@ on:
     types: [opened, edited, synchronize, reopened]
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: read
 

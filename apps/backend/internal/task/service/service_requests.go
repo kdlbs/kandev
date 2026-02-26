@@ -29,6 +29,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	PlanMode       bool                   `json:"plan_mode,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task

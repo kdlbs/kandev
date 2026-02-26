@@ -7,11 +7,23 @@ import (
 	"strings"
 )
 
-var toolCallCounter int
+// scriptState holds mutable state shared across script commands and sequence emitters.
+type scriptState struct {
+	toolCallCounter int
+	lastToolID      string
+}
+
+// state is the process-wide script state. Use resetState() in tests
+// to get a clean starting point instead of touching fields directly.
+var state = &scriptState{}
+
+func resetState() {
+	state = &scriptState{}
+}
 
 func nextToolID() string {
-	toolCallCounter++
-	return fmt.Sprintf("mock_tool_%04d", toolCallCounter)
+	state.toolCallCounter++
+	return fmt.Sprintf("mock_tool_%04d", state.toolCallCounter)
 }
 
 func defaultUsage() *Usage {
@@ -213,7 +225,7 @@ func emitCodeSearch(enc *json.Encoder, model string) {
 	randomDelay(model)
 
 	searchPatterns := []string{"func ", "import ", "TODO", "return ", "error", "type "}
-	pattern := searchPatterns[toolCallCounter%len(searchPatterns)]
+	pattern := searchPatterns[state.toolCallCounter%len(searchPatterns)]
 
 	f := randomFile()
 	_ = enc.Encode(AssistantMsg{
@@ -439,6 +451,35 @@ func emitMermaidSequence(enc *json.Encoder, model string) {
 		"- Authentication uses **JWT tokens** with a 24h expiry\n"+
 		"- Services communicate via `gRPC` internally\n"+
 		"- Database connections use a **connection pool** (max 50)\n", "")
+}
+
+// emitToolUseBlock emits an assistant message with a single tool_use content block.
+func emitToolUseBlock(enc *json.Encoder, toolID, toolName string, input map[string]any) {
+	_ = enc.Encode(AssistantMsg{
+		Type: TypeAssistant,
+		Message: AssistantBody{
+			Role: "assistant",
+			Content: []ContentBlock{
+				{Type: BlockToolUse, ID: toolID, Name: toolName, Input: input},
+			},
+			Model:      "mock-default",
+			StopReason: "tool_use",
+			Usage:      defaultUsage(),
+		},
+	})
+}
+
+// emitToolResultBlock emits a user message with a tool_result content block.
+func emitToolResultBlock(enc *json.Encoder, toolID, content string, isError bool) {
+	_ = enc.Encode(UserMsg{
+		Type: TypeUser,
+		Message: UserMsgBody{
+			Role: "user",
+			Content: []ContentBlock{
+				{Type: BlockToolResult, ToolUseID: toolID, Content: content, IsError: isError},
+			},
+		},
+	})
 }
 
 // emitWebFetch emits a WebFetch tool_use followed by a tool_result.

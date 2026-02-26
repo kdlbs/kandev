@@ -123,7 +123,6 @@ export function validateCreateInputs(inputs: {
     inputs.trimmedTitle &&
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
-    (inputs.repositoryId || inputs.selectedLocalRepo) &&
     inputs.agentProfileId,
   );
 }
