@@ -37,6 +37,9 @@ type Manager struct {
 
 // NewManager creates a new instance manager.
 func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
+	// Clean up code-server processes orphaned by a previous session (safety net).
+	process.CleanupOrphanedCodeServers(log)
+
 	return &Manager{
 		config:    cfg,
 		logger:    log.WithFields(zap.String("component", "instance-manager")),
