@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskSessionState, Task, TaskSession } from "@/lib/types/http";
 
@@ -49,21 +51,12 @@ export function useSessionAgent(task: Task | null): UseSessionAgentReturn {
       if (!task?.id) return;
       if (!agentProfileId) return;
 
-      const client = getWebSocketClient();
-      if (!client) return;
-
       setIsAgentLoading(true);
       try {
-        // Store will be updated via WebSocket notifications when session starts
-        await client.request(
-          "orchestrator.start",
-          {
-            task_id: task.id,
-            agent_profile_id: agentProfileId,
-            prompt: prompt ?? task.description ?? "",
-          },
-          15000,
-        );
+        const { request } = buildStartRequest(task.id, agentProfileId, {
+          prompt: prompt ?? task.description ?? "",
+        });
+        await launchSession(request);
       } catch {
         // Failed to start agent
       } finally {

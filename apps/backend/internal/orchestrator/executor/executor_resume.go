@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -9,6 +10,14 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+// isStaleExecutionError checks if an error from LaunchAgent indicates a stale
+// execution in the lifecycle manager's in-memory store. This happens when
+// PrepareTaskSession registered an execution but the agent was never started,
+// or the agent exited without proper cleanup.
+func isStaleExecutionError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already has an agent running")
+}
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
@@ -146,6 +155,21 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	if err != nil && isStaleExecutionError(err) {
+		// The lifecycle manager's in-memory store has a stale execution (agent not actually
+		// running). This happens when PrepareTaskSession registered an execution but the
+		// agent was never started, or the agent exited without cleanup. Clean up the stale
+		// entry and retry.
+		e.logger.Info("cleaning up stale execution and retrying launch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID))
+		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+			e.logger.Warn("failed to clean up stale execution",
+				zap.String("session_id", session.ID),
+				zap.Error(cleanupErr))
+		}
+		resp, err = e.agentManager.LaunchAgent(ctx, req)
+	}
 	if err != nil {
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),

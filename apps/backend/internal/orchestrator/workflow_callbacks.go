@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/workflow/engine"
-	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // buildWorkflowCallbacks creates the callback registry for the workflow engine.
@@ -82,24 +81,14 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 		return engine.ActionResult{}, nil
 	}
 
-	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	_, err := c.svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:         in.State.TaskID,
+		Intent:         IntentWorkflowStep,
+		SessionID:      in.State.SessionID,
+		WorkflowStepID: in.Step.ID,
+	})
 	if err != nil {
-		return engine.ActionResult{}, fmt.Errorf("load session for auto-start: %w", err)
-	}
-
-	// Reconstruct the workflow step to build the prompt.
-	// The step's prompt template and plan mode flag drive prompt construction.
-	step, err := c.svc.workflowStepGetter.GetStep(ctx, in.Step.ID)
-	if err != nil {
-		return engine.ActionResult{}, fmt.Errorf("load step for auto-start: %w", err)
-	}
-
-	effectivePrompt := c.svc.buildWorkflowPrompt(in.State.TaskDescription, step, in.State.TaskID)
-	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-
-	err = c.svc.autoStartStepPrompt(ctx, in.State.TaskID, session, in.Step.Name, effectivePrompt, planMode, true)
-	if err != nil {
-		return engine.ActionResult{}, fmt.Errorf("auto-start prompt failed: %w", err)
+		return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
 	}
 	return engine.ActionResult{}, nil
 }

@@ -57,3 +57,13 @@ export async function openSessionFolder(sessionId: string, options?: ApiRequestO
     init: { method: "POST", ...(options?.init ?? {}) },
   });
 }
+
+export { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
+export {
+  buildPRPrepareRequest,
+  buildPrepareRequest,
+  buildStartRequest,
+  buildStartCreatedRequest,
+  buildResumeRequest,
+  buildWorkflowStepRequest,
+} from "@/lib/services/session-launch-helpers";

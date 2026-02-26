@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { linkToSession } from "@/lib/links";
 import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 
@@ -38,22 +40,6 @@ async function fetchLatestSession(
   }
 }
 
-async function preparePRSession(taskId: string): Promise<string | null> {
-  const client = getWebSocketClient();
-  if (!client) return null;
-  try {
-    const response = await client.request<{ session_id: string }>(
-      "task.session.prepare",
-      { task_id: taskId },
-      15000,
-    );
-    return response.session_id ?? null;
-  } catch (error) {
-    console.error("Failed to prepare session for PR task:", error);
-    return null;
-  }
-}
-
 export function useKanbanNavigation({
   enablePreviewOnClick,
   isMobile,
@@ -81,17 +67,23 @@ export function useKanbanNavigation({
 
   const handleNoSession = useCallback(
     async (task: Task) => {
-      if (taskPRs[task.id]) {
-        const sessionId = await preparePRSession(task.id);
-        if (sessionId) {
-          router.push(linkToSession(sessionId, INTENT_PR_REVIEW));
+      try {
+        const { request } = buildPrepareRequest(task.id);
+        const resp = await launchSession(request);
+        if (resp.session_id) {
+          // Apply PR review layout if the task has PR metadata
+          const layoutIntent = taskPRs[task.id] ? INTENT_PR_REVIEW : undefined;
+          if (onOpenTask) onOpenTask(task, resp.session_id);
+          else router.push(linkToSession(resp.session_id, layoutIntent));
           return;
         }
+      } catch {
+        // Fall through to dialog as last resort
       }
       setEditingTask(task);
       setIsDialogOpen(true);
     },
-    [taskPRs, router, setEditingTask, setIsDialogOpen],
+    [taskPRs, router, onOpenTask, setEditingTask, setIsDialogOpen],
   );
 
   const handleOpenTask = useCallback(

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildResumeRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -129,11 +131,14 @@ async function checkAndResume({
     }
     if (status.needs_resume && status.is_resumable) {
       setters.setResumptionState("resuming");
-      const resumeResp = await client.request<ResumeResponse>(
-        "task.session.resume",
-        { task_id: taskId, session_id: sessionId },
-        30000,
-      );
+      const { request } = buildResumeRequest(taskId, sessionId);
+      const launchResp = await launchSession(request);
+      const resumeResp: ResumeResponse = {
+        success: launchResp.success,
+        state: launchResp.state,
+        worktree_path: launchResp.worktree_path,
+        worktree_branch: launchResp.worktree_branch,
+      };
       applyResumeResponse(resumeResp, taskId, sessionId, session, setters);
     } else {
       setters.setResumptionState("idle");
@@ -226,16 +231,11 @@ export function useSessionResumption(
   // Manual resume function
   const resumeSession = useCallback(async (): Promise<boolean> => {
     if (!taskId || !sessionId) return false;
-    const client = getWebSocketClient();
-    if (!client) return false;
     setResumptionState("resuming");
     setError(null);
     try {
-      const response = await client.request<ResumeResponse>(
-        "task.session.resume",
-        { task_id: taskId, session_id: sessionId },
-        30000,
-      );
+      const { request } = buildResumeRequest(taskId, sessionId);
+      const response = await launchSession(request);
       if (response.success) {
         setResumptionState("resumed");
         if (response.state) {
@@ -252,7 +252,7 @@ export function useSessionResumption(
         return true;
       }
       setResumptionState("error");
-      setError(response.error ?? "Failed to resume session");
+      setError("Failed to resume session");
       return false;
     } catch (err) {
       setResumptionState("error");

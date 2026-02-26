@@ -74,6 +74,9 @@ const (
 	ActionTaskSessionStatus  = "task.session.status"
 	ActionTaskSessionPrepare = "task.session.prepare"
 
+	// Unified session launch
+	ActionSessionLaunch = "session.launch"
+
 	// Agent actions
 	ActionAgentList   = "agent.list"
 	ActionAgentLaunch = "agent.launch"

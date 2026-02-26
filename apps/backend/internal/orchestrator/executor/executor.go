@@ -109,6 +109,11 @@ type AgentManagerClient interface {
 	// executor records. Used during startup to populate remote status cache before any
 	// sessions are lazily resumed.
 	PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest)
+
+	// CleanupStaleExecutionBySessionID removes a stale execution from the in-memory
+	// tracking store. Used when the agent process has exited but the execution entry
+	// was not cleaned up (e.g. prepared workspace where agent was never started).
+	CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error
 }
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.

@@ -5,8 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { getPlanLastSeen } from "@/lib/local-storage";
-import { approveSessionAction } from "@/app/actions/workspaces";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 
@@ -41,37 +40,6 @@ function useOpenFileRequestState() {
   }, []);
 
   return { openFileRequest, handleOpenFile, handleFileOpenHandled };
-}
-
-/** Handle approve action: call server action and trigger auto-start if configured. */
-async function executeApprove(
-  sessionId: string,
-  taskId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setTaskSession: (session: any) => void,
-) {
-  const response = await approveSessionAction(sessionId);
-  if (response?.session) {
-    setTaskSession(response.session);
-  }
-  if (
-    response?.workflow_step?.events?.on_enter?.some(
-      (a: { type: string }) => a.type === "auto_start_agent",
-    )
-  ) {
-    const client = getWebSocketClient();
-    if (client) {
-      client.send({
-        type: "request",
-        action: "orchestrator.start",
-        payload: {
-          task_id: taskId,
-          session_id: sessionId,
-          workflow_step_id: response.workflow_step.id,
-        },
-      });
-    }
-  }
 }
 
 /**

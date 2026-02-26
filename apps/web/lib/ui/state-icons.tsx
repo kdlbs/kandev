@@ -8,12 +8,13 @@ type IconConfig = {
   className: string;
 };
 
+const STYLE_MUTED = "text-muted-foreground";
 const STYLE_LOADING = "text-blue-500 animate-spin";
 const STYLE_WARNING = "text-yellow-500";
 const STYLE_ERROR = "text-red-500";
 
 const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
-  CREATED: { Icon: IconLoader2, className: STYLE_LOADING },
+  CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
   SCHEDULING: { Icon: IconLoader2, className: STYLE_LOADING },
   IN_PROGRESS: { Icon: IconLoader2, className: STYLE_LOADING },
   REVIEW: { Icon: IconCheck, className: STYLE_WARNING },
@@ -22,11 +23,11 @@ const TASK_STATE_ICONS: Record<TaskState, IconConfig> = {
   COMPLETED: { Icon: IconCheck, className: "text-green-500" },
   FAILED: { Icon: IconX, className: STYLE_ERROR },
   CANCELLED: { Icon: IconX, className: STYLE_ERROR },
-  TODO: { Icon: IconAlertCircle, className: "text-muted-foreground" },
+  TODO: { Icon: IconAlertCircle, className: STYLE_MUTED },
 };
 
 const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
-  CREATED: { Icon: IconLoader2, className: STYLE_LOADING },
+  CREATED: { Icon: IconAlertCircle, className: STYLE_MUTED },
   STARTING: { Icon: IconLoader2, className: STYLE_LOADING },
   RUNNING: { Icon: IconLoader2, className: STYLE_LOADING },
   WAITING_FOR_INPUT: { Icon: IconCheck, className: STYLE_WARNING },
@@ -37,12 +38,12 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 
 const DEFAULT_TASK_ICON: IconConfig = {
   Icon: IconAlertCircle,
-  className: "text-muted-foreground",
+  className: STYLE_MUTED,
 };
 
 const DEFAULT_SESSION_ICON: IconConfig = {
   Icon: IconAlertCircle,
-  className: "text-muted-foreground",
+  className: STYLE_MUTED,
 };
 
 export function getTaskStateIcon(state?: TaskState, className?: string) {

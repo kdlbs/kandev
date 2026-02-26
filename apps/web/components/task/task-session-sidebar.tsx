@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
-import type { TaskState, TaskSessionState, Repository, TaskSession, Task } from "@/lib/types/http";
+import type { TaskState, TaskSessionState, Repository, Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { TaskSwitcher } from "./task-switcher";
 import { TaskRenameDialog } from "./task-rename-dialog";
@@ -14,7 +14,11 @@ import { replaceSessionUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
-import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import { performLayoutSwitch, useDockviewStore } from "@/lib/state/dockview-store";
+import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { useArchivedTaskState } from "./task-archived-context";
 
 /** Find a task across all workflow snapshots */
@@ -85,45 +89,6 @@ type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
 };
-
-type SessionInfo = {
-  diffStats: { additions: number; deletions: number } | undefined;
-  updatedAt: string | undefined;
-  sessionState: TaskSessionState | undefined;
-};
-
-type GitStatusMap = Record<
-  string,
-  { files?: Record<string, { additions?: number; deletions?: number }> }
->;
-
-function getSessionInfoForTask(
-  taskId: string,
-  sessionsByTaskId: Record<string, TaskSession[]>,
-  gitStatusBySessionId: GitStatusMap,
-): SessionInfo {
-  const sessions = sessionsByTaskId[taskId] ?? [];
-  if (sessions.length === 0) {
-    return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
-  }
-  const primarySession = sessions.find((s: TaskSession) => s.is_primary);
-  const latestSession = primarySession ?? sessions[0];
-  if (!latestSession) {
-    return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
-  }
-  const updatedAt = latestSession.updated_at;
-  const sessionState = latestSession.state as TaskSessionState | undefined;
-  const gitStatus = gitStatusBySessionId[latestSession.id];
-  if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
-  let additions = 0;
-  let deletions = 0;
-  for (const file of Object.values(gitStatus.files)) {
-    additions += file.additions ?? 0;
-    deletions += file.deletions ?? 0;
-  }
-  const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
-  return { diffStats, updatedAt, sessionState };
-}
 
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -219,10 +184,46 @@ function useSidebarData(workspaceId: string | null) {
   return { activeTaskId, selectedTaskId, allSteps, isLoadingWorkflow, tasksWithRepositories };
 }
 
-function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
+type SwitchFn = (
+  taskId: string,
+  sessionId: string,
+  oldSessionId: string | null | undefined,
+) => void;
+type StoreApi = ReturnType<typeof useAppStoreApi>;
+
+async function prepareAndSwitchTask(
+  taskId: string,
+  store: StoreApi,
+  switchToSession: SwitchFn,
+  setPreparingTaskId: (id: string | null) => void,
+): Promise<boolean> {
+  setPreparingTaskId(taskId);
+  try {
+    const { request } = buildPrepareRequest(taskId);
+    const resp = await launchSession(request);
+    if (resp.session_id) {
+      const oldSessionId = store.getState().tasks.activeSessionId;
+      switchToSession(taskId, resp.session_id, oldSessionId);
+      // Apply PR review layout if the task has PR metadata
+      if (store.getState().taskPRs.byTaskId[taskId]) {
+        const { api, buildDefaultLayout } = useDockviewStore.getState();
+        if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
+      }
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    setPreparingTaskId(null);
+  }
+}
+
+function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const { deleteTaskById, archiveTaskById, renameTaskById } = useTaskActions();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
@@ -247,14 +248,21 @@ function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
         loadTaskSessionsForTask(taskId);
         return;
       }
-      loadTaskSessionsForTask(taskId).then((sessions) => {
+      loadTaskSessionsForTask(taskId).then(async (sessions) => {
         const currentOldSessionId = store.getState().tasks.activeSessionId;
         const sessionId = sessions[0]?.id ?? null;
-        if (!sessionId) {
-          setActiveTask(taskId);
+        if (sessionId) {
+          switchToSession(taskId, sessionId, currentOldSessionId);
           return;
         }
-        switchToSession(taskId, sessionId, currentOldSessionId);
+        // No session — prepare workspace and switch to it
+        const switched = await prepareAndSwitchTask(
+          taskId,
+          store,
+          switchToSession,
+          setPreparingTaskId,
+        );
+        if (!switched) setActiveTask(taskId);
       });
     },
     [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
@@ -306,6 +314,7 @@ function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
 
   return {
     deletingTaskId,
+    preparingTaskId,
     handleSelectTask,
     handleArchiveTask,
     handleDeleteTask,
@@ -326,6 +335,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     useSidebarData(workspaceId);
   const {
     deletingTaskId,
+    preparingTaskId,
     handleSelectTask,
     handleArchiveTask,
     handleDeleteTask,
@@ -335,11 +345,21 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleRenameSubmit,
   } = useSidebarActions(store);
 
+  const displayTasks = useMemo(
+    () =>
+      preparingTaskId
+        ? tasksWithRepositories.map((t) =>
+            t.id === preparingTaskId ? { ...t, sessionState: "STARTING" as TaskSessionState } : t,
+          )
+        : tasksWithRepositories,
+    [tasksWithRepositories, preparingTaskId],
+  );
+
   return (
     <PanelRoot>
       <PanelBody className="space-y-4 p-0">
         <TaskSwitcher
-          tasks={tasksWithRepositories}
+          tasks={displayTasks}
           steps={allSteps.map((step) => ({ id: step.id, title: step.title, color: step.color }))}
           activeTaskId={activeTaskId}
           selectedTaskId={selectedTaskId}

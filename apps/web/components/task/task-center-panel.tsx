@@ -21,8 +21,8 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { approveSessionAction } from "@/app/actions/workspaces";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { executeApprove } from "@/lib/services/session-approve";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import {
   setOpenFileTabs as saveOpenFileTabs,
@@ -64,25 +64,7 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   const handleApprove = useCallback(async () => {
     if (!activeSessionId || !activeTaskId) return;
     try {
-      const response = await approveSessionAction(activeSessionId);
-      if (response?.session) setTaskSession(response.session);
-      if (
-        response?.workflow_step?.events?.on_enter?.some(
-          (a: { type: string }) => a.type === "auto_start_agent",
-        )
-      ) {
-        const client = getWebSocketClient();
-        if (client)
-          client.send({
-            type: "request",
-            action: "orchestrator.start",
-            payload: {
-              task_id: activeTaskId,
-              session_id: activeSessionId,
-              workflow_step_id: response.workflow_step.id,
-            },
-          });
-      }
+      await executeApprove(activeSessionId, activeTaskId, setTaskSession);
     } catch (error) {
       console.error("Failed to approve session:", error);
     }

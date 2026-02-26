@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"context"
-	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -40,6 +39,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
 	d.RegisterFunc(ws.ActionTaskSessionPrepare, h.wsPrepareTaskSession)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
+	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
 }
 
 // WS handlers
@@ -93,6 +93,26 @@ func (h *Handlers) wsTriggerTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
+func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req orchestrator.LaunchSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	resp, err := h.service.LaunchSession(ctx, &req)
+	if err != nil {
+		h.logger.Error("failed to launch session",
+			zap.String("task_id", req.TaskID),
+			zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
 type wsStartTaskRequest struct {
 	TaskID            string `json:"task_id"`
 	SessionID         string `json:"session_id,omitempty"`
@@ -105,80 +125,47 @@ type wsStartTaskRequest struct {
 	PlanMode          bool   `json:"plan_mode,omitempty"`
 }
 
+// wsStartTask delegates to LaunchSession for backward compatibility.
 func (h *Handlers) wsStartTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsStartTaskRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	req.Prompt = strings.TrimSpace(req.Prompt)
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	// agent_profile_id is only required when creating a new session (no session_id provided)
 	if req.SessionID == "" && req.AgentProfileID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required when creating a new session", nil)
 	}
 
-	// If session_id is provided with a workflow step, resume with step config
-	if req.SessionID != "" && req.WorkflowStepID != "" {
-		err := h.service.StartSessionForWorkflowStep(ctx, req.TaskID, req.SessionID, req.WorkflowStepID)
-		if err != nil {
-			h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)
-		}
-		resp := dto.StartTaskResponse{
-			Success:       true,
-			TaskID:        req.TaskID,
-			TaskSessionID: req.SessionID,
-			State:         "RUNNING",
-		}
-		return ws.NewResponse(msg.ID, msg.Action, resp)
+	launchReq := &orchestrator.LaunchSessionRequest{
+		TaskID:            req.TaskID,
+		SessionID:         req.SessionID,
+		AgentProfileID:    req.AgentProfileID,
+		ExecutorID:        req.ExecutorID,
+		ExecutorProfileID: req.ExecutorProfileID,
+		Priority:          req.Priority,
+		Prompt:            req.Prompt,
+		WorkflowStepID:    req.WorkflowStepID,
+		PlanMode:          req.PlanMode,
 	}
-
-	// If session_id is provided without a workflow step, start a CREATED session with prompt
-	if req.SessionID != "" {
-		execution, err := h.service.StartCreatedSession(ctx, req.TaskID, req.SessionID, req.AgentProfileID, req.Prompt, false)
-		if err != nil {
-			h.logger.Error("failed to start created session", zap.String("task_id", req.TaskID), zap.String("session_id", req.SessionID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start session: "+err.Error(), nil)
-		}
-		resp := dto.StartTaskResponse{
-			Success:          true,
-			TaskID:           execution.TaskID,
-			AgentExecutionID: execution.AgentExecutionID,
-			TaskSessionID:    execution.SessionID,
-			State:            string(execution.SessionState),
-		}
-		if execution.WorktreePath != "" {
-			resp.WorktreePath = &execution.WorktreePath
-		}
-		if execution.WorktreeBranch != "" {
-			resp.WorktreeBranch = &execution.WorktreeBranch
-		}
-		return ws.NewResponse(msg.ID, msg.Action, resp)
-	}
-
-	// Otherwise, create a new session
-	execution, err := h.service.StartTask(ctx, req.TaskID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, req.Prompt, req.WorkflowStepID, req.PlanMode)
+	resp, err := h.service.LaunchSession(ctx, launchReq)
 	if err != nil {
 		h.logger.Error("failed to start task", zap.String("task_id", req.TaskID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start task: "+err.Error(), nil)
 	}
 
-	resp := dto.StartTaskResponse{
-		Success:          true,
-		TaskID:           execution.TaskID,
-		AgentExecutionID: execution.AgentExecutionID,
-		TaskSessionID:    execution.SessionID,
-		State:            string(execution.SessionState),
+	// Map to legacy StartTaskResponse format for backward compatibility
+	legacyResp := dto.StartTaskResponse{
+		Success:          resp.Success,
+		TaskID:           resp.TaskID,
+		AgentExecutionID: resp.AgentExecutionID,
+		TaskSessionID:    resp.SessionID,
+		State:            resp.State,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
 	}
-	if execution.WorktreePath != "" {
-		resp.WorktreePath = &execution.WorktreePath
-	}
-	if execution.WorktreeBranch != "" {
-		resp.WorktreeBranch = &execution.WorktreeBranch
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, legacyResp)
 }
 
 type wsResumeTaskSessionRequest struct {
@@ -186,6 +173,7 @@ type wsResumeTaskSessionRequest struct {
 	TaskSessionID string `json:"session_id"`
 }
 
+// wsResumeTaskSession delegates to LaunchSession with resume intent for backward compatibility.
 func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsResumeTaskSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -198,7 +186,12 @@ func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	execution, err := h.service.ResumeTaskSession(ctx, req.TaskID, req.TaskSessionID)
+	launchReq := &orchestrator.LaunchSessionRequest{
+		TaskID:    req.TaskID,
+		SessionID: req.TaskSessionID,
+		Intent:    orchestrator.IntentResume,
+	}
+	resp, err := h.service.LaunchSession(ctx, launchReq)
 	if err != nil {
 		h.logger.Error("failed to resume task session",
 			zap.String("task_id", req.TaskID),
@@ -207,20 +200,17 @@ func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resume task session: "+err.Error(), nil)
 	}
 
-	resp := dto.ResumeTaskSessionResponse{
-		Success:          true,
-		TaskID:           execution.TaskID,
-		AgentExecutionID: execution.AgentExecutionID,
-		TaskSessionID:    execution.SessionID,
-		State:            string(execution.SessionState),
+	// Map to legacy ResumeTaskSessionResponse format
+	legacyResp := dto.ResumeTaskSessionResponse{
+		Success:          resp.Success,
+		TaskID:           resp.TaskID,
+		AgentExecutionID: resp.AgentExecutionID,
+		TaskSessionID:    resp.SessionID,
+		State:            resp.State,
+		WorktreePath:     resp.WorktreePath,
+		WorktreeBranch:   resp.WorktreeBranch,
 	}
-	if execution.WorktreePath != "" {
-		resp.WorktreePath = &execution.WorktreePath
-	}
-	if execution.WorktreeBranch != "" {
-		resp.WorktreeBranch = &execution.WorktreeBranch
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return ws.NewResponse(msg.ID, msg.Action, legacyResp)
 }
 
 type wsPrepareTaskSessionRequest struct {
@@ -231,6 +221,7 @@ type wsPrepareTaskSessionResponse struct {
 	SessionID string `json:"session_id"`
 }
 
+// wsPrepareTaskSession delegates to LaunchSession with prepare intent for backward compatibility.
 func (h *Handlers) wsPrepareTaskSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsPrepareTaskSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -240,7 +231,12 @@ func (h *Handlers) wsPrepareTaskSession(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	sessionID, err := h.service.PrepareTaskSession(ctx, req.TaskID, "", "", "", "", true)
+	launchReq := &orchestrator.LaunchSessionRequest{
+		TaskID:          req.TaskID,
+		Intent:          orchestrator.IntentPrepare,
+		LaunchWorkspace: true,
+	}
+	resp, err := h.service.LaunchSession(ctx, launchReq)
 	if err != nil {
 		h.logger.Error("failed to prepare task session",
 			zap.String("task_id", req.TaskID),
@@ -248,7 +244,7 @@ func (h *Handlers) wsPrepareTaskSession(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to prepare session: "+err.Error(), nil)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, wsPrepareTaskSessionResponse{SessionID: sessionID})
+	return ws.NewResponse(msg.ID, msg.Action, wsPrepareTaskSessionResponse{SessionID: resp.SessionID})
 }
 
 type wsStopTaskRequest struct {
