@@ -341,6 +341,7 @@ func registerSecondaryRoutes(
 
 	if p.services.GitHub != nil {
 		github.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.GitHub, p.log)
+		github.RegisterMockRoutes(p.router, p.services.GitHub, p.log)
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
 	}
 

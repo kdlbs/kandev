@@ -9,14 +9,18 @@ import { cn } from "@kandev/ui/lib/utils";
  * PanelToolbar – fixed strip at the top/bottom of a panel
  */
 
-type PanelRootProps = {
+type PanelRootProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
   className?: string;
 };
 
 /** Fills the dockview content slot. Use as the outermost element in every panel. */
-export function PanelRoot({ children, className }: PanelRootProps) {
-  return <div className={cn("h-full flex flex-col min-h-0", className)}>{children}</div>;
+export function PanelRoot({ children, className, ...rest }: PanelRootProps) {
+  return (
+    <div className={cn("h-full flex flex-col min-h-0", className)} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 type PanelBodyProps = Omit<HTMLAttributes<HTMLDivElement>, "className"> & {

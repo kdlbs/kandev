@@ -1,6 +1,12 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 
-export type SessionIntent = "prepare" | "start" | "start_created" | "resume" | "workflow_step" | "restore_workspace";
+export type SessionIntent =
+  | "prepare"
+  | "start"
+  | "start_created"
+  | "resume"
+  | "workflow_step"
+  | "restore_workspace";
 
 export type LaunchSessionRequest = {
   task_id: string;

@@ -18,6 +18,18 @@ func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service,
 	registerWSHandlers(dispatcher, svc, log)
 }
 
+// RegisterMockRoutes registers mock control endpoints if the GitHub client is a MockClient.
+// This is a no-op when the underlying client is not a MockClient.
+func RegisterMockRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
+	mock, ok := svc.Client().(*MockClient)
+	if !ok {
+		return
+	}
+	ctrl := NewMockController(mock, log)
+	ctrl.RegisterRoutes(router)
+	log.Info("registered GitHub mock control endpoints")
+}
+
 func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
 	dispatcher.RegisterFunc(ws.ActionGitHubStatus, wsStatus(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRsList, wsListTaskPRs(svc, log))

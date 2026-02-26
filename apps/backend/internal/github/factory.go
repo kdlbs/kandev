@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"go.uber.org/zap"
 
@@ -25,6 +26,12 @@ type SecretListItem struct {
 // NewClient creates a GitHub client using the best available auth method.
 // It tries the gh CLI first, then falls back to a PAT from the secret store.
 func NewClient(ctx context.Context, secrets SecretProvider, log *logger.Logger) (Client, string, error) {
+	// Mock client for E2E testing
+	if os.Getenv("KANDEV_MOCK_GITHUB") == "true" {
+		log.Info("using mock client for GitHub integration")
+		return NewMockClient(), "mock", nil
+	}
+
 	// Try gh CLI first
 	if GHAvailable() {
 		ghClient := NewGHClient()
@@ -48,7 +55,7 @@ func NewClient(ctx context.Context, secrets SecretProvider, log *logger.Logger) 
 		}
 	}
 
-	return nil, "none", fmt.Errorf("no GitHub auth: gh CLI not authenticated and no GITHUB_TOKEN secret found")
+	return &NoopClient{}, "none", nil
 }
 
 // findGitHubPAT looks for a secret named "GITHUB_TOKEN" or "github_token".

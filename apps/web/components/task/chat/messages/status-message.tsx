@@ -150,7 +150,7 @@ function computeExpandableContent(isError: boolean, metadata: ErrorMetadata | un
 
 function SimpleStatusMessage({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-3 w-full py-2">
+    <div className="flex items-center gap-3 w-full py-2" data-testid="agent-turn-complete">
       <div className="flex-1 h-px bg-border" />
       <span className="text-xs text-muted-foreground/60 whitespace-nowrap">{message}</span>
       <div className="flex-1 h-px bg-border" />

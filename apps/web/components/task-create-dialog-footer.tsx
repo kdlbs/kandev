@@ -62,6 +62,7 @@ function StartTaskSplitButton({
         variant="default"
         className="rounded-none border-0 cursor-pointer gap-1.5 h-full"
         disabled={disabled}
+        data-testid="submit-start-agent"
       >
         {isCreatingTask ? (
           <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
@@ -86,6 +87,7 @@ function StartTaskSplitButton({
             <DropdownMenuItem
               onClick={onPlanModeAction}
               className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+              data-testid="submit-plan-mode"
             >
               <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
               Start task in plan mode

@@ -1,0 +1,74 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/backend/**"
+      - "apps/web/**"
+      - "apps/packages/**"
+      - "apps/pnpm-lock.yaml"
+      - ".github/workflows/e2e-tests.yml"
+      - "!**/*.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/backend/**"
+      - "apps/web/**"
+      - "apps/packages/**"
+      - "apps/pnpm-lock.yaml"
+      - ".github/workflows/e2e-tests.yml"
+      - "!**/*.md"
+
+jobs:
+  e2e:
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: make test-e2e
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: apps/web/e2e/test-results/
+          retention-days: 7

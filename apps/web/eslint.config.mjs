@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // E2E tests use Playwright's `use()` which ESLint mistakes for React hooks
+    "e2e/**",
   ]),
   {
     plugins: {

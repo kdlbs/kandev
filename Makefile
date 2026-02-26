@@ -78,6 +78,10 @@ help:
 	@echo "  test-backend     Run backend tests"
 	@echo "  test-web         Run web app tests"
 	@echo "  test-cli         Run CLI tests"
+	@echo "  test-e2e         Run E2E tests (headless, parallel)"
+	@echo "  test-e2e-headed  Run E2E tests with visible browser"
+	@echo "  test-e2e-ui      Run E2E tests in Playwright UI mode"
+	@echo "  test-e2e-report  Open Playwright HTML report"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  lint             Run linters for both components"
@@ -187,6 +191,8 @@ install-backend:
 install-web:
 	@printf "$(CYAN)Installing web dependencies...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) install --silent 2>/dev/null || cd $(APPS_DIR) && $(PNPM) install
+	@printf "$(CYAN)Installing Playwright browsers...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web exec playwright install chromium
 
 #
 # Testing
@@ -214,6 +220,25 @@ test-web:
 test-cli:
 	@printf "$(CYAN)Running CLI tests...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter kandev test
+
+.PHONY: test-e2e
+test-e2e: build-backend build-web
+	@printf "$(CYAN)Running E2E tests (headless, parallel)...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e
+
+.PHONY: test-e2e-headed
+test-e2e-headed: build-backend build-web
+	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
+
+.PHONY: test-e2e-ui
+test-e2e-ui: build-backend build-web
+	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
+
+.PHONY: test-e2e-report
+test-e2e-report:
+	@cd $(WEB_DIR) && npx playwright show-report e2e/playwright-report
 
 #
 # Code Quality
