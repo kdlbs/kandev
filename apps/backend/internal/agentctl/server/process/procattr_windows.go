@@ -26,3 +26,11 @@ func killProcessGroup(pid int) error {
 	kill := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 	return kill.Run()
 }
+
+// terminateProcessGroup sends a graceful shutdown signal to the process tree.
+// Without /F, taskkill sends WM_CLOSE to console and windowed apps, which is
+// the closest Windows equivalent of SIGTERM.
+func terminateProcessGroup(pid int) error {
+	kill := exec.Command("taskkill", "/T", "/PID", fmt.Sprintf("%d", pid))
+	return kill.Run()
+}

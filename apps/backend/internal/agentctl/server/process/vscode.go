@@ -173,9 +173,9 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 	v.cmd = exec.Command(binaryPath, args...)
 	v.cmd.Dir = workDir
 	v.workDir = workDir
-	// Do NOT set a new process group for code-server.
-	// It inherits agentctl's process group so that a force-kill of agentctl's
-	// process group also terminates code-server and its Node.js workers.
+	// Give code-server its own process group so Stop() can kill the entire
+	// process tree (main process + Node.js workers) without affecting agentctl.
+	setProcGroup(v.cmd)
 
 	stderr, err := v.cmd.StderrPipe()
 	if err != nil {
@@ -201,6 +201,7 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 	}()
 
 	// Wait for process exit in background
+	pid := v.cmd.Process.Pid
 	go func() {
 		defer close(v.doneCh)
 		waitErr := v.cmd.Wait()
@@ -211,10 +212,11 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 		if waitErr != nil && v.status != VscodeStatusStopped {
 			v.status = VscodeStatusError
 			v.err = waitErr.Error()
-			v.logger.Error("code-server exited with error", zap.Error(waitErr))
+			v.logger.Error("code-server exited with error",
+				zap.Int("pid", pid), zap.Error(waitErr))
 		} else {
 			v.status = VscodeStatusStopped
-			v.logger.Info("code-server exited")
+			v.logger.Info("code-server exited", zap.Int("pid", pid))
 		}
 	}()
 
@@ -326,21 +328,49 @@ func (v *VscodeManager) Stop(ctx context.Context) error {
 	v.mu.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
-		// Kill code-server directly. code-server shares agentctl's process group,
-		// so we must not use killProcessGroup here (that would kill agentctl itself).
-		// Worker processes inheriting the same pgid are cleaned up when agentctl's
-		// process group is force-killed on shutdown.
-		if err := cmd.Process.Kill(); err != nil {
-			v.logger.Warn("failed to kill code-server process", zap.Error(err))
-		}
-	}
+		pid := cmd.Process.Pid
+		v.logger.Info("stopping code-server process group",
+			zap.Int("pid", pid), zap.Int("pgid", pid))
+		logChildProcesses(v.logger, pid)
 
-	// Wait for exit with timeout
-	if doneCh != nil {
+		// Phase 1: Graceful SIGTERM to the entire process group.
+		if err := terminateProcessGroup(pid); err != nil {
+			v.logger.Warn("failed to send SIGTERM to code-server group",
+				zap.Int("pgid", pid), zap.Error(err))
+		}
+
+		// Phase 2: Wait for graceful exit, then escalate to SIGKILL.
+		if doneCh != nil {
+			select {
+			case <-doneCh:
+				v.logger.Info("code-server stopped gracefully", zap.Int("pid", pid))
+				return nil
+			case <-ctx.Done():
+				v.logger.Warn("context cancelled during SIGTERM wait, force killing",
+					zap.Int("pgid", pid))
+			case <-time.After(5 * time.Second):
+				v.logger.Warn("code-server did not exit after SIGTERM, force killing",
+					zap.Int("pgid", pid))
+			}
+
+			if err := killProcessGroup(pid); err != nil {
+				v.logger.Warn("failed to force kill code-server group",
+					zap.Int("pgid", pid), zap.Error(err))
+			}
+			select {
+			case <-doneCh:
+			case <-ctx.Done():
+			case <-time.After(2 * time.Second):
+				v.logger.Error("code-server still alive after SIGKILL",
+					zap.Int("pid", pid))
+			}
+		}
+	} else if doneCh != nil {
+		// No process but doneCh exists (startup cancelled before process started)
 		select {
 		case <-doneCh:
-		case <-time.After(5 * time.Second):
-			v.logger.Warn("code-server did not exit in time")
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
 		}
 	}
 

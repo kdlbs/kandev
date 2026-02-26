@@ -24,3 +24,8 @@ func killProcessGroup(pid int) error {
 	// Kill the entire process group by using negative PID
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
+
+// terminateProcessGroup sends SIGTERM to the entire process group for graceful shutdown.
+func terminateProcessGroup(pid int) error {
+	return syscall.Kill(-pid, syscall.SIGTERM)
+}
