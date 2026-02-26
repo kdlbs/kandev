@@ -46,7 +46,8 @@ type CreatePlanRequest struct {
 	CreatedBy string // "agent" or "user"
 }
 
-// CreatePlan creates a new task plan.
+// CreatePlan creates a new task plan, or updates the existing one if a plan
+// already exists for the given task (upsert semantics).
 func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*models.TaskPlan, error) {
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
@@ -59,6 +60,21 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*m
 	createdBy := req.CreatedBy
 	if createdBy == "" {
 		createdBy = createdByAgent
+	}
+
+	// If a plan already exists for this task, update it instead of inserting.
+	existing, err := s.repo.GetTaskPlan(ctx, req.TaskID)
+	if err != nil {
+		s.logger.Error("failed to check existing task plan", zap.String("task_id", req.TaskID), zap.Error(err))
+		return nil, err
+	}
+	if existing != nil {
+		return s.UpdatePlan(ctx, UpdatePlanRequest{
+			TaskID:    req.TaskID,
+			Title:     title,
+			Content:   req.Content,
+			CreatedBy: createdBy,
+		})
 	}
 
 	plan := &models.TaskPlan{
