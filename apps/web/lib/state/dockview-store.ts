@@ -23,6 +23,7 @@ import {
 } from "./layout-manager";
 import { buildFileStateActions } from "./dockview-file-state";
 import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
+import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -232,6 +233,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const { api, sidebarVisible } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
@@ -261,6 +263,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const { api, rightPanelsVisible } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
@@ -310,6 +313,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       // Capture dimensions before layout change — api.width can become stale
       // inside the rAF callback after dockview serialization
       const safeWidth = api.width;
@@ -340,6 +344,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      preserveChatScrollDuringLayout();
       const safeWidth = api.width;
       const safeHeight = api.height;
       set({ isRestoringLayout: true });
