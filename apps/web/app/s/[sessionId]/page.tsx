@@ -23,6 +23,7 @@ import type {
 } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { TaskPageContent } from "@/components/task/task-page-content";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
@@ -48,53 +49,6 @@ function buildWorktreeState(allSessions: TaskSession[]) {
       ),
     },
   };
-}
-
-type UserSettingsSettings = NonNullable<UserSettingsResponse["settings"]>;
-
-function buildLspSettings(s: UserSettingsSettings | undefined) {
-  return {
-    lspAutoStartLanguages: s?.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s?.lsp_server_configs ?? {},
-  };
-}
-
-function buildUserSettingsCore(s: UserSettingsSettings) {
-  return {
-    workspaceId: s.workspace_id || null,
-    workflowId: s.workflow_filter_id || null,
-    kanbanViewMode: s.kanban_view_mode || null,
-    repositoryIds: Array.from(new Set(s.repository_ids ?? [])).sort(),
-    preferredShell: s.preferred_shell || null,
-    defaultEditorId: s.default_editor_id || null,
-    enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
-    reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    savedLayouts: s.saved_layouts ?? [],
-  };
-}
-
-function buildUserSettingsFromResponse(userSettingsResponse: UserSettingsResponse | null) {
-  const s = userSettingsResponse?.settings;
-  const shellOptions = userSettingsResponse?.shell_options ?? [];
-  if (!s)
-    return {
-      workspaceId: null,
-      workflowId: null,
-      kanbanViewMode: null,
-      repositoryIds: [],
-      preferredShell: null,
-      shellOptions,
-      defaultEditorId: null,
-      enablePreviewOnClick: false,
-      chatSubmitKey: "cmd_enter" as const,
-      reviewAutoMarkOnScroll: true,
-      savedLayouts: [],
-      loaded: false,
-      ...buildLspSettings(undefined),
-    };
-  return { ...buildUserSettingsCore(s), shellOptions, loaded: true, ...buildLspSettings(s) };
 }
 
 type BuildSessionPageStateParams = {
@@ -206,7 +160,7 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
       agentsLoaded: true,
       executorsLoaded: false,
     },
-    userSettings: buildUserSettingsFromResponse(userSettingsResponse),
+    userSettings: mapUserSettingsResponse(userSettingsResponse),
   };
 }
 

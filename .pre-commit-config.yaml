@@ -1,4 +1,14 @@
 repos:
+  # Commit message validation (Conventional Commits via commitlint)
+  - repo: local
+    hooks:
+      - id: commitlint
+        name: Validate commit message (Conventional Commits)
+        entry: bash -c 'cd apps && pnpm exec commitlint --edit "$1"' --
+        language: system
+        stages: [commit-msg]
+        always_run: true
+
   # Backend (Go) hooks
   - repo: local
     hooks:

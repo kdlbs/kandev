@@ -4,6 +4,7 @@ import { fetchUserSettings, updateUserSettings } from "@/lib/api";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { Repository } from "@/lib/types/http";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 
@@ -25,24 +26,31 @@ type CommitPayload = {
   kanbanViewMode?: string | null;
 };
 
+function carryForwardSettings(current: DisplaySettings) {
+  return {
+    shellOptions: current.shellOptions ?? [],
+    defaultEditorId: current.defaultEditorId ?? null,
+    chatSubmitKey: current.chatSubmitKey ?? "cmd_enter",
+    reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
+    showReleaseNotification: current.showReleaseNotification ?? true,
+    releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,
+    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
+    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
+    lspServerConfigs: current.lspServerConfigs ?? {},
+    savedLayouts: current.savedLayouts ?? [],
+  };
+}
+
 function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings): DisplaySettings {
-  const repositoryIds = Array.from(new Set(next.repositoryIds)).sort();
   return {
     workspaceId: next.workspaceId,
     workflowId: next.workflowId,
     kanbanViewMode:
       next.kanbanViewMode !== undefined ? next.kanbanViewMode : (current.kanbanViewMode ?? null),
-    repositoryIds,
+    repositoryIds: Array.from(new Set(next.repositoryIds)).sort(),
     preferredShell: next.preferredShell ?? current.preferredShell ?? null,
-    shellOptions: current.shellOptions ?? [],
-    defaultEditorId: current.defaultEditorId ?? null,
     enablePreviewOnClick: next.enablePreviewOnClick ?? current.enablePreviewOnClick,
-    chatSubmitKey: current.chatSubmitKey ?? "cmd_enter",
-    reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
-    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
-    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
-    lspServerConfigs: current.lspServerConfigs ?? {},
-    savedLayouts: current.savedLayouts ?? [],
+    ...carryForwardSettings(current),
     loaded: true,
   };
 }
@@ -82,29 +90,6 @@ function useUserSettingsRef(userSettings: DisplaySettings) {
   return userSettingsRef;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapFetchedUserSettings(data: any): DisplaySettings {
-  const s = data.settings;
-  const repositoryIds = Array.from(new Set<string>(s.repository_ids ?? [])).sort();
-  return {
-    workspaceId: s.workspace_id || null,
-    workflowId: s.workflow_filter_id || null,
-    kanbanViewMode: s.kanban_view_mode || null,
-    repositoryIds,
-    preferredShell: s.preferred_shell || null,
-    shellOptions: data.shell_options ?? [],
-    defaultEditorId: s.default_editor_id || null,
-    enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
-    reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s.lsp_server_configs ?? {},
-    savedLayouts: s.saved_layouts ?? [],
-    loaded: true,
-  };
-}
-
 function useLoadUserSettings(
   loaded: boolean,
   setUserSettings: (settings: DisplaySettings) => void,
@@ -114,7 +99,9 @@ function useLoadUserSettings(
     fetchUserSettings({ cache: "no-store" })
       .then((data) => {
         if (!data?.settings) return;
-        setUserSettings(mapFetchedUserSettings(data));
+        const mapped = mapUserSettingsResponse(data);
+        if (!mapped.loaded) return;
+        setUserSettings(mapped);
       })
       .catch(() => {
         /* Ignore settings fetch errors for now. */

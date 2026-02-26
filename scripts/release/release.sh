@@ -85,7 +85,7 @@ Versioning:
 
 Prerequisites:
   - Run from a clean working tree on branch main.
-  - Required tools: git, node, npm, pnpm.
+  - Required tools: git, node, npm, pnpm, git-cliff.
 
 Examples:
   # Fully interactive release wizard
@@ -320,7 +320,7 @@ compute_next_versions() {
 ensure_prerequisites() {
   log_step "1/5" "Checking prerequisites"
 
-  for tool in git node npm pnpm; do
+  for tool in git node npm pnpm git-cliff; do
     if command_exists "$tool"; then
       log_ok "$tool"
     else
@@ -419,8 +419,10 @@ print_plan() {
   fi
   if [[ "$APP_SELECTED" -eq 1 ]]; then
     echo "  $(dim "Steps for App:")"
-    echo "    $(dim "1.") Create annotated git tag $NEXT_APP_TAG"
-    echo "    $(dim "2.") Push tag to origin (triggers GitHub Actions)"
+    echo "    $(dim "1.") Generate CHANGELOG.md (git-cliff)"
+    echo "    $(dim "2.") Commit and push changelog"
+    echo "    $(dim "3.") Create annotated git tag $NEXT_APP_TAG"
+    echo "    $(dim "4.") Push tag to origin (triggers GitHub Actions)"
   fi
   echo
 }
@@ -432,6 +434,8 @@ commit_message() {
     echo "release: app $NEXT_APP_TAG, cli $NEXT_CLI_VERSION"
   elif [[ "$CLI_SELECTED" -eq 1 ]]; then
     echo "release: cli $NEXT_CLI_VERSION"
+  elif [[ "$APP_SELECTED" -eq 1 ]]; then
+    echo "release: app $NEXT_APP_TAG"
   else
     echo ""
   fi
@@ -467,6 +471,18 @@ apply_cli_release() {
   log_ok "CLI built"
 }
 
+generate_changelog() {
+  [[ "$APP_SELECTED" -eq 1 ]] || return 0
+
+  log "Generating changelog for $(bold "$NEXT_APP_TAG")..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  $(yellow "[dry-run]") git-cliff --tag $NEXT_APP_TAG -o CHANGELOG.md"
+    return 0
+  fi
+  git-cliff --tag "$NEXT_APP_TAG" -o "$ROOT_DIR/CHANGELOG.md"
+  log_ok "CHANGELOG.md updated"
+}
+
 commit_and_push_if_needed() {
   local msg
   msg="$(commit_message)"
@@ -474,16 +490,17 @@ commit_and_push_if_needed() {
 
   log_step "4/5" "Committing and pushing"
 
-  # App-only releases are tag-only and do not require a version commit.
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "  $(yellow "[dry-run]") git add apps/cli/package.json"
+    [[ "$CLI_SELECTED" -eq 1 ]] && echo "  $(yellow "[dry-run]") git add apps/cli/package.json"
+    [[ "$APP_SELECTED" -eq 1 ]] && echo "  $(yellow "[dry-run]") git add CHANGELOG.md"
     echo "  $(yellow "[dry-run]") git commit -m \"$msg\""
     echo "  $(yellow "[dry-run]") git push origin $CURRENT_BRANCH"
     return 0
   fi
 
-  log "Staging apps/cli/package.json..."
-  git -C "$ROOT_DIR" add apps/cli/package.json
+  log "Staging release files..."
+  [[ "$CLI_SELECTED" -eq 1 ]] && git -C "$ROOT_DIR" add apps/cli/package.json
+  [[ "$APP_SELECTED" -eq 1 && -f "$ROOT_DIR/CHANGELOG.md" ]] && git -C "$ROOT_DIR" add CHANGELOG.md
   if git -C "$ROOT_DIR" diff --cached --quiet; then
     log_skip "No staged changes to commit"
     return 0
@@ -612,6 +629,7 @@ main() {
   fi
 
   apply_cli_release
+  generate_changelog
   commit_and_push_if_needed
   create_and_push_app_tag
   publish_cli

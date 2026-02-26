@@ -78,13 +78,21 @@ apps/backend/
 │   ├── editors/          # Editor integration
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
+│   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
 │   ├── integration/      # External integrations
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
 │   ├── notifications/    # Notification system
 │   ├── persistence/      # Persistence layer
 │   ├── prompts/          # Prompt management
+│   ├── repoclone/        # Repository cloning for remote executors
+│   ├── scriptengine/     # Script placeholder resolution and interpolation
+│   ├── secrets/          # Secret management
+│   ├── sprites/          # Sprites AI integration
 │   ├── sysprompt/        # System prompt injection
+│   ├── task/
+│   │   └── ...
+│   ├── tools/            # Tool integrations
 │   ├── user/             # User management
 │   ├── workflow/         # Workflow engine
 │   │   ├── engine/       # Typed state-machine engine (trigger evaluation, action callbacks, transition store)
@@ -173,7 +181,7 @@ Client (WS)     Orchestrator        Lifecycle Manager       Runtime          age
 
 **Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
 
-**Executor default scripts:** Default prepare scripts are owned by executor lifecycle code (`internal/agent/lifecycle/default_scripts.go`), while `internal/scriptengine/` handles placeholder resolution and interpolation.
+**Executor default scripts:** Default prepare scripts are in `internal/agent/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
 ---
 
@@ -256,15 +264,16 @@ lib/state/
 │   ├── session-runtime/           # shell, processes, git, context
 │   ├── workspace/                 # workspaces, repos, branches
 │   ├── settings/                  # executors, agents, editors, prompts
-│   ├── diff-comments/             # code review diff comments
+│   ├── comments/                  # code review diff comments
+│   ├── github/                    # GitHub PRs, reviews
 │   └── ui/                        # preview, connection, active state
 ├── hydration/                     # SSR merge strategies
 
 hooks/domains/{kanban,session,workspace,settings}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
-├── plan-api, queue-api, workflow-api, stats-api
-├── user-shell-api, debug-api
+├── plan-api, queue-api, workflow-api, stats-api, github-api
+├── user-shell-api, debug-api, secrets-api, sprites-api, vscode-api
 ```
 
 **Key State Paths:**
@@ -283,6 +292,10 @@ lib/api/domains/                    # API clients
 ---
 
 ## Best Practices
+
+### Commit Conventions (enforced by CI)
+
+Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged — the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
 
 ### Code Quality (enforced by linters)
 
@@ -331,4 +344,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-02-22
+**Last Updated**: 2026-02-26

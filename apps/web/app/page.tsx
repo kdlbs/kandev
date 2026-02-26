@@ -9,8 +9,9 @@ import {
   listTaskSessionMessages,
 } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
-import type { ListWorkspacesResponse, UserSettings, UserSettingsResponse } from "@/lib/types/http";
+import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
 // Server Component: runs on the server for SSR and data hydration.
 type PageProps = {
@@ -36,54 +37,11 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
   };
 }
 
-function buildLspConfig(s: UserSettings) {
-  return {
-    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s.lsp_server_configs ?? {},
-  };
-}
-
 function buildUserSettingsState(
   resp: UserSettingsResponse | null,
   workspaceId: string | null,
 ): AppState["userSettings"] {
-  const s = resp?.settings;
-  const shellOptions = resp ? (resp.shell_options ?? []) : [];
-  if (!s) {
-    return {
-      workspaceId,
-      workflowId: null,
-      kanbanViewMode: null,
-      repositoryIds: [],
-      preferredShell: null,
-      shellOptions,
-      defaultEditorId: null,
-      enablePreviewOnClick: false,
-      chatSubmitKey: "cmd_enter",
-      reviewAutoMarkOnScroll: true,
-      savedLayouts: [],
-      lspAutoStartLanguages: [],
-      lspAutoInstallLanguages: [],
-      lspServerConfigs: {},
-      loaded: false,
-    };
-  }
-  return {
-    workspaceId,
-    workflowId: s.workflow_filter_id || null,
-    kanbanViewMode: s.kanban_view_mode || null,
-    repositoryIds: Array.from(new Set(s.repository_ids ?? [])).sort(),
-    preferredShell: s.preferred_shell || null,
-    shellOptions,
-    defaultEditorId: s.default_editor_id || null,
-    enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
-    reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    savedLayouts: s.saved_layouts ?? [],
-    ...buildLspConfig(s),
-    loaded: true,
-  };
+  return { ...mapUserSettingsResponse(resp), workspaceId };
 }
 
 function resolveActiveId<T extends { id: string }>(

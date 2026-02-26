@@ -16,6 +16,8 @@ import {
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { RefreshReviewsButton } from "../github/refresh-reviews-button";
+import { ReleaseNotesButton } from "../release-notes/release-notes-button";
+import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
@@ -23,6 +25,7 @@ import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { useReleaseNotes } from "@/hooks/use-release-notes";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -98,6 +101,8 @@ function TabletHeader({
   toggleValue,
   handleViewChange,
   setMenuOpen,
+  showReleaseNotesButton,
+  onOpenReleaseNotes,
 }: {
   onCreateTask: () => void;
   searchQuery: string;
@@ -106,6 +111,8 @@ function TabletHeader({
   toggleValue: string;
   handleViewChange: (value: string) => void;
   setMenuOpen: (open: boolean) => void;
+  showReleaseNotesButton: boolean;
+  onOpenReleaseNotes: () => void;
 }) {
   return (
     <header className="flex items-center justify-between p-4 pb-3 gap-3">
@@ -133,6 +140,7 @@ function TabletHeader({
             className="h-8"
             itemClassName="h-8 w-8"
           />
+          {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
         </TooltipProvider>
         <Button
           variant="outline"
@@ -155,6 +163,8 @@ function DesktopHeader({
   isSearchLoading,
   toggleValue,
   handleViewChange,
+  showReleaseNotesButton,
+  onOpenReleaseNotes,
 }: {
   onCreateTask: () => void;
   searchQuery: string;
@@ -162,6 +172,8 @@ function DesktopHeader({
   isSearchLoading: boolean;
   toggleValue: string;
   handleViewChange: (value: string) => void;
+  showReleaseNotesButton: boolean;
+  onOpenReleaseNotes: () => void;
 }) {
   return (
     <header className="relative flex items-center justify-between p-4 pb-3">
@@ -199,6 +211,7 @@ function DesktopHeader({
           </Tooltip>
         </TooltipProvider>
         <RefreshReviewsButton />
+        {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
         <KanbanDisplayDropdown />
         <Link href="/settings" className="cursor-pointer">
           <Button variant="outline" className="cursor-pointer">
@@ -225,6 +238,7 @@ export function KanbanHeader({
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
 
   const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+  const releaseNotes = useReleaseNotes();
 
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
 
@@ -240,20 +254,25 @@ export function KanbanHeader({
     }
   };
 
+  const releaseNotesProps = {
+    showReleaseNotesButton: releaseNotes.showTopbarButton,
+    onOpenReleaseNotes: releaseNotes.openDialog,
+  };
+
+  let header: React.ReactNode;
   if (isMobile) {
-    return (
+    header = (
       <KanbanHeaderMobile
         workspaceId={workspaceId}
         currentPage={currentPage}
         searchQuery={searchQuery}
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
+        {...releaseNotesProps}
       />
     );
-  }
-
-  if (isTablet) {
-    return (
+  } else if (isTablet) {
+    header = (
       <>
         <TabletHeader
           onCreateTask={onCreateTask}
@@ -263,6 +282,7 @@ export function KanbanHeader({
           toggleValue={toggleValue}
           handleViewChange={handleViewChange}
           setMenuOpen={setMenuOpen}
+          {...releaseNotesProps}
         />
         <MobileMenuSheet
           open={isMenuOpen}
@@ -275,16 +295,31 @@ export function KanbanHeader({
         />
       </>
     );
+  } else {
+    header = (
+      <DesktopHeader
+        onCreateTask={onCreateTask}
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading}
+        toggleValue={toggleValue}
+        handleViewChange={handleViewChange}
+        {...releaseNotesProps}
+      />
+    );
   }
 
   return (
-    <DesktopHeader
-      onCreateTask={onCreateTask}
-      searchQuery={searchQuery}
-      onSearchChange={onSearchChange}
-      isSearchLoading={isSearchLoading}
-      toggleValue={toggleValue}
-      handleViewChange={handleViewChange}
-    />
+    <>
+      {header}
+      {releaseNotes.hasNotes && (
+        <ReleaseNotesDialog
+          open={releaseNotes.dialogOpen}
+          onOpenChange={releaseNotes.closeDialog}
+          entries={releaseNotes.unseenEntries}
+          latestVersion={releaseNotes.latestVersion}
+        />
+      )}
+    </>
   );
 }

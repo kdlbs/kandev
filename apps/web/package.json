@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "dev": "next dev --hostname 0.0.0.0",
+    "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "build": "cross-env NODE_ENV=production next build",
     "start": "cross-env NODE_ENV=production next start",
     "lint": "eslint --max-warnings 0",

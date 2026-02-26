@@ -30,6 +30,8 @@ export const defaultSettingsState: SettingsSliceState = {
     enablePreviewOnClick: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
+    showReleaseNotification: true,
+    releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},

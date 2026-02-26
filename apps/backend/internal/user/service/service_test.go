@@ -25,6 +25,69 @@ func makeLayouts(n int) []models.SavedLayout {
 	return layouts
 }
 
+func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
+	t.Run("nil fields leave settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{
+			ShowReleaseNotification:     true,
+			ReleaseNotesLastSeenVersion: "1.0.0",
+		}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ShowReleaseNotification != true {
+			t.Fatalf("expected ShowReleaseNotification=true, got %v", settings.ShowReleaseNotification)
+		}
+		if settings.ReleaseNotesLastSeenVersion != "1.0.0" {
+			t.Fatalf("expected ReleaseNotesLastSeenVersion=1.0.0, got %s", settings.ReleaseNotesLastSeenVersion)
+		}
+	})
+
+	t.Run("ShowReleaseNotification set to false", func(t *testing.T) {
+		settings := &models.UserSettings{ShowReleaseNotification: true}
+		req := &UpdateUserSettingsRequest{ShowReleaseNotification: ptr(false)}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ShowReleaseNotification != false {
+			t.Fatalf("expected ShowReleaseNotification=false, got %v", settings.ShowReleaseNotification)
+		}
+	})
+
+	t.Run("ShowReleaseNotification set to true", func(t *testing.T) {
+		settings := &models.UserSettings{ShowReleaseNotification: false}
+		req := &UpdateUserSettingsRequest{ShowReleaseNotification: ptr(true)}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ShowReleaseNotification != true {
+			t.Fatalf("expected ShowReleaseNotification=true, got %v", settings.ShowReleaseNotification)
+		}
+	})
+
+	t.Run("ReleaseNotesLastSeenVersion updated", func(t *testing.T) {
+		settings := &models.UserSettings{ReleaseNotesLastSeenVersion: "1.0.0"}
+		req := &UpdateUserSettingsRequest{ReleaseNotesLastSeenVersion: ptr("2.0.0")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ReleaseNotesLastSeenVersion != "2.0.0" {
+			t.Fatalf("expected ReleaseNotesLastSeenVersion=2.0.0, got %s", settings.ReleaseNotesLastSeenVersion)
+		}
+	})
+
+	t.Run("ReleaseNotesLastSeenVersion cleared with empty string", func(t *testing.T) {
+		settings := &models.UserSettings{ReleaseNotesLastSeenVersion: "1.0.0"}
+		req := &UpdateUserSettingsRequest{ReleaseNotesLastSeenVersion: ptr("")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ReleaseNotesLastSeenVersion != "" {
+			t.Fatalf("expected empty ReleaseNotesLastSeenVersion, got %s", settings.ReleaseNotesLastSeenVersion)
+		}
+	})
+}
+
 func TestApplySavedLayouts(t *testing.T) {
 	tests := []struct {
 		name        string

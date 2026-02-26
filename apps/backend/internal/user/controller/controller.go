@@ -44,20 +44,22 @@ func (c *Controller) GetUserSettings(ctx context.Context) (dto.UserSettingsRespo
 
 func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserSettingsRequest) (dto.UserSettingsResponse, error) {
 	settings, err := c.svc.UpdateUserSettings(ctx, &service.UpdateUserSettingsRequest{
-		WorkspaceID:             req.WorkspaceID,
-		KanbanViewMode:          req.KanbanViewMode,
-		WorkflowFilterID:        req.WorkflowFilterID,
-		RepositoryIDs:           req.RepositoryIDs,
-		InitialSetupComplete:    req.InitialSetupComplete,
-		PreferredShell:          req.PreferredShell,
-		DefaultEditorID:         req.DefaultEditorID,
-		EnablePreviewOnClick:    req.EnablePreviewOnClick,
-		ChatSubmitKey:           req.ChatSubmitKey,
-		ReviewAutoMarkOnScroll:  req.ReviewAutoMarkOnScroll,
-		LspAutoStartLanguages:   req.LspAutoStartLanguages,
-		LspAutoInstallLanguages: req.LspAutoInstallLanguages,
-		LspServerConfigs:        req.LspServerConfigs,
-		SavedLayouts:            req.SavedLayouts,
+		WorkspaceID:                 req.WorkspaceID,
+		KanbanViewMode:              req.KanbanViewMode,
+		WorkflowFilterID:            req.WorkflowFilterID,
+		RepositoryIDs:               req.RepositoryIDs,
+		InitialSetupComplete:        req.InitialSetupComplete,
+		PreferredShell:              req.PreferredShell,
+		DefaultEditorID:             req.DefaultEditorID,
+		EnablePreviewOnClick:        req.EnablePreviewOnClick,
+		ChatSubmitKey:               req.ChatSubmitKey,
+		ReviewAutoMarkOnScroll:      req.ReviewAutoMarkOnScroll,
+		ShowReleaseNotification:     req.ShowReleaseNotification,
+		ReleaseNotesLastSeenVersion: req.ReleaseNotesLastSeenVersion,
+		LspAutoStartLanguages:       req.LspAutoStartLanguages,
+		LspAutoInstallLanguages:     req.LspAutoInstallLanguages,
+		LspServerConfigs:            req.LspServerConfigs,
+		SavedLayouts:                req.SavedLayouts,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

@@ -130,20 +130,22 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		savedLayouts = []models.SavedLayout{}
 	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
-		"workspace_id":               settings.WorkspaceID,
-		"kanban_view_mode":           settings.KanbanViewMode,
-		"workflow_filter_id":         settings.WorkflowFilterID,
-		"repository_ids":             settings.RepositoryIDs,
-		"initial_setup_complete":     settings.InitialSetupComplete,
-		"preferred_shell":            settings.PreferredShell,
-		"default_editor_id":          settings.DefaultEditorID,
-		"enable_preview_on_click":    settings.EnablePreviewOnClick,
-		"chat_submit_key":            settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll": settings.ReviewAutoMarkOnScroll,
-		"lsp_auto_start_languages":   lspAutoStart,
-		"lsp_auto_install_languages": lspAutoInstall,
-		"lsp_server_configs":         lspServerConfigs,
-		"saved_layouts":              savedLayouts,
+		"workspace_id":                    settings.WorkspaceID,
+		"kanban_view_mode":                settings.KanbanViewMode,
+		"workflow_filter_id":              settings.WorkflowFilterID,
+		"repository_ids":                  settings.RepositoryIDs,
+		"initial_setup_complete":          settings.InitialSetupComplete,
+		"preferred_shell":                 settings.PreferredShell,
+		"default_editor_id":               settings.DefaultEditorID,
+		"enable_preview_on_click":         settings.EnablePreviewOnClick,
+		"chat_submit_key":                 settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
+		"show_release_notification":       settings.ShowReleaseNotification,
+		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":        lspAutoStart,
+		"lsp_auto_install_languages":      lspAutoInstall,
+		"lsp_server_configs":              lspServerConfigs,
+		"saved_layouts":                   savedLayouts,
 	})
 	if err != nil {
 		return err
@@ -186,20 +188,22 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID             string                            `json:"workspace_id"`
-		KanbanViewMode          string                            `json:"kanban_view_mode"`
-		WorkflowFilterID        string                            `json:"workflow_filter_id"`
-		RepositoryIDs           []string                          `json:"repository_ids"`
-		InitialSetupComplete    bool                              `json:"initial_setup_complete"`
-		PreferredShell          string                            `json:"preferred_shell"`
-		DefaultEditorID         string                            `json:"default_editor_id"`
-		EnablePreviewOnClick    bool                              `json:"enable_preview_on_click"`
-		ChatSubmitKey           string                            `json:"chat_submit_key"`
-		ReviewAutoMarkOnScroll  *bool                             `json:"review_auto_mark_on_scroll"`
-		LspAutoStartLanguages   []string                          `json:"lsp_auto_start_languages"`
-		LspAutoInstallLanguages []string                          `json:"lsp_auto_install_languages"`
-		LspServerConfigs        map[string]map[string]interface{} `json:"lsp_server_configs"`
-		SavedLayouts            []models.SavedLayout              `json:"saved_layouts"`
+		WorkspaceID                 string                            `json:"workspace_id"`
+		KanbanViewMode              string                            `json:"kanban_view_mode"`
+		WorkflowFilterID            string                            `json:"workflow_filter_id"`
+		RepositoryIDs               []string                          `json:"repository_ids"`
+		InitialSetupComplete        bool                              `json:"initial_setup_complete"`
+		PreferredShell              string                            `json:"preferred_shell"`
+		DefaultEditorID             string                            `json:"default_editor_id"`
+		EnablePreviewOnClick        bool                              `json:"enable_preview_on_click"`
+		ChatSubmitKey               string                            `json:"chat_submit_key"`
+		ReviewAutoMarkOnScroll      *bool                             `json:"review_auto_mark_on_scroll"`
+		ShowReleaseNotification     *bool                             `json:"show_release_notification"`
+		ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
+		LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`
+		LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
+		LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
+		SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -223,6 +227,12 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	} else {
 		settings.ReviewAutoMarkOnScroll = true
 	}
+	if payload.ShowReleaseNotification != nil {
+		settings.ShowReleaseNotification = *payload.ShowReleaseNotification
+	} else {
+		settings.ShowReleaseNotification = true
+	}
+	settings.ReleaseNotesLastSeenVersion = payload.ReleaseNotesLastSeenVersion
 	settings.LspAutoStartLanguages = payload.LspAutoStartLanguages
 	if settings.LspAutoStartLanguages == nil {
 		settings.LspAutoStartLanguages = []string{}

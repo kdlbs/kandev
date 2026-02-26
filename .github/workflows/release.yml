@@ -23,6 +23,8 @@ jobs:
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
       - name: Build web (standalone)
+        env:
+          KANDEV_VERSION: ${{ github.ref_name }}
         run: pnpm -C apps --filter @kandev/web build
       - name: Package web bundle
         run: bash scripts/release/package-web.sh
@@ -116,6 +118,18 @@ jobs:
     needs: build-bundles
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
       - name: Download bundle artifacts
         uses: actions/download-artifact@v4
         with:
@@ -144,6 +158,7 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             dist/release-assets/kandev-*.tar.gz
             dist/release-assets/kandev-*.tar.gz.sha256
