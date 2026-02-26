@@ -135,7 +135,7 @@ func TestInteractiveRunner_DirectOutput(t *testing.T) {
 
 	req := InteractiveStartRequest{
 		SessionID:      "direct-output-test",
-		Command:        []string{"echo", "direct"},
+		Command:        []string{"cat"},
 		ImmediateStart: true,
 		DefaultCols:    80,
 		DefaultRows:    24,
@@ -144,6 +144,15 @@ func TestInteractiveRunner_DirectOutput(t *testing.T) {
 	info, err := runner.Start(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
+	}
+
+	// Wait for process to be running
+	deadline := time.Now().Add(5 * time.Second)
+	for !runner.IsProcessRunning(info.ID) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for process to start")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Create a mock direct writer
@@ -155,22 +164,16 @@ func TestInteractiveRunner_DirectOutput(t *testing.T) {
 		t.Errorf("SetDirectOutput() error = %v", err)
 	}
 
-	// Wait for output
-	time.Sleep(200 * time.Millisecond)
-
 	// Clear direct output
 	err = runner.ClearDirectOutput(info.ID)
-	// May fail if process already exited, that's OK
-	_ = err
-
-	// Check if writer received data
-	writer.mu.Lock()
-	gotData := len(writer.data) > 0
-	writer.mu.Unlock()
-
-	if gotData {
-		t.Log("Direct writer received data")
+	if err != nil {
+		t.Errorf("ClearDirectOutput() error = %v", err)
 	}
+
+	// Stop the process
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = runner.Stop(ctx, info.ID)
 }
 
 // mockDirectWriter implements DirectOutputWriter for testing
