@@ -5,7 +5,6 @@ import { useAppStore } from "@/components/state-provider";
 import { getLocalStorage } from "@/lib/local-storage";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { preserveChatScrollDuringLayout } from "@/lib/state/dockview-scroll-preserve";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
@@ -70,9 +69,9 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
 
-  // Preserve scroll position and re-focus chat input after dockview layout rebuild
+  // Re-focus chat input after dockview layout rebuild.
+  // Scroll preservation is handled by the store layout actions (before DOM rebuild).
   const refocusChatAfterLayout = useCallback(() => {
-    preserveChatScrollDuringLayout();
     const unsub = useDockviewStore.subscribe((state) => {
       if (!state.isRestoringLayout) {
         unsub();

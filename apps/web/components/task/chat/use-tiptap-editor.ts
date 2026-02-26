@@ -315,7 +315,6 @@ function useSubmitKeymap(
             return false;
           },
           "Shift-Tab": () => {
-            console.log("[ShiftTab] toggling plan mode", { current: planModeEnabledRef.current });
             onPlanModeChangeRef.current?.(!planModeEnabledRef.current);
             return true;
           },

@@ -82,7 +82,7 @@ func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
 		return
 	}
 	if tp == nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "no PR associated with task"})
+		ctx.Status(http.StatusNoContent)
 		return
 	}
 	ctx.JSON(http.StatusOK, tp)
