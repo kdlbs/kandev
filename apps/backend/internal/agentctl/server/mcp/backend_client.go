@@ -62,6 +62,7 @@ func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
 }
 
 // RequestPayload sends a request to the backend and unmarshals the response.
+// The request will be cancelled if the context is cancelled or if Reset() is called.
 func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	id := uuid.New().String()
 
@@ -76,25 +77,30 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	c.pending[id] = respChan
 	c.pendingMu.Unlock()
 
+	// Ensure cleanup on exit
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+	}()
+
 	// Send request through channel
 	select {
 	case c.requestCh <- msg:
 		// Request sent
 	case <-ctx.Done():
-		c.pendingMu.Lock()
-		delete(c.pending, id)
-		c.pendingMu.Unlock()
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
-		c.pendingMu.Lock()
-		delete(c.pending, id)
-		c.pendingMu.Unlock()
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
 
 	// Wait for response
 	select {
-	case resp := <-respChan:
+	case resp, ok := <-respChan:
+		if !ok {
+			// Channel was closed by Reset() - session was cancelled/reset
+			return fmt.Errorf("MCP request cancelled: session reset")
+		}
 		if resp.Type == ws.MessageTypeError {
 			var ep struct {
 				Code    string `json:"code"`
@@ -112,10 +118,21 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		}
 		return nil
 	case <-ctx.Done():
-		c.pendingMu.Lock()
-		delete(c.pending, id)
-		c.pendingMu.Unlock()
 		return ctx.Err()
+	}
+}
+
+// Reset clears all pending MCP requests.
+// This should be called when starting a new ACP session to prevent
+// stale requests from a previous session from interfering.
+func (c *ChannelBackendClient) Reset() {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+
+	// Close all pending response channels to unblock waiting goroutines
+	for id, ch := range c.pending {
+		close(ch)
+		delete(c.pending, id)
 	}
 }
 
