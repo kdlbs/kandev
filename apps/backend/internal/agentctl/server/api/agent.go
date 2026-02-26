@@ -308,6 +308,13 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
+	// Reset MCP backend client state to clear any pending requests from previous session.
+	// This prevents stale MCP requests from interfering with the new session.
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.Reset()
+		s.logger.Debug("reset MCP backend client for new session")
+	}
+
 	// If MCP server is enabled, prepend the local kandev MCP server to the list.
 	mcpServers := req.McpServers
 	if s.mcpServer != nil {
@@ -361,6 +368,13 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	if adapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
+	}
+
+	// Reset MCP backend client state to clear any pending requests from previous session.
+	// This prevents stale MCP requests from interfering with the loaded session.
+	if s.mcpBackendClient != nil {
+		s.mcpBackendClient.Reset()
+		s.logger.Debug("reset MCP backend client for loaded session")
 	}
 
 	if err := adapter.LoadSession(ctx, req.SessionID); err != nil {
