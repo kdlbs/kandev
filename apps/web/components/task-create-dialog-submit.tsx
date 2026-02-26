@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { Task, LocalRepository } from "@/lib/types/http";
 import { createTask, updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
 import { linkToSession } from "@/lib/links";
 import {
@@ -16,14 +17,6 @@ import {
 } from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
-
-interface OrchestratorStartResponse {
-  success: boolean;
-  task_id: string;
-  agent_instance_id: string;
-  session_id?: string;
-  state: string;
-}
 
 export type SubmitHandlersDeps = {
   isSessionMode: boolean;
@@ -166,20 +159,12 @@ export function useTaskSubmitHandlers({
 
     setIsCreatingSession(true);
     try {
-      const client = getWebSocketClient();
-      if (!client) throw new Error("WebSocket client not available");
-
-      const response = await client.request<OrchestratorStartResponse>(
-        "orchestrator.start",
-        {
-          task_id: taskId,
-          agent_profile_id: agentProfileId,
-          executor_id: executorId,
-          executor_profile_id: executorProfileId || undefined,
-          prompt: trimmedDescription,
-        },
-        15000,
-      );
+      const { request } = buildStartRequest(taskId, agentProfileId, {
+        executorId,
+        executorProfileId: executorProfileId || undefined,
+        prompt: trimmedDescription,
+      });
+      const response = await launchSession(request);
 
       const newSessionId = response?.session_id;
       if (newSessionId) {
@@ -237,24 +222,16 @@ export function useTaskSubmitHandlers({
 
       let taskSessionId: string | null = null;
       if (agentProfileId) {
-        const client = getWebSocketClient();
-        if (client) {
-          try {
-            const response = await client.request<OrchestratorStartResponse>(
-              "orchestrator.start",
-              {
-                task_id: updatedTask.id,
-                agent_profile_id: agentProfileId,
-                executor_id: executorId,
-                executor_profile_id: executorProfileId || undefined,
-                prompt: trimmedDescription || "",
-              },
-              15000,
-            );
-            taskSessionId = response?.session_id ?? null;
-          } catch (error) {
-            console.error("[TaskCreateDialog] failed to start agent:", error);
-          }
+        try {
+          const { request } = buildStartRequest(updatedTask.id, agentProfileId, {
+            executorId,
+            executorProfileId: executorProfileId || undefined,
+            prompt: trimmedDescription || "",
+          });
+          const response = await launchSession(request);
+          taskSessionId = response?.session_id ?? null;
+        } catch (error) {
+          console.error("[TaskCreateDialog] failed to start agent:", error);
         }
       }
 
@@ -400,20 +377,13 @@ export function useTaskSubmitHandlers({
     const result = await performTaskUpdate();
     if (!result) return;
     const { updatedTask, trimmedDescription } = result;
-    const client = getWebSocketClient();
-    if (!client) throw new Error("WebSocket client not available");
-    const response = await client.request<OrchestratorStartResponse>(
-      "orchestrator.start",
-      {
-        task_id: updatedTask.id,
-        agent_profile_id: agentProfileId,
-        executor_id: executorId,
-        executor_profile_id: executorProfileId || undefined,
-        prompt: trimmedDescription || "",
-        plan_mode: true,
-      },
-      15000,
-    );
+    const { request } = buildStartRequest(updatedTask.id, agentProfileId, {
+      executorId,
+      executorProfileId: executorProfileId || undefined,
+      prompt: trimmedDescription || "",
+      planMode: true,
+    });
+    const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;
     onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
     onOpenChange(false);

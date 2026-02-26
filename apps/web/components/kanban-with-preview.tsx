@@ -12,6 +12,8 @@ import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
 import { linkToSession } from "@/lib/links";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;
@@ -99,7 +101,7 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
 
   // Use custom hooks for layout and session management
   const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(isOpen, previewWidthPx);
-  const { sessionId: selectedTaskSessionId } = useTaskSession(selectedTaskId ?? null);
+  const { sessionId: selectedTaskSessionId, isLoading } = useTaskSession(selectedTaskId ?? null);
 
   // Track resize state
   const isResizingRef = useRef(false);
@@ -128,6 +130,19 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
       close();
     }
   }, [isOpen, selectedTaskId, selectedTask, close]);
+
+  // Prepare workspace when preview opens for a task with no session
+  const preparedTaskRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !selectedTaskId || isLoading || selectedTaskSessionId) return;
+    if (preparedTaskRef.current === selectedTaskId) return;
+    preparedTaskRef.current = selectedTaskId;
+
+    const { request } = buildPrepareRequest(selectedTaskId);
+    launchSession(request).catch(() => {
+      // Prepare failed silently — user can still start agent manually
+    });
+  }, [isOpen, selectedTaskId, selectedTaskSessionId, isLoading]);
 
   const handleNavigateToTask = useCallback(
     (task: Task, sessionId: string) => {

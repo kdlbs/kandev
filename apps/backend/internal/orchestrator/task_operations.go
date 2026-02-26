@@ -576,6 +576,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
 
+	// If the session is in CREATED state with an existing workspace (AgentExecutionID set),
+	// the workspace was prepared but the agent was never started. Use LaunchPreparedSession
+	// which routes to startAgentOnExistingWorkspace to reuse the workspace rather than
+	// ResumeSession which tries a full LaunchAgent and conflicts with the existing execution.
+	if session.State == models.TaskSessionStateCreated && session.AgentExecutionID != "" {
+		return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+	}
+
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil || running == nil {
 		return fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
@@ -608,6 +616,35 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	}
 
 	s.logger.Debug("session resumed and ready for prompt")
+	return nil
+}
+
+// startAgentOnPreparedWorkspace starts the agent subprocess on a session whose workspace
+// was prepared (agentctl running) but whose agent process was never started. This avoids
+// the "session already has an agent running" error from ResumeSession which tries a full
+// LaunchAgent and conflicts with the existing execution in the lifecycle manager's store.
+func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID string, session *models.TaskSession) error {
+	s.logger.Debug("session has prepared workspace but no agent, starting agent on existing workspace",
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", session.AgentExecutionID))
+
+	launchCtx := context.WithoutCancel(ctx)
+	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID: session.AgentProfileID,
+		ExecutorID:     session.ExecutorID,
+		StartAgent:     true,
+	}); err != nil {
+		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
+	}
+
+	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("session not ready after starting agent: %w", err)
+	}
+	s.logger.Debug("agent started on prepared workspace and ready for prompt")
 	return nil
 }
 

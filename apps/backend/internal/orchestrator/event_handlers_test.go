@@ -144,6 +144,9 @@ func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(_ context.Context, _ 
 }
 func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []executor.RemoteStatusPollRequest) {
 }
+func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _ string) error {
+	return nil
+}
 
 // --- Helpers ---
 

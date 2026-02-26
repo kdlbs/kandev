@@ -16,43 +16,6 @@ import type { WorkflowStep } from "@/components/kanban-column";
 
 type StepPhase = "past" | "current" | "future";
 
-type StatusInfo = {
-  label: string;
-  color: string;
-};
-
-function getStatusInfo(task: Task): StatusInfo {
-  if (task.reviewStatus === "pending" && task.state !== "IN_PROGRESS") {
-    return { label: "Needs Approval", color: "text-amber-500" };
-  }
-  if (task.reviewStatus === "changes_requested") {
-    return { label: "Changes Requested", color: "text-amber-500" };
-  }
-
-  switch (task.state) {
-    case "IN_PROGRESS":
-    case "SCHEDULING":
-      return { label: "Running", color: "text-blue-500" };
-    case "WAITING_FOR_INPUT":
-      return { label: "Waiting", color: "text-amber-500" };
-    case "COMPLETED":
-      return { label: "Completed", color: "text-green-500" };
-    case "FAILED":
-      return { label: "Failed", color: "text-red-500" };
-    case "CANCELLED":
-      return { label: "Cancelled", color: "text-red-500" };
-    case "TODO":
-    case "CREATED":
-      return { label: "Todo", color: "text-muted-foreground" };
-    case "REVIEW":
-      return { label: "Review", color: "text-yellow-500" };
-    case "BLOCKED":
-      return { label: "Blocked", color: "text-yellow-500" };
-    default:
-      return { label: "Pending", color: "text-muted-foreground" };
-  }
-}
-
 function isRunningState(state?: string): boolean {
   return state === "IN_PROGRESS" || state === "SCHEDULING";
 }
@@ -71,7 +34,7 @@ export type Graph2StepNodeProps = {
 };
 
 const NODE_CLASS =
-  "w-[130px] h-[44px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center";
+  "w-[130px] h-[36px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center";
 
 function PastNode({ step }: { step: WorkflowStep }) {
   return (
@@ -143,7 +106,6 @@ export function Graph2StepNode({
   if (phase === "future") return <FutureNode step={step} />;
 
   // Current phase
-  const status = getStatusInfo(task);
   const running = isRunningState(task.state);
 
   const handleClick = () => {
@@ -176,29 +138,18 @@ export function Graph2StepNode({
         onClick={handleClick}
         className={cn(
           NODE_CLASS,
-          "bg-background cursor-pointer",
-          "hover:bg-accent/30 transition-colors",
+          "cursor-pointer transition-colors bg-background hover:bg-accent/30",
           running
-            ? "border border-muted-foreground/20 node-border-running"
-            : "border-2 ring-1 ring-offset-1 ring-offset-background",
+            ? "border-1 border-accent/50 node-border-running"
+            : "border-1 border-accent/50",
         )}
-        style={
-          running
-            ? undefined
-            : {
-                borderColor: step.color || "hsl(var(--primary))",
-                // @ts-expect-error -- CSS custom property for ring color
-                "--tw-ring-color": step.color || "hsl(var(--primary))",
-              }
-        }
       >
         <div className="flex items-center gap-1.5 w-full">
           <div className="shrink-0">{getTaskStateIcon(task.state, "h-3 w-3")}</div>
-          <span className={cn("text-[10px] font-medium", status.color)}>{status.label}</span>
+          <span className="text-[11px] font-medium text-foreground truncate">
+            {step.title}
+          </span>
         </div>
-        <span className="text-[11px] text-foreground/80 truncate w-full text-left">
-          {step.title}
-        </span>
       </button>
 
       {isHovered && hasNext && nextStepId && (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -146,9 +147,19 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
 	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
-		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
+		// Use task description as the initial prompt with workflow step config
 		// Use taskDTO.WorkflowStepID (backend-resolved) instead of req.WorkflowStepID
-		execution, err := h.orchestrator.StartTask(ctx, taskDTO.ID, req.AgentProfileID, req.ExecutorID, req.ExecutorProfileID, req.Priority, taskDTO.Description, taskDTO.WorkflowStepID, req.PlanMode)
+		launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+			TaskID:            taskDTO.ID,
+			Intent:            orchestrator.IntentStart,
+			AgentProfileID:    req.AgentProfileID,
+			ExecutorID:        req.ExecutorID,
+			ExecutorProfileID: req.ExecutorProfileID,
+			Priority:          req.Priority,
+			Prompt:            taskDTO.Description,
+			WorkflowStepID:    taskDTO.WorkflowStepID,
+			PlanMode:          req.PlanMode,
+		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to start agent for task", nil)
@@ -156,10 +167,10 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Info("wsCreateTask started agent",
 			zap.String("task_id", taskDTO.ID),
 			zap.String("executor_id", req.ExecutorID),
-			zap.String("workflow_step_id", req.WorkflowStepID),
-			zap.String("session_id", execution.SessionID))
-		response.TaskSessionID = execution.SessionID
-		response.AgentExecutionID = execution.AgentExecutionID
+			zap.String("workflow_step_id", taskDTO.WorkflowStepID),
+			zap.String("session_id", launchResp.SessionID))
+		response.TaskSessionID = launchResp.SessionID
+		response.AgentExecutionID = launchResp.AgentExecutionID
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }

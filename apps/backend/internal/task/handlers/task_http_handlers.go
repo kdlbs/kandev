@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -397,14 +398,19 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 		return
 	}
 	if body.PrepareSession && !body.StartAgent {
-		// Create session entry without launching the agent.
-		// The session stays in CREATED state until the user triggers it.
-		// Launch workspace so file browsing works immediately.
-		sessionID, err := h.orchestrator.PrepareTaskSession(c.Request.Context(), taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID, true)
+		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
+			TaskID:            taskID,
+			Intent:            orchestrator.IntentPrepare,
+			AgentProfileID:    body.AgentProfileID,
+			ExecutorID:        body.ExecutorID,
+			ExecutorProfileID: body.ExecutorProfileID,
+			WorkflowStepID:    resolvedStepID,
+			LaunchWorkspace:   true,
+		})
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
 		} else {
-			response.TaskSessionID = sessionID
+			response.TaskSessionID = resp.SessionID
 		}
 	} else if body.StartAgent {
 		h.startAgentForNewTask(c.Request.Context(), response, taskID, description, body, resolvedStepID)
@@ -422,36 +428,45 @@ func (h *TaskHandlers) startAgentForNewTask(
 	resolvedStepID string,
 ) {
 	// Create session entry synchronously so we can return the session ID immediately.
-	// Skip workspace launch — StartTaskWithSession will handle it in the background goroutine.
+	// Skip workspace launch — the start intent will handle it in the background goroutine.
 	// This prevents blocking for 30-60s on remote executors (sprites, remote_docker).
-	sessionID, err := h.orchestrator.PrepareTaskSession(ctx, taskID, body.AgentProfileID, body.ExecutorID, body.ExecutorProfileID, resolvedStepID, false)
+	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:            taskID,
+		Intent:            orchestrator.IntentPrepare,
+		AgentProfileID:    body.AgentProfileID,
+		ExecutorID:        body.ExecutorID,
+		ExecutorProfileID: body.ExecutorProfileID,
+		WorkflowStepID:    resolvedStepID,
+	})
 	if err != nil {
 		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
-		// Continue without session - task was created successfully
 		return
 	}
+	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
 
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
-	executorID := body.ExecutorID // Capture for goroutine
-	stepID := resolvedStepID      // Capture for goroutine
 	go func() {
-		// Use a longer timeout to accommodate setup scripts (which can take minutes for npm install, etc.)
 		startCtx, cancel := context.WithTimeout(context.Background(), constants.AgentLaunchTimeout)
 		defer cancel()
-		// Use task description as the initial prompt with workflow step config (prompt prefix/suffix, plan mode)
-		execution, err := h.orchestrator.StartTaskWithSession(startCtx, taskID, sessionID, body.AgentProfileID, executorID, body.ExecutorProfileID, body.Priority, description, stepID, body.PlanMode)
+		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+			TaskID:            taskID,
+			Intent:            orchestrator.IntentStartCreated,
+			SessionID:         sessionID,
+			AgentProfileID:    body.AgentProfileID,
+			Prompt:            description,
+			SkipMessageRecord: true,
+			PlanMode:          body.PlanMode,
+		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
 			return
 		}
 		h.logger.Info("agent started for task (async)",
 			zap.String("task_id", taskID),
-			zap.String("session_id", execution.SessionID),
-			zap.String("executor_id", executorID),
-			zap.String("workflow_step_id", stepID),
-			zap.String("execution_id", execution.AgentExecutionID))
+			zap.String("session_id", launchResp.SessionID),
+			zap.String("execution_id", launchResp.AgentExecutionID))
 	}()
 }
 

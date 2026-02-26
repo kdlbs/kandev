@@ -10,7 +10,7 @@ export function SwimlaneGraph2Content({
   steps,
   tasks,
   onPreviewTask,
-  onEditTask,
+  onOpenTask,
   onDeleteTask,
   onMoveError,
   deletingTaskId,
@@ -58,7 +58,7 @@ export function SwimlaneGraph2Content({
             steps={steps}
             onMoveTask={handleMoveTask}
             onPreviewTask={onPreviewTask}
-            onEditTask={onEditTask}
+            onOpenTask={onOpenTask}
             onDeleteTask={onDeleteTask}
             isMoving={movingTaskId === task.id}
             isDeleting={deletingTaskId === task.id}

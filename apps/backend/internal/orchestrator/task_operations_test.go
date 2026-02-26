@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -540,4 +543,159 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
 		}
 	})
+}
+
+// --- ensureSessionRunning: prepared workspace ---
+
+func TestEnsureSessionRunning_PreparedWorkspace(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	// Seed task and session in CREATED state (workspace prepared, agent not started)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+
+	// Set AgentExecutionID to simulate a prepared workspace
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-prepare-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	// Create a wrapped mock agent manager that transitions the session to WAITING_FOR_INPUT
+	// when StartAgentProcess is called (simulating the agent starting successfully).
+	startAgentProcessCalled := false
+	wrappedMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{isAgentRunning: false},
+		repo:             repo,
+		sessionID:        "session1",
+		taskID:           "task1",
+		onStartCalled:    &startAgentProcessCalled,
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Test Task",
+		Description: "desc",
+		State:       v1.TaskStateInProgress,
+	}
+
+	log := testLogger()
+	exec := executor.NewExecutor(wrappedMgr, repo, log, executor.ExecutorConfig{})
+	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.DefaultSchedulerConfig())
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, wrappedMgr)
+	svc.executor = exec
+	svc.scheduler = sched
+
+	// Re-load session for the call
+	session, err = repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	if err != nil {
+		t.Fatalf("ensureSessionRunning failed: %v", err)
+	}
+
+	if !startAgentProcessCalled {
+		t.Fatal("expected StartAgentProcess to be called (prepared workspace path)")
+	}
+
+	// Verify the session transitioned through STARTING
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to reload session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+}
+
+func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	// Session in WAITING_FOR_INPUT without executor running record → resume path fails gracefully
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	agentMgr := &mockAgentManager{isAgentRunning: false}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = exec
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+
+	// Should fail because there is no executor running record (resume path)
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	if err == nil {
+		t.Fatal("expected error for WAITING_FOR_INPUT session without executor record")
+	}
+	// Verify it took the resume path (error mentions "not resumable")
+	if !strings.Contains(err.Error(), "not resumable") {
+		t.Fatalf("expected 'not resumable' error from resume path, got: %v", err)
+	}
+}
+
+func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	// Session in CREATED state WITHOUT AgentExecutionID → resume path (not prepared workspace)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+
+	agentMgr := &mockAgentManager{isAgentRunning: false}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = exec
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+
+	// AgentExecutionID is empty → should NOT take prepared workspace path
+	// Should fail with "not resumable" because no executor running record
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	if err == nil {
+		t.Fatal("expected error for CREATED session without executor record")
+	}
+	if !strings.Contains(err.Error(), "not resumable") {
+		t.Fatalf("expected 'not resumable' error from resume path, got: %v", err)
+	}
+}
+
+// sessionUpdatingAgentManager wraps mockAgentManager to update session state
+// when StartAgentProcess is called, simulating the agent initialization flow.
+type sessionUpdatingAgentManager struct {
+	*mockAgentManager
+	repo          *sqliterepo.Repository
+	sessionID     string
+	taskID        string
+	onStartCalled *bool
+}
+
+func (m *sessionUpdatingAgentManager) StartAgentProcess(_ context.Context, _ string) error {
+	*m.onStartCalled = true
+	// Simulate the agent starting by transitioning session to WAITING_FOR_INPUT
+	ctx := context.Background()
+	sess, err := m.repo.GetTaskSession(ctx, m.sessionID)
+	if err == nil && sess != nil {
+		sess.State = models.TaskSessionStateWaitingForInput
+		sess.UpdatedAt = time.Now().UTC()
+		_ = m.repo.UpdateTaskSession(ctx, sess)
+	}
+	return nil
 }

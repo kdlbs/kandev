@@ -234,6 +234,10 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 	a.mgr.PollRemoteStatusForRecords(ctx, lcRecords)
 }
 
+func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {

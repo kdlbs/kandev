@@ -86,6 +86,9 @@ func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, 
 }
 func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, records []RemoteStatusPollRequest) {
 }
+func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	return nil
+}
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
 	if m.resolveAgentProfileFunc != nil {

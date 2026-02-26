@@ -38,7 +38,7 @@ export type Graph2TaskPipelineProps = {
   steps: WorkflowStep[];
   onMoveTask: (task: Task, targetStepId: string) => void;
   onPreviewTask: (task: Task) => void;
-  onEditTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   isMoving?: boolean;
   isDeleting?: boolean;
@@ -110,7 +110,7 @@ export function Graph2TaskPipeline({
   steps,
   onMoveTask,
   onPreviewTask,
-  onEditTask,
+  onOpenTask,
   onDeleteTask,
   isMoving,
   isDeleting,
@@ -128,7 +128,7 @@ export function Graph2TaskPipeline({
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onEditTask(task)}
+          onClick={() => onOpenTask(task)}
           className={cn(
             "w-[160px] shrink-0 rounded-md px-2.5 py-1.5 text-left transition-colors cursor-pointer",
             "hover:bg-accent/60 active:bg-accent/80",

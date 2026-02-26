@@ -415,3 +415,6 @@ func (s *SimulatedAgentManagerClient) GetRemoteRuntimeStatusBySession(ctx contex
 
 func (s *SimulatedAgentManagerClient) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 }
+func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
+	return nil
+}

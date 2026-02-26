@@ -10,15 +10,17 @@ import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceSessionUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useTasks } from "@/hooks/use-tasks";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import type {
   TaskState,
   TaskSessionState,
   Workspace,
   Repository,
-  TaskSession,
   Task,
   WorkflowSnapshot,
 } from "@/lib/types/http";
@@ -90,40 +92,13 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
     return activeTaskId;
   }, [activeSessionId, activeTaskId, sessionsById]);
 
-  const getSessionInfoForTask = useCallback(
-    (taskId: string) => {
-      const sessions = sessionsByTaskId[taskId] ?? [];
-      if (sessions.length === 0) {
-        return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
-      }
-      const primarySession = sessions.find((s: TaskSession) => s.is_primary);
-      const latestSession = primarySession ?? sessions[0];
-      if (!latestSession) {
-        return { diffStats: undefined, updatedAt: undefined, sessionState: undefined };
-      }
-      const updatedAt = latestSession.updated_at;
-      const sessionState = latestSession.state as TaskSessionState | undefined;
-      const gitStatus = gitStatusBySessionId[latestSession.id];
-      if (!gitStatus?.files) return { diffStats: undefined, updatedAt, sessionState };
-      let additions = 0;
-      let deletions = 0;
-      for (const file of Object.values(gitStatus.files)) {
-        additions += file.additions ?? 0;
-        deletions += file.deletions ?? 0;
-      }
-      const diffStats = additions === 0 && deletions === 0 ? undefined : { additions, deletions };
-      return { diffStats, updatedAt, sessionState };
-    },
-    [sessionsByTaskId, gitStatusBySessionId],
-  );
-
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const repositoryPathsById = new Map(
       repositories.map((repo: Repository) => [repo.id, repo.local_path]),
     );
     return tasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id);
+      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
       return {
         id: task.id,
         title: task.title,
@@ -141,7 +116,7 @@ function useSheetData(workspaceId: string | null, workflowId: string | null) {
         primarySessionId: task.primarySessionId ?? null,
       };
     });
-  }, [repositoriesByWorkspace, tasks, workspaceId, getSessionInfoForTask]);
+  }, [repositoriesByWorkspace, tasks, workspaceId, sessionsByTaskId, gitStatusBySessionId]);
 
   const dialogSteps = useMemo(
     () =>
@@ -299,15 +274,28 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
         onOpenChange(false);
         return;
       }
-      loadTaskSessionsForTask(taskId).then((sessions) => {
+      loadTaskSessionsForTask(taskId).then(async (sessions) => {
         const sessionId = sessions[0]?.id ?? null;
-        if (!sessionId) {
-          setActiveTask(taskId);
+        if (sessionId) {
+          setActiveSession(taskId, sessionId);
+          replaceSessionUrl(sessionId);
           onOpenChange(false);
           return;
         }
-        setActiveSession(taskId, sessionId);
-        replaceSessionUrl(sessionId);
+        // No session — prepare workspace
+        const { request } = buildPrepareRequest(taskId);
+        try {
+          const resp = await launchSession(request);
+          if (resp.session_id) {
+            setActiveSession(taskId, resp.session_id);
+            replaceSessionUrl(resp.session_id);
+            onOpenChange(false);
+            return;
+          }
+        } catch {
+          // Fall through to default behavior
+        }
+        setActiveTask(taskId);
         onOpenChange(false);
       });
     },

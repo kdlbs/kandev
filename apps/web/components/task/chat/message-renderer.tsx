@@ -5,7 +5,8 @@ import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { launchSession } from "@/lib/services/session-launch-service";
+import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -37,11 +38,10 @@ type AdapterContext = {
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const [isStarting, setIsStarting] = useState(false);
   const handleStart = useCallback(async () => {
-    const client = getWebSocketClient();
-    if (!client) return;
     setIsStarting(true);
     try {
-      await client.request("orchestrator.start", { task_id: taskId, session_id: sessionId }, 15000);
+      const { request } = buildStartCreatedRequest(taskId, sessionId);
+      await launchSession(request);
     } catch (error) {
       console.error("Failed to start agent:", error);
     } finally {
