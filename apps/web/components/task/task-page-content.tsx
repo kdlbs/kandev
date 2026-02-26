@@ -35,6 +35,7 @@ type TaskPageContentProps = {
   initialScripts?: RepositoryScript[];
   initialTerminals?: Terminal[];
   defaultLayouts?: Record<string, Layout>;
+  initialLayout?: string | null;
 };
 
 function resolveEffectiveTask(
@@ -192,6 +193,7 @@ type TaskPageInnerProps = {
   initialScripts: RepositoryScript[];
   initialTerminals?: Terminal[];
   defaultLayouts: Record<string, Layout>;
+  initialLayout?: string | null;
 };
 
 type RemoteExecutorStatus = {
@@ -273,6 +275,7 @@ function buildTaskLayoutProps(params: {
   defaultLayouts: Record<string, Layout>;
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
+  initialLayout?: string | null;
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
@@ -283,6 +286,7 @@ function buildTaskLayoutProps(params: {
     initialScripts,
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
+    initialLayout: params.initialLayout,
     taskTitle: taskProps.taskTitle,
     baseBranch: taskProps.baseBranch,
     worktreeBranch: params.merged.worktreeBranch,
@@ -342,6 +346,7 @@ function TaskPageInner({
   initialScripts,
   initialTerminals,
   defaultLayouts,
+  initialLayout,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
@@ -374,6 +379,7 @@ function TaskPageInner({
     defaultLayouts,
     merged,
     remote,
+    initialLayout,
   });
 
   return (
@@ -493,6 +499,7 @@ export function TaskPageContent({
   initialScripts = [],
   initialTerminals,
   defaultLayouts = {},
+  initialLayout,
 }: TaskPageContentProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
@@ -537,6 +544,7 @@ export function TaskPageContent({
       initialScripts={initialScripts}
       initialTerminals={initialTerminals}
       defaultLayouts={defaultLayouts}
+      initialLayout={initialLayout}
     />
   );
 }

@@ -10,7 +10,7 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { IconPlus } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { linkToSession } from "@/lib/links";
+import { replaceSessionUrl } from "@/lib/links";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
@@ -229,18 +229,13 @@ function useSidebarActions(store: ReturnType<typeof useAppStoreApi>) {
     useLayoutSwitch: true,
   });
 
-  const updateUrl = useCallback((sessionId: string) => {
-    if (typeof window === "undefined") return;
-    window.history.replaceState({}, "", linkToSession(sessionId));
-  }, []);
-
   const switchToSession = useCallback(
     (taskId: string, sessionId: string, oldSessionId: string | null | undefined) => {
       setActiveSession(taskId, sessionId);
       performLayoutSwitch(oldSessionId ?? null, sessionId);
-      updateUrl(sessionId);
+      replaceSessionUrl(sessionId);
     },
-    [setActiveSession, updateUrl],
+    [setActiveSession],
   );
 
   const handleSelectTask = useCallback(

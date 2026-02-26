@@ -396,8 +396,12 @@ export function useChatPanelState({
     [planModeAvailable, rawHandlePlanModeChange, togglePlanLayout, planLayoutVisible],
   );
 
-  // Auto-disable plan mode if agent doesn't support MCP (e.g. started from create dialog)
+  // Auto-disable plan mode if agent doesn't support MCP (e.g. started from create dialog).
+  // Only clear state — do NOT call applyBuiltInPreset("default") because the layout
+  // may have just been set via URL intent (?layout=plan) and we don't want to overwrite it.
   const hasAgentProfile = Boolean(sessionState.session?.agent_profile_id);
+  const setPlanMode = useAppStore((s) => s.setPlanMode);
+  const removeCtxFile = useContextFilesStore((s) => s.removeFile);
   const hasAutoDisabled = useRef(false);
   useEffect(() => {
     if (
@@ -408,7 +412,8 @@ export function useChatPanelState({
       !hasAutoDisabled.current
     ) {
       hasAutoDisabled.current = true;
-      rawHandlePlanModeChange(false);
+      setPlanMode(resolvedSessionId, false);
+      removeCtxFile(resolvedSessionId, PLAN_CONTEXT_PATH);
     }
     if (!planModeEnabled) hasAutoDisabled.current = false;
   }, [
@@ -416,7 +421,8 @@ export function useChatPanelState({
     hasAgentProfile,
     planModeAvailable,
     resolvedSessionId,
-    rawHandlePlanModeChange,
+    setPlanMode,
+    removeCtxFile,
   ]);
 
   const contextFilesState = useContextFiles(resolvedSessionId);

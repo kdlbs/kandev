@@ -298,9 +298,16 @@ function extractInitialScripts(
   return initialState?.repositoryScripts?.itemsByRepositoryId?.[repoId] ?? [];
 }
 
-export default async function SessionPage({ params }: { params: Promise<{ sessionId: string }> }) {
+export default async function SessionPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ sessionId: string }>;
+  searchParams: Promise<{ layout?: string }>;
+}) {
   let fetchedData: FetchedSessionData | null = null;
   const defaultLayouts = await readLayoutDefaults();
+  const { layout: initialLayout } = await searchParams;
 
   try {
     const { sessionId: paramSessionId } = await params;
@@ -331,6 +338,7 @@ export default async function SessionPage({ params }: { params: Promise<{ sessio
         initialScripts={extractInitialScripts(initialState, task)}
         initialTerminals={initialTerminals}
         defaultLayouts={defaultLayouts}
+        initialLayout={initialLayout}
       />
     </>
   );
