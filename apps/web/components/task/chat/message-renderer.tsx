@@ -3,7 +3,7 @@
 import { memo, useState, useCallback, type ReactElement } from "react";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import type { Message, TaskSessionState } from "@/lib/types/http";
+import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
@@ -23,6 +23,7 @@ import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subage
 type AdapterContext = {
   isTaskDescription: boolean;
   sessionState?: TaskSessionState;
+  taskState?: TaskState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
@@ -195,7 +196,11 @@ const adapters: MessageAdapter[] = [
         (ctx.isTaskDescription && ctx.sessionState !== "FAILED")
       ) {
         const showStartButton =
-          ctx.isTaskDescription && ctx.sessionState === "CREATED" && ctx.taskId && ctx.sessionId;
+          ctx.isTaskDescription &&
+          ctx.sessionState === "CREATED" &&
+          ctx.taskState !== "SCHEDULING" &&
+          ctx.taskId &&
+          ctx.sessionId;
         return (
           <>
             <ChatMessage
@@ -229,6 +234,7 @@ type MessageRendererProps = {
   comment: Message;
   isTaskDescription: boolean;
   sessionState?: TaskSessionState;
+  taskState?: TaskState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
@@ -243,6 +249,7 @@ export const MessageRenderer = memo(function MessageRenderer({
   comment,
   isTaskDescription,
   sessionState,
+  taskState,
   taskId,
   permissionsByToolCallId,
   childrenByParentToolCallId,
@@ -255,6 +262,7 @@ export const MessageRenderer = memo(function MessageRenderer({
   const ctx = {
     isTaskDescription,
     sessionState,
+    taskState,
     taskId,
     permissionsByToolCallId,
     childrenByParentToolCallId,

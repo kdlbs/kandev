@@ -15,8 +15,10 @@ import {
   defaultLayout,
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
-import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import type { BuiltInPreset, LayoutState, LayoutGroupIds, LayoutIntent } from "./layout-manager";
+import { injectIntentPanels, applyActivePanelOverrides } from "./layout-manager";
 import { buildFileStateActions } from "./dockview-file-state";
+import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -111,7 +113,11 @@ type DockviewStore = {
   setPinnedWidth: (columnId: string, width: number) => void;
   userDefaultLayout: LayoutState | null;
   setUserDefaultLayout: (layout: LayoutState | null) => void;
+  layoutIntent: LayoutIntent | null;
+  setLayoutIntent: (intent: LayoutIntent | null) => void;
   activeFilePath: string | null;
+  pendingChatScrollTop: number | null;
+  setPendingChatScrollTop: (value: number | null) => void;
 };
 
 type StoreGet = () => DockviewStore;
@@ -368,170 +374,38 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
-type SimplePanelOpts = {
-  id: string;
-  component: string;
-  title: string;
-  params?: Record<string, unknown>;
-};
+function performBuildDefault(api: DockviewApi, set: StoreSet, get: StoreGet): void {
+  const { userDefaultLayout, layoutIntent } = get();
+  const freshPinned = new Map<string, number>();
+  set({ isRestoringLayout: true, pinnedWidths: freshPinned, layoutIntent: null });
 
-function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
-  focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
-}
+  const basePreset = layoutIntent?.preset as BuiltInPreset | undefined;
+  let state = basePreset
+    ? getPresetLayout(basePreset)
+    : (userDefaultLayout ?? getPresetLayout("default"));
 
-function buildPanelActions(set: StoreSet, get: StoreGet) {
-  const getFileName = (path: string) => path.split("/").pop() || path;
+  if (layoutIntent?.panels?.length) {
+    state = injectIntentPanels(state, layoutIntent.panels);
+  }
+  if (layoutIntent?.activePanels) {
+    state = applyActivePanelOverrides(state, layoutIntent.activePanels);
+  }
 
-  return {
-    addChatPanel: () => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      focusOrAddPanel(api, {
-        id: "chat",
-        component: "chat",
-        tabComponent: "permanentTab",
-        title: "Agent",
-        position: { referenceGroup: centerGroupId },
-      });
-    },
-    addChangesPanel: (groupId?: string) => {
-      const { api, rightTopGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? rightTopGroupId, {
-        id: "changes",
-        component: "changes",
-        title: "Changes",
-      });
-    },
-    addFilesPanel: (groupId?: string) => {
-      const { api, rightTopGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? rightTopGroupId, {
-        id: "files",
-        component: "files",
-        title: "Files",
-      });
-    },
-    addDiffViewerPanel: (path?: string, content?: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      if (path) set({ selectedDiff: { path, content } });
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: "diff-viewer",
-        component: "diff-viewer",
-        title: "Diff Viewer",
-        params: { kind: "all" },
-      });
-    },
-    addFileDiffPanel: (path: string, content?: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: `diff:file:${path}`,
-        component: "diff-viewer",
-        title: `Diff [${getFileName(path)}]`,
-        params: { kind: "file", path, content },
-      });
-    },
-    addCommitDetailPanel: (sha: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: `commit:${sha}`,
-        component: "commit-detail",
-        title: sha.slice(0, 7),
-        params: { commitSha: sha },
-      });
-    },
-    addFileEditorPanel: (path: string, name: string, quiet?: boolean) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      focusOrAddPanel(
-        api,
-        {
-          id: `file:${path}`,
-          component: "file-editor",
-          title: name,
-          params: { path },
-          position: { referenceGroup: centerGroupId },
-        },
-        quiet,
-      );
-    },
-    addBrowserPanel: (url?: string, groupId?: string) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const browserId = url ? `browser:${url}` : `browser:${Date.now()}`;
-      addSimplePanel(api, groupId ?? centerGroupId, {
-        id: browserId,
-        component: "browser",
-        title: "Browser",
-        params: { url: url ?? "" },
-      });
-    },
-  };
-}
+  const ids = applyLayout(api, state, freshPinned);
+  const hasSidebar = state.columns.some((c) => c.id === "sidebar");
+  const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
+  set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
 
-function buildExtraPanelActions(_set: StoreSet, get: StoreGet) {
-  return {
-    addVscodePanel: () => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      focusOrAddPanel(api, {
-        id: "vscode",
-        component: "vscode",
-        title: "VS Code",
-        position: { referenceGroup: centerGroupId },
-      });
-    },
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    openInternalVscode: (_goto: { file: string; line: number; col: number } | null) => {
-      const { api } = get();
-      if (!api) return;
+  const pending = get().deferredPanelActions;
+  if (pending.length > 0) {
+    set({ deferredPanelActions: [] });
+    applyDeferredPanelActions(api, pending);
+  }
 
-      const existing = api.getPanel("vscode");
-      if (existing) {
-        existing.api.setActive();
-        return;
-      }
-
-      focusOrAddPanel(api, {
-        id: "vscode",
-        component: "vscode",
-        title: "VS Code",
-        position: { referencePanel: "chat", direction: "right" },
-      });
-    },
-    addPlanPanel: (groupId?: string) => {
-      const { api } = get();
-      if (!api) return;
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(api, { id: "plan", component: "plan", title: "Plan", position });
-    },
-    addPRPanel: () => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      focusOrAddPanel(api, {
-        id: "pr-detail",
-        component: "pr-detail",
-        title: "Pull Request",
-        position: { referenceGroup: centerGroupId },
-      });
-    },
-    addTerminalPanel: (terminalId?: string, groupId?: string) => {
-      const { api, rightBottomGroupId } = get();
-      if (!api) return;
-      const id = terminalId ?? `terminal-${Date.now()}`;
-      addSimplePanel(api, groupId ?? rightBottomGroupId, {
-        id,
-        component: "terminal",
-        title: "Terminal",
-        params: { terminalId: id },
-      });
-    },
-  };
+  requestAnimationFrame(() => {
+    syncPinnedWidthsFromApi(api, set);
+    set({ isRestoringLayout: false });
+  });
 }
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
@@ -567,6 +441,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   },
   userDefaultLayout: null,
   setUserDefaultLayout: (layout) => set({ userDefaultLayout: layout }),
+  layoutIntent: null,
+  setLayoutIntent: (intent) => set({ layoutIntent: intent }),
   ...buildVisibilityActions(set, get),
   ...buildPresetActions(set, get),
   isRestoringLayout: false,
@@ -596,45 +472,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       set({ isRestoringLayout: false });
     }
   },
-  buildDefaultLayout: (api) => {
-    const { userDefaultLayout } = get();
-    // Clear pinned overrides so fresh default gets clean preset widths
-    const freshPinned = new Map<string, number>();
-    set({ isRestoringLayout: true, pinnedWidths: freshPinned });
-    // Check if plan mode was queued before navigation (e.g. task created in plan mode).
-    // If so, use the plan preset directly and consume the deferred actions.
-    const pending = get().deferredPanelActions;
-    const hasPlanAction = pending.some((a) => a.id === "plan");
-    if (hasPlanAction) {
-      set({ deferredPanelActions: [] });
-      const planState = getPresetLayout("plan");
-      const ids = applyLayout(api, planState, freshPinned);
-      set({ ...ids, sidebarVisible: true, rightPanelsVisible: false });
-      // Apply any remaining non-plan deferred actions
-      const remaining = pending.filter((a) => a.id !== "plan");
-      if (remaining.length > 0) applyDeferredPanelActions(api, remaining);
-    } else {
-      const state = userDefaultLayout ?? getPresetLayout("default");
-      const ids = applyLayout(api, state, freshPinned);
-      const hasSidebar = state.columns.some((c) => c.id === "sidebar");
-      const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
-      set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
-      if (pending.length > 0) {
-        set({ deferredPanelActions: [] });
-        applyDeferredPanelActions(api, pending);
-      }
-    }
-    requestAnimationFrame(() => {
-      syncPinnedWidthsFromApi(api, set);
-      set({ isRestoringLayout: false });
-    });
-  },
+  buildDefaultLayout: (api) => performBuildDefault(api, set, get),
   resetLayout: () => {
     const { api } = get();
     if (api) get().buildDefaultLayout(api);
   },
+  pendingChatScrollTop: null,
+  setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
   ...buildPanelActions(set, get),
-  ...buildExtraPanelActions(set, get),
+  ...buildExtraPanelActions(get),
 }));
 
 /** Perform a layout switch between sessions. */

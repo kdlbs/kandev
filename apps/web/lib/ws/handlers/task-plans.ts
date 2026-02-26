@@ -18,9 +18,10 @@ function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
     updated_at,
   });
 
-  // Auto-open plan panel when agent creates/updates a plan for the active task
+  // Auto-open plan panel side-by-side with chat when agent writes a plan
   if (created_by === "agent" && task_id === store.getState().tasks.activeTaskId) {
     const dockview = useDockviewStore.getState();
+    if (dockview.isRestoringLayout) return;
     if (dockview.api?.getPanel("plan")) return;
 
     const activeSessionId = store.getState().tasks.activeSessionId;

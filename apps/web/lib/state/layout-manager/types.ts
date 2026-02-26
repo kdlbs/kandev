@@ -50,3 +50,30 @@ export type LayoutColumn = {
 export type LayoutState = {
   columns: LayoutColumn[];
 };
+
+// ─── Layout Intent ──────────────────────────────────────────────────────────
+
+/** A panel to inject into the layout as part of an intent. */
+export type LayoutIntentPanel = {
+  id: string;
+  component: string;
+  title: string;
+  tabComponent?: string;
+  params?: Record<string, unknown>;
+  /** Which group to add this panel to. Accepts a group ID (e.g. "group-center")
+   *  or an alias: "center", "right-top", "right-bottom". Defaults to "center". */
+  targetGroup?: string;
+};
+
+/**
+ * Declarative description of the desired initial layout for a new session.
+ * Set before navigation, consumed by buildDefaultLayout on first render.
+ */
+export type LayoutIntent = {
+  /** Base preset to use. If omitted, uses userDefaultLayout or "default". */
+  preset?: string;
+  /** Additional panels to add after the base layout is applied. */
+  panels?: LayoutIntentPanel[];
+  /** Map of group ID → panel ID to set as the active tab in that group. */
+  activePanels?: Record<string, string>;
+};
