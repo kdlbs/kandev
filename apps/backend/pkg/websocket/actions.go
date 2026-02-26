@@ -69,9 +69,10 @@ const (
 	ActionTaskPlanUpdate = "task.plan.update"
 	ActionTaskPlanDelete = "task.plan.delete"
 
-	ActionTaskSessionList   = "task.session.list"
-	ActionTaskSessionResume = "task.session.resume"
-	ActionTaskSessionStatus = "task.session.status"
+	ActionTaskSessionList    = "task.session.list"
+	ActionTaskSessionResume  = "task.session.resume"
+	ActionTaskSessionStatus  = "task.session.status"
+	ActionTaskSessionPrepare = "task.session.prepare"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"

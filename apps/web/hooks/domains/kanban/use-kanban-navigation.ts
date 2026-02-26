@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { linkToSession } from "@/lib/links";
+import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 
 type NavigationOptions = {
@@ -16,6 +17,42 @@ type NavigationOptions = {
   setTaskSessionAvailability: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
 
+async function fetchLatestSession(
+  taskId: string,
+  setAvailability: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
+): Promise<string | null> {
+  const client = getWebSocketClient();
+  if (!client) return null;
+  try {
+    const response = await client.request<{ sessions: Array<{ id: string }> }>(
+      "task.session.list",
+      { task_id: taskId },
+      10000,
+    );
+    setAvailability((prev) => ({ ...prev, [taskId]: response.sessions.length > 0 }));
+    return response.sessions[0]?.id ?? null;
+  } catch (error) {
+    console.error("Failed to load task sessions:", error);
+    return null;
+  }
+}
+
+async function preparePRSession(taskId: string): Promise<string | null> {
+  const client = getWebSocketClient();
+  if (!client) return null;
+  try {
+    const response = await client.request<{ session_id: string }>(
+      "task.session.prepare",
+      { task_id: taskId },
+      15000,
+    );
+    return response.session_id ?? null;
+  } catch (error) {
+    console.error("Failed to prepare session for PR task:", error);
+    return null;
+  }
+}
+
 export function useKanbanNavigation({
   enablePreviewOnClick,
   isMobile,
@@ -26,91 +63,53 @@ export function useKanbanNavigation({
   setTaskSessionAvailability,
 }: NavigationOptions) {
   const router = useRouter();
+  const taskPRs = useAppStore((s) => s.taskPRs.byTaskId);
 
-  // Fetch latest session ID for a task
   const fetchLatestSessionId = useCallback(
-    async (taskId: string) => {
-      const client = getWebSocketClient();
-      if (!client) return null;
-      try {
-        const response = await client.request<{ sessions: Array<{ id: string }> }>(
-          "task.session.list",
-          { task_id: taskId },
-          10000,
-        );
-        setTaskSessionAvailability((prev) => ({
-          ...prev,
-          [taskId]: response.sessions.length > 0,
-        }));
-        return response.sessions[0]?.id ?? null;
-      } catch (error) {
-        console.error("Failed to load task sessions:", error);
-        return null;
-      }
-    },
+    (taskId: string) => fetchLatestSession(taskId, setTaskSessionAvailability),
     [setTaskSessionAvailability],
   );
 
-  // Open task (always navigates, opens dialog if no session)
-  const handleOpenTask = useCallback(
-    async (task: Task) => {
-      const latestSessionId = await fetchLatestSessionId(task.id);
-      if (!latestSessionId) {
-        setEditingTask(task);
-        setIsDialogOpen(true);
-        return;
-      }
-      if (onOpenTask) {
-        onOpenTask(task, latestSessionId);
-      } else {
-        router.push(linkToSession(latestSessionId));
-      }
+  const navigateToSession = useCallback(
+    (task: Task, sessionId: string) => {
+      if (onOpenTask) onOpenTask(task, sessionId);
+      else router.push(linkToSession(sessionId));
     },
-    [fetchLatestSessionId, onOpenTask, router, setEditingTask, setIsDialogOpen],
+    [onOpenTask, router],
   );
 
-  // Handle card click (preview or navigate based on settings)
+  const handleNoSession = useCallback(
+    async (task: Task) => {
+      if (taskPRs[task.id]) {
+        const sessionId = await preparePRSession(task.id);
+        if (sessionId) {
+          router.push(linkToSession(sessionId));
+          return;
+        }
+      }
+      setEditingTask(task);
+      setIsDialogOpen(true);
+    },
+    [taskPRs, router, setEditingTask, setIsDialogOpen],
+  );
+
+  const handleOpenTask = useCallback(
+    async (task: Task) => {
+      const sessionId = await fetchLatestSessionId(task.id);
+      if (!sessionId) return handleNoSession(task);
+      navigateToSession(task, sessionId);
+    },
+    [fetchLatestSessionId, handleNoSession, navigateToSession],
+  );
+
   const handleCardClick = useCallback(
     async (task: Task) => {
-      // On mobile, always navigate to task (no preview panel)
-      if (isMobile) {
-        const latestSessionId = await fetchLatestSessionId(task.id);
-        if (!latestSessionId) {
-          setEditingTask(task);
-          setIsDialogOpen(true);
-          return;
-        }
-
-        if (onOpenTask) {
-          onOpenTask(task, latestSessionId);
-        } else {
-          router.push(linkToSession(latestSessionId));
-        }
-        return;
-      }
-
-      // Desktop/tablet: preview or navigate based on settings
-      const shouldOpenPreview = enablePreviewOnClick;
-
-      if (shouldOpenPreview) {
-        // Preview mode - just call the preview handler without fetching session
-        if (onPreviewTask) {
-          onPreviewTask(task);
-        }
-      } else {
-        // Navigate mode - fetch session and navigate
-        const latestSessionId = await fetchLatestSessionId(task.id);
-        if (!latestSessionId) {
-          setEditingTask(task);
-          setIsDialogOpen(true);
-          return;
-        }
-
-        if (onOpenTask) {
-          onOpenTask(task, latestSessionId);
-        } else {
-          router.push(linkToSession(latestSessionId));
-        }
+      if (isMobile || !enablePreviewOnClick) {
+        const sessionId = await fetchLatestSessionId(task.id);
+        if (!sessionId) return handleNoSession(task);
+        navigateToSession(task, sessionId);
+      } else if (onPreviewTask) {
+        onPreviewTask(task);
       }
     },
     [
@@ -118,16 +117,10 @@ export function useKanbanNavigation({
       enablePreviewOnClick,
       onPreviewTask,
       fetchLatestSessionId,
-      onOpenTask,
-      router,
-      setEditingTask,
-      setIsDialogOpen,
+      handleNoSession,
+      navigateToSession,
     ],
   );
 
-  return {
-    handleOpenTask,
-    handleCardClick,
-    fetchLatestSessionId,
-  };
+  return { handleOpenTask, handleCardClick, fetchLatestSessionId };
 }

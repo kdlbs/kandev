@@ -131,12 +131,14 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 		Description:    description,
 		Repositories:   repositories,
 		Metadata: map[string]interface{}{
-			"review_watch_id": evt.ReviewWatchID,
-			"pr_number":       pr.Number,
-			"pr_url":          pr.HTMLURL,
-			"pr_repo":         repoSlug,
-			"pr_author":       pr.AuthorLogin,
-			"pr_branch":       pr.HeadBranch,
+			"review_watch_id":     evt.ReviewWatchID,
+			"pr_number":           pr.Number,
+			"pr_url":              pr.HTMLURL,
+			"pr_repo":             repoSlug,
+			"pr_author":           pr.AuthorLogin,
+			"pr_branch":           pr.HeadBranch,
+			"agent_profile_id":    evt.AgentProfileID,
+			"executor_profile_id": evt.ExecutorProfileID,
 		},
 	})
 	if err != nil {

@@ -38,6 +38,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionPermissionRespond, h.wsRespondToPermission)
 	d.RegisterFunc(ws.ActionTaskSessionResume, h.wsResumeTaskSession)
 	d.RegisterFunc(ws.ActionTaskSessionStatus, h.wsGetTaskSessionStatus)
+	d.RegisterFunc(ws.ActionTaskSessionPrepare, h.wsPrepareTaskSession)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 }
 
@@ -220,6 +221,34 @@ func (h *Handlers) wsResumeTaskSession(ctx context.Context, msg *ws.Message) (*w
 		resp.WorktreeBranch = &execution.WorktreeBranch
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsPrepareTaskSessionRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+type wsPrepareTaskSessionResponse struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *Handlers) wsPrepareTaskSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsPrepareTaskSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	sessionID, err := h.service.PrepareTaskSession(ctx, req.TaskID, "", "", "", "", true)
+	if err != nil {
+		h.logger.Error("failed to prepare task session",
+			zap.String("task_id", req.TaskID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to prepare session: "+err.Error(), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wsPrepareTaskSessionResponse{SessionID: sessionID})
 }
 
 type wsStopTaskRequest struct {
