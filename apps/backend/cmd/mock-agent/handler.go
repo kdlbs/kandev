@@ -44,7 +44,7 @@ func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model s
 	customResult := false
 
 	switch {
-	case strings.EqualFold(prompt, "all"):
+	case strings.EqualFold(prompt, "all") || strings.EqualFold(prompt, "/all"):
 		emitAllTypes(enc, scanner, model)
 	case strings.EqualFold(prompt, "/error"):
 		emitError(enc, model)
@@ -67,6 +67,8 @@ func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model s
 		}
 	case strings.HasPrefix(prompt, "/todo"):
 		emitTodoSequence(enc, model)
+	case strings.EqualFold(prompt, "/mermaid"):
+		emitMermaidSequence(enc, model)
 	default:
 		emitRandomResponse(enc, scanner, prompt, model)
 	}

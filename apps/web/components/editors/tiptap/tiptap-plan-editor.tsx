@@ -14,8 +14,8 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
-import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { Markdown } from "tiptap-markdown";
+import { createCodeBlockWithMermaid } from "./tiptap-mermaid-extension";
 import { common, createLowlight } from "lowlight";
 import {
   CommentMark,
@@ -28,6 +28,7 @@ import { PlanSlashMenu } from "./plan-slash-menu";
 import { PlanBubbleMenu } from "./plan-bubble-menu";
 import { PlanDragHandle } from "./plan-drag-handle";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
+import { DOMParser as PmDOMParser } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
 
 export type { CommentForEditor };
@@ -52,6 +53,45 @@ type TipTapPlanEditorProps = {
 
 const lowlight = createLowlight(common);
 
+/** Regex matching common markdown syntax signals. */
+const MD_SIGNALS = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|```|\*\*|__|\[.+\]\(/m;
+
+/**
+ * Creates a paste handler that detects when pasted HTML is just a `<pre>`
+ * wrapper around text (e.g. copying raw markdown from GitHub) and re-parses
+ * the clipboard text/plain through the tiptap-markdown parser instead.
+ */
+function createPasteHandler(editorRef: React.RefObject<Editor | null>) {
+  return (_view: import("@tiptap/pm/view").EditorView, event: ClipboardEvent): boolean => {
+    const html = event.clipboardData?.getData("text/html");
+    const text = event.clipboardData?.getData("text/plain");
+    if (!html || !text) return false;
+
+    // Only intercept when the HTML is a bare <pre> wrapper (no rich content)
+    const trimmed = html.replace(/^<meta[^>]*>/, "").trim();
+    if (!trimmed.match(/^<pre[^>]*>[\s\S]*<\/pre>$/i)) return false;
+
+    // Must look like markdown
+    if (!MD_SIGNALS.test(text)) return false;
+
+    const ed = editorRef.current;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parser = (ed?.storage as any)?.markdown?.parser;
+    if (!parser) return false;
+
+    event.preventDefault();
+    const parsed: string = parser.parse(text);
+    const div = document.createElement("div");
+    div.innerHTML = parsed;
+    const slice = PmDOMParser.fromSchema(ed!.state.schema).parseSlice(div, {
+      preserveWhitespace: true,
+    });
+    const { from, to } = ed!.state.selection;
+    ed!.view.dispatch(ed!.state.tr.replaceRange(from, to, slice));
+    return true;
+  };
+}
+
 /** Build the TipTap editor extensions array. */
 function buildEditorExtensions(
   placeholder: string,
@@ -60,7 +100,7 @@ function buildEditorExtensions(
 ) {
   return [
     StarterKit.configure({ codeBlock: false }),
-    CodeBlockLowlight.configure({ lowlight }),
+    createCodeBlockWithMermaid(lowlight),
     Markdown.configure({ html: true, transformPastedText: true, transformCopiedText: true }),
     Placeholder.configure({ placeholder }),
     Link.configure({ openOnClick: false }),
@@ -225,18 +265,30 @@ function useCommentClickHandler(
   }, [wrapperRef, onCommentClickRef]);
 }
 
-export function TipTapPlanEditor({
-  value,
-  onChange,
-  placeholder = "Start typing...",
-  onSelectionChange,
-  comments = [],
-  onCommentClick,
-  onCommentDeleted,
-  onEditorReady,
-}: TipTapPlanEditorProps) {
-  const { resolvedTheme } = useTheme();
-  const wrapperRef = useRef<HTMLDivElement>(null);
+type PlanEditorState = {
+  editor: Editor | null;
+  editorRef: React.RefObject<Editor | null>;
+  onSelectionChangeRef: React.RefObject<((sel: TextSelection | null) => void) | undefined>;
+  onCommentClickRef: React.RefObject<
+    ((id: string, pos: { x: number; y: number }) => void) | undefined
+  >;
+  isReady: boolean;
+  slash: ReturnType<typeof useSlashMenu>;
+};
+
+/** Hook encapsulating TipTap editor setup, extensions, and lifecycle effects. */
+function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
+  const {
+    value,
+    onChange,
+    placeholder = "Start typing...",
+    onSelectionChange,
+    comments = [],
+    onCommentClick,
+    onCommentDeleted,
+    onEditorReady,
+  } = props;
+
   const editorRef = useRef<ReturnType<typeof useEditor>>(null);
   const onChangeRef = useRef(onChange);
   const onSelectionChangeRef = useRef(onSelectionChange);
@@ -246,6 +298,9 @@ export function TipTapPlanEditor({
   const [isReady, setIsReady] = useState(false);
 
   const slash = useSlashMenu();
+  /* eslint-disable react-hooks/refs -- createPasteHandler reads ref for deferred access in event handler, not during render */
+  const pasteHandler = useMemo(() => createPasteHandler(editorRef), []);
+  /* eslint-enable react-hooks/refs */
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -278,7 +333,10 @@ export function TipTapPlanEditor({
     immediatelyRender: false,
     extensions,
     content: value,
-    editorProps: { attributes: { class: "tiptap-plan-editor", spellcheck: "false" } },
+    editorProps: {
+      attributes: { class: "tiptap-plan-editor", spellcheck: "false" },
+      handlePaste: pasteHandler,
+    },
     onUpdate: ({ editor: ed }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const md = (ed.storage as any).markdown?.getMarkdown?.() as string | undefined;
@@ -294,15 +352,23 @@ export function TipTapPlanEditor({
     editorRef.current = editor;
   }, [editor]);
 
-  // Re-hydrate comment marks when comments change or editor becomes ready
   useEffect(() => {
     if (!editor || !isReady) return;
     try {
       rehydrateCommentMarks(editor, comments);
     } catch {
-      // Silently ignore — editor may be in a transitional state
+      /* editor may be transitional */
     }
   }, [comments, editor, isReady]);
+
+  return { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash };
+}
+
+export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
+  const { resolvedTheme } = useTheme();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash } =
+    usePlanEditor(props);
 
   useCommentClickHandler(wrapperRef, onCommentClickRef);
   useCommentShortcut(wrapperRef, editorRef, onSelectionChangeRef);

@@ -2,8 +2,10 @@
 
 import { useCallback, useState } from "react";
 import { IconX, IconMessageQuestion } from "@tabler/icons-react";
+import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
 import { getBackendConfig } from "@/lib/config";
+import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type {
   Message,
   ClarificationRequestMetadata,
@@ -227,7 +229,11 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
       <div className="pr-6">
         <div className="flex items-start gap-2 mb-1">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-foreground">{question.prompt}</p>
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-1 prose-p:leading-relaxed prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-headings:text-foreground prose-headings:font-bold prose-strong:text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+              {question.prompt}
+            </ReactMarkdown>
+          </div>
         </div>
         <ClarificationOptions
           question={question}

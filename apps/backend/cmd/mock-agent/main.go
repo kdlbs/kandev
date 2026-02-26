@@ -81,6 +81,7 @@ func handleControlRequest(enc *json.Encoder, msg IncomingMessage) {
 				RequestID: msg.RequestID,
 				Response: &InitializeResponse{
 					Commands: []Command{
+						{Name: "all", Description: "Demo all message types"},
 						{Name: "error", Description: "Simulate an error result"},
 						{Name: "slow", Description: "Random response with slow delays", ArgumentHint: "<duration e.g. 5s, 30s, 2m>"},
 						{Name: "thinking", Description: "Extended thinking/reasoning blocks"},
@@ -88,8 +89,10 @@ func handleControlRequest(enc *json.Encoder, msg IncomingMessage) {
 						{Name: "tool:edit", Description: "Single file edit (with permission)"},
 						{Name: "tool:exec", Description: "Single shell command (with permission)"},
 						{Name: "tool:search", Description: "Single code search"},
+						{Name: "tool:webfetch", Description: "Single web fetch"},
 						{Name: "subagent", Description: "Subagent Task with nested child messages"},
 						{Name: "todo", Description: "Todo management sequence"},
+						{Name: "mermaid", Description: "Rich markdown with mermaid diagrams"},
 						{Name: "e2e:simple-message", Description: "E2E: text only, fixed timing"},
 						{Name: "e2e:read-and-edit", Description: "E2E: read + edit + text"},
 						{Name: "e2e:permission-flow", Description: "E2E: tool requiring permission"},
