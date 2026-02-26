@@ -138,7 +138,7 @@ func TestStartCreatedSession_WrongTask(t *testing.T) {
 	// Session belongs to "task-other", not "task1"
 	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCreated)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt")
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false)
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
 	}
@@ -150,7 +150,7 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt")
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
 	}
