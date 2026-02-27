@@ -2,6 +2,24 @@
 
 All notable changes to Kandev.
 
+## 0.9 - 2026-02-27
+
+### Bug Fixes
+
+- release notes button not visible on new database ([#299](https://github.com/kdlbs/kandev/pull/299))
+- clear MCP pending requests on session transitions ([#296](https://github.com/kdlbs/kandev/pull/296))
+
+### Features
+
+- release notes ([#298](https://github.com/kdlbs/kandev/pull/298))
+- improve task launch ([#297](https://github.com/kdlbs/kandev/pull/297))
+
+## 0.8 - 2026-02-26
+
+### Features
+
+- restore correct scroll position after layout switch ([#295](https://github.com/kdlbs/kandev/pull/295))
+
 ## 0.7 - 2026-02-26
 
 ### Bug Fixes
