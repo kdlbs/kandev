@@ -55,6 +55,19 @@ function extractVersionNotes(changelog, version) {
   return { date, notes };
 }
 
+function findLatestVersionInChangelog(changelog) {
+  const headerPattern = /^## (\d[\d.]+)(?:\s*-\s*(\S+))?\s*$/gm;
+  let match;
+  while ((match = headerPattern.exec(changelog)) !== null) {
+    const version = match[1];
+    const extracted = extractVersionNotes(changelog, version);
+    if (extracted && extracted.notes) {
+      return { version, ...extracted };
+    }
+  }
+  return null;
+}
+
 function main() {
   mkdirSync(OUTPUT_DIR, { recursive: true });
   const version = getVersion();
@@ -75,9 +88,16 @@ function main() {
   }
 
   const extracted = extractVersionNotes(changelog, version);
-  if (!extracted) {
-    writeFileSync(OUTPUT_FILE, JSON.stringify({ version, date: "", notes: "" }, null, 2) + "\n");
-    console.log(`[release-notes] version ${version} not found in CHANGELOG.md — wrote empty notes`);
+  if (!extracted || !extracted.notes) {
+    // Current version has no changelog entry yet — fall back to the most recent released version
+    const latest = findLatestVersionInChangelog(changelog);
+    if (latest) {
+      writeFileSync(OUTPUT_FILE, JSON.stringify({ version: latest.version, date: latest.date, notes: latest.notes }, null, 2) + "\n");
+      console.log(`[release-notes] version ${version} not in CHANGELOG.md — fell back to ${latest.version}`);
+    } else {
+      writeFileSync(OUTPUT_FILE, JSON.stringify({ version, date: "", notes: "" }, null, 2) + "\n");
+      console.log(`[release-notes] version ${version} not found in CHANGELOG.md — wrote empty notes`);
+    }
     return;
   }
 

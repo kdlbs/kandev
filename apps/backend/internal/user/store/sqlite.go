@@ -185,6 +185,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.UserID = userID
 	if settingsRaw == "" || settingsRaw == "{}" {
 		settings.RepositoryIDs = []string{}
+		settings.ShowReleaseNotification = true
+		settings.ReviewAutoMarkOnScroll = true
+		settings.ChatSubmitKey = "cmd_enter"
 		return settings, nil
 	}
 	var payload struct {
