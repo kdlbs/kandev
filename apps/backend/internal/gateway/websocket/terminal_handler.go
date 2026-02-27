@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1054,6 +1055,27 @@ func (h *TerminalHandler) setupUserShellPtyAccess(
 	return h.setupPtyAccessCommon(sessionID, processID, interactiveRunner, wsw, ptyWriter, getWriter)
 }
 
+// terminalResponsePattern matches terminal query responses that should not be replayed.
+// These are responses from the terminal emulator to queries sent by the shell, which
+// appear as PTY output and get captured in the ring buffer. On replay they render as
+// visible garbage text because they are response sequences, not display sequences.
+//
+// Matched sequences:
+//   - OSC 11 response: \x1b]11;rgb:XXXX/XXXX/XXXX ST (background color, ST = ESC\ or BEL)
+//   - DA1 response: \x1b[?<params>c (device attributes)
+//   - CPR response: \x1b[<row>;<col>R or \x1b[<row>R (cursor position report)
+var terminalResponsePattern = regexp.MustCompile(
+	`\x1b]11;rgb:[0-9a-fA-F/]+(?:\x1b\\|\x07)` + // OSC 11 (ESC\ or BEL terminator)
+		`|\x1b\[\?[0-9;]*c` + // DA1 response
+		`|\x1b\[\d+(?:;\d+)?R`, // CPR response
+)
+
+// stripTerminalResponses removes terminal query response sequences from data.
+// Used to clean buffered PTY output before replaying it on reconnect.
+func stripTerminalResponses(data []byte) []byte {
+	return terminalResponsePattern.ReplaceAll(data, nil)
+}
+
 // setupPtyAccessCommon is the shared implementation for setupPtyAccess and setupUserShellPtyAccess.
 // It gets a PTY writer via getWriter, sends buffered output, and sets up direct output.
 func (h *TerminalHandler) setupPtyAccessCommon(
@@ -1080,14 +1102,18 @@ func (h *TerminalHandler) setupPtyAccessCommon(
 			combined.WriteString(chunk.Data)
 		}
 		if combined.Len() > 0 {
+			cleaned := stripTerminalResponses(combined.Bytes())
 			h.logger.Debug("sending buffered output to terminal",
 				zap.String("session_id", sessionID),
 				zap.Int("chunks", len(chunks)),
-				zap.Int("total_bytes", combined.Len()))
-			if _, writeErr := wsw.Write(combined.Bytes()); writeErr != nil {
-				h.logger.Warn("failed to send buffered output",
-					zap.String("session_id", sessionID),
-					zap.Error(writeErr))
+				zap.Int("total_bytes", combined.Len()),
+				zap.Int("cleaned_bytes", len(cleaned)))
+			if len(cleaned) > 0 {
+				if _, writeErr := wsw.Write(cleaned); writeErr != nil {
+					h.logger.Warn("failed to send buffered output",
+						zap.String("session_id", sessionID),
+						zap.Error(writeErr))
+				}
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
 	"testing"
@@ -57,6 +58,89 @@ func TestCheckWebSocketOrigin(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("checkWebSocketOrigin(origin=%q, host=%q) = %v, want %v",
 					tt.origin, tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripTerminalResponses(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  []byte
+	}{
+		{
+			name:  "no sequences",
+			input: []byte("hello world\r\n$ "),
+			want:  []byte("hello world\r\n$ "),
+		},
+		{
+			name:  "empty input",
+			input: []byte{},
+			want:  []byte{},
+		},
+		{
+			name:  "OSC 11 response with ESC backslash",
+			input: []byte("\x1b]11;rgb:1f1f/1f1f/1f1f\x1b\\"),
+			want:  []byte{},
+		},
+		{
+			name:  "OSC 11 response with BEL",
+			input: []byte("\x1b]11;rgb:1f1f/1f1f/1f1f\x07"),
+			want:  []byte{},
+		},
+		{
+			name:  "DA1 response",
+			input: []byte("\x1b[?1;2c"),
+			want:  []byte{},
+		},
+		{
+			name:  "DA1 response with multiple params",
+			input: []byte("\x1b[?64;1;2;6;22c"),
+			want:  []byte{},
+		},
+		{
+			name:  "CPR response row;col",
+			input: []byte("\x1b[5;1R"),
+			want:  []byte{},
+		},
+		{
+			name:  "CPR response row only",
+			input: []byte("\x1b[1R"),
+			want:  []byte{},
+		},
+		{
+			name:  "only responses produces empty",
+			input: []byte("\x1b]11;rgb:1f1f/1f1f/1f1f\x1b\\\x1b[?1;2c\x1b[5;1R"),
+			want:  []byte{},
+		},
+		{
+			name:  "mixed content preserves normal output",
+			input: []byte("$ ls\r\nfile.txt\r\n\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[?1;2c$ "),
+			want:  []byte("$ ls\r\nfile.txt\r\n$ "),
+		},
+		{
+			name:  "sequences between normal text",
+			input: []byte("before\x1b[24;80Rafter"),
+			want:  []byte("beforeafter"),
+		},
+		{
+			name:  "multiple OSC 11 responses",
+			input: []byte("\x1b]11;rgb:1f1f/1f1f/1f1f\x1b\\\x1b]11;rgb:ffff/ffff/ffff\x07"),
+			want:  []byte{},
+		},
+		{
+			name:  "preserves other escape sequences",
+			input: []byte("\x1b[32mgreen\x1b[0m \x1b[?1;2c normal"),
+			want:  []byte("\x1b[32mgreen\x1b[0m  normal"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripTerminalResponses(tt.input)
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("stripTerminalResponses(%q)\n got: %q\nwant: %q", tt.input, got, tt.want)
 			}
 		})
 	}
