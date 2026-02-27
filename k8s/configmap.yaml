@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kandev-config
+  labels:
+    app: kandev
+data:
+  # Database — SQLite on the PV. Set KANDEV_DATABASE_DRIVER=postgres for production.
+  KANDEV_DATABASE_PATH: /data/kandev.db
+
+  # Disable Docker runtime (no Docker-in-Docker in K8s)
+  KANDEV_DOCKER_ENABLED: "false"
+
+  # Worktree storage on the PV
+  KANDEV_WORKTREE_BASEPATH: /data/worktrees
+
+  # Logging — auto-detects K8s and uses JSON format
+  KANDEV_LOG_LEVEL: info

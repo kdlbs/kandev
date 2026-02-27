@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kandev
+  labels:
+    app: kandev
+spec:
+  # SQLite is single-writer — use 1 replica. Switch to Postgres for horizontal scaling.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kandev
+  template:
+    metadata:
+      labels:
+        app: kandev
+    spec:
+      containers:
+        - name: kandev
+          image: kandev:latest
+          ports:
+            - name: backend
+              containerPort: 8080
+              protocol: TCP
+            - name: web
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kandev-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: backend
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: backend
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kandev-data

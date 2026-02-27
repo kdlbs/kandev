@@ -110,7 +110,7 @@ export async function runStart({
 
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
-  const dbPath = path.join(DATA_DIR, "kandev.db");
+  const dbPath = process.env.KANDEV_DATABASE_PATH || path.join(DATA_DIR, "kandev.db");
   const logLevel = debug ? "debug" : verbose ? "info" : "warn";
   const backendEnv = buildBackendEnv({
     ports,
