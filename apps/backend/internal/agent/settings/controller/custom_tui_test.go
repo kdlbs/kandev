@@ -7,13 +7,20 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 func newTestControllerWithRepo(t *testing.T) (*Controller, *registry.Registry) {
+	ctrl, reg, _ := newTestControllerWithRepoAndStore(t)
+	return ctrl, reg
+}
+
+func newTestControllerWithRepoAndStore(t *testing.T) (*Controller, *registry.Registry, store.Repository) {
 	t.Helper()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -34,7 +41,7 @@ func newTestControllerWithRepo(t *testing.T) (*Controller, *registry.Registry) {
 		modelCache:    modelfetcher.NewCache(),
 		logger:        log,
 	}
-	return ctrl, reg
+	return ctrl, reg, repo
 }
 
 func TestSlugify(t *testing.T) {
@@ -218,4 +225,95 @@ func TestDeleteAgent_UnregistersFromRegistry(t *testing.T) {
 	if reg.Exists("delete-me") {
 		t.Error("expected agent to be unregistered from registry after delete")
 	}
+}
+
+func TestUpdateProfile_AutoUpdatesNameWhenModelChanges(t *testing.T) {
+	ctrl, repo := setupProfileUpdateTest(t)
+	ctx := context.Background()
+
+	agent := &models.Agent{Name: "test-agent"}
+	if err := repo.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	profile, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: agent.ID,
+		Name:    "Model A Display",
+		Model:   "model-a",
+	})
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	// Update only the model (not the name)
+	newModel := "model-b"
+	updated, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
+		ID:    profile.ID,
+		Model: &newModel,
+	})
+	if err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+
+	if updated.Name != "Model B Display" {
+		t.Errorf("profile name = %q, want %q", updated.Name, "Model B Display")
+	}
+	if updated.Model != "model-b" {
+		t.Errorf("profile model = %q, want %q", updated.Model, "model-b")
+	}
+}
+
+func TestUpdateProfile_KeepsExplicitNameWhenProvided(t *testing.T) {
+	ctrl, repo := setupProfileUpdateTest(t)
+	ctx := context.Background()
+
+	agent := &models.Agent{Name: "test-agent"}
+	if err := repo.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	profile, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: agent.ID,
+		Name:    "Original Name",
+		Model:   "model-a",
+	})
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	// Update both model and name explicitly
+	newModel := "model-b"
+	newName := "My Custom Name"
+	updated, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
+		ID:    profile.ID,
+		Model: &newModel,
+		Name:  &newName,
+	})
+	if err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+
+	if updated.Name != "My Custom Name" {
+		t.Errorf("profile name = %q, want %q", updated.Name, "My Custom Name")
+	}
+}
+
+// setupProfileUpdateTest creates a controller with a test agent that has multiple models.
+func setupProfileUpdateTest(t *testing.T) (*Controller, store.Repository) {
+	t.Helper()
+	ctrl, reg, repo := newTestControllerWithRepoAndStore(t)
+	ta := &testAgent{
+		id:   "test-agent",
+		name: "test-agent",
+		modelList: &agents.ModelList{
+			Models: []agents.Model{
+				{ID: "model-a", Name: "Model A Display"},
+				{ID: "model-b", Name: "Model B Display"},
+			},
+		},
+	}
+	if err := reg.Register(ta); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	return ctrl, repo
 }

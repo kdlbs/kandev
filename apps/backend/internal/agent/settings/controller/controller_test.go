@@ -24,6 +24,7 @@ type testAgent struct {
 	runtime            *agents.RuntimeConfig
 	permissionSettings map[string]agents.PermissionSetting
 	logoData           []byte
+	modelList          *agents.ModelList
 }
 
 func (a *testAgent) ID() string          { return a.id }
@@ -42,6 +43,9 @@ func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, e
 func (a *testAgent) DefaultModel() string { return "" }
 
 func (a *testAgent) ListModels(ctx context.Context) (*agents.ModelList, error) {
+	if a.modelList != nil {
+		return a.modelList, nil
+	}
 	return &agents.ModelList{}, nil
 }
 

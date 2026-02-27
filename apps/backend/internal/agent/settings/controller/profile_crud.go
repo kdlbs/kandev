@@ -78,6 +78,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, ErrModelRequired
 		}
 		profile.Model = *req.Model
+		// Auto-update profile name when model changes and name wasn't explicitly provided
+		if req.Name == nil {
+			if newName := c.resolveProfileNameForModel(ctx, profile.AgentID, *req.Model); newName != "" {
+				profile.Name = newName
+			}
+		}
 	}
 	if req.AutoApprove != nil {
 		profile.AutoApprove = *req.AutoApprove
@@ -169,4 +175,25 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}
+}
+
+// resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),
+// and returns the display name for the given model ID. Returns empty string on failure.
+func (c *Controller) resolveProfileNameForModel(ctx context.Context, agentID, modelID string) string {
+	agent, err := c.repo.GetAgent(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	agentConfig, ok := c.agentRegistry.Get(agent.Name)
+	if !ok {
+		return ""
+	}
+
+	modelEntries, _ := c.fetchModelsWithCache(ctx, agentConfig)
+	for _, m := range modelEntries {
+		if m.ID == modelID {
+			return m.Name
+		}
+	}
+	return modelID // fallback to model ID if not found
 }
