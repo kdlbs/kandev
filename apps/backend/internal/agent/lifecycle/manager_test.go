@@ -206,8 +206,8 @@ func newTestManager() *Manager {
 	eventBus := &MockEventBus{}
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
-	// Pass nil for runtime and containerManager - tests don't need them
-	return NewManager(reg, eventBus, nil, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, log)
+	// Pass nil for runtime - tests don't need them
+	return NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, log)
 }
 
 func TestNewManager(t *testing.T) {

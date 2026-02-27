@@ -133,12 +133,17 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 	return result
 }
 
-// Stop stops the lifecycle manager
+// Stop stops the lifecycle manager and releases resources held by executors.
 func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
 
 	close(m.stopCh)
 	m.wg.Wait()
+
+	// Close executor backends that hold resources (e.g., Docker SDK client).
+	if m.executorRegistry != nil {
+		m.executorRegistry.CloseAll()
+	}
 
 	return nil
 }
@@ -183,8 +188,23 @@ func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string
 		return
 	}
 
+	// Get the Docker executor's ContainerManager from the registry.
+	var containerMgr *ContainerManager
+	if m.executorRegistry != nil {
+		if backend, berr := m.executorRegistry.GetBackend(executor.NameDocker); berr == nil {
+			if dockerExec, ok := backend.(*DockerExecutor); ok {
+				containerMgr = dockerExec.ContainerMgr()
+			}
+		}
+	}
+	if containerMgr == nil {
+		m.logger.Warn("docker container manager unavailable, cannot clean up container",
+			zap.String("container_id", containerID))
+		return
+	}
+
 	// Get container info to get exit code
-	info, err := m.containerManager.GetContainerInfo(ctx, containerID)
+	info, err := containerMgr.GetContainerInfo(ctx, containerID)
 	if err != nil {
 		m.logger.Warn("failed to get container info during cleanup",
 			zap.String("container_id", containerID),
@@ -200,7 +220,7 @@ func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string
 	_ = m.MarkCompleted(execution.ID, info.ExitCode, errorMsg)
 
 	// Remove the container
-	if err := m.containerManager.RemoveContainer(ctx, containerID, false); err != nil {
+	if err := containerMgr.RemoveContainer(ctx, containerID, false); err != nil {
 		m.logger.Warn("failed to remove container during cleanup",
 			zap.String("container_id", containerID),
 			zap.Error(err))

@@ -94,6 +94,28 @@ func (r *ExecutorRegistry) HealthCheckAll(ctx context.Context) map[executor.Name
 	return results
 }
 
+// Closeable is an optional interface for executors that hold resources
+// requiring cleanup on shutdown (e.g., Docker SDK client connections).
+type Closeable interface {
+	Close() error
+}
+
+// CloseAll closes all registered backends that implement Closeable.
+func (r *ExecutorRegistry) CloseAll() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for name, rt := range r.backends {
+		if closer, ok := rt.(Closeable); ok {
+			if err := closer.Close(); err != nil {
+				r.logger.Warn("failed to close runtime",
+					zap.String("runtime", string(name)),
+					zap.Error(err))
+			}
+		}
+	}
+}
+
 // RecoverAll recovers instances from all registered runtimes.
 // Returns all recovered instances and any error encountered.
 // If multiple runtimes fail, only the last error is returned.

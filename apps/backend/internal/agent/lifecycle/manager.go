@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,13 +47,12 @@ type Manager struct {
 	executorFallbackPolicy ExecutorFallbackPolicy
 
 	// Refactored components for separation of concerns
-	executionStore   *ExecutionStore        // Thread-safe execution tracking
-	commandBuilder   *CommandBuilder        // Builds agent commands from registry config
-	sessionManager   *SessionManager        // Handles ACP session initialization
-	streamManager    *StreamManager         // Manages WebSocket streams
-	eventPublisher   *EventPublisher        // Publishes lifecycle events
-	containerManager *ContainerManager      // Manages Docker containers (optional, nil for non-Docker runtimes)
-	historyManager   *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
+	executionStore *ExecutionStore        // Thread-safe execution tracking
+	commandBuilder *CommandBuilder        // Builds agent commands from registry config
+	sessionManager *SessionManager        // Handles ACP session initialization
+	streamManager  *StreamManager         // Manages WebSocket streams
+	eventPublisher *EventPublisher        // Publishes lifecycle events
+	historyManager *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
 
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider WorkspaceInfoProvider
@@ -76,13 +77,11 @@ type Manager struct {
 
 // NewManager creates a new lifecycle manager.
 // The executorRegistry manages multiple runtimes (Docker, Standalone, etc.) for task-specific execution.
-// The containerManager parameter is optional and used for Docker cleanup (pass nil for non-Docker runtimes).
 // The fallbackPolicy controls behavior when a requested runtime is unavailable.
 func NewManager(
 	reg *registry.Registry,
 	eventBus bus.EventBus,
 	executorRegistry *ExecutorRegistry,
-	containerManager *ContainerManager,
 	credsMgr CredentialsManager,
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
@@ -125,7 +124,6 @@ func NewManager(
 		commandBuilder:           commandBuilder,
 		sessionManager:           sessionManager,
 		eventPublisher:           eventPublisher,
-		containerManager:         containerManager,
 		historyManager:           historyManager,
 		remoteStatusPollInterval: 60 * time.Second,
 		remoteStatusBySession:    make(map[string]*RemoteStatus),
@@ -208,4 +206,23 @@ func (m *Manager) SetBootMessageService(svc BootMessageService) {
 // SetPreparerRegistry sets the registry of environment preparers.
 func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 	m.preparerRegistry = registry
+}
+
+// DockerClientProvider returns a function that lazily resolves the Docker client
+// from the Docker executor in the registry. Returns nil if Docker is unavailable.
+func (m *Manager) DockerClientProvider() func() *docker.Client {
+	return func() *docker.Client {
+		if m.executorRegistry == nil {
+			return nil
+		}
+		backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
+		if err != nil {
+			return nil
+		}
+		dockerExec, ok := backend.(*DockerExecutor)
+		if !ok {
+			return nil
+		}
+		return dockerExec.Client()
+	}
 }

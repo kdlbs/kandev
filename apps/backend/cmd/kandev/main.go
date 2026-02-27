@@ -28,7 +28,6 @@ import (
 	githubpkg "github.com/kandev/kandev/internal/github"
 
 	// Agent infrastructure
-	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -170,13 +169,7 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	addCleanup(cleanup)
 	eventBus := eventBusProvider.Bus
 
-	// 5. Initialize Docker client
-	dockerClient := initDockerClient(ctx, cfg, log)
-	if dockerClient != nil {
-		defer func() { _ = dockerClient.Close() }()
-	}
-
-	return startServices(ctx, cfg, log, addCleanup, eventBus, dockerClient, runCleanups)
+	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups)
 }
 
 // startServices initializes task-level services and all downstream infrastructure.
@@ -186,7 +179,6 @@ func startServices( //nolint:cyclop
 	log *logger.Logger,
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
-	dockerClient *docker.Client,
 	runCleanups func(),
 ) bool {
 	// ============================================
@@ -242,7 +234,7 @@ func startServices( //nolint:cyclop
 		}()
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dockerClient, dbPool, repos, services, agentSettingsController, agentRegistry, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -253,7 +245,6 @@ func startAgentInfrastructure(
 	log *logger.Logger,
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
-	dockerClient *docker.Client,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -264,7 +255,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, dockerClient, repos.AgentSettings, agentRegistry, repos.Secrets)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, repos.Secrets)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -321,7 +312,7 @@ func startAgentInfrastructure(
 		log.Info("GitHub poller started")
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, dockerClient, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, runCleanups)
 }
 
@@ -332,7 +323,6 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
-	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -374,7 +364,7 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server := buildHTTPServer(cfg, log, gateway, dockerClient, repos, services, agentSettingsController,
+	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry)
 
 	port := cfg.Server.Port
@@ -403,7 +393,6 @@ func buildHTTPServer(
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
-	dockerClient *docker.Client,
 	repos *Repositories,
 	services *Services,
 	agentSettingsController *agentsettingscontroller.Controller,
@@ -424,7 +413,6 @@ func buildHTTPServer(
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
-		dockerClient:            dockerClient,
 		taskSvc:                 services.Task,
 		taskRepo:                repos.Task,
 		analyticsRepo:           repos.Analytics,
