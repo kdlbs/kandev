@@ -33,24 +33,38 @@ type stopContainerRequest struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
-// RegisterDockerRoutes registers Docker management HTTP routes on the given router.
-func RegisterDockerRoutes(router *gin.Engine, dockerClient *Client, log *logger.Logger) {
-	if dockerClient == nil {
-		log.Debug("Docker client is nil, skipping Docker route registration")
-		return
-	}
+// ClientProvider lazily resolves the Docker client. Returns nil if Docker is unavailable.
+type ClientProvider func() *Client
 
+// RegisterDockerRoutes registers Docker management HTTP routes on the given router.
+// The clientProvider lazily resolves the Docker client on each request.
+func RegisterDockerRoutes(router *gin.Engine, clientProvider ClientProvider, log *logger.Logger) {
 	api := router.Group("/api/v1/docker")
-	api.POST("/build", handleBuildImage(dockerClient, log))
-	api.GET("/containers", handleListContainers(dockerClient, log))
-	api.POST("/containers/:id/stop", handleStopContainer(dockerClient, log))
-	api.DELETE("/containers/:id", handleRemoveContainer(dockerClient, log))
+	api.POST("/build", handleBuildImage(clientProvider, log))
+	api.GET("/containers", handleListContainers(clientProvider, log))
+	api.POST("/containers/:id/stop", handleStopContainer(clientProvider, log))
+	api.DELETE("/containers/:id", handleRemoveContainer(clientProvider, log))
+}
+
+// requireDocker resolves the Docker client and returns 503 if unavailable.
+func requireDocker(c *gin.Context, clientProvider ClientProvider) *Client {
+	client := clientProvider()
+	if client == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Docker is not available"})
+		return nil
+	}
+	return client
 }
 
 // handleBuildImage handles POST /api/v1/docker/build.
 // It streams the Docker build output as JSON lines to the client.
-func handleBuildImage(dockerClient *Client, log *logger.Logger) gin.HandlerFunc {
+func handleBuildImage(clientProvider ClientProvider, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		dockerClient := requireDocker(c, clientProvider)
+		if dockerClient == nil {
+			return
+		}
+
 		var req buildImageRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
@@ -99,8 +113,13 @@ func streamBuildOutput(c *gin.Context, reader interface{ Read([]byte) (int, erro
 
 // handleListContainers handles GET /api/v1/docker/containers.
 // Supports optional query params: image, labels (comma-separated key=value pairs).
-func handleListContainers(dockerClient *Client, log *logger.Logger) gin.HandlerFunc {
+func handleListContainers(clientProvider ClientProvider, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		dockerClient := requireDocker(c, clientProvider)
+		if dockerClient == nil {
+			return
+		}
+
 		labels := parseLabelsQuery(c)
 		addImageFilter(c, labels)
 
@@ -174,8 +193,13 @@ func addImageFilter(c *gin.Context, labels map[string]string) {
 }
 
 // handleStopContainer handles POST /api/v1/docker/containers/:id/stop.
-func handleStopContainer(dockerClient *Client, log *logger.Logger) gin.HandlerFunc {
+func handleStopContainer(clientProvider ClientProvider, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		dockerClient := requireDocker(c, clientProvider)
+		if dockerClient == nil {
+			return
+		}
+
 		containerID := c.Param("id")
 		if containerID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "container id is required"})
@@ -202,8 +226,13 @@ func handleStopContainer(dockerClient *Client, log *logger.Logger) gin.HandlerFu
 }
 
 // handleRemoveContainer handles DELETE /api/v1/docker/containers/:id.
-func handleRemoveContainer(dockerClient *Client, log *logger.Logger) gin.HandlerFunc {
+func handleRemoveContainer(clientProvider ClientProvider, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		dockerClient := requireDocker(c, clientProvider)
+		if dockerClient == nil {
+			return
+		}
+
 		containerID := c.Param("id")
 		if containerID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "container id is required"})

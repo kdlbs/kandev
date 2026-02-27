@@ -17,7 +17,6 @@ import (
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/clarification"
-	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
@@ -43,23 +42,6 @@ import (
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
-
-// initDockerClient initializes the Docker client and verifies connectivity.
-// Returns nil if Docker is unavailable or the connection check fails.
-func initDockerClient(ctx context.Context, cfg *config.Config, log *logger.Logger) *docker.Client {
-	dockerClient, err := docker.NewClient(cfg.Docker, log)
-	if err != nil {
-		log.Debug("Failed to initialize Docker client - agent features will be disabled", zap.Error(err))
-		return nil
-	}
-	if err := dockerClient.Ping(ctx); err != nil {
-		log.Debug("Docker daemon not available - agent features will be disabled", zap.Error(err))
-		_ = dockerClient.Close()
-		return nil
-	}
-	log.Info("Connected to Docker daemon")
-	return dockerClient
-}
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
@@ -265,7 +247,6 @@ func newGitHubTaskPRUpdatedHandler(gateway *gateways.Gateway, log *logger.Logger
 type routeParams struct {
 	router                  *gin.Engine
 	gateway                 *gateways.Gateway
-	dockerClient            *docker.Client
 	taskSvc                 *taskservice.Service
 	taskRepo                *sqliterepo.Repository
 	analyticsRepo           analyticsrepository.Repository
@@ -363,7 +344,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered GitHub handlers (HTTP + WebSocket)")
 	}
 
-	docker.RegisterDockerRoutes(p.router, p.dockerClient, p.log)
+	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)

@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -41,35 +42,85 @@ func getMetadataBool(metadata map[string]interface{}, key string) bool {
 }
 
 // DockerExecutor implements Runtime for Docker-based agent execution.
+// The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
-	containerMgr *ContainerManager
+	cfg    config.DockerConfig
+	logger *logger.Logger
+
+	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
+	// Override in tests to simulate failures.
+	newClientFunc func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
+
+	// Lazy-initialized on first use via ensureClient().
+	// Uses mu + initialized instead of sync.Once so that transient Docker
+	// daemon failures can be retried on subsequent calls.
+	mu           sync.Mutex
+	initialized  bool
 	docker       *docker.Client
-	logger       *logger.Logger
+	containerMgr *ContainerManager
 }
 
 // NewDockerExecutor creates a new Docker runtime.
-func NewDockerExecutor(dockerClient *docker.Client, log *logger.Logger) *DockerExecutor {
+// The Docker client is NOT created here — it is initialized lazily
+// when CreateInstance is called.
+func NewDockerExecutor(cfg config.DockerConfig, log *logger.Logger) *DockerExecutor {
 	return &DockerExecutor{
-		containerMgr: NewContainerManager(dockerClient, "", log),
-		docker:       dockerClient,
-		logger:       log.WithFields(zap.String("runtime", "docker")),
+		cfg:           cfg,
+		logger:        log.WithFields(zap.String("runtime", "docker")),
+		newClientFunc: docker.NewClient,
 	}
+}
+
+// ensureClient lazily creates the Docker client and ContainerManager.
+// Unlike sync.Once, this retries on failure so transient Docker daemon
+// unavailability doesn't permanently disable the executor.
+func (r *DockerExecutor) ensureClient() (*docker.Client, *ContainerManager, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.initialized {
+		return r.docker, r.containerMgr, nil
+	}
+
+	cli, err := r.newClientFunc(r.cfg, r.logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create docker client: %w", err)
+	}
+
+	r.docker = cli
+	r.containerMgr = NewContainerManager(cli, "", r.logger)
+	r.initialized = true
+
+	return r.docker, r.containerMgr, nil
+}
+
+// Client returns the lazily-initialized Docker client, or nil if Docker is unavailable.
+func (r *DockerExecutor) Client() *docker.Client {
+	cli, _, _ := r.ensureClient()
+	return cli
+}
+
+// ContainerMgr returns the lazily-initialized ContainerManager, or nil if Docker is unavailable.
+func (r *DockerExecutor) ContainerMgr() *ContainerManager {
+	_, cm, _ := r.ensureClient()
+	return cm
 }
 
 func (r *DockerExecutor) Name() executor.Name {
 	return executor.NameDocker
 }
 
-func (r *DockerExecutor) HealthCheck(ctx context.Context) error {
-	// Check Docker is reachable by listing containers
-	_, err := r.docker.ListContainers(ctx, map[string]string{})
-	if err != nil {
-		return fmt.Errorf("docker not reachable: %w", err)
-	}
+func (r *DockerExecutor) HealthCheck(_ context.Context) error {
+	// No-op: Docker availability is checked lazily when CreateInstance is called.
 	return nil
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	dockerClient, containerMgr, err := r.ensureClient()
+	if err != nil {
+		return nil, fmt.Errorf("docker unavailable: %w", err)
+	}
+
 	// Extract runtime-specific values from metadata
 	mainRepoGitDir := getMetadataString(req.Metadata, MetadataKeyMainRepoGitDir)
 	worktreeID := getMetadataString(req.Metadata, MetadataKeyWorktreeID)
@@ -88,13 +139,13 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	}
 
 	// Use ContainerManager to launch container
-	containerID, client, err := r.containerMgr.LaunchContainer(ctx, containerCfg)
+	containerID, client, err := containerMgr.LaunchContainer(ctx, containerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
 	// Get container IP for logging
-	containerIP, _ := r.docker.GetContainerIP(ctx, containerID)
+	containerIP, _ := dockerClient.GetContainerIP(ctx, containerID)
 
 	// Build metadata
 	metadata := make(map[string]interface{})
@@ -127,11 +178,15 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil // No container to stop
 	}
 
-	var err error
+	dockerClient, _, err := r.ensureClient()
+	if err != nil {
+		return fmt.Errorf("docker unavailable: %w", err)
+	}
+
 	if force {
-		err = r.docker.KillContainer(ctx, instance.ContainerID, "SIGKILL")
+		err = dockerClient.KillContainer(ctx, instance.ContainerID, "SIGKILL")
 	} else {
-		err = r.docker.StopContainer(ctx, instance.ContainerID, 30*time.Second)
+		err = dockerClient.StopContainer(ctx, instance.ContainerID, 30*time.Second)
 	}
 
 	if err != nil {
@@ -141,89 +196,28 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	return nil
 }
 
-func (r *DockerExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
-	// Find containers with kandev.managed label
-	containers, err := r.docker.ListContainers(ctx, map[string]string{
-		"kandev.managed": "true",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
+func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+	// No-op: Docker client is initialized lazily on first use.
+	// If no session has used Docker yet, there's nothing to recover.
+	// Running containers from a previous backend process will be detected
+	// when the user navigates to that session (via EnsureWorkspaceExecutionForSession).
+	return nil, nil
+}
+
+// Close closes the Docker client if it was initialized.
+// Safe to call even if the client was never created.
+func (r *DockerExecutor) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.docker != nil {
+		err := r.docker.Close()
+		r.docker = nil
+		r.containerMgr = nil
+		r.initialized = false
+		return err
 	}
-
-	var recovered []*ExecutorInstance
-	for _, ctr := range containers {
-		// Only recover running containers
-		if ctr.State != "running" {
-			r.logger.Debug("skipping non-running container",
-				zap.String("container_id", ctr.ID),
-				zap.String("state", ctr.State))
-			continue
-		}
-
-		// Get container labels to extract instance info
-		labels, err := r.docker.GetContainerLabels(ctx, ctr.ID)
-		if err != nil {
-			r.logger.Warn("failed to get container labels",
-				zap.String("container_id", ctr.ID),
-				zap.Error(err))
-			continue
-		}
-
-		instanceID := labels["kandev.instance_id"]
-		taskID := labels["kandev.task_id"]
-		sessionID := labels["kandev.session_id"]
-		agentProfileID := labels["kandev.agent_profile_id"]
-
-		if instanceID == "" || taskID == "" {
-			r.logger.Warn("container missing required labels",
-				zap.String("container_id", ctr.ID))
-			continue
-		}
-
-		// Get container IP
-		containerIP, err := r.docker.GetContainerIP(ctx, ctr.ID)
-		if err != nil {
-			r.logger.Warn("failed to get container IP",
-				zap.String("container_id", ctr.ID),
-				zap.Error(err))
-			containerIP = "127.0.0.1"
-		}
-
-		// Query the control server to get the instance port
-		ctl := agentctl.NewControlClient(containerIP, AgentCtlPort, r.logger)
-		instanceInfo, err := ctl.GetInstance(ctx, instanceID)
-		if err != nil {
-			r.logger.Warn("failed to get instance info from container",
-				zap.String("container_id", ctr.ID),
-				zap.String("instance_id", instanceID),
-				zap.Error(err))
-			continue
-		}
-
-		client := agentctl.NewClient(containerIP, instanceInfo.Port, r.logger,
-			agentctl.WithExecutionID(instanceID),
-			agentctl.WithSessionID(sessionID))
-
-		recovered = append(recovered, &ExecutorInstance{
-			InstanceID:    instanceID,
-			TaskID:        taskID,
-			SessionID:     sessionID,
-			RuntimeName:   string(r.Name()),
-			Client:        client,
-			ContainerID:   ctr.ID,
-			ContainerIP:   containerIP,
-			WorkspacePath: "/workspace",
-			Metadata:      map[string]interface{}{"agent_profile_id": agentProfileID},
-		})
-
-		r.logger.Info("recovered docker instance",
-			zap.String("instance_id", instanceID),
-			zap.String("task_id", taskID),
-			zap.String("container_id", ctr.ID),
-			zap.Int("instance_port", instanceInfo.Port))
-	}
-
-	return recovered, nil
+	return nil
 }
 
 // GetInteractiveRunner returns nil for Docker runtime.

@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/credentials"
-	"github.com/kandev/kandev/internal/agent/docker"
 	agentexecutor "github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -26,7 +25,6 @@ func provideLifecycleManager(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
-	dockerClient *docker.Client,
 	agentSettingsRepo settingsstore.Repository,
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
@@ -58,15 +56,11 @@ func provideLifecycleManager(
 		zap.String("host", cfg.Agent.StandaloneHost),
 		zap.Int("port", cfg.Agent.StandalonePort))
 
-	// Register Docker runtime if enabled and Docker client is available
-	var containerMgr *lifecycle.ContainerManager
-	if cfg.Docker.Enabled && dockerClient != nil {
-		containerMgr = lifecycle.NewContainerManager(dockerClient, "", log)
-		dockerExec := lifecycle.NewDockerExecutor(dockerClient, log)
+	// Register Docker runtime if enabled (client is created lazily on first use)
+	if cfg.Docker.Enabled {
+		dockerExec := lifecycle.NewDockerExecutor(cfg.Docker, log)
 		executorRegistry.Register(dockerExec)
-		log.Info("Docker runtime registered")
-	} else if cfg.Docker.Enabled && dockerClient == nil {
-		log.Debug("Docker runtime enabled but Docker client not available")
+		log.Info("Docker runtime registered (lazy initialization)")
 	}
 
 	// Register Remote Docker runtime (always available, instances are created lazily per host)
@@ -97,7 +91,6 @@ func provideLifecycleManager(
 		agentRegistry,
 		eventBus,
 		executorRegistry,
-		containerMgr,
 		credsMgr,
 		profileResolver,
 		mcpService,
