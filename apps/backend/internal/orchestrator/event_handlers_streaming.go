@@ -380,6 +380,11 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		if session.WorkflowStepID != nil {
 			eventData["workflow_step_id"] = *session.WorkflowStepID
 		}
+		// Include session metadata (e.g. plan_mode set by workflow events).
+		// Key is "session_metadata" to avoid conflict with message-level "metadata".
+		if len(session.Metadata) > 0 {
+			eventData["session_metadata"] = session.Metadata
+		}
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 	}
 }

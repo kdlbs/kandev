@@ -744,6 +744,10 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		"workflow_step_id": stepID,
 		"new_state":        string(models.TaskSessionStateWaitingForInput),
 	}
+	// Include session metadata (e.g. plan_mode) so the frontend can react.
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && len(session.Metadata) > 0 {
+		eventData["session_metadata"] = session.Metadata
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",

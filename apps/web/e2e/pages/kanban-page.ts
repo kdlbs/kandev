@@ -23,4 +23,14 @@ export class KanbanPage {
       hasText: title,
     });
   }
+
+  columnByStepId(stepId: string): Locator {
+    return this.page.getByTestId(`kanban-column-${stepId}`);
+  }
+
+  taskCardInColumn(title: string, stepId: string): Locator {
+    return this.columnByStepId(stepId).locator('[data-testid^="task-card-"]', {
+      hasText: title,
+    });
+  }
 }

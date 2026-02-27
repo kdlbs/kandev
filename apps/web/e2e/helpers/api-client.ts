@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
 } from "../../lib/types/http";
+import type { Agent } from "../../lib/types/http-agents";
 
 // --- GitHub Mock Types ---
 
@@ -94,7 +95,15 @@ export class ApiClient {
   async createTask(
     workspaceId: string,
     title: string,
-    opts?: { description?: string; workflow_id?: string; workflow_step_id?: string },
+    opts?: {
+      description?: string;
+      workflow_id?: string;
+      workflow_step_id?: string;
+      /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
+      agent_profile_id?: string;
+      /** Repository IDs to associate with the task (required for agent execution). */
+      repository_ids?: string[];
+    },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
       workspace_id: workspaceId,
@@ -102,6 +111,39 @@ export class ApiClient {
       description: opts?.description ?? "",
       ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
       ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
+      ...(opts?.agent_profile_id ? { metadata: { agent_profile_id: opts.agent_profile_id } } : {}),
+      ...(opts?.repository_ids
+        ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
+        : {}),
+    });
+  }
+
+  async listAgents(): Promise<{ agents: Agent[]; total: number }> {
+    return this.request("GET", "/api/v1/agents");
+  }
+
+  async createTaskWithAgent(
+    workspaceId: string,
+    title: string,
+    agentProfileId: string,
+    opts?: {
+      description?: string;
+      workflow_id?: string;
+      workflow_step_id?: string;
+      repository_ids?: string[];
+    },
+  ): Promise<CreateTaskResponse> {
+    return this.request("POST", "/api/v1/tasks", {
+      workspace_id: workspaceId,
+      title,
+      description: opts?.description ?? "",
+      start_agent: true,
+      agent_profile_id: agentProfileId,
+      ...(opts?.workflow_id ? { workflow_id: opts.workflow_id } : {}),
+      ...(opts?.workflow_step_id ? { workflow_step_id: opts.workflow_step_id } : {}),
+      ...(opts?.repository_ids
+        ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
+        : {}),
     });
   }
 
@@ -117,11 +159,24 @@ export class ApiClient {
     workflowId: string,
     name: string,
     position: number,
-  ): Promise<{ step: { id: string } }> {
+  ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workflow/steps`, {
       workflow_id: workflowId,
       name,
       position,
+    });
+  }
+
+  async createRepository(
+    workspaceId: string,
+    localPath: string,
+    defaultBranch = "main",
+  ): Promise<{ id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
+      name: "E2E Repo",
+      source_type: "local",
+      local_path: localPath,
+      default_branch: defaultBranch,
     });
   }
 
@@ -138,6 +193,21 @@ export class ApiClient {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
     });
+  }
+
+  async updateWorkflowStep(
+    stepId: string,
+    updates: {
+      prompt?: string;
+      events?: {
+        on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+      };
+    },
+  ): Promise<void> {
+    await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
   }
 
   // --- GitHub Mock Control ---

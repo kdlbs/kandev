@@ -219,8 +219,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const splitDisabled =
     isCreatingTask ||
     !hasTitle ||
-    !hasRepositorySelection ||
-    !branch ||
+    (hasRepositorySelection && !branch) ||
     !agentProfileId ||
     missingCtx;
   const defaultDisabled = isSessionMode

@@ -18,6 +18,7 @@ export type BackendContext = {
   baseUrl: string;
   frontendPort: number;
   frontendUrl: string;
+  tmpDir: string;
 };
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
@@ -72,9 +73,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       fs.mkdirSync(repoCloneBase, { recursive: true });
 
       // Write a minimal .gitconfig so git doesn't prompt for identity
+      // and disable signing to avoid SSH/GPG key lookups in the isolated HOME.
       fs.writeFileSync(
         path.join(tmpDir, ".gitconfig"),
-        "[user]\n  name = E2E Test\n  email = e2e@test.local\n",
+        "[user]\n  name = E2E Test\n  email = e2e@test.local\n[commit]\n  gpgsign = false\n[tag]\n  gpgsign = false\n",
       );
 
       const backendEnv = {
@@ -132,14 +134,18 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       await waitForHealth(frontendUrl, HEALTH_TIMEOUT_MS);
 
       try {
-        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl });
+        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir });
       } finally {
         // Shutdown frontend first, then backend
         await killProcess(frontendProc);
         await killProcess(backendProc);
 
-        // Cleanup temp directory
-        fs.rmSync(tmpDir, { recursive: true, force: true });
+        // Cleanup temp directory — ignore errors (backend may still hold files briefly)
+        try {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch {
+          // Non-fatal: OS may not have released all file handles yet
+        }
       }
     },
     { scope: "worker", timeout: 60_000 },

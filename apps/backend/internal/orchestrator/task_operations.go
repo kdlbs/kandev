@@ -108,6 +108,20 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		}
 	}
 
+	// Fall back to the task's current workflow step when the caller didn't provide one.
+	// This ensures sessions created via the kanban card (which doesn't send workflow_step_id)
+	// inherit the task's step and participate in workflow events.
+	if workflowStepID == "" {
+		dbTask, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		} else if dbTask.WorkflowStepID != "" {
+			workflowStepID = dbTask.WorkflowStepID
+		}
+	}
+
 	// Create session entry in database
 	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
@@ -178,6 +192,13 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+
+		if planModeActive {
+			sess, sessErr := s.repo.GetTaskSession(ctx, execution.SessionID)
+			if sessErr == nil {
+				s.setSessionPlanMode(ctx, sess, true)
+			}
+		}
 	}
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
@@ -333,6 +354,16 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 	if execution.SessionID != "" {
 		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+
+		// Set plan mode in session metadata so the frontend can detect it.
+		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
+		// the session metadata is needed for the frontend to switch the layout.
+		if planModeActive {
+			session, err := s.repo.GetTaskSession(ctx, execution.SessionID)
+			if err == nil {
+				s.setSessionPlanMode(ctx, session, true)
+			}
+		}
 	}
 	if execution.WorktreeBranch != "" {
 		go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)

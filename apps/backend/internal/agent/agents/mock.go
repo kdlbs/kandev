@@ -46,8 +46,9 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 }
 
 func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Mock agent is always "available" when enabled (forced by settings controller)
-	return &DiscoveryResult{Available: false}, nil
+	// Mock agent is always "available" when enabled (forced by settings controller).
+	// SupportsMCP is true so plan mode workflow events work in E2E tests.
+	return &DiscoveryResult{Available: false, SupportsMCP: true}, nil
 }
 
 func (a *MockAgent) DefaultModel() string { return "mock-default" }

@@ -356,7 +356,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   );
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="task-sidebar">
       <PanelBody className="space-y-4 p-0">
         <TaskSwitcher
           tasks={displayTasks}

@@ -9,7 +9,7 @@ export default defineConfig({
   retries: CI ? 2 : 0,
   workers: CI ? 2 : undefined,
   timeout: 60_000,
-  reporter: CI ? "html" : "list",
+  reporter: CI ? [["html", { outputFolder: "./playwright-report" }]] : "list",
   outputDir: "./test-results",
 
   use: {

@@ -66,7 +66,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   if (sortedSteps.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0 mx-2">
+    <div data-testid="workflow-stepper" className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0 mx-2">
       {sortedSteps.map((step, index) => (
         <WorkflowStepItem
           key={step.id}
@@ -144,6 +144,8 @@ function WorkflowStepItem({
       <HoverCard openDelay={200} closeDelay={100}>
         <HoverCardTrigger asChild>
           <div
+            data-testid={`workflow-step-${step.name}`}
+            aria-current={isCurrent ? "step" : undefined}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
               isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
