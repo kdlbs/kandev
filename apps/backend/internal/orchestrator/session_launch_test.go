@@ -1,7 +1,10 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestResolveIntent(t *testing.T) {
@@ -109,5 +112,112 @@ func TestResolveIntent(t *testing.T) {
 				t.Errorf("ResolveIntent() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- launchRestoreWorkspace ---
+
+func TestLaunchRestoreWorkspace_MissingSessionID(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	_, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID: "task1",
+		Intent: IntentRestoreWorkspace,
+	})
+	if err == nil {
+		t.Fatal("expected error when session_id is empty")
+	}
+}
+
+func TestLaunchRestoreWorkspace_SessionNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	_, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task1",
+		Intent:    IntentRestoreWorkspace,
+		SessionID: "nonexistent",
+	})
+	if err == nil {
+		t.Fatal("expected error when session does not exist")
+	}
+}
+
+func TestLaunchRestoreWorkspace_WrongTask(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCompleted)
+
+	_, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task-wrong",
+		Intent:    IntentRestoreWorkspace,
+		SessionID: "session1",
+	})
+	if err == nil {
+		t.Fatal("expected error when session does not belong to task")
+	}
+}
+
+func TestLaunchRestoreWorkspace_Success(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+
+	resp, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task1",
+		Intent:    IntentRestoreWorkspace,
+		SessionID: "session1",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success=true")
+	}
+	if resp.SessionID != "session1" {
+		t.Errorf("expected session_id 'session1', got %q", resp.SessionID)
+	}
+	if resp.State != string(models.TaskSessionStateCompleted) {
+		t.Errorf("expected state %q, got %q", models.TaskSessionStateCompleted, resp.State)
+	}
+}
+
+func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	// Add worktree to the session
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID:             "wt1",
+		SessionID:      "session1",
+		WorktreeID:     "wid1",
+		RepositoryID:   "repo1",
+		WorktreePath:   "/tmp/worktrees/session1",
+		WorktreeBranch: "feature/test",
+	}); err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
+	resp, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:    "task1",
+		Intent:    IntentRestoreWorkspace,
+		SessionID: "session1",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/tmp/worktrees/session1" {
+		t.Errorf("expected worktree_path '/tmp/worktrees/session1', got %v", resp.WorktreePath)
+	}
+	if resp.WorktreeBranch == nil || *resp.WorktreeBranch != "feature/test" {
+		t.Errorf("expected worktree_branch 'feature/test', got %v", resp.WorktreeBranch)
 	}
 }

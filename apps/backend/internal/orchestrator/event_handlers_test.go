@@ -147,6 +147,9 @@ func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []exe
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
+	return nil
+}
 
 // --- Helpers ---
 

@@ -124,12 +124,6 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 	if req == nil {
 		return fmt.Errorf("request is nil")
 	}
-	if !getMetadataBool(req.Metadata, MetadataKeyRemoteReconnect) {
-		return nil
-	}
-	if strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyRemoteName)) == "" {
-		return fmt.Errorf("remote reconnect requested without sprite name")
-	}
 	return nil
 }
 
@@ -145,9 +139,13 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 
 	spriteName := spritesNamePrefix + req.InstanceID[:12]
 	client := sprites.New(token, sprites.WithDisableControl())
-	reconnectRequired := getMetadataBool(req.Metadata, MetadataKeyRemoteReconnect)
-	if reconnectName := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyRemoteName)); reconnectName != "" {
-		spriteName = reconnectName
+	reconnectRequired := req.PreviousExecutionID != ""
+	if reconnectRequired {
+		suffix := req.PreviousExecutionID
+		if len(suffix) > 12 {
+			suffix = suffix[:12]
+		}
+		spriteName = spritesNamePrefix + suffix
 	}
 
 	r.logger.Info("creating sprite instance",

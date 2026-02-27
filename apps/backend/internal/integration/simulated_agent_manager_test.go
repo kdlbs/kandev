@@ -418,3 +418,6 @@ func (s *SimulatedAgentManagerClient) PollRemoteStatusForRecords(ctx context.Con
 func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (s *SimulatedAgentManagerClient) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	return nil
+}

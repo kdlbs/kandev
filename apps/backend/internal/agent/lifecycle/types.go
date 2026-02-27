@@ -171,8 +171,9 @@ type LaunchRequest struct {
 	ModelOverride   string // If set, use this model instead of the profile's model
 
 	// Executor configuration - determines which runtime to use
-	ExecutorType   string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig map[string]string // Executor config (docker_host, git_token, etc.)
+	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -240,6 +241,12 @@ type WorkspaceInfo struct {
 	AgentProfileID string // Optional - agent profile for the task
 	AgentID        string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID   string // Agent's session ID for conversation resumption (from session metadata)
+
+	// Executor-aware fields for correct runtime selection and remote reconnection
+	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")
+	RuntimeName      string                 // Runtime name from ExecutorRunning record
+	AgentExecutionID string                 // Previous execution ID (for remote reconnect)
+	Metadata         map[string]interface{} // Additional metadata (reconnect flags)
 }
 
 // WorkspaceInfoProvider provides workspace information for tasks

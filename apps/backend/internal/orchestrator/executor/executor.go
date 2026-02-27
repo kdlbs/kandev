@@ -114,6 +114,11 @@ type AgentManagerClient interface {
 	// tracking store. Used when the agent process has exited but the execution entry
 	// was not cleaned up (e.g. prepared workspace where agent was never started).
 	CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error
+
+	// EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a
+	// session so that workspace operations (file tree, terminals, git) are accessible.
+	// Used for restoring workspace access on terminal-state sessions.
+	EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error
 }
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
@@ -150,20 +155,21 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID          string
-	SessionID       string
-	TaskTitle       string // Human-readable task title for semantic worktree naming
-	AgentProfileID  string
-	RepositoryURL   string
-	Branch          string
-	TaskDescription string // Task description to send via ACP prompt
-	Priority        int
-	Metadata        map[string]interface{}
-	Env             map[string]string
-	ACPSessionID    string            // ACP session ID to resume, if available
-	ModelOverride   string            // If set, use this model instead of the profile's model
-	ExecutorType    string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig  map[string]string // Executor config (docker_host, git_token, etc.)
+	TaskID              string
+	SessionID           string
+	TaskTitle           string // Human-readable task title for semantic worktree naming
+	AgentProfileID      string
+	RepositoryURL       string
+	Branch              string
+	TaskDescription     string // Task description to send via ACP prompt
+	Priority            int
+	Metadata            map[string]interface{}
+	Env                 map[string]string
+	ACPSessionID        string            // ACP session ID to resume, if available
+	ModelOverride       string            // If set, use this model instead of the profile's model
+	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
