@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+apps/backend/bin/
+apps/web/.next/
+apps/web/out/
+dist/
+
+# Dependencies (rebuilt in Docker)
+node_modules/
+apps/web/node_modules/
+apps/cli/node_modules/
+apps/packages/*/node_modules/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+
+# CI/CD
+.github/
+
+# Documentation and config not needed at build time
+docs/
+k8s/
+*.md
+!apps/web/src/**/*.md
+LICENSE
+
+# Test artifacts
+coverage/
+*.test.ts
+*.test.go
+**/*_test.go
+
+# Agent/Claude config
+.claude/
+.agents/
+CLAUDE.md
+AGENTS.md

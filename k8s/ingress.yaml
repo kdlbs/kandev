@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kandev
+  labels:
+    app: kandev
+  annotations:
+    # Adjust annotations for your ingress controller (nginx, traefik, etc.)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+spec:
+  rules:
+    - host: kandev.example.com
+      http:
+        paths:
+          # Backend API + WebSocket
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: kandev
+                port:
+                  name: backend
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: kandev
+                port:
+                  name: backend
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: kandev
+                port:
+                  name: backend
+          # Web UI (catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kandev
+                port:
+                  name: web

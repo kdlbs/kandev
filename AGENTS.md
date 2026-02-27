@@ -18,6 +18,8 @@ apps/
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
 - **Frontend**: Next.js (`cd apps && pnpm --filter @kandev/web dev|lint|typecheck`)
 - **UI**: Shadcn components via `@kandev/ui`
+- **GitHub repo**: `https://github.com/kdlbs/kandev`
+- **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
 ---
 
