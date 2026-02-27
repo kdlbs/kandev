@@ -68,19 +68,20 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// The RepositoryURL field contains a local filesystem path for the workspace
 	// If empty, the agent will run without a mounted workspace
 	launchReq := &lifecycle.LaunchRequest{
-		TaskID:          req.TaskID,
-		SessionID:       req.SessionID,
-		TaskTitle:       req.TaskTitle,
-		AgentProfileID:  req.AgentProfileID,
-		WorkspacePath:   req.RepositoryURL, // May be empty - lifecycle manager handles this
-		TaskDescription: req.TaskDescription,
-		Env:             req.Env,
-		ACPSessionID:    req.ACPSessionID,
-		Metadata:        req.Metadata,
-		ModelOverride:   req.ModelOverride,
-		ExecutorType:    req.ExecutorType,
-		ExecutorConfig:  req.ExecutorConfig,
-		SetupScript:     req.SetupScript,
+		TaskID:              req.TaskID,
+		SessionID:           req.SessionID,
+		TaskTitle:           req.TaskTitle,
+		AgentProfileID:      req.AgentProfileID,
+		WorkspacePath:       req.RepositoryURL, // May be empty - lifecycle manager handles this
+		TaskDescription:     req.TaskDescription,
+		Env:                 req.Env,
+		ACPSessionID:        req.ACPSessionID,
+		Metadata:            req.Metadata,
+		ModelOverride:       req.ModelOverride,
+		ExecutorType:        req.ExecutorType,
+		ExecutorConfig:      req.ExecutorConfig,
+		PreviousExecutionID: req.PreviousExecutionID,
+		SetupScript:         req.SetupScript,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
 		RepositoryID:         req.RepositoryID,
@@ -236,6 +237,11 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 
 func (a *lifecycleAdapter) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return a.mgr.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
+	return err
 }
 
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {

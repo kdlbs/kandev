@@ -10,6 +10,7 @@ import (
 
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
+	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
@@ -674,6 +675,103 @@ func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "not resumable") {
 		t.Fatalf("expected 'not resumable' error from resume path, got: %v", err)
+	}
+}
+
+// --- canRestoreWorkspace ---
+
+func TestCanRestoreWorkspace(t *testing.T) {
+	tests := []struct {
+		name string
+		resp *dto.TaskSessionStatusResponse
+		want bool
+	}{
+		{
+			name: "nil response",
+			resp: nil,
+			want: false,
+		},
+		{
+			name: "nil worktree path",
+			resp: &dto.TaskSessionStatusResponse{},
+			want: false,
+		},
+		{
+			name: "empty worktree path",
+			resp: &dto.TaskSessionStatusResponse{WorktreePath: strPtr("")},
+			want: false,
+		},
+		{
+			name: "valid worktree path",
+			resp: &dto.TaskSessionStatusResponse{WorktreePath: strPtr("/tmp/worktrees/session1")},
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canRestoreWorkspace(tc.resp); got != tc.want {
+				t.Errorf("canRestoreWorkspace() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- GetTaskSessionStatus: NeedsWorkspaceRestore ---
+
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithWorktree(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+
+	// Add worktree to session
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID:             "wt1",
+		SessionID:      "session1",
+		WorktreeID:     "wid1",
+		RepositoryID:   "repo1",
+		WorktreePath:   "/tmp/worktrees/session1",
+		WorktreeBranch: "feature/test",
+		CreatedAt:      now,
+	}); err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=true for terminal session with worktree")
+	}
+	if resp.NeedsResume {
+		t.Fatal("expected NeedsResume=false for terminal session")
+	}
+}
+
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=false for terminal session without worktree")
 	}
 }
 

@@ -752,6 +752,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 			resp.IsAgentRunning = false
 			resp.IsResumable = false
 			resp.NeedsResume = false
+			resp.NeedsWorkspaceRestore = canRestoreWorkspace(&resp)
 			return resp, nil
 		}
 		return s.validateResumeEligibility(session, resp), nil
@@ -773,6 +774,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.IsAgentRunning = false
 	resp.IsResumable = false
 	resp.NeedsResume = false
+	resp.NeedsWorkspaceRestore = canRestoreWorkspace(&resp)
 	return resp, nil
 }
 
@@ -822,6 +824,10 @@ func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string
 }
 
 // populateWorktreeInfo copies worktree path and branch into the response if present.
+func canRestoreWorkspace(resp *dto.TaskSessionStatusResponse) bool {
+	return resp != nil && resp.WorktreePath != nil && *resp.WorktreePath != ""
+}
+
 func populateWorktreeInfo(session *models.TaskSession, resp *dto.TaskSessionStatusResponse) {
 	if len(session.Worktrees) == 0 {
 		return

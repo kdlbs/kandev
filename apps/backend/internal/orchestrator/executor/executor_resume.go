@@ -334,13 +334,8 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 		return nil
 	}
 
-	if req.ExecutorType == string(models.ExecutorTypeSprites) && running.AgentExecutionID != "" {
-		if req.Metadata == nil {
-			req.Metadata = make(map[string]interface{})
-		}
-		req.Metadata[lifecycle.MetadataKeyRemoteReconnect] = true
-		req.Metadata[lifecycle.MetadataKeyRemoteExecID] = running.AgentExecutionID
-		req.Metadata[lifecycle.MetadataKeyRemoteName] = spriteNameFromExecutionID(running.AgentExecutionID)
+	if running.AgentExecutionID != "" {
+		req.PreviousExecutionID = running.AgentExecutionID
 	}
 
 	if running.ResumeToken != "" && startAgent {
@@ -361,17 +356,6 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 	}
 
 	return running
-}
-
-func spriteNameFromExecutionID(executionID string) string {
-	if executionID == "" {
-		return ""
-	}
-	trimmed := executionID
-	if len(trimmed) > 12 {
-		trimmed = trimmed[:12]
-	}
-	return "kandev-" + trimmed
 }
 
 // applyResumeRepoConfig resolves repository details and applies them to req.

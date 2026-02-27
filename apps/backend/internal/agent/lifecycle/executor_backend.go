@@ -64,9 +64,6 @@ const (
 	MetadataKeyRemoteAuthHome  = "remote_auth_target_home"
 	MetadataKeyGitUserName     = "git_user_name"
 	MetadataKeyGitUserEmail    = "git_user_email"
-	MetadataKeyRemoteReconnect = "remote_reconnect_required"
-	MetadataKeyRemoteName      = "remote_reconnect_name"
-	MetadataKeyRemoteExecID    = "remote_previous_execution_id"
 )
 
 // RemoteStatus describes runtime health/details for remote executors.
@@ -95,16 +92,17 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID     string
-	TaskID         string
-	SessionID      string
-	AgentProfileID string
-	WorkspacePath  string
-	Protocol       string
-	Env            map[string]string
-	Metadata       map[string]interface{}
-	McpServers     []McpServerConfig
-	AgentConfig    agents.Agent // Agent type info needed by runtimes
+	InstanceID          string
+	TaskID              string
+	SessionID           string
+	AgentProfileID      string
+	WorkspacePath       string
+	Protocol            string
+	Env                 map[string]string
+	Metadata            map[string]interface{}
+	McpServers          []McpServerConfig
+	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

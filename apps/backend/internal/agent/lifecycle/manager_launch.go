@@ -183,16 +183,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 
 	execReq := &ExecutorCreateRequest{
-		InstanceID:     executionID,
-		TaskID:         reqWithWorktree.TaskID,
-		SessionID:      reqWithWorktree.SessionID,
-		AgentProfileID: reqWithWorktree.AgentProfileID,
-		WorkspacePath:  reqWithWorktree.WorkspacePath,
-		Protocol:       string(agentConfig.Runtime().Protocol),
-		Env:            env,
-		Metadata:       metadata,
-		AgentConfig:    agentConfig,
-		McpServers:     mcpServers,
+		InstanceID:          executionID,
+		TaskID:              reqWithWorktree.TaskID,
+		SessionID:           reqWithWorktree.SessionID,
+		AgentProfileID:      reqWithWorktree.AgentProfileID,
+		WorkspacePath:       reqWithWorktree.WorkspacePath,
+		Protocol:            string(agentConfig.Runtime().Protocol),
+		Env:                 env,
+		Metadata:            metadata,
+		AgentConfig:         agentConfig,
+		McpServers:          mcpServers,
+		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
 		OnProgress: func(step PrepareStep, stepIndex int, totalSteps int) {
 			m.eventPublisher.PublishPrepareProgress(reqWithWorktree.SessionID, &PrepareProgressEventPayload{
 				TaskID:     reqWithWorktree.TaskID,

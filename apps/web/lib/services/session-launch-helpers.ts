@@ -90,6 +90,17 @@ export function buildResumeRequest(taskId: string, sessionId: string): BuildResu
   };
 }
 
+export function buildRestoreWorkspaceRequest(taskId: string, sessionId: string): BuildResult {
+  return {
+    request: {
+      task_id: taskId,
+      intent: "restore_workspace",
+      session_id: sessionId,
+    },
+    layout: "default",
+  };
+}
+
 export function buildWorkflowStepRequest(
   taskId: string,
   sessionId: string,

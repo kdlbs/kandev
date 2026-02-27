@@ -95,10 +95,11 @@ type TaskSessionStatusResponse struct {
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 
 	// Runtime status
-	IsAgentRunning bool   `json:"is_agent_running"`        // Agent process is currently running
-	IsResumable    bool   `json:"is_resumable"`            // Session can be resumed
-	NeedsResume    bool   `json:"needs_resume"`            // Session needs resumption (page reload scenario)
-	ResumeReason   string `json:"resume_reason,omitempty"` // Why resume is needed (e.g., "agent_not_running")
+	IsAgentRunning        bool   `json:"is_agent_running"`        // Agent process is currently running
+	IsResumable           bool   `json:"is_resumable"`            // Session can be resumed
+	NeedsResume           bool   `json:"needs_resume"`            // Session needs resumption (page reload scenario)
+	NeedsWorkspaceRestore bool   `json:"needs_workspace_restore"` // Session workspace can be restored (terminal state)
+	ResumeReason          string `json:"resume_reason,omitempty"` // Why resume is needed (e.g., "agent_not_running")
 
 	// ACP session info
 	ACPSessionID string `json:"acp_session_id,omitempty"`

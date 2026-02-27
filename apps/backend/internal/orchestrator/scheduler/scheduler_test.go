@@ -88,6 +88,9 @@ func (m *mockAgentManager) PollRemoteStatusForRecords(ctx context.Context, recor
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	return nil
+}
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	return nil

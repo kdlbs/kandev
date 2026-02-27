@@ -16,11 +16,12 @@ import (
 type SessionIntent string
 
 const (
-	IntentPrepare      SessionIntent = "prepare"       // Create session, optionally launch workspace, NO agent
-	IntentStart        SessionIntent = "start"         // Create session + launch agent (new session)
-	IntentStartCreated SessionIntent = "start_created" // Start agent on existing CREATED session
-	IntentResume       SessionIntent = "resume"        // Restart stopped session with resume token
-	IntentWorkflowStep SessionIntent = "workflow_step" // Start session with workflow step prompt config
+	IntentPrepare          SessionIntent = "prepare"           // Create session, optionally launch workspace, NO agent
+	IntentStart            SessionIntent = "start"             // Create session + launch agent (new session)
+	IntentStartCreated     SessionIntent = "start_created"     // Start agent on existing CREATED session
+	IntentResume           SessionIntent = "resume"            // Restart stopped session with resume token
+	IntentWorkflowStep     SessionIntent = "workflow_step"     // Start session with workflow step prompt config
+	IntentRestoreWorkspace SessionIntent = "restore_workspace" // Restore workspace access for terminal-state session
 )
 
 // LaunchSessionRequest is the unified request for session.launch.
@@ -91,6 +92,8 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return s.launchResume(ctx, req)
 	case IntentWorkflowStep:
 		return s.launchWorkflowStep(ctx, req)
+	case IntentRestoreWorkspace:
+		return s.launchRestoreWorkspace(ctx, req)
 	default:
 		return nil, fmt.Errorf("unknown intent: %s", intent)
 	}
@@ -159,6 +162,43 @@ func (s *Service) launchWorkflowStep(ctx context.Context, req *LaunchSessionRequ
 		SessionID: req.SessionID,
 		State:     string(v1.TaskSessionStateRunning),
 	}, nil
+}
+
+// launchRestoreWorkspace restores workspace access for a terminal-state session (COMPLETED, FAILED, CANCELLED).
+// It creates a lightweight agentctl execution so the frontend can browse files, open terminals, and view git status.
+func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required for workspace restore")
+	}
+
+	session, err := s.repo.GetTaskSession(ctx, req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+	if session.TaskID != req.TaskID {
+		return nil, fmt.Errorf("session does not belong to task")
+	}
+
+	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
+		return nil, fmt.Errorf("failed to restore workspace: %w", err)
+	}
+
+	resp := &LaunchSessionResponse{
+		Success:   true,
+		TaskID:    req.TaskID,
+		SessionID: req.SessionID,
+		State:     string(session.State),
+	}
+	if len(session.Worktrees) > 0 {
+		wt := session.Worktrees[0]
+		if wt.WorktreePath != "" {
+			resp.WorktreePath = &wt.WorktreePath
+		}
+		if wt.WorktreeBranch != "" {
+			resp.WorktreeBranch = &wt.WorktreeBranch
+		}
+	}
+	return resp, nil
 }
 
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.

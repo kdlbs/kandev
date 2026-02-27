@@ -234,12 +234,36 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	return &lifecycle.WorkspaceInfo{
+	info := &lifecycle.WorkspaceInfo{
 		TaskID:         taskID,
 		SessionID:      sessionID,
 		WorkspacePath:  workspacePath,
 		AgentProfileID: session.AgentProfileID,
 		AgentID:        agentID,
 		ACPSessionID:   acpSessionID,
-	}, nil
+	}
+
+	// Populate executor info for correct runtime selection and remote reconnection
+	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to get executor running for session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if running != nil {
+		info.RuntimeName = running.Runtime
+		info.AgentExecutionID = running.AgentExecutionID
+	}
+	if session.ExecutorID != "" {
+		exec, err := s.executors.GetExecutor(ctx, session.ExecutorID)
+		if err != nil {
+			s.logger.Warn("failed to get executor for session",
+				zap.String("session_id", sessionID),
+				zap.String("executor_id", session.ExecutorID),
+				zap.Error(err))
+		} else if exec != nil {
+			info.ExecutorType = string(exec.Type)
+		}
+	}
+
+	return info, nil
 }

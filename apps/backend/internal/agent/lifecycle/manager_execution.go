@@ -203,8 +203,8 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
-	// Get the default runtime for on-demand execution creation
-	rt, err := m.getDefaultExecutorBackend()
+	// Select runtime based on executor type; falls back to standalone if empty/unavailable
+	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
@@ -221,13 +221,15 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 
 	req := &ExecutorCreateRequest{
-		InstanceID:     executionID,
-		TaskID:         taskID,
-		SessionID:      info.SessionID,
-		AgentProfileID: info.AgentProfileID,
-		WorkspacePath:  info.WorkspacePath,
-		Protocol:       string(agentConfig.Runtime().Protocol),
-		AgentConfig:    agentConfig,
+		InstanceID:          executionID,
+		TaskID:              taskID,
+		SessionID:           info.SessionID,
+		AgentProfileID:      info.AgentProfileID,
+		WorkspacePath:       info.WorkspacePath,
+		Protocol:            string(agentConfig.Runtime().Protocol),
+		AgentConfig:         agentConfig,
+		Metadata:            info.Metadata,
+		PreviousExecutionID: info.AgentExecutionID,
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)

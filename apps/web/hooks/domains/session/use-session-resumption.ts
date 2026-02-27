@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
-import { buildResumeRequest } from "@/lib/services/session-launch-helpers";
+import { buildResumeRequest, buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -13,6 +13,7 @@ export type SessionStatus = {
   is_agent_running: boolean;
   is_resumable: boolean;
   needs_resume: boolean;
+  needs_workspace_restore?: boolean;
   resume_reason?: string;
   acp_session_id?: string;
   worktree_path?: string;
@@ -84,6 +85,31 @@ function applyResumeResponse(
   return false;
 }
 
+/** Launch a session via a request builder and apply the response. */
+async function resumeViaLaunch(
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+  buildRequest: (taskId: string, sessionId: string) => { request: import("@/lib/services/session-launch-service").LaunchSessionRequest },
+): Promise<void> {
+  setters.setResumptionState("resuming");
+  const { request } = buildRequest(taskId, sessionId);
+  const launchResp = await launchSession(request);
+  applyResumeResponse(
+    {
+      success: launchResp.success,
+      state: launchResp.state,
+      worktree_path: launchResp.worktree_path,
+      worktree_branch: launchResp.worktree_branch,
+    },
+    taskId,
+    sessionId,
+    session,
+    setters,
+  );
+}
+
 type CheckAndResumeParams = {
   taskId: string;
   sessionId: string;
@@ -91,6 +117,27 @@ type CheckAndResumeParams = {
   setSessionStatus: (s: SessionStatus) => void;
   setters: ResumeStateSetter;
 };
+
+/** Apply session status fields to local state. */
+function applyStatusToState(
+  status: SessionStatus,
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+): void {
+  setters.setWorktreePath(status.worktree_path ?? null);
+  setters.setWorktreeBranch(status.worktree_branch ?? null);
+  if (status.state) {
+    setters.setTaskSession({
+      id: sessionId,
+      task_id: taskId,
+      state: status.state as TaskSessionState,
+      started_at: session?.started_at ?? "",
+      updated_at: session?.updated_at ?? "",
+    });
+  }
+}
 
 async function checkAndResume({
   taskId,
@@ -114,32 +161,13 @@ async function checkAndResume({
       setters.setError(status.error);
       return;
     }
-    setters.setWorktreePath(status.worktree_path ?? null);
-    setters.setWorktreeBranch(status.worktree_branch ?? null);
-    if (status.state) {
-      setters.setTaskSession({
-        id: sessionId,
-        task_id: taskId,
-        state: status.state as TaskSessionState,
-        started_at: session?.started_at ?? "",
-        updated_at: session?.updated_at ?? "",
-      });
-    }
+    applyStatusToState(status, taskId, sessionId, session, setters);
     if (status.is_agent_running) {
       setters.setResumptionState("running");
-      return;
-    }
-    if (status.needs_resume && status.is_resumable) {
-      setters.setResumptionState("resuming");
-      const { request } = buildResumeRequest(taskId, sessionId);
-      const launchResp = await launchSession(request);
-      const resumeResp: ResumeResponse = {
-        success: launchResp.success,
-        state: launchResp.state,
-        worktree_path: launchResp.worktree_path,
-        worktree_branch: launchResp.worktree_branch,
-      };
-      applyResumeResponse(resumeResp, taskId, sessionId, session, setters);
+    } else if (status.needs_resume && status.is_resumable) {
+      await resumeViaLaunch(taskId, sessionId, session, setters, buildResumeRequest);
+    } else if (status.needs_workspace_restore) {
+      await resumeViaLaunch(taskId, sessionId, session, setters, buildRestoreWorkspaceRequest);
     } else {
       setters.setResumptionState("idle");
     }
