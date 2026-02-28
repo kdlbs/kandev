@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
     "localhost:3000",
     "192.168.1.116",
     "192.168.1.116:3000",
+    "100.105.155.17",
+    "100.105.155.17:3001",
   ],
   transpilePackages: ["@kandev/ui", "@kandev/theme", "@kandev/types"],
   turbopack: {},
