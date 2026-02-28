@@ -139,16 +139,12 @@ export function Graph2StepNode({
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",
-          running
-            ? "border-1 border-accent/50 node-border-running"
-            : "border-1 border-accent/50",
+          running ? "border-1 border-accent/50 node-border-running" : "border-1 border-accent/50",
         )}
       >
         <div className="flex items-center gap-1.5 w-full">
           <div className="shrink-0">{getTaskStateIcon(task.state, "h-3 w-3")}</div>
-          <span className="text-[11px] font-medium text-foreground truncate">
-            {step.title}
-          </span>
+          <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
         </div>
       </button>
 

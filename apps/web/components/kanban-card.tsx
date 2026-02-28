@@ -322,6 +322,7 @@ export function KanbanCard({
       size="sm"
       ref={setNodeRef}
       style={style}
+      data-testid={`task-card-${task.id}`}
       className={cn(
         "max-h-48 bg-card rounded-sm data-[size=sm]:py-1 cursor-pointer mb-2 w-full py-0 relative border border-border overflow-visible shadow-none ring-0",
         needsAction(task) && "border-l-2 border-l-amber-500",

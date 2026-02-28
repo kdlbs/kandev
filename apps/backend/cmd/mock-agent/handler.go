@@ -33,9 +33,27 @@ func fixedDelay(ms int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
+// stripKandevSystem removes <kandev-system>...</kandev-system> blocks injected by
+// injectKandevContext so that /e2e: routing works regardless of system prompt wrapping.
+func stripKandevSystem(prompt string) string {
+	const endTag = "</kandev-system>"
+	idx := strings.LastIndex(prompt, endTag)
+	if idx < 0 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt[idx+len(endTag):])
+}
+
 // handleUserPrompt routes a user prompt to the appropriate sequence generator.
 func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model string) {
 	prompt = strings.TrimSpace(prompt)
+
+	// Extract the user-facing content for command routing.
+	// The backend wraps prompts with <kandev-system>...</kandev-system> context;
+	// routing should match the user's actual command regardless of that wrapper.
+	// The full prompt (including any kandev-system content) is kept available via
+	// the outer variable so future scenarios can inspect it if needed.
+	cmd := stripKandevSystem(prompt)
 
 	// Emit system message at the start of every turn
 	emitSystemMessage(enc)
@@ -44,33 +62,33 @@ func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model s
 	customResult := false
 
 	switch {
-	case strings.EqualFold(prompt, "all") || strings.EqualFold(prompt, "/all"):
+	case strings.EqualFold(cmd, "all") || strings.EqualFold(cmd, "/all"):
 		emitAllTypes(enc, scanner, model)
-	case strings.EqualFold(prompt, "/error"):
+	case strings.EqualFold(cmd, "/error"):
 		emitError(enc, model)
 		customResult = true
-	case strings.EqualFold(prompt, "/slow") || strings.HasPrefix(strings.ToLower(prompt), "/slow "):
-		emitSlowResponse(enc, scanner, prompt, model)
-	case strings.EqualFold(prompt, "/thinking"):
+	case strings.EqualFold(cmd, "/slow") || strings.HasPrefix(strings.ToLower(cmd), "/slow "):
+		emitSlowResponse(enc, scanner, cmd, model)
+	case strings.EqualFold(cmd, "/thinking"):
 		emitThinkingSequence(enc, model)
-	case strings.HasPrefix(prompt, "/tool:"):
-		toolName := strings.TrimPrefix(prompt, "/tool:")
+	case strings.HasPrefix(cmd, "/tool:"):
+		toolName := strings.TrimPrefix(cmd, "/tool:")
 		emitSpecificTool(enc, scanner, strings.TrimSpace(toolName), model)
-	case strings.HasPrefix(prompt, "/subagent"):
+	case strings.HasPrefix(cmd, "/subagent"):
 		emitSubagentSequence(enc, scanner, model)
-	case strings.HasPrefix(prompt, "/e2e:"):
-		scenarioName := strings.TrimPrefix(prompt, "/e2e:")
+	case strings.HasPrefix(cmd, "/e2e:"):
+		scenarioName := strings.TrimPrefix(cmd, "/e2e:")
 		emitPredefinedScenario(enc, scanner, strings.TrimSpace(scenarioName))
 		// e2e:error emits its own result
 		if strings.TrimSpace(scenarioName) == "error" {
 			customResult = true
 		}
-	case strings.HasPrefix(prompt, "/todo"):
+	case strings.HasPrefix(cmd, "/todo"):
 		emitTodoSequence(enc, model)
-	case strings.EqualFold(prompt, "/mermaid"):
+	case strings.EqualFold(cmd, "/mermaid"):
 		emitMermaidSequence(enc, model)
 	default:
-		emitRandomResponse(enc, scanner, prompt, model)
+		emitRandomResponse(enc, scanner, cmd, model)
 	}
 
 	if !customResult {

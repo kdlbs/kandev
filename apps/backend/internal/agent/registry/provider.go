@@ -12,10 +12,13 @@ import (
 // Provide creates and loads the agent registry.
 func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	reg := NewRegistry(log)
-	reg.LoadDefaults()
 
 	if os.Getenv("KANDEV_MOCK_AGENT") == "true" {
+		// Only register mock agent — skip slow agent discovery for all others
+		_ = reg.Register(agents.NewMockAgent())
 		configureMockAgent(reg, log)
+	} else {
+		reg.LoadDefaults()
 	}
 
 	return reg, func() error { return nil }, nil

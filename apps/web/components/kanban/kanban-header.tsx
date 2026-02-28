@@ -129,7 +129,12 @@ function TabletHeader({
         />
       )}
       <div className="flex items-center gap-2">
-        <Button onClick={onCreateTask} size="lg" className="cursor-pointer">
+        <Button
+          onClick={onCreateTask}
+          size="lg"
+          className="cursor-pointer"
+          data-testid="create-task-button"
+        >
           <IconPlus className="h-4 w-4" />
           <span className="hidden sm:inline ml-1">Add task</span>
         </Button>
@@ -193,7 +198,7 @@ function DesktopHeader({
         </div>
       )}
       <div className="flex items-center gap-3">
-        <Button onClick={onCreateTask} className="cursor-pointer">
+        <Button onClick={onCreateTask} className="cursor-pointer" data-testid="create-task-button">
           <IconPlus className="h-4 w-4" />
           Add task
         </Button>

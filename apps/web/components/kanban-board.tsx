@@ -253,7 +253,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
   }));
 
   return (
-    <div className="h-dvh w-full flex flex-col">
+    <div className="h-dvh w-full flex flex-col" data-testid="kanban-board">
       <HomepageCommands onCreateTask={s.handleCreate} />
       <KanbanHeader
         onCreateTask={s.handleCreate}

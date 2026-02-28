@@ -15,6 +15,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
+  if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
   return update;
 }
 

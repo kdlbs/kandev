@@ -82,7 +82,10 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 	cleanups = append(cleanups, cleanup)
 
 	// Initialize master key and secrets store
-	kandevDir := filepath.Join(os.Getenv("HOME"), ".kandev")
+	kandevDir := os.Getenv("KANDEV_DATA_DIR")
+	if kandevDir == "" {
+		kandevDir = filepath.Join(os.Getenv("HOME"), ".kandev")
+	}
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(kandevDir)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)

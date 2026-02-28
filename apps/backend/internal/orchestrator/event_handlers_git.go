@@ -274,29 +274,28 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		return
 	}
 
-	session, err := s.repo.GetTaskSession(ctx, data.TaskSessionID)
-	if err != nil {
-		s.logger.Debug("no task session for context window update",
-			zap.String("session_id", data.TaskSessionID),
-			zap.Error(err))
-		return
-	}
-
-	// Update session metadata with context window info
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
 	contextWindowData := map[string]interface{}{
 		"size":       data.ContextWindowSize,
 		"used":       data.ContextWindowUsed,
 		"remaining":  data.ContextWindowRemaining,
 		"efficiency": data.ContextEfficiency,
 	}
-	session.Metadata["context_window"] = contextWindowData
 
-	// Persist to database asynchronously
+	// Persist to database asynchronously. Read the session inside the goroutine
+	// to get the latest metadata (avoids race with setSessionPlanMode etc.).
 	go func() {
-		if err := s.repo.UpdateTaskSession(context.Background(), session); err != nil {
+		session, err := s.repo.GetTaskSession(context.Background(), data.TaskSessionID)
+		if err != nil {
+			s.logger.Debug("no task session for context window update",
+				zap.String("session_id", data.TaskSessionID),
+				zap.Error(err))
+			return
+		}
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["context_window"] = contextWindowData
+		if err := s.repo.UpdateSessionMetadata(context.Background(), session.ID, session.Metadata); err != nil {
 			s.logger.Error("failed to update session with context window",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", session.ID),
@@ -308,18 +307,15 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		}
 	}()
 
-	// Broadcast session state change with metadata so frontend can update
-	// This uses the existing session.state_changed event with metadata included
+	// Broadcast context window update so the frontend can update in real-time.
+	// This uses the existing session.state_changed event with metadata included.
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"orchestrator",
 			map[string]interface{}{
-				"task_id":                data.TaskID,
-				"session_id":             session.ID,
-				"new_state":              string(session.State),
-				"agent_profile_id":       session.AgentProfileID,
-				"agent_profile_snapshot": session.AgentProfileSnapshot,
+				"task_id":    data.TaskID,
+				"session_id": data.TaskSessionID,
 				"metadata": map[string]interface{}{
 					"context_window": contextWindowData,
 				},

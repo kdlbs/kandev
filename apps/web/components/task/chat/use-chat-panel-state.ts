@@ -57,6 +57,14 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false,
   );
 
+  // Backend-driven plan mode: session.metadata.plan_mode is set by the enable_plan_mode
+  // workflow event. When detected, auto-apply the plan layout so the plan panel is visible.
+  const sessionMetaPlanMode = useAppStore((state) =>
+    resolvedSessionId
+      ? (state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true)
+      : false,
+  );
+
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
 
@@ -68,6 +76,20 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
       addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
     }
   }, [resolvedSessionId, setPlanMode, addContextFile]);
+
+  // Auto-apply plan layout when session metadata has plan_mode enabled (set by backend
+  // workflow events like enable_plan_mode on_enter). Only applies once per session to
+  // avoid overriding the user's manual layout changes.
+  const autoAppliedPlanSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resolvedSessionId || !taskId) return;
+    if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
+    if (sessionMetaPlanMode) {
+      autoAppliedPlanSessionRef.current = resolvedSessionId;
+      setActiveDocument(resolvedSessionId, { type: "plan", taskId });
+      applyBuiltInPreset("plan");
+    }
+  }, [resolvedSessionId, taskId, sessionMetaPlanMode, setActiveDocument, applyBuiltInPreset]);
 
   // Re-focus chat input after dockview layout rebuild.
   // Scroll preservation is handled by the store layout actions (before DOM rebuild).

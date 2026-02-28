@@ -43,7 +43,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="files-panel">
       <PanelBody padding={false}>
         {activeSessionId ? (
           <FileBrowser
