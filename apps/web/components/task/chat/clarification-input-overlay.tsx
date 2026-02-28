@@ -229,7 +229,7 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
       <div className="pr-6">
         <div className="flex items-start gap-2 mb-1">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
-          <div className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-1 prose-p:leading-relaxed prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-headings:text-foreground prose-headings:font-bold prose-strong:text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <div className="markdown-body max-w-none text-sm [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
               {question.prompt}
             </ReactMarkdown>

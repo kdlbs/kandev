@@ -41,7 +41,9 @@ export function getTextContent(children: ReactNode): string {
 
 /**
  * Shared markdown component overrides for ReactMarkdown.
- * Used by both chat messages and PR comment/review rendering.
+ * Element styles (headings, lists, inline code, etc.) are handled by
+ * the `.markdown-body` CSS class in globals.css. Only behavioral overrides
+ * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
@@ -57,64 +59,14 @@ export const markdownComponents = {
     }
     return <InlineCode>{content}</InlineCode>;
   },
-  ol: ({ children }: { children?: ReactNode }) => (
-    <ol className="list-decimal pl-5 my-4">{children}</ol>
-  ),
-  ul: ({ children }: { children?: ReactNode }) => (
-    <ul className="list-disc pl-5 my-4">{children}</ul>
-  ),
-  li: ({ children }: { children?: ReactNode }) => <li className="my-0.5">{children}</li>,
   a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-blue-600 dark:text-blue-400 hover:underline underline-offset-2 cursor-pointer"
-    >
+    <a href={href} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   ),
-  p: ({ children }: { children?: ReactNode }) => <p className="leading-[1.625]">{children}</p>,
-  h1: ({ children }: { children?: ReactNode }) => (
-    <h1 className="mt-5 mb-1.5 font-bold text-xl first:mt-0">{children}</h1>
-  ),
-  h2: ({ children }: { children?: ReactNode }) => (
-    <h2 className="mt-5 mb-1.5 font-bold text-[1.0625rem] first:mt-0">{children}</h2>
-  ),
-  h3: ({ children }: { children?: ReactNode }) => (
-    <h3 className="mt-5 mb-1.5 font-bold text-[0.9375rem] first:mt-0">{children}</h3>
-  ),
-  h4: ({ children }: { children?: ReactNode }) => (
-    <h4 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h4>
-  ),
-  h5: ({ children }: { children?: ReactNode }) => (
-    <h5 className="mt-5 mb-1.5 font-bold first:mt-0">{children}</h5>
-  ),
-  hr: ({ children }: { children?: ReactNode }) => <hr className="my-5">{children}</hr>,
   table: ({ children }: { children?: ReactNode }) => (
-    <div className="my-3 overflow-x-auto">
-      <table className="border-collapse border border-border rounded-lg overflow-hidden">
-        {children}
-      </table>
+    <div className="overflow-x-auto">
+      <table>{children}</table>
     </div>
-  ),
-  thead: ({ children }: { children?: ReactNode }) => (
-    <thead className="bg-muted/50">{children}</thead>
-  ),
-  tbody: ({ children }: { children?: ReactNode }) => (
-    <tbody className="divide-y divide-border">{children}</tbody>
-  ),
-  tr: ({ children }: { children?: ReactNode }) => (
-    <tr className="border-b border-border last:border-b-0 hover:bg-muted/50">{children}</tr>
-  ),
-  th: ({ children }: { children?: ReactNode }) => (
-    <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border last:border-r-0">
-      {children}
-    </th>
-  ),
-  td: ({ children }: { children?: ReactNode }) => (
-    <td className="px-3 py-2 text-xs text-muted-foreground border-r border-border last:border-r-0">
-      {children}
-    </td>
   ),
 };

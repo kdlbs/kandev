@@ -383,7 +383,7 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
   return (
     <div
       ref={wrapperRef}
-      className={`tiptap-plan-wrapper h-full relative ${resolvedTheme === "dark" ? "dark" : ""}`}
+      className={`tiptap-plan-wrapper markdown-body h-full relative ${resolvedTheme === "dark" ? "dark" : ""}`}
     >
       <EditorContent editor={editor} className="h-full" />
       {editor && isReady && (
