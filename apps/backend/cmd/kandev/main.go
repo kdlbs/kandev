@@ -293,11 +293,14 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
-	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, orchestratorCleanup, err := provideOrchestrator(cfg, log, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
+	}
+	if orchestratorCleanup != nil {
+		addCleanup(func() error { orchestratorCleanup(); return nil })
 	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push

@@ -663,3 +663,112 @@ func TestService_DeleteMessage(t *testing.T) {
 		t.Error("expected comment to be deleted")
 	}
 }
+
+func TestService_CreateLogMessage_WithBatcher(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
+
+	// Wire up a log batcher
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	batcher := NewLogBatcher(repo, log)
+	batcher.interval = 1 * time.Hour // prevent auto-flush
+	batcher.Start()
+	svc.SetLogBatcher(batcher)
+	eventBus.ClearEvents()
+
+	msg, err := svc.CreateLogMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		Content:       "Agent log output",
+		AuthorType:    "agent",
+		AuthorID:      "agent-1",
+		Type:          string(models.MessageTypeLog),
+		Metadata:      map[string]any{"level": "debug"},
+	})
+	if err != nil {
+		t.Fatalf("CreateLogMessage failed: %v", err)
+	}
+
+	// Message should have correct fields
+	if msg.ID == "" {
+		t.Error("expected message ID to be generated")
+	}
+	if msg.Content != "Agent log output" {
+		t.Errorf("expected content 'Agent log output', got %q", msg.Content)
+	}
+	if msg.AuthorType != models.MessageAuthorAgent {
+		t.Errorf("expected author type 'agent', got %q", msg.AuthorType)
+	}
+	if msg.TaskID != "task-123" {
+		t.Errorf("expected task ID 'task-123', got %q", msg.TaskID)
+	}
+	if msg.Type != models.MessageTypeLog {
+		t.Errorf("expected type 'log', got %q", msg.Type)
+	}
+
+	// WS event should be published immediately
+	publishedEvents := eventBus.GetPublishedEvents()
+	if len(publishedEvents) != 1 {
+		t.Fatalf("expected 1 WS event, got %d", len(publishedEvents))
+	}
+	if publishedEvents[0].Type != "message.added" {
+		t.Errorf("expected event type 'message.added', got %s", publishedEvents[0].Type)
+	}
+
+	// Message should NOT be in DB yet (batched, not flushed)
+	_, dbErr := repo.GetMessage(ctx, msg.ID)
+	if dbErr == nil {
+		t.Error("expected message to not yet be in DB (batched)")
+	}
+
+	// After stopping the batcher, message should be in DB
+	batcher.Stop()
+	retrieved, dbErr := repo.GetMessage(ctx, msg.ID)
+	if dbErr != nil {
+		t.Fatalf("expected message in DB after batcher stop: %v", dbErr)
+	}
+	if retrieved.Content != "Agent log output" {
+		t.Errorf("expected persisted content 'Agent log output', got %q", retrieved.Content)
+	}
+}
+
+func TestService_CreateLogMessage_WithoutBatcher(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
+	eventBus.ClearEvents()
+
+	// Without a batcher, CreateLogMessage should fall back to CreateMessage
+	msg, err := svc.CreateLogMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		Content:       "Direct log",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeLog),
+	})
+	if err != nil {
+		t.Fatalf("CreateLogMessage without batcher failed: %v", err)
+	}
+
+	// Message should be immediately in DB
+	retrieved, dbErr := repo.GetMessage(ctx, msg.ID)
+	if dbErr != nil {
+		t.Fatalf("expected message in DB immediately: %v", dbErr)
+	}
+	if retrieved.Content != "Direct log" {
+		t.Errorf("expected 'Direct log', got %q", retrieved.Content)
+	}
+
+	// Event should still be published
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+}

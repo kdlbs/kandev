@@ -199,6 +199,10 @@ func (a *testMessageCreatorAdapter) AppendThinkingMessage(ctx context.Context, m
 	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
 }
 
+func (a *testMessageCreatorAdapter) FinalizeStreamingMessages(ctx context.Context, sessionID string) {
+	a.svc.FinalizeStreamingMessages(ctx, sessionID)
+}
+
 // testTurnServiceAdapter adapts the task service to the orchestrator.TurnService interface for tests
 type testTurnServiceAdapter struct {
 	svc *taskservice.Service
