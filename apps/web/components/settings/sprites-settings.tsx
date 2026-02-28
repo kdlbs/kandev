@@ -193,7 +193,7 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
           <div>
             <CardTitle>Running Sprites</CardTitle>
             <CardDescription>
-              Active Kandev sprites. Sprites are destroyed when agents stop.
+              Active KanDev sprites. Sprites are destroyed when agents stop.
             </CardDescription>
           </div>
           {instances.length > 0 && (
