@@ -122,6 +122,8 @@ type Service struct {
 	workflowStepCreator WorkflowStepCreator
 	workflowStepGetter  WorkflowStepGetter
 	startStepResolver   StartStepResolver
+	streamBuf           *StreamingBuffer
+	logBatcher          *LogBatcher
 }
 
 // NewService creates a new task service
@@ -168,4 +170,15 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // SetStartStepResolver wires the start step resolver for CreateTask.
 func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
+}
+
+// SetStreamingBuffer wires the streaming write buffer for coalescing
+// streaming message content writes.
+func (s *Service) SetStreamingBuffer(buf *StreamingBuffer) {
+	s.streamBuf = buf
+}
+
+// SetLogBatcher wires the log message batcher for batching log inserts.
+func (s *Service) SetLogBatcher(batcher *LogBatcher) {
+	s.logBatcher = batcher
 }

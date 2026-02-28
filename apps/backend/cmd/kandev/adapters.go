@@ -418,8 +418,9 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 }
 
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
+// Log messages are routed through the LogBatcher for batched DB inserts.
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
-	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+	req := &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -428,7 +429,14 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 		Type:          messageType,
 		Metadata:      metadata,
 		RequestsInput: requestsInput,
-	})
+	}
+
+	if messageType == string(models.MessageTypeLog) {
+		_, err := a.svc.CreateLogMessage(ctx, req)
+		return err
+	}
+
+	_, err := a.svc.CreateMessage(ctx, req)
 	return err
 }
 
@@ -556,6 +564,11 @@ func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Conte
 // AppendThinkingMessage appends additional content to an existing streaming thinking message.
 func (a *messageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
+}
+
+// FinalizeStreamingMessages flushes all buffered streaming content for a session.
+func (a *messageCreatorAdapter) FinalizeStreamingMessages(ctx context.Context, sessionID string) {
+	a.svc.FinalizeStreamingMessages(ctx, sessionID)
 }
 
 // turnServiceAdapter adapts the task service to the orchestrator.TurnService interface

@@ -40,9 +40,9 @@ func provideOrchestrator(
 	workflowSvc *workflowservice.Service,
 	secretStore secrets.SecretStore,
 	repoCloner *repoclone.Cloner,
-) (*orchestrator.Service, *messageCreatorAdapter, error) {
+) (*orchestrator.Service, *messageCreatorAdapter, func(), error) {
 	if lifecycleMgr == nil {
-		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
+		return nil, nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
 	}
 
 	taskRepoAdapter := &taskRepositoryAdapter{repo: taskRepo, svc: taskSvc}
@@ -62,6 +62,16 @@ func provideOrchestrator(
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
+
+	// Create streaming write buffer to coalesce per-chunk DB writes.
+	streamBuf := taskservice.NewStreamingBuffer(taskRepo, log)
+	streamBuf.Start()
+	taskSvc.SetStreamingBuffer(streamBuf)
+
+	// Create log batcher to batch-insert log messages in single transactions.
+	logBatch := taskservice.NewLogBatcher(taskRepo, log)
+	logBatch.Start()
+	taskSvc.SetLogBatcher(logBatch)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
@@ -86,7 +96,12 @@ func provideOrchestrator(
 		})
 	}
 
-	return orchestratorSvc, msgCreator, nil
+	cleanup := func() {
+		logBatch.Stop()
+		streamBuf.Stop()
+	}
+
+	return orchestratorSvc, msgCreator, cleanup, nil
 }
 
 func resolveEventNamespace(cfg *config.Config) string {

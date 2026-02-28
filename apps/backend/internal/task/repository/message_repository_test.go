@@ -235,3 +235,146 @@ func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 		t.Error("expected RequestsInput to be true")
 	}
 }
+
+func TestSQLiteRepository_CreateMessages(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
+
+	messages := []*models.Message{
+		{
+			ID:            "batch-1",
+			TaskSessionID: sessionID,
+			TaskID:        "task-123",
+			TurnID:        turnID,
+			AuthorType:    models.MessageAuthorAgent,
+			Content:       "Log line 1",
+			Type:          models.MessageTypeLog,
+		},
+		{
+			ID:            "batch-2",
+			TaskSessionID: sessionID,
+			TaskID:        "task-123",
+			TurnID:        turnID,
+			AuthorType:    models.MessageAuthorAgent,
+			Content:       "Log line 2",
+			Type:          models.MessageTypeLog,
+			Metadata:      map[string]interface{}{"level": "info"},
+		},
+		{
+			TaskSessionID: sessionID,
+			TaskID:        "task-123",
+			TurnID:        turnID,
+			AuthorType:    "",
+			Content:       "Log line 3 - defaults applied",
+		},
+	}
+
+	if err := repo.CreateMessages(ctx, messages); err != nil {
+		t.Fatalf("CreateMessages failed: %v", err)
+	}
+
+	// Verify all messages were inserted
+	all, err := repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListMessages failed: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(all))
+	}
+
+	// Verify first message
+	msg1, err := repo.GetMessage(ctx, "batch-1")
+	if err != nil {
+		t.Fatalf("GetMessage batch-1 failed: %v", err)
+	}
+	if msg1.Content != "Log line 1" {
+		t.Errorf("expected content 'Log line 1', got %q", msg1.Content)
+	}
+
+	// Verify metadata was persisted
+	msg2, err := repo.GetMessage(ctx, "batch-2")
+	if err != nil {
+		t.Fatalf("GetMessage batch-2 failed: %v", err)
+	}
+	if msg2.Metadata == nil {
+		t.Fatal("expected metadata to be set on batch-2")
+	}
+	if level, _ := msg2.Metadata["level"].(string); level != "info" {
+		t.Errorf("expected metadata level 'info', got %q", level)
+	}
+
+	// Verify defaults were applied to third message
+	if messages[2].ID == "" {
+		t.Error("expected ID to be auto-generated for batch-3")
+	}
+	msg3, err := repo.GetMessage(ctx, messages[2].ID)
+	if err != nil {
+		t.Fatalf("GetMessage batch-3 failed: %v", err)
+	}
+	if msg3.AuthorType != models.MessageAuthorUser {
+		t.Errorf("expected default author type 'user', got %q", msg3.AuthorType)
+	}
+	if msg3.Type != models.MessageTypeMessage {
+		t.Errorf("expected default type 'message', got %q", msg3.Type)
+	}
+}
+
+func TestSQLiteRepository_CreateMessages_Empty(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Empty batch should succeed without error
+	if err := repo.CreateMessages(ctx, nil); err != nil {
+		t.Fatalf("CreateMessages with nil should not error: %v", err)
+	}
+	if err := repo.CreateMessages(ctx, []*models.Message{}); err != nil {
+		t.Fatalf("CreateMessages with empty slice should not error: %v", err)
+	}
+}
+
+func TestSQLiteRepository_AppendContent(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-123", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-123")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-123")
+
+	msg := &models.Message{
+		ID:            "msg-append",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "Hello",
+	}
+	_ = repo.CreateMessage(ctx, msg)
+
+	// Append content
+	if err := repo.AppendContent(ctx, "msg-append", " world"); err != nil {
+		t.Fatalf("AppendContent failed: %v", err)
+	}
+
+	retrieved, _ := repo.GetMessage(ctx, "msg-append")
+	if retrieved.Content != "Hello world" {
+		t.Errorf("expected 'Hello world', got %q", retrieved.Content)
+	}
+
+	// Append to nonexistent message should fail
+	if err := repo.AppendContent(ctx, "nonexistent", " data"); err == nil {
+		t.Error("expected error for nonexistent message")
+	}
+}

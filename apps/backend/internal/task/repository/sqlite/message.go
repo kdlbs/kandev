@@ -16,43 +16,118 @@ import (
 
 // Message operations
 
-// CreateMessage creates a new message
-func (r *Repository) CreateMessage(ctx context.Context, message *models.Message) error {
+// messageInsertArgs holds the derived values needed for a message INSERT.
+type messageInsertArgs struct {
+	requestsInput int
+	messageType   string
+	metadataJSON  string
+}
+
+// prepareMessageInsert applies defaults to a message (ID, CreatedAt, AuthorType)
+// and derives the insert arguments (requestsInput, messageType, metadataJSON).
+func prepareMessageInsert(message *models.Message, fallbackTime time.Time) (messageInsertArgs, error) {
 	if message.ID == "" {
 		message.ID = uuid.New().String()
 	}
 	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now().UTC()
+		message.CreatedAt = fallbackTime
 	}
 	if message.AuthorType == "" {
 		message.AuthorType = models.MessageAuthorUser
 	}
 
-	requestsInput := 0
+	args := messageInsertArgs{}
+
 	if message.RequestsInput {
-		requestsInput = 1
+		args.requestsInput = 1
 	}
 
-	messageType := string(message.Type)
-	if messageType == "" {
-		messageType = string(models.MessageTypeMessage)
+	args.messageType = string(message.Type)
+	if args.messageType == "" {
+		args.messageType = string(models.MessageTypeMessage)
 	}
 
-	metadataJSON := "{}"
+	args.metadataJSON = "{}"
 	if message.Metadata != nil {
 		metadataBytes, err := json.Marshal(message.Metadata)
 		if err != nil {
-			return fmt.Errorf("failed to serialize message metadata: %w", err)
+			return args, fmt.Errorf("failed to serialize message metadata: %w", err)
 		}
-		metadataJSON = string(metadataBytes)
+		args.metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return args, nil
+}
+
+// CreateMessage creates a new message
+func (r *Repository) CreateMessage(ctx context.Context, message *models.Message) error {
+	args, err := prepareMessageInsert(message, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, args.requestsInput, args.messageType, args.metadataJSON, message.CreatedAt)
 
 	return err
+}
+
+// CreateMessages batch-inserts multiple messages in a single transaction.
+// This is more efficient than individual CreateMessage calls because it
+// wraps all INSERTs in one transaction instead of N separate transactions.
+func (r *Repository) CreateMessages(ctx context.Context, messages []*models.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, r.db.Rebind(`
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`))
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	now := time.Now().UTC()
+	for _, message := range messages {
+		args, prepErr := prepareMessageInsert(message, now)
+		if prepErr != nil {
+			return prepErr
+		}
+
+		if _, execErr := stmt.ExecContext(ctx, message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, args.requestsInput, args.messageType, args.metadataJSON, message.CreatedAt); execErr != nil {
+			return fmt.Errorf("failed to insert message %s: %w", message.ID, execErr)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// AppendContent appends additional text to a message's content using SQL
+// string concatenation. This avoids the read-modify-write cycle of
+// GetMessage + string append + UpdateMessage.
+func (r *Repository) AppendContent(ctx context.Context, messageID, additionalContent string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_messages SET content = content || ? WHERE id = ?
+	`), additionalContent, messageID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("message not found: %s", messageID)
+	}
+	return nil
 }
 
 // GetMessage retrieves a message by ID
