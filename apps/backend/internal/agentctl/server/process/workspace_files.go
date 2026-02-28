@@ -39,8 +39,11 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 		Files:     []types.FileEntry{},
 	}
 
-	// Use git ls-files to get tracked files
-	cmd := exec.CommandContext(ctx, "git", "ls-files")
+	// Use git ls-files to get tracked files AND untracked files (excluding ignored)
+	// --cached: include tracked files
+	// --others: include untracked files
+	// --exclude-standard: respect .gitignore
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
 	if err != nil {
