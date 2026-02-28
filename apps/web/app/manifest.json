@@ -1,6 +1,6 @@
 {
-  "name": "Kandev",
-  "short_name": "Kandev",
+  "name": "KanDev",
+  "short_name": "KanDev",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",

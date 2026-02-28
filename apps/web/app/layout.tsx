@@ -11,7 +11,7 @@ import { GlobalCommands } from "@/components/global-commands";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 
 export const metadata: Metadata = {
-  title: "Kandev - AI Kanban",
+  title: "KanDev - AI Kanban",
   description: "AI-powered workflow management for developers",
 };
 
@@ -50,7 +50,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="apple-mobile-web-app-title" content="Kandev" />
+        <meta name="apple-mobile-web-app-title" content="KanDev" />
       </head>
       <body className="antialiased font-sans">
         {apiPort || mcpPort || debugMode ? (
