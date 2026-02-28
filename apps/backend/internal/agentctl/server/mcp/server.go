@@ -206,31 +206,31 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("list_workspaces", s.listWorkspacesHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("list_boards",
-			mcp.WithDescription("List all boards in a workspace."),
+		mcp.NewTool("list_workflows",
+			mcp.WithDescription("List all workflows in a workspace."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
 		),
-		s.wrapHandler("list_boards", s.listBoardsHandler()),
+		s.wrapHandler("list_workflows", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps",
-			mcp.WithDescription("List all workflow steps in a board."),
-			mcp.WithString("board_id", mcp.Required(), mcp.Description("The board ID")),
+			mcp.WithDescription("List all workflow steps in a workflow."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
 		s.wrapHandler("list_workflow_steps", s.listWorkflowStepsHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks",
-			mcp.WithDescription("List all tasks on a board."),
-			mcp.WithString("board_id", mcp.Required(), mcp.Description("The board ID")),
+			mcp.WithDescription("List all tasks in a workflow."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
 		s.wrapHandler("list_tasks", s.listTasksHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task",
-			mcp.WithDescription("Create a new task on a board."),
+			mcp.WithDescription("Create a new task in a workflow."),
 			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-			mcp.WithString("board_id", mcp.Required(), mcp.Description("The board ID")),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("The workflow step ID")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
 			mcp.WithString("description", mcp.Description("The task description")),
