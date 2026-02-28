@@ -57,7 +57,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
     >
       {!isShort && (
         <div className="pl-4 border-l-2 border-border/30">
-          <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80 [&_code]:text-foreground/70 [&_code]:bg-muted/50 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em]">
+          <div className="markdown-body max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
         </div>

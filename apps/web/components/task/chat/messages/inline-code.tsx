@@ -29,10 +29,7 @@ export function InlineCode({ children }: InlineCodeProps) {
     <span className="relative inline-block group/inline-code">
       <code
         onClick={handleClick}
-        className={cn(
-          "px-1 py-0.5 bg-foreground/[0.06] text-foreground/80 rounded font-mono",
-          "cursor-pointer hover:bg-foreground/10 transition-colors",
-        )}
+        className="cursor-pointer hover:bg-foreground/10 transition-colors"
       >
         {children}
       </code>

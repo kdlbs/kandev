@@ -75,7 +75,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
         {/* Content */}
         <div className="flex-1 min-w-0">
           {/* Question */}
-          <div className="prose prose-sm dark:prose-invert max-w-none text-xs prose-p:my-0.5 prose-p:leading-relaxed prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-pre:my-1 prose-headings:text-xs prose-headings:font-medium prose-strong:text-muted-foreground text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <div className="markdown-body max-w-none text-xs text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
               {question.prompt}
             </ReactMarkdown>

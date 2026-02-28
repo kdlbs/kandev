@@ -44,7 +44,7 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
     parts.push(
       <code
         key={`file-ref-${keyIndex++}`}
-        className="px-1 py-0.5 bg-foreground/[0.06] text-foreground/80 rounded font-mono text-[0.9em]"
+        className="px-1 py-0.5 bg-muted text-accent rounded font-mono text-[0.85em]"
       >
         @{filePath}
       </code>,
@@ -258,7 +258,7 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
             {comment.content || "(empty)"}
           </pre>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-4 prose-p:leading-relaxed prose-ul:my-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-4 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1.5 prose-pre:my-5 prose-strong:text-foreground prose-strong:font-bold prose-headings:text-foreground prose-headings:font-bold">
+          <div className="markdown-body max-w-none">
             <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
               {comment.content || "(empty)"}
             </ReactMarkdown>

@@ -155,7 +155,7 @@ export function AddToContextButton({
 
 export function PRMarkdownBody({ body }: { body: string }) {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-1.5 prose-p:leading-relaxed prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-pre:my-2 prose-headings:text-foreground prose-headings:font-bold prose-strong:text-foreground prose-strong:font-bold">
+    <div className="markdown-body max-w-none text-sm">
       <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
         {body}
       </ReactMarkdown>

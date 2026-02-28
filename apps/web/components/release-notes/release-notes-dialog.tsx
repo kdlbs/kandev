@@ -60,7 +60,7 @@ export function ReleaseNotesDialog({
                     )}
                   </div>
                 )}
-                <div className="text-sm">
+                <div className="markdown-body text-sm">
                   <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
                     {entry.notes}
                   </ReactMarkdown>
