@@ -10,9 +10,10 @@ import (
 )
 
 // MCP action constants for backend WS requests
+// These must match the actions registered in pkg/websocket/actions.go
 const (
 	ActionMCPListWorkspaces    = "mcp.list_workspaces"
-	ActionMCPListBoards        = "mcp.list_boards"
+	ActionMCPListWorkflows     = "mcp.list_workflows"
 	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
 	ActionMCPListTasks         = "mcp.list_tasks"
 	ActionMCPCreateTask        = "mcp.create_task"
@@ -26,7 +27,8 @@ const (
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result []map[string]interface{}
+		// Backend returns {workspaces: [...], total: N}
+		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkspaces, nil, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -35,15 +37,16 @@ func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) listBoardsHandler() server.ToolHandlerFunc {
+func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		workspaceID, err := req.RequireString("workspace_id")
 		if err != nil {
 			return mcp.NewToolResultError("workspace_id is required"), nil
 		}
 		payload := map[string]string{"workspace_id": workspaceID}
-		var result []map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ActionMCPListBoards, payload, &result); err != nil {
+		// Backend returns {workflows: [...], total: N}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkflows, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -53,12 +56,13 @@ func (s *Server) listBoardsHandler() server.ToolHandlerFunc {
 
 func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		boardID, err := req.RequireString("board_id")
+		workflowID, err := req.RequireString("workflow_id")
 		if err != nil {
-			return mcp.NewToolResultError("board_id is required"), nil
+			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
-		payload := map[string]string{"board_id": boardID}
-		var result []map[string]interface{}
+		payload := map[string]string{"workflow_id": workflowID}
+		// Backend returns {workflow_steps: [...], total: N}
+		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ActionMCPListWorkflowSteps, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -69,12 +73,13 @@ func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 
 func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		boardID, err := req.RequireString("board_id")
+		workflowID, err := req.RequireString("workflow_id")
 		if err != nil {
-			return mcp.NewToolResultError("board_id is required"), nil
+			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
-		payload := map[string]string{"board_id": boardID}
-		var result []map[string]interface{}
+		payload := map[string]string{"workflow_id": workflowID}
+		// Backend returns {tasks: [...], total: N}
+		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ActionMCPListTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -89,9 +94,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("workspace_id is required"), nil
 		}
-		boardID, err := req.RequireString("board_id")
+		workflowID, err := req.RequireString("workflow_id")
 		if err != nil {
-			return mcp.NewToolResultError("board_id is required"), nil
+			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
 		workflowStepID, err := req.RequireString("workflow_step_id")
 		if err != nil {
@@ -105,7 +110,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 
 		payload := map[string]string{
 			"workspace_id":     workspaceID,
-			"board_id":         boardID,
+			"workflow_id":      workflowID,
 			"workflow_step_id": workflowStepID,
 			"title":            title,
 			"description":      description,

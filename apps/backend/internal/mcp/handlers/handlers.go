@@ -188,7 +188,14 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 
 // handleCreateTask creates a new task.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req dto.CreateTaskRequest
+	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
+	var req struct {
+		WorkspaceID    string `json:"workspace_id"`
+		WorkflowID     string `json:"workflow_id"`
+		WorkflowStepID string `json:"workflow_step_id"`
+		Title          string `json:"title"`
+		Description    string `json:"description"`
+	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -205,28 +212,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	var repos []service.TaskRepositoryInput
-	for _, r := range req.Repositories {
-		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID:  r.RepositoryID,
-			BaseBranch:    r.BaseBranch,
-			LocalPath:     r.LocalPath,
-			Name:          r.Name,
-			DefaultBranch: r.DefaultBranch,
-		})
-	}
-
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
 		Description:    req.Description,
-		Priority:       req.Priority,
-		State:          req.State,
-		Repositories:   repos,
-		Position:       req.Position,
-		Metadata:       req.Metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -238,33 +229,23 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 // handleUpdateTask updates an existing task.
 func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req dto.UpdateTaskRequest
+	// Use local struct with JSON tags since dto.UpdateTaskRequest lacks them
+	var req struct {
+		TaskID      string  `json:"task_id"`
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		State       *string `json:"state"`
+	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.ID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	var repos []service.TaskRepositoryInput
-	for _, r := range req.Repositories {
-		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID:  r.RepositoryID,
-			BaseBranch:    r.BaseBranch,
-			LocalPath:     r.LocalPath,
-			Name:          r.Name,
-			DefaultBranch: r.DefaultBranch,
-		})
-	}
-
-	task, err := h.taskSvc.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
-		Title:        req.Title,
-		Description:  req.Description,
-		Priority:     req.Priority,
-		State:        req.State,
-		Repositories: repos,
-		Position:     req.Position,
-		Metadata:     req.Metadata,
+	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
+		Title:       req.Title,
+		Description: req.Description,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
