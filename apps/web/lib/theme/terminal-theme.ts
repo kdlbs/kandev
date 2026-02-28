@@ -37,7 +37,7 @@ export function getTerminalTheme(container: HTMLElement): ITheme {
   const v = (name: string) => s.getPropertyValue(name).trim();
 
   return {
-    background: v("--card"),
+    background: v("--background"),
     foreground: v("--foreground"),
     cursor: v("--foreground"),
     cursorAccent: v("--background"),

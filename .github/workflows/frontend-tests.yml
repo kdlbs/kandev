@@ -41,6 +41,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -85,7 +87,7 @@ jobs:
           echo "${CHANGED_FILES}"
           echo "${CHANGED_FILES}" \
             | sed 's#^apps/##' \
-            | xargs pnpm --dir apps exec prettier --check --ignore-unknown
+            | xargs pnpm exec prettier --check --ignore-unknown
 
       - name: Run lint
         run: pnpm --filter @kandev/web lint

@@ -250,6 +250,7 @@ export function ShellTerminal({
   const isReadOnlyMode = processOutput !== undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = propSessionId ?? storeSessionId;
+
   const { session, isActive, isFailed, errorMessage } = useSession(
     isReadOnlyMode ? null : sessionId,
   );
