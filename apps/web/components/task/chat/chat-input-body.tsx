@@ -194,7 +194,7 @@ export function ChatInputBody({
       ref={containerRef}
       className={cn(
         "relative flex flex-col border rounded ",
-        isPanelFocused ? "bg-background border-border" : "bg-background/40 border-border",
+        "bg-background border-border",
         isAgentBusy && !planModeEnabled && "chat-input-running",
         isAgentBusy && planModeEnabled && "chat-input-running-plan",
         planModeEnabled && !isAgentBusy && "border-slate-400/50",

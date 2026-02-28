@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
-import { buildResumeRequest, buildRestoreWorkspaceRequest } from "@/lib/services/session-launch-helpers";
+import {
+  buildResumeRequest,
+  buildRestoreWorkspaceRequest,
+} from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -91,7 +94,10 @@ async function resumeViaLaunch(
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-  buildRequest: (taskId: string, sessionId: string) => { request: import("@/lib/services/session-launch-service").LaunchSessionRequest },
+  buildRequest: (
+    taskId: string,
+    sessionId: string,
+  ) => { request: import("@/lib/services/session-launch-service").LaunchSessionRequest },
 ): Promise<void> {
   setters.setResumptionState("resuming");
   const { request } = buildRequest(taskId, sessionId);

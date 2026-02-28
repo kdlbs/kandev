@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
@@ -39,6 +39,7 @@ type TerminalInitOptions = {
   resizeTimeoutRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
   webglAddonRef: React.MutableRefObject<WebglAddon | null>;
   fitAndResize: (force?: boolean) => void;
+  onReady: () => void;
 };
 
 function initTerminalInstance(
@@ -135,6 +136,7 @@ function useTerminalInit({
   resizeTimeoutRef,
   webglAddonRef,
   fitAndResize,
+  onReady,
 }: TerminalInitOptions) {
   const refs = {
     xtermRef,
@@ -155,32 +157,39 @@ function useTerminalInit({
       log("Already initialized");
       return;
     }
-    const initWhenReady = () => {
+
+    const tryInit = () => {
+      if (isInitializedRef.current) return true;
       const rect = container.getBoundingClientRect();
       log("Init check: dimensions", rect.width, "x", rect.height);
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
         initTerminalInstance(container, refs, fitAndResize);
+        onReady();
         return true;
       }
       return false;
     };
-    if (!initWhenReady()) {
-      let retryCount = 0;
-      const maxRetries = 30;
-      const retry = () => {
-        if (isInitializedRef.current) return;
-        retryCount++;
-        if (initWhenReady() || retryCount >= maxRetries) {
-          if (retryCount >= maxRetries) {
-            log("Max retries, forcing init");
-            initTerminalInstance(container, refs, fitAndResize);
-          }
-          return;
+
+    // If the container already has dimensions, init immediately.
+    if (tryInit()) {
+      // Already initialized — cleanup handled by initTerminalInstance's return
+    } else {
+      // Container is 0×0 (e.g. terminal is in a background dockview tab).
+      // Use a ResizeObserver to wait until the container becomes visible
+      // instead of polling with rAF and force-initializing at 0×0
+      // (which causes black backgrounds since CSS vars can't be read).
+      log("Container not visible, waiting via ResizeObserver");
+      const observer = new ResizeObserver(() => {
+        if (tryInit()) {
+          observer.disconnect();
         }
-        requestAnimationFrame(retry);
+      });
+      observer.observe(container);
+      return () => {
+        observer.disconnect();
       };
-      requestAnimationFrame(retry);
     }
+
     const resizeTimeout = resizeTimeoutRef;
     const webgl = webglAddonRef;
     const xterm = xtermRef;
@@ -208,6 +217,7 @@ type WebSocketConnectionOptions = {
   taskId: string | null;
   sessionId: string | null | undefined;
   canConnect: boolean;
+  isTerminalReady: boolean;
   fitAndResize: (force?: boolean) => void;
   wsBaseUrl: string;
   mode: "agent" | "shell";
@@ -245,7 +255,7 @@ type ConnectWebSocketOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   isMountedCheck: () => boolean;
-  onInterval: (id: ReturnType<typeof setInterval>) => void;
+  onTimeout: (id: ReturnType<typeof setTimeout>) => void;
 };
 
 function connectWebSocket({
@@ -259,7 +269,7 @@ function connectWebSocket({
   wsRef,
   attachAddonRef,
   isMountedCheck,
-  onInterval,
+  onTimeout,
 }: ConnectWebSocketOptions) {
   if (attachAddonRef.current) {
     attachAddonRef.current.dispose();
@@ -283,23 +293,24 @@ function connectWebSocket({
     const attachAddon = new AttachAddon(ws, { bidirectional: true });
     terminal.loadAddon(attachAddon);
     attachAddonRef.current = attachAddon;
-    const triggerRefresh = () => {
-      if (isMountedCheck() && ws.readyState === WebSocket.OPEN) fitAndResize(true);
-    };
-    requestAnimationFrame(triggerRefresh);
-    setTimeout(triggerRefresh, 100);
-    setTimeout(triggerRefresh, 300);
-    setTimeout(triggerRefresh, 500);
-    let refreshCount = 0;
-    const intervalId = setInterval(() => {
-      refreshCount++;
-      if (refreshCount > 5 || !isMountedCheck()) {
-        clearInterval(intervalId);
-        return;
+    // Send initial resize (forced) so the backend knows our terminal dimensions,
+    // then one deferred resize to catch layout settling + force a full redraw.
+    // The WebGL renderer can become stale when the container transitions through
+    // 0×0 (portal system detach/reattach), so we must explicitly refresh.
+    requestAnimationFrame(() => {
+      if (isMountedCheck() && ws.readyState === WebSocket.OPEN) {
+        fitAndResize(true);
       }
-      triggerRefresh();
-    }, 1000);
-    onInterval(intervalId);
+    });
+    const settleTimeout = setTimeout(() => {
+      if (!isMountedCheck()) return;
+      if (ws.readyState === WebSocket.OPEN) {
+        fitAndResize(true);
+      }
+      // Force full redraw — WebGL canvas may be stale after portal 0×0 transition
+      terminal.refresh(0, terminal.rows - 1);
+    }, 500);
+    onTimeout(settleTimeout);
   };
   ws.onclose = (event) => {
     log("WebSocket closed:", event.code, event.reason);
@@ -317,6 +328,7 @@ function useWebSocketConnection({
   taskId,
   sessionId,
   canConnect,
+  isTerminalReady,
   fitAndResize,
   wsBaseUrl,
   mode,
@@ -334,20 +346,21 @@ function useWebSocketConnection({
       mode,
       terminalId,
       canConnect,
+      isTerminalReady,
       hasTerminal: !!xtermRef.current,
     });
-    if (!taskId || !sessionId || !canConnect) {
-      log("WebSocket effect: early return", { taskId, sessionId, canConnect });
+    if (!taskId || !sessionId || !canConnect || !isTerminalReady) {
+      log("WebSocket effect: early return", { taskId, sessionId, canConnect, isTerminalReady });
       return;
     }
     if (!xtermRef.current || !fitAddonRef.current) {
-      log("Terminal not ready for WebSocket");
+      log("Terminal not ready for WebSocket (refs missing despite isTerminalReady)");
       return;
     }
     const terminal = xtermRef.current;
     let isMounted = true;
     let connectTimeout: ReturnType<typeof setTimeout> | null = null;
-    let refreshInterval: ReturnType<typeof setInterval> | null = null;
+    let settleTimeout: ReturnType<typeof setTimeout> | null = null;
     connectTimeout = setTimeout(() => {
       if (!isMounted) return;
       connectWebSocket({
@@ -361,8 +374,8 @@ function useWebSocketConnection({
         wsRef,
         attachAddonRef,
         isMountedCheck: () => isMounted,
-        onInterval: (id) => {
-          refreshInterval = id;
+        onTimeout: (id) => {
+          settleTimeout = id;
         },
       });
     }, 150);
@@ -370,7 +383,7 @@ function useWebSocketConnection({
       log("WebSocket cleanup");
       isMounted = false;
       if (connectTimeout) clearTimeout(connectTimeout);
-      if (refreshInterval) clearInterval(refreshInterval);
+      if (settleTimeout) clearTimeout(settleTimeout);
       if (attachAddonRef.current) {
         attachAddonRef.current.dispose();
         attachAddonRef.current = null;
@@ -384,6 +397,7 @@ function useWebSocketConnection({
     taskId,
     sessionId,
     canConnect,
+    isTerminalReady,
     fitAndResize,
     wsBaseUrl,
     mode,
@@ -463,9 +477,16 @@ function useFitAndResize({
       }
       const { cols, rows } = terminal;
       const last = lastDimensionsRef.current;
-      if (force || cols !== last.cols || rows !== last.rows) {
+      const changed = cols !== last.cols || rows !== last.rows;
+      const wasZero = last.cols === 0 && last.rows === 0;
+      if (force || changed) {
         lastDimensionsRef.current = { cols, rows };
         sendResize(cols, rows);
+      }
+      // Force full redraw when transitioning from uninitialized/zero dimensions —
+      // the WebGL canvas may be stale after the container was at 0×0 (portal moves).
+      if (wasZero || changed) {
+        terminal.refresh(0, terminal.rows - 1);
       }
     },
     [xtermRef, fitAddonRef, terminalRef, lastDimensionsRef, sendResize],
@@ -516,6 +537,12 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     }
   }, []);
 
+  const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const onTerminalReady = useCallback(() => {
+    log("Terminal ready — will trigger WebSocket connection");
+    setIsTerminalReady(true);
+  }, []);
+
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
     xtermRef,
@@ -534,11 +561,13 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     resizeTimeoutRef,
     webglAddonRef,
     fitAndResize,
+    onReady: onTerminalReady,
   });
   useWebSocketConnection({
     taskId,
     sessionId,
     canConnect,
+    isTerminalReady,
     fitAndResize,
     wsBaseUrl,
     mode,
@@ -553,7 +582,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   return (
     <div
       ref={terminalRef}
-      className="h-full w-full overflow-hidden p-1"
+      className="h-full w-full overflow-hidden p-2 bg-background"
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     />
   );
