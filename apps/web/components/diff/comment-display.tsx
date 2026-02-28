@@ -23,7 +23,7 @@ export function CommentDisplay({
   onDelete,
   onEdit,
   showCode = false,
-  compact = false,
+  compact = false, delete 
 }: CommentDisplayProps) {
   const lineRange = formatLineRange(comment.startLine, comment.endLine);
 
