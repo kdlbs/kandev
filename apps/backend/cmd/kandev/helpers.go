@@ -374,6 +374,8 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
+
+	registerE2EResetRoutes(p.router, p.taskRepo, p.log)
 }
 
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.

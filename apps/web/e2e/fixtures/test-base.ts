@@ -72,6 +72,10 @@ export const test = backendFixture.extend<
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+    // Clean up tasks and test-created workflows from previous tests in this worker.
+    // Keep the seeded workflow so the worker-scoped seedData fixture remains valid.
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,

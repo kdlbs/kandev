@@ -343,6 +343,7 @@ export function useTaskSubmitHandlers({
           executorId,
           executorProfileId,
           withAgent: false,
+          planMode: true,
         }),
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;

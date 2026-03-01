@@ -236,4 +236,68 @@ test.describe("Workflow start step placement", () => {
     // Session transitions to idle
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
+
+  /**
+   * Plan mode bypasses is_start_step — task lands in Backlog (position 0):
+   *
+   * Workflow: Backlog → In Progress [start] (auto_start_agent) → Review → Done
+   *
+   * 1. Create task via dialog in plan mode (title only, no description)
+   * 2. Session page opens with plan panel visible
+   * 3. Task lands in Backlog, not In Progress — plan mode ignores is_start_step
+   */
+  test("plan mode with start step: task lands in Backlog, not In Progress", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Plan Mode Dev Workflow");
+
+    const backlogStep = await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
+    await apiClient.createWorkflowStep(workflow.id, "In Progress", 1, { is_start_step: true });
+    await apiClient.createWorkflowStep(workflow.id, "Review", 2);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    // --- Create task via dialog in plan mode ---
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    // Fill title only — "Start Plan Mode" becomes the default submit action
+    await testPage.getByTestId("task-title-input").fill("Plan Dev Task");
+
+    const submitBtn = dialog.getByRole("button", { name: /Start Plan Mode/ });
+    await expect(submitBtn).toBeEnabled({ timeout: 10_000 });
+    await submitBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Navigates to session page with plan layout
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Plan panel is visible
+    await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+
+    // Stepper shows Backlog as current step — plan mode ignores is_start_step
+    await expect(session.stepperStep("Backlog")).toHaveAttribute("aria-current", "step", {
+      timeout: 10_000,
+    });
+
+    // Task card is in the Backlog column on the kanban board
+    await testPage.goto("/");
+    await kanban.board.waitFor({ state: "visible" });
+    const card = kanban.taskCardInColumn("Plan Dev Task", backlogStep.id);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+  });
 });

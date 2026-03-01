@@ -96,6 +96,17 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }
 
+// DeleteTasksByWorkspace deletes all tasks for a workspace (E2E cleanup).
+// Relies on CASCADE foreign keys to remove sessions, messages, turns, etc.
+func (r *Repository) DeleteTasksByWorkspace(ctx context.Context, workspaceID string) (int64, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE workspace_id = ?`), workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)

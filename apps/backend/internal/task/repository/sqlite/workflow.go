@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -85,6 +86,30 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 		return fmt.Errorf("workflow not found: %s", workflow.ID)
 	}
 	return nil
+}
+
+// DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
+// Relies on CASCADE foreign keys to remove workflow_steps.
+func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
+	if len(excludeIDs) == 0 {
+		result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE workspace_id = ?`), workspaceID)
+		if err != nil {
+			return 0, err
+		}
+		rows, _ := result.RowsAffected()
+		return rows, nil
+	}
+
+	query, args, err := sqlx.In(`DELETE FROM workflows WHERE workspace_id = ? AND id NOT IN (?)`, workspaceID, excludeIDs)
+	if err != nil {
+		return 0, err
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
 }
 
 // DeleteWorkflow deletes a workflow by ID

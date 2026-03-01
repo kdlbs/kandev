@@ -215,6 +215,13 @@ export class ApiClient {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
   }
 
+  // --- E2E Test Reset ---
+
+  async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
+    const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
+    await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
+  }
+
   // --- GitHub Mock Control ---
 
   async mockGitHubReset(): Promise<void> {
