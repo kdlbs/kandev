@@ -34,6 +34,10 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("utility prompt failed with status %d: %s", resp.StatusCode, truncateBody(respBody))
+	}
+
 	var result utility.PromptResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)

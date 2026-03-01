@@ -1,6 +1,9 @@
 package template
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Context holds the data available for template resolution.
 type Context struct {
@@ -35,6 +38,9 @@ func NewEngine() *Engine {
 	return &Engine{}
 }
 
+// templatePattern matches {{Key}} placeholders.
+var templatePattern = regexp.MustCompile(`\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}`)
+
 // Resolve resolves template variables in the given prompt using the provided context.
 // Uses {{Key}} format (no dot) for consistency with scriptengine.
 func (e *Engine) Resolve(promptTemplate string, ctx *Context) (string, error) {
@@ -42,10 +48,17 @@ func (e *Engine) Resolve(promptTemplate string, ctx *Context) (string, error) {
 		ctx = &Context{}
 	}
 	data := e.buildTemplateData(ctx)
-	result := promptTemplate
-	for key, value := range data {
-		result = strings.ReplaceAll(result, "{{"+key+"}}", value)
-	}
+
+	// Use regex replacement for deterministic single-pass substitution
+	result := templatePattern.ReplaceAllStringFunc(promptTemplate, func(match string) string {
+		// Extract key from {{Key}}
+		key := strings.TrimSuffix(strings.TrimPrefix(match, "{{"), "}}")
+		if val, ok := data[key]; ok {
+			return val
+		}
+		return match // Leave unknown placeholders unchanged
+	})
+
 	return result, nil
 }
 

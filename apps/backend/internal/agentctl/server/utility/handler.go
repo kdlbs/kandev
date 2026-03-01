@@ -48,7 +48,7 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 		h.logger.Error("inference prompt failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, PromptResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   "inference execution failed",
 		})
 		return
 	}

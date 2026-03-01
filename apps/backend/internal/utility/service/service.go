@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -41,7 +42,10 @@ func (s *Service) ListAgents(ctx context.Context) ([]*models.UtilityAgent, error
 func (s *Service) GetAgentByID(ctx context.Context, id string) (*models.UtilityAgent, error) {
 	agent, err := s.repo.GetAgentByID(ctx, id)
 	if err != nil {
-		return nil, ErrAgentNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
 	}
 	return agent, nil
 }
@@ -50,7 +54,10 @@ func (s *Service) GetAgentByID(ctx context.Context, id string) (*models.UtilityA
 func (s *Service) GetAgentByName(ctx context.Context, name string) (*models.UtilityAgent, error) {
 	agent, err := s.repo.GetAgentByName(ctx, name)
 	if err != nil {
-		return nil, ErrAgentNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
 	}
 	return agent, nil
 }

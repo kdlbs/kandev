@@ -153,6 +153,9 @@ func parseStreamJSON(output string) string {
 	var result strings.Builder
 
 	scanner := bufio.NewScanner(strings.NewReader(output))
+	// Increase buffer for large outputs (8MB max)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -164,6 +167,9 @@ func parseStreamJSON(output string) string {
 			result.WriteString(text)
 		}
 	}
+
+	// Ignore scanner errors - best effort parsing
+	_ = scanner.Err()
 
 	return strings.TrimSpace(result.String())
 }

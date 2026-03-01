@@ -155,7 +155,7 @@ func (a *ClaudeCode) PermissionSettings() map[string]PermissionSetting {
 func (a *ClaudeCode) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("claude", "--print"),
+		Command:      NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--print"),
 		ModelFlag:    NewParam("--model", "{model}"),
 		OutputFormat: "text",
 		StdinInput:   true,

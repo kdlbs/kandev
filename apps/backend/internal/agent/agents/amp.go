@@ -121,7 +121,7 @@ func (a *Amp) PermissionSettings() map[string]PermissionSetting {
 func (a *Amp) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("amp"),
+		Command:      NewCommand("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input"),
 		ModelFlag:    NewParam("-m", "{model}"),
 		OutputFormat: "stream-json",
 		StdinInput:   true,

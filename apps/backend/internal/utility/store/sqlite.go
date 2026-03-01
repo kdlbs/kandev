@@ -114,7 +114,19 @@ func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
 	}
-	return r.db.Close()
+	var errs []error
+	if err := r.db.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if r.ro != r.db {
+		if err := r.ro.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
 
 func (r *sqliteRepository) ListAgents(ctx context.Context) ([]*models.UtilityAgent, error) {

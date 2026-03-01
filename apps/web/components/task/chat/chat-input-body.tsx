@@ -136,7 +136,7 @@ export function ChatInputEditorArea({
         isDisabled={isDisabled}
         isSending={isSending}
         onCancel={onCancel}
-        onSubmit={handleSubmitWithReset}
+        onSubmit={wrappedSubmit}
         submitKey={submitKey}
         contextCount={contextCount}
         contextPopoverOpen={contextPopoverOpen}

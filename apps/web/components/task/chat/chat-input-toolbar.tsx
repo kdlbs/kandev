@@ -173,6 +173,8 @@ function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLo
           className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
           onClick={onClick}
           disabled={isLoading}
+          aria-label="Enhance prompt with AI"
+          aria-busy={isLoading}
         >
           {isLoading ? <GridSpinner className="h-4 w-4" /> : <IconSparkles className="h-4 w-4" />}
         </Button>
