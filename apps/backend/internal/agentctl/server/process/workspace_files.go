@@ -144,17 +144,45 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	cleanReqPath := filepath.Clean(reqPath)
 
 	var fullPath string
-	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
+	if filepath.IsAbs(cleanReqPath) {
 		fullPath = cleanReqPath
 	} else {
 		fullPath = filepath.Join(wt.workDir, cleanReqPath)
 	}
 
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return "", fmt.Errorf("path traversal detected")
+	// Resolve symlinks to prevent bypassing validation
+	realPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		// If EvalSymlinks fails, the path might not exist yet (e.g., creating new file)
+		// In that case, resolve the parent directory
+		parentDir := filepath.Dir(fullPath)
+		realParent, parentErr := filepath.EvalSymlinks(parentDir)
+		if parentErr != nil {
+			// Parent doesn't exist either, use the cleaned full path
+			realPath = fullPath
+		} else {
+			realPath = filepath.Join(realParent, filepath.Base(fullPath))
+		}
 	}
 
-	return fullPath, nil
+	// Resolve workspace directory symlinks for consistent comparison
+	realWorkDir, err := filepath.EvalSymlinks(cleanWorkDir)
+	if err != nil {
+		realWorkDir = cleanWorkDir
+	}
+
+	// Check that the real path is within the workspace
+	relPath, err := filepath.Rel(realWorkDir, realPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Ensure the relative path doesn't escape the workspace
+	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
+		return "", fmt.Errorf("path traversal detected: %s", reqPath)
+	}
+
+	return realPath, nil
 }
 
 // GetFileContent returns the content of a file.
