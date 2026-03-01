@@ -5,7 +5,6 @@ import {
   IconGitPullRequest,
   IconCloudUpload,
   IconChevronDown,
-  IconArrowBackUp,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -21,6 +20,7 @@ import type { FileInfo } from "@/lib/state/store";
 import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
 import { FileRow } from "./changes-panel-file-row";
+import { CommitRow, type CommitItem } from "./commit-row";
 
 // --- Timeline visual components ---
 
@@ -93,18 +93,13 @@ function TimelineSection({
 
 // --- Commits section ---
 
-type CommitItem = {
-  commit_sha: string;
-  commit_message: string;
-  insertions: number;
-  deletions: number;
-};
-
 type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
   onRevertCommit?: (sha: string) => void;
+  onAmendCommit?: (currentMessage: string) => void;
+  onResetToCommit?: (sha: string) => void;
 };
 
 export function CommitsSection({
@@ -112,6 +107,8 @@ export function CommitsSection({
   isLast,
   onOpenCommitDetail,
   onRevertCommit,
+  onAmendCommit,
+  onResetToCommit,
 }: CommitsSectionProps) {
   return (
     <TimelineSection
@@ -122,39 +119,15 @@ export function CommitsSection({
     >
       <ul className="space-y-0.5">
         {commits.map((commit, index) => (
-          <li
+          <CommitRow
             key={`${commit.commit_sha}-${index}`}
-            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-            onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
-          >
-            <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-            <code className="font-mono text-muted-foreground text-[11px]">
-              {commit.commit_sha.slice(0, 7)}
-            </code>
-            <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-            <span className="shrink-0 text-[11px] flex items-center gap-1">
-              <span className="text-emerald-500">+{commit.insertions}</span>{" "}
-              <span className="text-rose-500">-{commit.deletions}</span>
-              {index === 0 && onRevertCommit && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Revert commit"
-                      className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRevertCommit(commit.commit_sha);
-                      }}
-                    >
-                      <IconArrowBackUp className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Revert commit</TooltipContent>
-                </Tooltip>
-              )}
-            </span>
-          </li>
+            commit={commit}
+            isLatest={index === 0}
+            onOpenCommitDetail={onOpenCommitDetail}
+            onAmendCommit={onAmendCommit}
+            onRevertCommit={onRevertCommit}
+            onResetToCommit={onResetToCommit}
+          />
         ))}
       </ul>
     </TimelineSection>
