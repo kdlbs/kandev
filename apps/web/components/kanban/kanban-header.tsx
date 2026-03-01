@@ -18,6 +18,7 @@ import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { RefreshReviewsButton } from "../github/refresh-reviews-button";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
+import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
@@ -26,6 +27,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
+import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 
 type KanbanHeaderProps = {
   onCreateTask: () => void;
@@ -103,6 +105,8 @@ function TabletHeader({
   setMenuOpen,
   showReleaseNotesButton,
   onOpenReleaseNotes,
+  showHealthIndicator,
+  onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
   searchQuery: string;
@@ -113,6 +117,8 @@ function TabletHeader({
   setMenuOpen: (open: boolean) => void;
   showReleaseNotesButton: boolean;
   onOpenReleaseNotes: () => void;
+  showHealthIndicator: boolean;
+  onOpenHealthDialog: () => void;
 }) {
   return (
     <header className="flex items-center justify-between p-4 pb-3 gap-3">
@@ -141,6 +147,7 @@ function TabletHeader({
             itemClassName="h-8 w-8"
           />
           {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
+          <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         </TooltipProvider>
         <Button
           variant="outline"
@@ -165,6 +172,8 @@ function DesktopHeader({
   handleViewChange,
   showReleaseNotesButton,
   onOpenReleaseNotes,
+  showHealthIndicator,
+  onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
   searchQuery: string;
@@ -174,6 +183,8 @@ function DesktopHeader({
   handleViewChange: (value: string) => void;
   showReleaseNotesButton: boolean;
   onOpenReleaseNotes: () => void;
+  showHealthIndicator: boolean;
+  onOpenHealthDialog: () => void;
 }) {
   return (
     <header className="relative flex items-center justify-between p-4 pb-3">
@@ -212,6 +223,7 @@ function DesktopHeader({
         </TooltipProvider>
         <RefreshReviewsButton />
         {showReleaseNotesButton && <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />}
+        <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
         <KanbanDisplayDropdown />
         <Link href="/settings" className="cursor-pointer">
           <Button variant="outline" className="cursor-pointer">
@@ -236,12 +248,10 @@ export function KanbanHeader({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-
   const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
   const releaseNotes = useReleaseNotes();
-
+  const healthIndicator = useSystemHealthIndicator();
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
-
   const handleViewChange = (value: string) => {
     if (value === "list") {
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
@@ -253,22 +263,21 @@ export function KanbanHeader({
       onViewModeChange("graph2");
     }
   };
-
-  const releaseNotesProps = {
+  const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
     onOpenReleaseNotes: releaseNotes.openDialog,
+    showHealthIndicator: healthIndicator.hasIssues,
+    onOpenHealthDialog: healthIndicator.openDialog,
   };
-
+  const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
   let header: React.ReactNode;
   if (isMobile) {
     header = (
       <KanbanHeaderMobile
         workspaceId={workspaceId}
         currentPage={currentPage}
-        searchQuery={searchQuery}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading}
-        {...releaseNotesProps}
+        {...sharedSearch}
+        {...indicatorProps}
       />
     );
   } else if (isTablet) {
@@ -276,22 +285,18 @@ export function KanbanHeader({
       <>
         <TabletHeader
           onCreateTask={onCreateTask}
-          searchQuery={searchQuery}
-          onSearchChange={onSearchChange}
-          isSearchLoading={isSearchLoading}
+          {...sharedSearch}
           toggleValue={toggleValue}
           handleViewChange={handleViewChange}
           setMenuOpen={setMenuOpen}
-          {...releaseNotesProps}
+          {...indicatorProps}
         />
         <MobileMenuSheet
           open={isMenuOpen}
           onOpenChange={setMenuOpen}
           workspaceId={workspaceId}
           currentPage={currentPage}
-          searchQuery={searchQuery}
-          onSearchChange={onSearchChange}
-          isSearchLoading={isSearchLoading}
+          {...sharedSearch}
         />
       </>
     );
@@ -299,16 +304,13 @@ export function KanbanHeader({
     header = (
       <DesktopHeader
         onCreateTask={onCreateTask}
-        searchQuery={searchQuery}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading}
+        {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}
-        {...releaseNotesProps}
+        {...indicatorProps}
       />
     );
   }
-
   return (
     <>
       {header}
@@ -320,6 +322,11 @@ export function KanbanHeader({
           latestVersion={releaseNotes.latestVersion}
         />
       )}
+      <HealthIssuesDialog
+        open={healthIndicator.dialogOpen}
+        onOpenChange={healthIndicator.closeDialog}
+        issues={healthIndicator.issues}
+      />
     </>
   );
 }

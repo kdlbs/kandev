@@ -18,16 +18,18 @@ import (
 type Service struct {
 	client     Client
 	authMethod string
+	secrets    SecretProvider
 	store      *Store
 	eventBus   bus.EventBus
 	logger     *logger.Logger
 }
 
 // NewService creates a new GitHub service.
-func NewService(client Client, authMethod string, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
+func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
 		client:     client,
 		authMethod: authMethod,
+		secrets:    secrets,
 		store:      store,
 		eventBus:   eventBus,
 		logger:     log,
@@ -39,12 +41,28 @@ func (s *Service) Client() Client {
 	return s.client
 }
 
+// IsAuthenticated returns whether the service has a working GitHub client.
+func (s *Service) IsAuthenticated() bool {
+	return s.client != nil
+}
+
+// AuthMethod returns the authentication method ("gh_cli", "pat", or "none").
+func (s *Service) AuthMethod() string {
+	return s.authMethod
+}
+
 // GetStatus returns the current GitHub connection status.
+// If no client exists, it retries client creation to pick up auth changes made after startup.
 func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
+	if s.client == nil {
+		s.retryClientCreation(ctx)
+	}
+
 	status := &GitHubStatus{
 		AuthMethod: s.authMethod,
 	}
 	if s.client == nil {
+		status.Diagnostics = runGHDiagnostics(ctx)
 		return status, nil
 	}
 	ok, err := s.client.IsAuthenticated(ctx)
@@ -57,8 +75,34 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 		if err == nil {
 			status.Username = user
 		}
+	} else {
+		status.Diagnostics = runGHDiagnostics(ctx)
 	}
 	return status, nil
+}
+
+// retryClientCreation attempts to create a GitHub client when none exists.
+func (s *Service) retryClientCreation(ctx context.Context) {
+	client, authMethod, err := NewClient(ctx, s.secrets, s.logger)
+	if err != nil {
+		return
+	}
+	s.client = client
+	s.authMethod = authMethod
+	s.logger.Info("GitHub client recovered after retry",
+		zap.String("auth_method", authMethod))
+}
+
+// runGHDiagnostics runs gh auth status if the gh CLI is available.
+func runGHDiagnostics(ctx context.Context) *AuthDiagnostics {
+	if !GHAvailable() {
+		return &AuthDiagnostics{
+			Command:  "gh auth status",
+			Output:   "gh CLI is not installed. Install it from https://cli.github.com",
+			ExitCode: -1,
+		}
+	}
+	return NewGHClient().RunAuthDiagnostics(ctx)
 }
 
 // SubmitReview submits a review on a pull request.

@@ -18,6 +18,7 @@ export const defaultUIState: UISliceState = {
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
+  systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
 };
 
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
@@ -93,5 +94,19 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.documentPanel.activeDocumentBySessionId[sessionId] = doc;
       setLocalStorage(`active-document-${sessionId}`, doc as ActiveDocument | null);
+    }),
+  setSystemHealth: (response) =>
+    set((draft) => {
+      draft.systemHealth.issues = response.issues;
+      draft.systemHealth.healthy = response.healthy;
+      draft.systemHealth.loaded = true;
+    }),
+  setSystemHealthLoading: (loading) =>
+    set((draft) => {
+      draft.systemHealth.loading = loading;
+    }),
+  invalidateSystemHealth: () =>
+    set((draft) => {
+      draft.systemHealth.loaded = false;
     }),
 });

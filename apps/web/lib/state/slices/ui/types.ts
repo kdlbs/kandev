@@ -1,3 +1,5 @@
+import type { HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
 export type PreviewDevicePreset = "desktop" | "tablet" | "mobile";
@@ -48,6 +50,13 @@ export type DocumentPanelState = {
   activeDocumentBySessionId: Record<string, ActiveDocument | null>;
 };
 
+export type SystemHealthState = {
+  issues: HealthIssue[];
+  healthy: boolean;
+  loaded: boolean;
+  loading: boolean;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -57,6 +66,7 @@ export type UISliceState = {
   mobileSession: MobileSessionState;
   chatInput: ChatInputState;
   documentPanel: DocumentPanelState;
+  systemHealth: SystemHealthState;
 };
 
 export type UISliceActions = {
@@ -75,6 +85,9 @@ export type UISliceActions = {
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
+  setSystemHealth: (response: SystemHealthResponse) => void;
+  setSystemHealthLoading: (loading: boolean) => void;
+  invalidateSystemHealth: () => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

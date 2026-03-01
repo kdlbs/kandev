@@ -190,9 +190,17 @@ type GitHubRepo struct {
 
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
-	Authenticated bool   `json:"authenticated"`
-	Username      string `json:"username"`
-	AuthMethod    string `json:"auth_method"` // "gh_cli", "pat", "none"
+	Authenticated bool             `json:"authenticated"`
+	Username      string           `json:"username"`
+	AuthMethod    string           `json:"auth_method"` // "gh_cli", "pat", "none"
+	Diagnostics   *AuthDiagnostics `json:"diagnostics,omitempty"`
+}
+
+// AuthDiagnostics captures the output of gh auth status for troubleshooting.
+type AuthDiagnostics struct {
+	Command  string `json:"command"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
 }
 
 // CreateReviewWatchRequest is the request body for creating a review watch.

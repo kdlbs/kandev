@@ -29,7 +29,7 @@ func Provide(
 		log.Warn("GitHub client not available: " + err.Error())
 	}
 
-	svc := NewService(client, authMethod, store, eventBus, log)
+	svc := NewService(client, authMethod, secrets, store, eventBus, log)
 
 	cleanup := func() error { return nil }
 	return svc, cleanup, nil

@@ -106,6 +106,7 @@ export type {
   MobileSessionState,
   ActiveDocument,
   DocumentPanelState,
+  SystemHealthState,
 } from "./ui/types";
 export type {
   GitHubStatusState,

@@ -56,6 +56,20 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
 }
 
+// HasAvailableAgents returns true if at least one agent is detected as installed.
+func (c *Controller) HasAvailableAgents(ctx context.Context) (bool, error) {
+	results, err := c.detectAgents(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range results {
+		if r.Available {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *Controller) InvalidateDiscoveryCache() {
 	if c.discovery != nil {
 		c.discovery.InvalidateCache()

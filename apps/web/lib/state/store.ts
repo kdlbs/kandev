@@ -15,6 +15,7 @@ import type {
   PRWatch,
   ReviewWatch as GitHubReviewWatch,
 } from "@/lib/types/github";
+import type { SystemHealthResponse } from "@/lib/types/health";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -189,6 +190,7 @@ export type AppState = {
   mobileSession: (typeof defaultUIState)["mobileSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
+  systemHealth: (typeof defaultUIState)["systemHealth"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -287,6 +289,9 @@ export type AppState = {
     sessionId: string,
     doc: import("./slices/ui/types").ActiveDocument | null,
   ) => void;
+  setSystemHealth: (response: SystemHealthResponse) => void;
+  setSystemHealthLoading: (loading: boolean) => void;
+  invalidateSystemHealth: () => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -416,6 +421,7 @@ const defaultState = {
   mobileKanban: defaultUIState.mobileKanban,
   mobileSession: defaultUIState.mobileSession,
   chatInput: defaultUIState.chatInput,
+  systemHealth: defaultUIState.systemHealth,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -483,6 +489,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
     mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
+    systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
   };
 }
 
@@ -557,6 +564,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       mobileKanban: merged.mobileKanban,
       mobileSession: merged.mobileSession,
       chatInput: merged.chatInput,
+      systemHealth: merged.systemHealth,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

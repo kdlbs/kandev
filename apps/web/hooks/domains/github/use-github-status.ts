@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
 
@@ -10,9 +10,9 @@ export function useGitHubStatus() {
   const loading = useAppStore((state) => state.githubStatus.loading);
   const setGitHubStatus = useAppStore((state) => state.setGitHubStatus);
   const setGitHubStatusLoading = useAppStore((state) => state.setGitHubStatusLoading);
+  const invalidateSystemHealth = useAppStore((state) => state.invalidateSystemHealth);
 
-  useEffect(() => {
-    if (loaded || loading) return;
+  const doFetch = useCallback(() => {
     setGitHubStatusLoading(true);
     fetchGitHubStatus({ cache: "no-store" })
       .then((response) => {
@@ -24,7 +24,18 @@ export function useGitHubStatus() {
       .finally(() => {
         setGitHubStatusLoading(false);
       });
-  }, [loaded, loading, setGitHubStatus, setGitHubStatusLoading]);
+  }, [setGitHubStatus, setGitHubStatusLoading]);
 
-  return { status, loaded, loading };
+  useEffect(() => {
+    if (loaded || loading) return;
+    doFetch();
+  }, [loaded, loading, doFetch]);
+
+  const refresh = useCallback(() => {
+    // Also invalidate system health so the header indicator refetches
+    invalidateSystemHealth();
+    doFetch();
+  }, [doFetch, invalidateSystemHealth]);
+
+  return { status, loaded, loading, refresh };
 }

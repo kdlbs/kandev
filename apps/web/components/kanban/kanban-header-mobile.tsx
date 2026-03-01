@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconMenu2 } from "@tabler/icons-react";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
+import { HealthIndicatorButton } from "../system-health/health-indicator";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
 
@@ -16,6 +17,8 @@ type KanbanHeaderMobileProps = {
   isSearchLoading?: boolean;
   showReleaseNotesButton: boolean;
   onOpenReleaseNotes: () => void;
+  showHealthIndicator: boolean;
+  onOpenHealthDialog: () => void;
 };
 
 export function KanbanHeaderMobile({
@@ -26,6 +29,8 @@ export function KanbanHeaderMobile({
   isSearchLoading = false,
   showReleaseNotesButton,
   onOpenReleaseNotes,
+  showHealthIndicator,
+  onOpenHealthDialog,
 }: KanbanHeaderMobileProps) {
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
@@ -40,6 +45,11 @@ export function KanbanHeaderMobile({
           {showReleaseNotesButton && (
             <TooltipProvider>
               <ReleaseNotesButton hasUnseen onClick={onOpenReleaseNotes} />
+            </TooltipProvider>
+          )}
+          {showHealthIndicator && (
+            <TooltipProvider>
+              <HealthIndicatorButton hasIssues={showHealthIndicator} onClick={onOpenHealthDialog} />
             </TooltipProvider>
           )}
           <Button

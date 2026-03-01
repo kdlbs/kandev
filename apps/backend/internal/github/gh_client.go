@@ -26,18 +26,37 @@ func GHAvailable() bool {
 }
 
 func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
+	// Treat any non-zero exit as "not authenticated". This avoids parsing
+	// locale-dependent error messages and handles multi-account scenarios
+	// where a secondary account has an invalid token. GHAvailable() already
+	// guards binary existence before this method is called.
 	_, err := c.run(ctx, "auth", "status", "--hostname", "github.com")
-	if err != nil {
-		// gh auth status exits non-zero when not authenticated.
-		// The error message includes stderr from the gh CLI.
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not logged") || strings.Contains(errMsg, "no accounts") {
-			return false, nil
+	return err == nil, nil
+}
+
+// RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
+func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
+	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	exitCode := 0
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
 		}
-		// Unexpected error (binary not found, network issue, etc.)
-		return false, err
 	}
-	return true, nil
+	output := stderr.String()
+	if output == "" {
+		output = stdout.String()
+	}
+	return &AuthDiagnostics{
+		Command:  "gh auth status --hostname github.com",
+		Output:   output,
+		ExitCode: exitCode,
+	}
 }
 
 func (c *GHClient) GetAuthenticatedUser(ctx context.Context) (string, error) {

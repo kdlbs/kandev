@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/health"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
@@ -347,7 +348,22 @@ func registerSecondaryRoutes(
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), p.log)
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
+	registerHealthRoutes(p)
+
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService)
+}
+
+// registerHealthRoutes sets up the system health endpoint with all health checkers.
+func registerHealthRoutes(p routeParams) {
+	var githubProvider health.GitHubStatusProvider
+	if p.services.GitHub != nil {
+		githubProvider = p.services.GitHub
+	}
+	healthSvc := health.NewService(p.log,
+		health.NewGitHubChecker(githubProvider),
+		health.NewAgentChecker(p.agentSettingsController),
+	)
+	health.RegisterRoutes(p.router, healthSvc, p.log)
 }
 
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.

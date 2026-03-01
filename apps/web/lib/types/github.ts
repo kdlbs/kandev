@@ -2,10 +2,17 @@
 
 export type GitHubAuthMethod = "gh_cli" | "pat" | "none";
 
+export type AuthDiagnostics = {
+  command: string;
+  output: string;
+  exit_code: number;
+};
+
 export type GitHubStatus = {
   authenticated: boolean;
   username: string;
   auth_method: GitHubAuthMethod;
+  diagnostics?: AuthDiagnostics;
 };
 
 export type GitHubPR = {
