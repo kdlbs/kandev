@@ -341,11 +341,16 @@ func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
 	return nil
 }
 
-// DeleteFile deletes a file from the workspace
+// DeleteFile deletes a file or directory from the workspace.
 func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 	fullPath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return err
+	}
+
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	if fullPath == cleanWorkDir {
+		return fmt.Errorf("cannot delete workspace root")
 	}
 
 	// Check if file exists
@@ -357,72 +362,73 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	// Don't allow deleting directories
 	if info.IsDir() {
-		return fmt.Errorf("cannot delete directory: %s", reqPath)
+		if err := os.RemoveAll(fullPath); err != nil {
+			return fmt.Errorf("failed to delete directory: %w", err)
+		}
+	} else {
+		if err := os.Remove(fullPath); err != nil {
+			return fmt.Errorf("failed to delete file: %w", err)
+		}
 	}
 
-	// Delete the file
-	if err := os.Remove(fullPath); err != nil {
-		return fmt.Errorf("failed to delete file: %w", err)
-	}
-
-	// Notify with the relative path
-	cleanWorkDir := filepath.Clean(wt.workDir)
 	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(relPath, types.FileOpRemove)
 
 	return nil
 }
 
-// RenameFile renames/moves a file in the workspace
+// RenameFile renames/moves a file or directory in the workspace.
 func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
+	if oldPath == "" || newPath == "" {
+		return fmt.Errorf("old_path and new_path are required")
+	}
+
 	oldFullPath, err := wt.resolveSafePath(oldPath)
 	if err != nil {
 		return err
 	}
-
 	newFullPath, err := wt.resolveSafePath(newPath)
 	if err != nil {
 		return err
 	}
 
-	// Check if source file exists
-	info, err := os.Stat(oldFullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("file does not exist: %s", oldPath)
-		}
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	// Don't allow renaming directories
-	if info.IsDir() {
-		return fmt.Errorf("cannot rename directory: %s", oldPath)
-	}
-
-	// Check if destination already exists
-	if _, err := os.Stat(newFullPath); err == nil {
-		return fmt.Errorf("destination file already exists: %s", newPath)
-	}
-
-	// Create destination directory if needed
-	newDir := filepath.Dir(newFullPath)
-	if err := os.MkdirAll(newDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create directories: %w", err)
-	}
-
-	// Rename the file
-	if err := os.Rename(oldFullPath, newFullPath); err != nil {
-		return fmt.Errorf("failed to rename file: %w", err)
-	}
-
-	// Notify with the relative paths
 	cleanWorkDir := filepath.Clean(wt.workDir)
+	if oldFullPath == cleanWorkDir || newFullPath == cleanWorkDir {
+		return fmt.Errorf("cannot rename workspace root")
+	}
+	if oldFullPath == newFullPath {
+		return nil
+	}
+
+	if _, err := os.Stat(oldFullPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("path does not exist: %s", oldPath)
+		}
+		return fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	if _, err := os.Stat(newFullPath); err == nil {
+		return fmt.Errorf("target already exists: %s", newPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat target: %w", err)
+	}
+
+	parentDir := filepath.Dir(newFullPath)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create target parent directories: %w", err)
+	}
+
+	if err := os.Rename(oldFullPath, newFullPath); err != nil {
+		return fmt.Errorf("failed to rename path: %w", err)
+	}
+
 	oldRelPath := strings.TrimPrefix(oldFullPath, cleanWorkDir+string(os.PathSeparator))
 	newRelPath := strings.TrimPrefix(newFullPath, cleanWorkDir+string(os.PathSeparator))
-	wt.addPendingChange(oldRelPath, types.FileOpRemove)
-	wt.addPendingChange(newRelPath, types.FileOpCreate)
+	wt.addPendingChange(oldRelPath, types.FileOpRename)
+	if newRelPath != oldRelPath {
+		wt.addPendingChange(newRelPath, types.FileOpRename)
+	}
 
 	return nil
 }

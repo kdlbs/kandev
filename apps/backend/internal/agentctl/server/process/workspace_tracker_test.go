@@ -523,17 +523,56 @@ func TestDeleteFile(t *testing.T) {
 		}
 	})
 
-	t.Run("directory deletion rejected", func(t *testing.T) {
+	t.Run("directory deletion succeeds", func(t *testing.T) {
 		dir, wt := setupTestDir(t)
-		if err := os.Mkdir(filepath.Join(dir, "mydir"), 0o755); err != nil {
+		targetDir := filepath.Join(dir, "mydir")
+		if err := os.Mkdir(targetDir, 0o755); err != nil {
 			t.Fatalf("mkdir failed: %v", err)
 		}
 		err := wt.DeleteFile("mydir")
-		if err == nil {
-			t.Fatal("expected error for directory deletion, got nil")
+		if err != nil {
+			t.Fatalf("expected directory deletion to succeed, got: %v", err)
 		}
-		if !strings.Contains(err.Error(), "cannot delete directory") {
-			t.Errorf("expected 'cannot delete directory' error, got: %v", err)
+		if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
+			t.Fatalf("expected directory to be deleted, got err: %v", err)
+		}
+	})
+}
+
+func TestRenamePath(t *testing.T) {
+	t.Run("renames file", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		oldPath := filepath.Join(dir, "from.txt")
+		newPath := filepath.Join(dir, "to.txt")
+		if err := os.WriteFile(oldPath, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		if err := wt.RenamePath("from.txt", "to.txt"); err != nil {
+			t.Fatalf("RenamePath failed: %v", err)
+		}
+		if _, err := os.Stat(newPath); err != nil {
+			t.Fatalf("expected new path to exist, got: %v", err)
+		}
+		if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+			t.Fatalf("expected old path to be gone, got: %v", err)
+		}
+	})
+
+	t.Run("renames directory", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		oldDir := filepath.Join(dir, "dir-a")
+		newDir := filepath.Join(dir, "dir-b")
+		if err := os.Mkdir(oldDir, 0o755); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(oldDir, "file.txt"), []byte("hello"), 0o644); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		if err := wt.RenamePath("dir-a", "dir-b"); err != nil {
+			t.Fatalf("RenamePath failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(newDir, "file.txt")); err != nil {
+			t.Fatalf("expected file to be moved with directory, got: %v", err)
 		}
 	})
 }

@@ -205,7 +205,7 @@ type FileCreateResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// FileDeleteRequest represents a request to delete a file.
+// FileDeleteRequest represents a request to delete a file or directory.
 //
 // HTTP endpoint: DELETE /api/v1/workspace/file
 type FileDeleteRequest struct {
@@ -228,23 +228,23 @@ type FileDeleteResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// FileRenameRequest represents a request to rename/move a file.
+// FileRenameRequest represents a request to rename a file or directory.
 //
 // HTTP endpoint: POST /api/v1/workspace/file/rename
 type FileRenameRequest struct {
-	// OldPath is the current file path (relative to workspace root).
+	// OldPath is the current path (relative to workspace root).
 	OldPath string `json:"old_path"`
 
-	// NewPath is the new file path (relative to workspace root).
+	// NewPath is the new path (relative to workspace root).
 	NewPath string `json:"new_path"`
 }
 
-// FileRenameResponse represents a response to a file rename request.
+// FileRenameResponse represents a response to a rename request.
 type FileRenameResponse struct {
-	// OldPath is the original file path.
+	// OldPath is the original path.
 	OldPath string `json:"old_path"`
 
-	// NewPath is the new file path.
+	// NewPath is the new path.
 	NewPath string `json:"new_path"`
 
 	// Success indicates if the rename was successful.

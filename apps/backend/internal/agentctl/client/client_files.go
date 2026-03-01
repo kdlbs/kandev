@@ -228,7 +228,7 @@ func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDele
 	return &response, nil
 }
 
-// RenameFile renames/moves a file via HTTP POST
+// RenameFile renames/moves a file or directory via HTTP POST
 func (c *Client) RenameFile(ctx context.Context, oldPath, newPath string) (*streams.FileRenameResponse, error) {
 	reqBody := streams.FileRenameRequest{OldPath: oldPath, NewPath: newPath}
 

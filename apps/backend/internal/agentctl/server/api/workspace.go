@@ -233,14 +233,13 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 	})
 }
 
-// handleFileRename handles file rename requests via HTTP POST
+// handleFileRename handles file/directory rename requests via HTTP POST
 func (s *Server) handleFileRename(c *gin.Context) {
 	var req streams.FileRenameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, streams.FileRenameResponse{Error: "invalid request: " + err.Error()})
 		return
 	}
-
 	if req.OldPath == "" {
 		c.JSON(400, streams.FileRenameResponse{Error: "old_path is required"})
 		return
