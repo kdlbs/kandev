@@ -109,6 +109,12 @@ function renameSubtree(node: FileTreeNode, oldPath: string, newPath: string): Fi
   };
 }
 
+function treeContainsPath(root: FileTreeNode, targetPath: string): boolean {
+  if (root.path === targetPath) return true;
+  if (!root.children) return false;
+  return root.children.some((child) => treeContainsPath(child, targetPath));
+}
+
 export function renameNodeInTree(
   root: FileTreeNode,
   oldPath: string,
@@ -281,8 +287,18 @@ function useFileRename(
       : "";
     const newPath = parentPath ? `${parentPath}/${newName}` : newName;
     const snapshot = tree;
-    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
     setIsRenaming(false);
+    if (tree && treeContainsPath(tree, newPath)) {
+      onRenameFile(node.path, newPath)
+        .then((ok) => {
+          if (ok) setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
+        })
+        .catch(() => {
+          return;
+        });
+      return;
+    }
+    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
     onRenameFile(node.path, newPath)
       .then((ok) => {
         if (!ok) setTree(snapshot);
@@ -290,7 +306,15 @@ function useFileRename(
       .catch(() => {
         setTree(snapshot);
       });
-  }, [renameValue, node.name, node.path, onRenameFile, tree, setTree, handleCancelRename]);
+  }, [
+    renameValue,
+    node.name,
+    node.path,
+    onRenameFile,
+    tree,
+    setTree,
+    handleCancelRename,
+  ]);
 
   const handleRenameKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
