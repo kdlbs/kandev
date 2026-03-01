@@ -91,7 +91,6 @@ func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event 
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
 		}
-		m.RemoveExecution(execution.ID)
 		return
 	}
 	if err := m.MarkReady(execution.ID); err != nil {

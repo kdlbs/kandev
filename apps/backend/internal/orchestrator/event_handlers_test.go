@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -98,6 +101,15 @@ type mockAgentManager struct {
 	restartProcessErr   error
 	promptErr           error
 	promptResult        *executor.PromptResult
+
+	mu                      sync.Mutex
+	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
+}
+
+type stopAgentCall struct {
+	ExecutionID string
+	Reason      string
+	Force       bool
 }
 
 func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
@@ -105,8 +117,15 @@ func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgen
 }
 func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
 func (m *mockAgentManager) StopAgent(_ context.Context, _ string, _ bool) error { return nil }
-func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
-	return m.StopAgent(ctx, agentExecutionID, force)
+func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecutionID, reason string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopAgentWithReasonArgs = append(m.stopAgentWithReasonArgs, stopAgentCall{
+		ExecutionID: agentExecutionID,
+		Reason:      reason,
+		Force:       force,
+	})
+	return nil
 }
 func (m *mockAgentManager) PromptAgent(_ context.Context, _ string, _ string, _ []v1.MessageAttachment) (*executor.PromptResult, error) {
 	if m.promptErr != nil {
@@ -504,5 +523,123 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	if status.Message.Content != "hello" {
 		t.Fatalf("expected queued content to be preserved, got %q", status.Message.Content)
+	}
+}
+
+func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	return &Service{
+		logger:             log,
+		repo:               repo,
+		workflowStepGetter: stepGetter,
+		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
+		messageQueue:       messagequeue.NewService(log),
+		executor:           exec,
+		scheduler:          sched,
+	}
+}
+
+func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	// Clear WorkflowStepID so processOnTurnComplete skips workflow evaluation
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.WorkflowStepID = nil
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+	})
+
+	// cleanupAgentExecution runs in a goroutine; give it time to execute
+	waitForStopCall(t, agentMgr)
+
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	call := agentMgr.stopAgentWithReasonArgs[0]
+	if call.ExecutionID != "exec-1" {
+		t.Errorf("expected execution ID %q, got %q", "exec-1", call.ExecutionID)
+	}
+	if !call.Force {
+		t.Error("expected force=true for cleanup after completion")
+	}
+}
+
+func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	// Clear WorkflowStepID so workflow evaluation is skipped
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.WorkflowStepID = nil
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-1",
+		ErrorMessage:     "agent crashed",
+	})
+
+	// cleanupAgentExecution runs in a goroutine; give it time to execute
+	waitForStopCall(t, agentMgr)
+
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	call := agentMgr.stopAgentWithReasonArgs[0]
+	if call.ExecutionID != "exec-1" {
+		t.Errorf("expected execution ID %q, got %q", "exec-1", call.ExecutionID)
+	}
+}
+
+func TestCleanupAgentExecution_SkipsEmptyExecutionID(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	// Should return immediately without calling StopAgentWithReason
+	svc.cleanupAgentExecution("", "t1", "s1")
+
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	if len(agentMgr.stopAgentWithReasonArgs) != 0 {
+		t.Error("expected no StopAgentWithReason call for empty execution ID")
+	}
+}
+
+// waitForStopCall polls until the mock agent manager has received at least one
+// StopAgentWithReason call, or fails the test after a timeout.
+func waitForStopCall(t *testing.T, agentMgr *mockAgentManager) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		agentMgr.mu.Lock()
+		calls := len(agentMgr.stopAgentWithReasonArgs)
+		agentMgr.mu.Unlock()
+		if calls > 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected StopAgentWithReason to be called, but it was not")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }

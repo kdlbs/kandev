@@ -712,3 +712,49 @@ func TestHandleAgentEvent_ReasoningWithNewlinesThenToolCall(t *testing.T) {
 		t.Errorf("reasoning chunk after tool_call should start a new thinking message, but got IsAppend=true")
 	}
 }
+
+// TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution verifies that on error
+// completion, the execution is NOT removed from the store. The orchestrator's cleanup
+// (StopExecution → StopAgentWithReason) handles full teardown including port release;
+// premature removal would prevent that cleanup from finding the execution.
+func TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	errorEvent := &agentctl.AgentEvent{
+		Type:  "complete",
+		Error: "agent crashed",
+		Data:  map[string]interface{}{"is_error": true},
+	}
+
+	mgr.handleCompleteEventMarkState(execution, errorEvent, true)
+
+	// Execution must still be in the store so the orchestrator can clean it up
+	if _, found := mgr.executionStore.Get("exec-1"); !found {
+		t.Error("execution was removed from store on error completion; " +
+			"it should remain so the orchestrator can call StopExecution to release resources")
+	}
+}
+
+// TestHandleCompleteEventMarkState_SuccessKeepsExecution verifies that on normal
+// completion, the execution remains in the store (marked ready, not removed).
+func TestHandleCompleteEventMarkState_SuccessKeepsExecution(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	successEvent := &agentctl.AgentEvent{
+		Type: "complete",
+	}
+
+	mgr.handleCompleteEventMarkState(execution, successEvent, false)
+
+	got, found := mgr.executionStore.Get("exec-1")
+	if !found {
+		t.Error("execution was removed from store on successful completion; it should remain")
+	}
+	if found && got.Status != v1.AgentStatusReady {
+		t.Errorf("expected status %q after success, got %q", v1.AgentStatusReady, got.Status)
+	}
+}

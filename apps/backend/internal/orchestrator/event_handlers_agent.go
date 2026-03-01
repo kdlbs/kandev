@@ -311,6 +311,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 				zap.String("task_id", data.TaskID))
 		}
 	}
+
+	// Clean up the agent execution (stop agentctl, release port)
+	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
 
 // handleAgentFailed handles agent failure events
@@ -361,6 +364,9 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 				zap.Error(err))
 		}
 	}
+
+	// Clean up the agent execution (stop agentctl, release port)
+	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
 
 // wasResumeAttempt checks whether the session's last execution used a resume token.
@@ -453,4 +459,20 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	//
 	// The task state management is the responsibility of the operation that triggered the stop,
 	// not the event handler. This handler only manages session-level cleanup.
+}
+
+// cleanupAgentExecution stops the agentctl instance and releases its port after
+// the agent reaches a terminal state (completed/failed). This runs in a goroutine
+// so it doesn't block the event handler.
+func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
+	if executionID == "" {
+		return
+	}
+	ctx := context.Background()
+	if err := s.executor.StopExecution(ctx, executionID, "agent completed", true); err != nil {
+		s.logger.Debug("agent execution cleanup after terminal state",
+			zap.String("execution_id", executionID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
 }

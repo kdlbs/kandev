@@ -19,13 +19,9 @@ func (l *Launcher) gracefulStop(pid int) error {
 	return nil
 }
 
-// forceKill sends SIGKILL to the entire process group.
-// Since agentctl starts with Setpgid=true, its PID == PGID, so killing -pid
-// terminates agentctl and all children that haven't created their own groups
-// (including code-server and its Node.js worker processes).
+// forceKill sends SIGKILL to the agentctl process.
+// agentctl shares the backend's process group, so we kill the single process
+// rather than the group (which would kill the backend itself).
 func (l *Launcher) forceKill(pid int) {
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-		// Fallback: kill the single process if group kill fails
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
