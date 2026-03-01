@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from "dockview-react";
-import { getSessionLayout, setSessionLayout } from "@/lib/local-storage";
+import {
+  getSessionLayout,
+  setSessionLayout,
+  getSessionMaximizeState,
+  setSessionMaximizeState,
+  removeSessionMaximizeState,
+} from "@/lib/local-storage";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -121,6 +127,12 @@ type DockviewStore = {
   activeFilePath: string | null;
   pendingChatScrollTop: number | null;
   setPendingChatScrollTop: (value: number | null) => void;
+  /** Saved layout from before a manual maximize. Null when not maximized. */
+  preMaximizeLayout: LayoutState | null;
+  /** The group ID that was maximized (used for session restore). */
+  maximizedGroupId: string | null;
+  maximizeGroup: (groupId: string) => void;
+  exitMaximizedLayout: () => void;
 };
 
 type StoreGet = () => DockviewStore;
@@ -152,6 +164,7 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
  *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
  *  capturing plan/preview/vscode column widths as stale "right" overrides. */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
+  if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
@@ -179,6 +192,9 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
 
 /** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
+  if (api.hasMaximizedGroup()) {
+    api.exitMaximizedGroup();
+  }
   syncPinnedWidthsFromApi(api, set);
   return useDockviewStore.getState().pinnedWidths;
 }
@@ -234,6 +250,8 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
@@ -242,6 +260,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         set({ isRestoringLayout: true, sidebarVisible: false });
         applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
         requestAnimationFrame(() => {
+          api.layout(safeWidth, safeHeight);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -254,6 +273,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         set({ isRestoringLayout: true, sidebarVisible: true });
         applyLayoutAndSet(api, withSidebar, liveWidths, set);
         requestAnimationFrame(() => {
+          api.layout(safeWidth, safeHeight);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -264,6 +284,8 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
+      const safeWidth = api.width;
+      const safeHeight = api.height;
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
@@ -275,6 +297,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         set({ isRestoringLayout: true, rightPanelsVisible: false });
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
         requestAnimationFrame(() => {
+          api.layout(safeWidth, safeHeight);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -289,6 +312,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         set({ isRestoringLayout: true, rightPanelsVisible: true });
         applyLayoutAndSet(api, withRight, liveWidths, set);
         requestAnimationFrame(() => {
+          api.layout(safeWidth, safeHeight);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -381,6 +405,142 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
+  return (oldSessionId: string | null, newSessionId: string) => {
+    const { api, currentLayoutSessionId, preMaximizeLayout } = get();
+    if (!api || currentLayoutSessionId === newSessionId) return;
+    // When the first session becomes active (oldSessionId is null and no prior
+    // layout session), onReady already built the correct layout (possibly with
+    // an intent). Just adopt the current layout for the new session without
+    // rebuilding, which would lose the intent-based layout.
+    if (!oldSessionId && !currentLayoutSessionId) {
+      set({ currentLayoutSessionId: newSessionId });
+      try {
+        setSessionLayout(newSessionId, api.toJSON());
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // When maximized, save native dockview JSON for the maximized layout so we
+    // can restore it via api.fromJSON() — the same path page refresh uses.
+    // This preserves terminal panel state (shell connections, running processes).
+    if (oldSessionId && preMaximizeLayout) {
+      setSessionMaximizeState(oldSessionId, {
+        preMaximizeLayout: preMaximizeLayout as unknown as object,
+        maximizedDockviewJson: api.toJSON(),
+      });
+    } else if (oldSessionId) {
+      removeSessionMaximizeState(oldSessionId);
+    }
+    // Clear maximize state before switching — the new session has its own.
+    set({ preMaximizeLayout: null, maximizedGroupId: null });
+    const safeWidth = api.width;
+    const safeHeight = api.height;
+    set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
+    try {
+      // Check if the new session has a saved maximize state.
+      // If so, restore using native dockview JSON (same path as page refresh)
+      // to preserve terminal connections and running processes.
+      const savedMaximize = getSessionMaximizeState(newSessionId);
+      if (savedMaximize) {
+        // Save old session's current layout first
+        if (oldSessionId) {
+          try {
+            setSessionLayout(oldSessionId, api.toJSON());
+          } catch {
+            /* ignore */
+          }
+        }
+        // Restore using native dockview format — preserves terminal state
+        api.fromJSON(savedMaximize.maximizedDockviewJson as SerializedDockview);
+        api.layout(safeWidth, safeHeight);
+        const ids = applyLayoutFixups(api);
+        const preMax = savedMaximize.preMaximizeLayout as unknown as LayoutState;
+        set({ ...ids, preMaximizeLayout: preMax });
+        requestAnimationFrame(() => {
+          set({ isRestoringLayout: false });
+        });
+      } else {
+        const ids = performSessionSwitch({
+          api,
+          oldSessionId,
+          newSessionId,
+          safeWidth,
+          safeHeight,
+          buildDefault: (a) => get().buildDefaultLayout(a),
+        });
+        set(ids);
+        set({ isRestoringLayout: false });
+      }
+    } catch {
+      set({ isRestoringLayout: false });
+    }
+  };
+}
+
+function buildMaximizeActions(set: StoreSet, get: StoreGet) {
+  return {
+    maximizeGroup: (groupId: string) => {
+      const { api, preMaximizeLayout } = get();
+      if (!api) return;
+      if (preMaximizeLayout) {
+        get().exitMaximizedLayout();
+        return;
+      }
+      const liveWidths = captureLiveWidths(api, set);
+      const current = fromDockviewApi(api);
+      let targetGroup: {
+        panels: LayoutState["columns"][0]["groups"][0]["panels"];
+        activePanel?: string;
+      } | null = null;
+      for (const col of current.columns) {
+        for (const g of col.groups) {
+          if (g.id === groupId) {
+            targetGroup = { panels: g.panels, activePanel: g.activePanel };
+            break;
+          }
+        }
+        if (targetGroup) break;
+      }
+      if (!targetGroup || targetGroup.panels.length === 0) return;
+      const sidebarCol = current.columns.find((c) => c.id === "sidebar");
+      const columns: LayoutState["columns"] = [];
+      if (sidebarCol) columns.push(sidebarCol);
+      columns.push({
+        id: "maximized",
+        groups: [{ panels: targetGroup.panels, activePanel: targetGroup.activePanel }],
+      });
+      const maximizedLayout: LayoutState = { columns };
+      set({ isRestoringLayout: true, preMaximizeLayout: current, maximizedGroupId: groupId });
+      const safeWidth = api.width;
+      const safeHeight = api.height;
+      applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
+      requestAnimationFrame(() => {
+        api.layout(safeWidth, safeHeight);
+        set({ isRestoringLayout: false });
+      });
+    },
+    exitMaximizedLayout: () => {
+      const { api, preMaximizeLayout, currentLayoutSessionId } = get();
+      if (!api || !preMaximizeLayout) return;
+      const safeWidth = api.width;
+      const safeHeight = api.height;
+      const liveWidths = get().pinnedWidths;
+      set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
+      if (currentLayoutSessionId) {
+        removeSessionMaximizeState(currentLayoutSessionId);
+      }
+      applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
+      requestAnimationFrame(() => {
+        api.layout(safeWidth, safeHeight);
+        syncPinnedWidthsFromApi(api, set);
+        set({ isRestoringLayout: false });
+      });
+    },
+  };
+}
+
 function performBuildDefault(
   api: DockviewApi,
   set: StoreSet,
@@ -463,39 +623,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
     set((prev) => ({
       deferredPanelActions: [...prev.deferredPanelActions, action],
     })),
-  switchSessionLayout: (oldSessionId, newSessionId) => {
-    const { api, currentLayoutSessionId } = get();
-    if (!api || currentLayoutSessionId === newSessionId) return;
-    // When the first session becomes active (oldSessionId is null and no prior
-    // layout session), onReady already built the correct layout (possibly with
-    // an intent). Just adopt the current layout for the new session without
-    // rebuilding, which would lose the intent-based layout.
-    if (!oldSessionId && !currentLayoutSessionId) {
-      set({ currentLayoutSessionId: newSessionId });
-      try {
-        setSessionLayout(newSessionId, api.toJSON());
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    const safeWidth = api.width;
-    const safeHeight = api.height;
-    set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
-    try {
-      const ids = performSessionSwitch({
-        api,
-        oldSessionId,
-        newSessionId,
-        safeWidth,
-        safeHeight,
-        buildDefault: (a) => get().buildDefaultLayout(a),
-      });
-      set(ids);
-    } finally {
-      set({ isRestoringLayout: false });
-    }
-  },
+  switchSessionLayout: buildSessionSwitchAction(set, get),
   buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
   resetLayout: () => {
     const { api } = get();
@@ -503,6 +631,9 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   },
   pendingChatScrollTop: null,
   setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
+  preMaximizeLayout: null,
+  maximizedGroupId: null,
+  ...buildMaximizeActions(set, get),
   ...buildPanelActions(set, get),
   ...buildExtraPanelActions(get),
 }));

@@ -352,6 +352,48 @@ export function setSessionLayout(sessionId: string, layout: object): void {
   }
 }
 
+// --- Dockview per-session maximize state (sessionStorage) ---
+const DOCKVIEW_SESSION_MAXIMIZE_PREFIX = "kandev.dockview.maximize.";
+
+export type SessionMaximizeState = {
+  /** The pre-maximize (normal) layout to restore on exit-maximize. */
+  preMaximizeLayout: object;
+  /** Native dockview JSON (api.toJSON()) for the maximized layout. */
+  maximizedDockviewJson: object;
+};
+
+export function getSessionMaximizeState(sessionId: string): SessionMaximizeState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as SessionMaximizeState;
+  } catch {
+    return null;
+  }
+}
+
+export function setSessionMaximizeState(sessionId: string, state: SessionMaximizeState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      `${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`,
+      JSON.stringify(state),
+    );
+  } catch {
+    // Ignore write failures
+  }
+}
+
+export function removeSessionMaximizeState(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(`${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`);
+  } catch {
+    // Ignore
+  }
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";

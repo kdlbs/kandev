@@ -118,9 +118,7 @@ export function computeColumnWidths(
 ): number[] {
   const bucket = classifyColumns(columns, totalWidth, pinnedWidths);
   const remainingSpace = Math.max(0, totalWidth - bucket.pinnedTotal);
-  const widths = computeFlexWidths(columns, bucket, remainingSpace);
-
-  return widths;
+  return computeFlexWidths(columns, bucket, remainingSpace);
 }
 
 /**

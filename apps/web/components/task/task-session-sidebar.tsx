@@ -131,12 +131,13 @@ function useSidebarData(workspaceId: string | null) {
     );
     const items = allTasks.map((task: KanbanState["tasks"][number]) => {
       const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
+      const resolvedSessionState =
+        sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
       return {
         id: task.id,
         title: task.title,
         state: task.state as TaskState | undefined,
-        sessionState:
-          sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
+        sessionState: resolvedSessionState,
         description: task.description,
         workflowStepId: task.workflowStepId as string | undefined,
         repositoryPath: task.repositoryId ? repositoryPathsById.get(task.repositoryId) : undefined,

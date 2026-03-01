@@ -20,6 +20,7 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
     sb.group.header.hidden = false;
     sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
   }
+
   const oldChanges = api.getPanel("diff-files");
   if (oldChanges) oldChanges.api.setTitle("Changes");
   const oldFiles = api.getPanel("all-files");

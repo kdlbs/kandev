@@ -436,6 +436,7 @@ function tryRestoreLayout(
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
+  if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
@@ -467,17 +468,17 @@ function setupChatPanelSafetyNet(api: DockviewReadyEvent["api"]) {
     if (useDockviewStore.getState().isRestoringLayout) return;
     requestAnimationFrame(() => {
       if (api.getPanel("chat")) return;
-      const sidebarPanel = api.getPanel("sidebar");
+      const sb = api.getPanel("sidebar");
       api.addPanel({
         id: "chat",
         component: "chat",
         tabComponent: "permanentTab",
         title: "Agent",
-        position: sidebarPanel ? { direction: "right", referencePanel: "sidebar" } : undefined,
+        position: sb ? { direction: "right", referencePanel: "sidebar" } : undefined,
       });
-      const newChat = api.getPanel("chat");
-      if (newChat) {
-        useDockviewStore.setState({ centerGroupId: newChat.group.id });
+      const nc = api.getPanel("chat");
+      if (nc) {
+        useDockviewStore.setState({ centerGroupId: nc.group.id });
       }
     });
   });
@@ -512,14 +513,20 @@ function setupLayoutPersistence(
  * closed a tab), but NOT during layout restores where fromJSON temporarily
  * removes all panels.
  */
+function setupGroupTracking(api: DockviewReadyEvent["api"]) {
+  api.onDidActiveGroupChange((group) => {
+    useDockviewStore.setState({ activeGroupId: group?.id ?? null });
+  });
+  useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
+  api.onDidLayoutChange(() => trackPinnedWidths(api));
+  trackPinnedWidths(api);
+}
+
 function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
-    // Stop code-server when the user explicitly closes the vscode tab
     const entry = panelPortalManager.get(panel.id);
-    if (entry?.component === "vscode" && entry.sessionId) {
-      stopVscode(entry.sessionId);
-    }
+    if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
     panelPortalManager.release(panel.id);
   });
 }
@@ -682,16 +689,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
       useDockviewStore.setState({ currentLayoutSessionId: currentSessionId });
 
-      // Track active group
-      api.onDidActiveGroupChange((group) => {
-        useDockviewStore.setState({ activeGroupId: group?.id ?? null });
-      });
-      useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-
-      // Track pinned column widths on layout changes (captures user sash drags)
-      api.onDidLayoutChange(() => trackPinnedWidths(api));
-      trackPinnedWidths(api);
-
+      setupGroupTracking(api);
       setupChatPanelSafetyNet(api);
       setupLayoutPersistence(api, saveTimerRef, sessionIdRef);
       setupPortalCleanup(api);
