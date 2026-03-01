@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxFileSize = 10 * 1024 * 1024 // 10MB
+
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 	files, err := wt.getFileList(ctx)
@@ -217,8 +219,7 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 		return "", 0, false, fmt.Errorf("path is a directory, not a file")
 	}
 
-	// Check file size (limit to 10MB)
-	const maxFileSize = 10 * 1024 * 1024
+	// Check file size
 	if info.Size() > maxFileSize {
 		return "", info.Size(), false, fmt.Errorf("file too large (max 10MB)")
 	}
@@ -527,6 +528,51 @@ func calculateSHA256(content string) string {
 type scoredMatch struct {
 	path  string
 	score int
+}
+
+// GetFileContentAtRef returns the content of a file at a specific git ref (branch, commit, HEAD, etc).
+// If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
+func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath string, ref string) (string, int64, bool, error) {
+	// Validate path to prevent directory traversal
+	cleanPath := filepath.Clean(reqPath)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		return "", 0, false, fmt.Errorf("invalid path: path traversal detected")
+	}
+
+	// Use git show to get the file content at the specified ref
+	// Format: git show <ref>:<path>
+	gitRef := fmt.Sprintf("%s:%s", ref, cleanPath)
+	cmd := exec.CommandContext(ctx, "git", "show", gitRef)
+	cmd.Dir = wt.workDir
+
+	content, err := cmd.Output()
+	if err != nil {
+		// Check if it's because the file doesn't exist at that ref
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := string(exitErr.Stderr)
+			if strings.Contains(stderr, "does not exist") ||
+				strings.Contains(stderr, "exists on disk, but not in") ||
+				strings.Contains(stderr, "fatal: path") {
+				return "", 0, false, fmt.Errorf("file not found at ref %s: %s", ref, cleanPath)
+			}
+		}
+		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
+	}
+
+	size := int64(len(content))
+
+	// Check file size
+	if size > maxFileSize {
+		return "", size, false, fmt.Errorf("file too large (max 10MB)")
+	}
+
+	// Detect binary: if content is not valid UTF-8, base64-encode it
+	if !utf8.Valid(content) {
+		encoded := base64.StdEncoding.EncodeToString(content)
+		return encoded, size, true, nil
+	}
+
+	return string(content), size, false, nil
 }
 
 // SearchFiles searches for files matching the query string.

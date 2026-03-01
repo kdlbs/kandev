@@ -195,6 +195,7 @@ const (
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
+	ActionWorkspaceFileContentGetRef = "workspace.file.get_at_ref"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
 	ActionWorkspaceFileCreate        = "workspace.file.create"
 	ActionWorkspaceFileDelete        = "workspace.file.delete"

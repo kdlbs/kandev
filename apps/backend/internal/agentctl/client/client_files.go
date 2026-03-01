@@ -110,6 +110,37 @@ func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileCont
 	return &response, nil
 }
 
+// RequestFileContentAtRef requests file content at a specific git ref via HTTP GET
+func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref string) (*FileContentResponse, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content-at-ref?path=%s&ref=%s", c.baseURL, url.QueryEscape(path), url.QueryEscape(ref))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request file content at ref: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file content at ref response body", zap.Error(err))
+		}
+	}()
+
+	var response FileContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file content at ref error: %s", response.Error)
+	}
+
+	return &response, nil
+}
+
 // ApplyFileDiff applies a unified diff to a file via HTTP POST
 func (c *Client) ApplyFileDiff(ctx context.Context, path string, diff string, originalHash string) (*streams.FileUpdateResponse, error) {
 	reqBody := streams.FileUpdateRequest{

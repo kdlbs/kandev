@@ -125,6 +125,29 @@ func (s *Server) handleFileContent(c *gin.Context) {
 	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary})
 }
 
+// handleFileContentAtRef handles file content requests at a specific git ref via HTTP GET
+func (s *Server) handleFileContentAtRef(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(400, types.FileContentResponse{Error: "path is required"})
+		return
+	}
+
+	ref := c.Query("ref")
+	if ref == "" {
+		c.JSON(400, types.FileContentResponse{Error: "ref is required"})
+		return
+	}
+
+	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContentAtRef(c.Request.Context(), path, ref)
+	if err != nil {
+		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		return
+	}
+
+	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary})
+}
+
 // handleFileUpdate handles file update requests via HTTP POST
 func (s *Server) handleFileUpdate(c *gin.Context) {
 	var req streams.FileUpdateRequest
