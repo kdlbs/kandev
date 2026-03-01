@@ -133,6 +133,59 @@ func (r *Registry) ListEnabled() []agents.Agent {
 	return result
 }
 
+// ListInferenceAgents returns enabled agents that implement InferenceAgent.
+func (r *Registry) ListInferenceAgents() []agents.InferenceAgent {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []agents.InferenceAgent
+	var forSort []agents.Agent
+	for _, ag := range r.agents {
+		if !ag.Enabled() {
+			continue
+		}
+		if ia, ok := ag.(agents.InferenceAgent); ok {
+			if cfg := ia.InferenceConfig(); cfg != nil && cfg.Supported {
+				result = append(result, ia)
+				forSort = append(forSort, ag)
+			}
+		}
+	}
+	// Sort by DisplayOrder
+	slices.SortStableFunc(result, func(a, b agents.InferenceAgent) int {
+		aIdx, bIdx := -1, -1
+		for i, ag := range forSort {
+			if ag.(agents.InferenceAgent) == a {
+				aIdx = i
+			}
+			if ag.(agents.InferenceAgent) == b {
+				bIdx = i
+			}
+		}
+		return cmp.Compare(forSort[aIdx].DisplayOrder(), forSort[bIdx].DisplayOrder())
+	})
+	return result
+}
+
+// GetInferenceAgent returns an inference-capable agent by ID.
+func (r *Registry) GetInferenceAgent(id string) (agents.InferenceAgent, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ag, exists := r.agents[id]
+	if !exists || !ag.Enabled() {
+		return nil, false
+	}
+	ia, ok := ag.(agents.InferenceAgent)
+	if !ok {
+		return nil, false
+	}
+	if cfg := ia.InferenceConfig(); cfg == nil || !cfg.Supported {
+		return nil, false
+	}
+	return ia, true
+}
+
 // Exists checks if an agent exists
 func (r *Registry) Exists(id string) bool {
 	r.mu.RLock()

@@ -50,9 +50,14 @@ type Agent interface {
 	RemoteAuth() *RemoteAuth
 }
 
-// InferenceAgent is an optional capability for agents that support direct LLM inference.
+// InferenceAgent is an optional capability for agents that support one-shot LLM inference.
+// Agents implementing this interface can execute single prompts without a persistent session.
 type InferenceAgent interface {
-	GenerateText(ctx context.Context, req InferenceRequest) (*InferenceResponse, error)
+	// InferenceConfig returns the configuration for one-shot inference.
+	InferenceConfig() *InferenceConfig
+
+	// InferenceModels returns models available for inference (may be a subset of full models).
+	InferenceModels() []InferenceModel
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
@@ -78,6 +83,25 @@ type Model struct {
 	ContextWindow int    `json:"context_window"` // 0 = unspecified
 	IsDefault     bool   `json:"is_default"`
 	Source        string `json:"source,omitempty"` // "static" or "dynamic"
+}
+
+// ToInferenceModel converts a Model to an InferenceModel.
+func (m Model) ToInferenceModel() InferenceModel {
+	return InferenceModel{
+		ID:          m.ID,
+		Name:        m.Name,
+		Description: m.Description,
+		IsDefault:   m.IsDefault,
+	}
+}
+
+// ModelsToInferenceModels converts a slice of Models to InferenceModels.
+func ModelsToInferenceModels(models []Model) []InferenceModel {
+	result := make([]InferenceModel, 0, len(models))
+	for _, m := range models {
+		result = append(result, m.ToInferenceModel())
+	}
+	return result
 }
 
 // ModelList is the result of listing models for an agent.
@@ -214,20 +238,26 @@ var DefaultResourceLimits = ResourceLimits{
 	MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour,
 }
 
-// InferenceRequest for direct model inference.
-type InferenceRequest struct {
-	Prompt      string
-	Model       string
-	MaxTokens   int
-	Credentials map[string]string
+// InferenceConfig describes how an agent executes one-shot prompts.
+type InferenceConfig struct {
+	// Supported indicates the agent can do one-shot inference.
+	Supported bool
+	// Command is the base command for one-shot inference (e.g., ["claude", "--print"]).
+	Command Command
+	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
+	ModelFlag Param
+	// OutputFormat describes how to parse the output: "text", "stream-json".
+	OutputFormat string
+	// StdinInput if true, prompt is sent via stdin; otherwise as a positional argument.
+	StdinInput bool
 }
 
-// InferenceResponse from direct model inference.
-type InferenceResponse struct {
-	Text         string
-	Model        string
-	TokensUsed   int
-	FinishReason string
+// InferenceModel describes a model available for inference.
+type InferenceModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"is_default"`
 }
 
 // RemoteAuth describes all auth methods an agent supports for remote environments.

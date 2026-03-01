@@ -31,6 +31,8 @@ type UserSettingsDTO struct {
 	LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
+	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
+	DefaultUtilityModel         string                            `json:"default_utility_model"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -66,6 +68,8 @@ type UpdateUserSettingsRequest struct {
 	LspAutoInstallLanguages     *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs            *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
 	SavedLayouts                *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
+	DefaultUtilityAgentID       *string                            `json:"default_utility_agent_id,omitempty"`
+	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -96,6 +100,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoInstallLanguages:     settings.LspAutoInstallLanguages,
 		LspServerConfigs:            settings.LspServerConfigs,
 		SavedLayouts:                settings.SavedLayouts,
+		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
+		DefaultUtilityModel:         settings.DefaultUtilityModel,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

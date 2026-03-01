@@ -146,6 +146,8 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"lsp_auto_install_languages":      lspAutoInstall,
 		"lsp_server_configs":              lspServerConfigs,
 		"saved_layouts":                   savedLayouts,
+		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
+		"default_utility_model":           settings.DefaultUtilityModel,
 	})
 	if err != nil {
 		return err
@@ -207,6 +209,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 		LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 		SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
+		DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
+		DefaultUtilityModel         string                            `json:"default_utility_model"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -249,5 +253,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
 	}
+	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
+	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	return settings, nil
 }

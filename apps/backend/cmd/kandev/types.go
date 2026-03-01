@@ -15,6 +15,8 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
+	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -27,6 +29,7 @@ type Repositories struct {
 	Notification  notificationstore.Repository
 	Editor        editorstore.Repository
 	Prompts       promptstore.Repository
+	Utility       utilitystore.Repository
 	Workflow      *workflowrepository.Repository
 	Secrets       secrets.SecretStore
 }
@@ -37,6 +40,7 @@ type Services struct {
 	Editor       *editorservice.Service
 	Notification *notificationservice.Service
 	Prompts      *promptservice.Service
+	Utility      *utilityservice.Service
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
 }

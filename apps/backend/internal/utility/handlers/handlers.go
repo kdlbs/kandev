@@ -1,0 +1,272 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/lifecycle"
+	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/utility/controller"
+	"github.com/kandev/kandev/internal/utility/dto"
+	"github.com/kandev/kandev/internal/utility/service"
+)
+
+// InferenceExecutor executes inference prompts via agentctl.
+type InferenceExecutor interface {
+	// ExecuteInferencePrompt executes an inference prompt via an active session's agentctl.
+	ExecuteInferencePrompt(ctx context.Context, sessionID, agentID, model, prompt string) (*agentctlutil.PromptResponse, error)
+	// ListInferenceAgents returns agents that support inference.
+	ListInferenceAgents() []lifecycle.InferenceAgentInfo
+}
+
+// UserSettingsProvider provides user settings for default utility agent/model.
+type UserSettingsProvider interface {
+	// GetDefaultUtilitySettings returns the user's default utility agent/model settings.
+	GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error)
+}
+
+// Handlers provides HTTP handlers for utility agents.
+type Handlers struct {
+	controller   *controller.Controller
+	executor     InferenceExecutor
+	userSettings UserSettingsProvider
+	logger       *logger.Logger
+}
+
+// NewHandlers creates new utility agent handlers.
+func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
+	return &Handlers{
+		controller:   ctrl,
+		executor:     executor,
+		userSettings: userSettings,
+		logger:       log.WithFields(zap.String("component", "utility-handlers")),
+	}
+}
+
+// RegisterRoutes registers the utility agent routes.
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor InferenceExecutor, userSettings UserSettingsProvider, log *logger.Logger) {
+	handlers := NewHandlers(ctrl, executor, userSettings, log)
+	api := router.Group("/api/v1/utility")
+	api.GET("/agents", handlers.httpListAgents)
+	api.GET("/agents/:id", handlers.httpGetAgent)
+	api.POST("/agents", handlers.httpCreateAgent)
+	api.PATCH("/agents/:id", handlers.httpUpdateAgent)
+	api.DELETE("/agents/:id", handlers.httpDeleteAgent)
+	api.GET("/template-variables", handlers.httpGetTemplateVariables)
+	api.POST("/execute", handlers.httpExecutePrompt)
+	api.GET("/agents/:id/calls", handlers.httpListCalls)
+	api.GET("/inference-agents", handlers.httpListInferenceAgents)
+}
+
+func (h *Handlers) httpListAgents(c *gin.Context) {
+	resp, err := h.controller.ListAgents(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list utility agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list utility agents"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpGetAgent(c *gin.Context) {
+	resp, err := h.controller.GetAgent(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrAgentNotFound) {
+			status = http.StatusNotFound
+		}
+		h.logger.Error("failed to get utility agent", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to get utility agent"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpCreateAgent(c *gin.Context) {
+	var req dto.CreateUtilityAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	resp, err := h.controller.CreateAgent(c.Request.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrInvalidAgent) {
+			status = http.StatusBadRequest
+		}
+		h.logger.Error("failed to create utility agent", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to create utility agent"})
+		return
+	}
+	c.JSON(http.StatusCreated, resp)
+}
+
+func (h *Handlers) httpUpdateAgent(c *gin.Context) {
+	var req dto.UpdateUtilityAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	resp, err := h.controller.UpdateAgent(c.Request.Context(), c.Param("id"), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, service.ErrAgentNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, service.ErrInvalidAgent):
+			status = http.StatusBadRequest
+		case errors.Is(err, service.ErrBuiltinAgent):
+			status = http.StatusForbidden
+		}
+		h.logger.Error("failed to update utility agent", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to update utility agent"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpDeleteAgent(c *gin.Context) {
+	if err := h.controller.DeleteAgent(c.Request.Context(), c.Param("id")); err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, service.ErrAgentNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, service.ErrBuiltinAgent):
+			status = http.StatusForbidden
+		}
+		h.logger.Error("failed to delete utility agent", zap.Error(err))
+		c.JSON(status, gin.H{"error": "failed to delete utility agent"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handlers) httpGetTemplateVariables(c *gin.Context) {
+	resp := h.controller.GetTemplateVariables(c.Request.Context())
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpExecutePrompt(c *gin.Context) {
+	var req dto.ExecutePromptRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: "invalid payload"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Get default utility settings from user settings
+	var defaults *service.DefaultUtilitySettings
+	if h.userSettings != nil {
+		agentID, model, err := h.userSettings.GetDefaultUtilitySettings(ctx)
+		if err == nil && (agentID != "" || model != "") {
+			defaults = &service.DefaultUtilitySettings{AgentID: agentID, Model: model}
+		}
+	}
+
+	// Prepare the prompt request (resolve template, get agent/model info)
+	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrAgentNotFound) {
+			status = http.StatusNotFound
+		}
+		h.logger.Error("failed to prepare prompt", zap.Error(err))
+		c.JSON(status, dto.ExecutePromptResponse{Error: "failed to prepare prompt"})
+		return
+	}
+
+	// Create call record for tracking
+	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model)
+	if err != nil {
+		h.logger.Error("failed to create call record", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
+		return
+	}
+
+	// Execute via agentctl using inference agent
+	resp, err := h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
+	if err != nil {
+		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
+		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
+			CallID: callID,
+			Error:  "failed to execute prompt: " + err.Error(),
+		})
+		return
+	}
+
+	if !resp.Success {
+		_ = h.controller.FailCall(ctx, callID, resp.Error, resp.DurationMs)
+		c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+			CallID:     callID,
+			Error:      resp.Error,
+			DurationMs: resp.DurationMs,
+		})
+		return
+	}
+
+	// Mark call as completed
+	if err := h.controller.CompleteCall(ctx, callID, resp.Response, resp.PromptTokens, resp.ResponseTokens, resp.DurationMs); err != nil {
+		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	}
+
+	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
+		Success:        true,
+		CallID:         callID,
+		Response:       resp.Response,
+		Model:          resp.Model,
+		PromptTokens:   resp.PromptTokens,
+		ResponseTokens: resp.ResponseTokens,
+		DurationMs:     resp.DurationMs,
+	})
+}
+
+func (h *Handlers) httpListCalls(c *gin.Context) {
+	utilityID := c.Param("id")
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	resp, err := h.controller.ListCalls(c.Request.Context(), utilityID, limit)
+	if err != nil {
+		h.logger.Error("failed to list calls", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list calls"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
+	inferenceAgents := h.executor.ListInferenceAgents()
+
+	// Convert to DTO
+	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
+	for _, ia := range inferenceAgents {
+		models := make([]dto.InferenceModelDTO, 0, len(ia.Models))
+		for _, m := range ia.Models {
+			models = append(models, dto.InferenceModelDTO{
+				ID:          m.ID,
+				Name:        m.Name,
+				Description: m.Description,
+				IsDefault:   m.IsDefault,
+			})
+		}
+		result = append(result, dto.InferenceAgentDTO{
+			ID:          ia.ID,
+			Name:        ia.Name,
+			DisplayName: ia.DisplayName,
+			Models:      models,
+		})
+	}
+	c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})
+}

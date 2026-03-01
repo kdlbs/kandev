@@ -30,6 +30,8 @@ type UserSettings struct {
 	LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
 	SavedLayouts                []SavedLayout                     `json:"saved_layouts"`
+	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
+	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
 }

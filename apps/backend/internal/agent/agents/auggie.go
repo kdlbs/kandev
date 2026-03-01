@@ -20,6 +20,7 @@ var auggieLogoDark []byte
 var (
 	_ Agent            = (*Auggie)(nil)
 	_ PassthroughAgent = (*Auggie)(nil)
+	_ InferenceAgent   = (*Auggie)(nil)
 )
 
 // Auggie implements Agent for the Augment Coding Agent.
@@ -145,6 +146,22 @@ func (a *Auggie) RemoteAuth() *RemoteAuth {
 
 func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 	return auggiePermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+func (a *Auggie) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported:    true,
+		Command:      NewCommand("auggie", "--print", "--output-format", "json"),
+		ModelFlag:    NewParam("--model", "{model}"),
+		OutputFormat: "auggie-json",
+		StdinInput:   true,
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *Auggie) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(auggieStaticModels())
 }
 
 // --- Private ---

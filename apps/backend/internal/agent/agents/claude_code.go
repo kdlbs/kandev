@@ -17,6 +17,7 @@ var claudeCodeLogoDark []byte
 var (
 	_ Agent            = (*ClaudeCode)(nil)
 	_ PassthroughAgent = (*ClaudeCode)(nil)
+	_ InferenceAgent   = (*ClaudeCode)(nil)
 )
 
 type ClaudeCode struct {
@@ -148,6 +149,22 @@ chmod 600 "${HOME}/.claude.json"`,
 
 func (a *ClaudeCode) PermissionSettings() map[string]PermissionSetting {
 	return claudeCodePermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+func (a *ClaudeCode) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported:    true,
+		Command:      NewCommand("claude", "--print"),
+		ModelFlag:    NewParam("--model", "{model}"),
+		OutputFormat: "text",
+		StdinInput:   true,
+	}
+}
+
+// InferenceModels returns models available for one-shot inference tasks.
+func (a *ClaudeCode) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(claudeCodeStaticModels())
 }
 
 var claudeCodePermSettings = map[string]PermissionSetting{

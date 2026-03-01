@@ -17,6 +17,7 @@ var codexLogoDark []byte
 var (
 	_ Agent            = (*Codex)(nil)
 	_ PassthroughAgent = (*Codex)(nil)
+	_ InferenceAgent   = (*Codex)(nil)
 )
 
 type Codex struct {
@@ -123,6 +124,23 @@ func (a *Codex) RemoteAuth() *RemoteAuth {
 
 func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 	return codexPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+// Uses npx without version to match PassthroughConfig pattern.
+func (a *Codex) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported:    true,
+		Command:      NewCommand("npx", "-y", "@openai/codex", "-q"),
+		ModelFlag:    NewParam("-c", "model=\"{model}\""),
+		OutputFormat: "text",
+		StdinInput:   true,
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *Codex) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(codexStaticModels())
 }
 
 var codexPermSettings = map[string]PermissionSetting{

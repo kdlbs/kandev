@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
+	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -81,6 +82,12 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 	}
 	cleanups = append(cleanups, cleanup)
 
+	utilityRepo, cleanup, err := utilitystore.Provide(writer, reader)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cleanups = append(cleanups, cleanup)
+
 	// Initialize master key and secrets store
 	kandevDir := filepath.Join(os.Getenv("HOME"), ".kandev")
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(kandevDir)
@@ -102,6 +109,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 		Notification:  notificationRepo,
 		Editor:        editorRepo,
 		Prompts:       promptRepo,
+		Utility:       utilityRepo,
 		Workflow:      workflowRepo,
 		Secrets:       secretStore,
 	}

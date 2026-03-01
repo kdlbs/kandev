@@ -38,6 +38,8 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
+	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
+	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -260,6 +262,7 @@ type routeParams struct {
 	notificationCtrl        *notificationcontroller.Controller
 	editorCtrl              *editorcontroller.Controller
 	promptCtrl              *promptcontroller.Controller
+	utilityCtrl             *utilitycontroller.Controller
 	msgCreator              *messageCreatorAdapter
 	secretsSvc              *secrets.Service
 	secretStore             secrets.SecretStore
@@ -325,6 +328,9 @@ func registerSecondaryRoutes(
 
 	prompthandlers.RegisterRoutes(p.router, p.promptCtrl, p.log)
 	p.log.Debug("Registered Prompts handlers (HTTP)")
+
+	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.services.User, p.log)
+	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
 	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")

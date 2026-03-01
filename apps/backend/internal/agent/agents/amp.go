@@ -17,6 +17,7 @@ var ampLogoDark []byte
 var (
 	_ Agent            = (*Amp)(nil)
 	_ PassthroughAgent = (*Amp)(nil)
+	_ InferenceAgent   = (*Amp)(nil)
 )
 
 type Amp struct {
@@ -114,6 +115,22 @@ func (a *Amp) RemoteAuth() *RemoteAuth { return nil }
 
 func (a *Amp) PermissionSettings() map[string]PermissionSetting {
 	return ampPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+func (a *Amp) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported:    true,
+		Command:      NewCommand("amp"),
+		ModelFlag:    NewParam("-m", "{model}"),
+		OutputFormat: "stream-json",
+		StdinInput:   true,
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *Amp) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(ampStaticModels())
 }
 
 var ampPermSettings = map[string]PermissionSetting{

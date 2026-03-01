@@ -42,6 +42,8 @@ type UpdateUserSettingsRequest struct {
 	LspAutoInstallLanguages     *[]string
 	LspServerConfigs            *map[string]map[string]interface{}
 	SavedLayouts                *[]models.SavedLayout
+	DefaultUtilityAgentID       *string
+	DefaultUtilityModel         *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -75,6 +77,15 @@ func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return settings.PreferredShell, nil
+}
+
+// GetDefaultUtilitySettings returns the user's default utility agent/model settings.
+func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model string, err error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.defaultUser)
+	if err != nil {
+		return "", "", err
+	}
+	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
 }
 
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
@@ -136,6 +147,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.ReleaseNotesLastSeenVersion != nil {
 		settings.ReleaseNotesLastSeenVersion = *req.ReleaseNotesLastSeenVersion
+	}
+	if req.DefaultUtilityAgentID != nil {
+		settings.DefaultUtilityAgentID = strings.TrimSpace(*req.DefaultUtilityAgentID)
+	}
+	if req.DefaultUtilityModel != nil {
+		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
 	}
 	return nil
 }
@@ -216,6 +233,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_install_languages":      settings.LspAutoInstallLanguages,
 		"lsp_server_configs":              settings.LspServerConfigs,
 		"saved_layouts":                   settings.SavedLayouts,
+		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
+		"default_utility_model":           settings.DefaultUtilityModel,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

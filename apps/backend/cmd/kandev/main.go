@@ -39,6 +39,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -426,6 +427,7 @@ func buildHTTPServer(
 		notificationCtrl:        notificationCtrl,
 		editorCtrl:              editorcontroller.NewController(services.Editor),
 		promptCtrl:              promptcontroller.NewController(services.Prompts),
+		utilityCtrl:             utilitycontroller.NewController(services.Utility),
 		msgCreator:              msgCreator,
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/mcp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -122,6 +123,10 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/revert-commit", s.handleGitRevertCommit)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
 	}
+
+	// Utility agent routes
+	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {

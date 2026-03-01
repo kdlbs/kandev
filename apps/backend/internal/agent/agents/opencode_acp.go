@@ -7,7 +7,10 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-var _ Agent = (*OpenCodeACP)(nil)
+var (
+	_ Agent          = (*OpenCodeACP)(nil)
+	_ InferenceAgent = (*OpenCodeACP)(nil)
+)
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
 // Uses JSON-RPC 2.0 over stdin/stdout via "opencode acp" instead of REST/SSE.
@@ -80,4 +83,15 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth { return nil }
 
 func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+// Uses the same "opencode ask" command as the SSE variant.
+func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
+	return (&OpenCode{}).InferenceConfig()
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *OpenCodeACP) InferenceModels() []InferenceModel {
+	return (&OpenCode{}).InferenceModels()
 }

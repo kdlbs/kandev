@@ -17,6 +17,7 @@ var geminiLogoDark []byte
 var (
 	_ Agent            = (*Gemini)(nil)
 	_ PassthroughAgent = (*Gemini)(nil)
+	_ InferenceAgent   = (*Gemini)(nil)
 )
 
 type Gemini struct {
@@ -132,6 +133,23 @@ func (a *Gemini) RemoteAuth() *RemoteAuth {
 
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 	return geminiPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference.
+// Uses npx without version to match PassthroughConfig pattern.
+func (a *Gemini) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported:    true,
+		Command:      NewCommand("npx", "-y", "@google/gemini-cli", "-p"),
+		ModelFlag:    NewParam("--model", "{model}"),
+		OutputFormat: "text",
+		StdinInput:   true,
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *Gemini) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(geminiStaticModels())
 }
 
 var geminiPermSettings = map[string]PermissionSetting{

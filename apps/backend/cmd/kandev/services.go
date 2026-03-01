@@ -19,6 +19,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -36,6 +37,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
+	utilitySvc := utilityservice.NewService(repos.Utility)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
@@ -84,6 +86,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		User:     userSvc,
 		Editor:   editorSvc,
 		Prompts:  promptSvc,
+		Utility:  utilitySvc,
 		Workflow: workflowSvc,
 		GitHub:   githubSvc,
 		// Notification service is initialized after gateway is available.
