@@ -397,21 +397,28 @@ export function useWorkflowSaveActions({
   const saveWorkflowRequest = useRequest(onSaveWorkflow);
 
   const saveNewWorkflowRequest = useRequest(async () => {
+    const templateId = workflow.workflow_template_id;
     const created = await createWorkflowAction({
       workspace_id: workflow.workspace_id,
       name: workflow.name.trim() || "New Workflow",
+      workflow_template_id: templateId || undefined,
     });
-    for (const step of workflowSteps) {
-      await createWorkflowStepAction({
-        workflow_id: created.id,
-        name: step.name,
-        position: step.position,
-        color: step.color,
-        prompt: step.prompt,
-        events: step.events,
-        is_start_step: step.is_start_step,
-        allow_manual_move: step.allow_manual_move,
-      });
+    // When a template is used, the backend creates steps with properly
+    // remapped step_id references (template aliases → real UUIDs).
+    // Only create steps manually when there's no template.
+    if (!templateId) {
+      for (const step of workflowSteps) {
+        await createWorkflowStepAction({
+          workflow_id: created.id,
+          name: step.name,
+          position: step.position,
+          color: step.color,
+          prompt: step.prompt,
+          events: step.events,
+          is_start_step: step.is_start_step,
+          allow_manual_move: step.allow_manual_move,
+        });
+      }
     }
     onWorkflowCreated?.(created);
   });

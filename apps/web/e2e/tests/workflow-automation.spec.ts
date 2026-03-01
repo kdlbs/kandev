@@ -453,4 +453,106 @@ test.describe("Workflow automation", () => {
     // Sidebar shows the task under "Review" section
     await expect(session.sidebarSection("Review")).toBeVisible();
   });
+
+  /**
+   * Kanban board workflow with on_turn_start: move_to_next on Backlog.
+   *
+   * Workflow:
+   *   Backlog (on_turn_start: move_to_next, on_turn_complete: move_to_step("review"))
+   *   In Progress (on_enter: auto_start_agent, on_turn_complete: move_to_step("review"))
+   *   Review (on_turn_start: move_to_previous)
+   *   Done (on_turn_start: move_to_step("in-progress"))
+   *
+   * No step has is_start_step, so the task lands at position 0 (Backlog).
+   * The on_turn_complete events use template-level step_id references ("review",
+   * "in-progress") which don't resolve to actual step UUIDs — they're no-ops.
+   *
+   * Flow:
+   * 1. Create task with description via dialog + Start Agent → task starts in Backlog
+   * 2. on_turn_start fires (move_to_next) → task moves to In Progress
+   * 3. Agent completes → on_turn_complete fires with move_to_step("review")
+   *    which is gracefully skipped (invalid step_id) → task stays in In Progress
+   */
+  test("kanban workflow: on_turn_start moves task, invalid step_id in on_turn_complete is skipped", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Kanban Board Workflow");
+
+    await apiClient.createWorkflowStep(workflow.id, "Backlog", 0);
+    await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
+    await apiClient.createWorkflowStep(workflow.id, "Review", 2);
+    await apiClient.createWorkflowStep(workflow.id, "Done", 3);
+
+    // Fetch step IDs after creation to set up events
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const backlogStep = steps.find((s) => s.name === "Backlog")!;
+    const inProgressStep = steps.find((s) => s.name === "In Progress")!;
+
+    // Backlog: on_turn_start moves to next (In Progress),
+    // on_turn_complete uses template-level step_id (no-op in API-created steps)
+    await apiClient.updateWorkflowStep(backlogStep.id, {
+      events: {
+        on_turn_start: [{ type: "move_to_next" }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
+      },
+    });
+
+    // In Progress: on_turn_complete with invalid step_id (should be skipped)
+    await apiClient.updateWorkflowStep(inProgressStep.id, {
+      events: {
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    // --- Create task via dialog with description + Start Agent ---
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("task-title-input").fill("Kanban Flow Task");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Task should be in In Progress: on_turn_start fires on the initial prompt
+    // and moves the task from Backlog → In Progress via move_to_next.
+    // After the agent completes, on_turn_complete's move_to_step("review") is
+    // gracefully skipped (invalid step_id), so the task stays in In Progress.
+    const card = kanban.taskCardInColumn("Kanban Flow Task", inProgressStep.id);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    // Navigate to session to verify agent completed successfully
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Agent response confirms the mock agent ran
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Session transitions to idle — task is still functional
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+
+    // Stepper shows In Progress as current step
+    await expect(session.stepperStep("In Progress")).toHaveAttribute("aria-current", "step", {
+      timeout: 15_000,
+    });
+  });
 });

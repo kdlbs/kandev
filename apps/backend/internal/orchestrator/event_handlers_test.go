@@ -532,6 +532,133 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnStart: []wfmodels.OnTurnStartAction{
+				{Type: wfmodels.OnTurnStartMoveToNext},
+			},
+		},
+	}
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		Events: wfmodels.StepEvents{},
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		// PromptAgent succeeds so the message is consumed normally.
+	}
+	log := testLogger()
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     taskRepo,
+		agentManager: agentMgr,
+		messageQueue: messagequeue.NewService(log),
+	}
+	svc.SetWorkflowStepGetter(stepGetter)
+	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "auto-start prompt",
+		QueuedBy:  "workflow-auto-start",
+	}
+
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	// Verify on_turn_start moved the session from step1 to step2.
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
+		got := "<nil>"
+		if updated.WorkflowStepID != nil {
+			got = *updated.WorkflowStepID
+		}
+		t.Errorf("expected session workflow step to be 'step2', got %s", got)
+	}
+}
+
+func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{}, // no on_turn_start
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	log := testLogger()
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     taskRepo,
+		agentManager: agentMgr,
+		messageQueue: messagequeue.NewService(log),
+	}
+	svc.SetWorkflowStepGetter(stepGetter)
+	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "auto-start prompt",
+		QueuedBy:  "workflow-auto-start",
+	}
+
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	// Verify session stayed on step1 (no on_turn_start actions).
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
+		got := "<nil>"
+		if updated.WorkflowStepID != nil {
+			got = *updated.WorkflowStepID
+		}
+		t.Errorf("expected session workflow step to remain 'step1', got %s", got)
+	}
+}
+
 func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})

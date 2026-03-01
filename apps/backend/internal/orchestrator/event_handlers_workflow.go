@@ -134,7 +134,7 @@ func (s *Service) processOnTurnStart(ctx context.Context, taskID string, session
 
 	// Get the current workflow step
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
-	if err != nil {
+	if err != nil || currentStep == nil {
 		s.logger.Warn("failed to get workflow step for on_turn_start",
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
@@ -482,6 +482,7 @@ func (s *Service) autoStartStepPrompt(
 	shouldQueueIfBusy bool,
 ) error {
 	sessionID := session.ID
+
 	if shouldQueueIfBusy {
 		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode)
 		if err != nil {
@@ -871,6 +872,31 @@ func (s *Service) applyEngineTransition(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	triggerOnEnter bool,
 ) bool {
+	// Validate the target step exists BEFORE persisting the transition.
+	// This prevents the task from being moved to an invalid step_id
+	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
+	var targetStep *wfmodels.WorkflowStep
+	if triggerOnEnter {
+		var err error
+		targetStep, err = s.workflowStepGetter.GetStep(ctx, result.ToStepID)
+		if err != nil {
+			s.logger.Warn("target step not found, skipping transition",
+				zap.String("step_id", result.ToStepID),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
+	} else {
+		// Even without on_enter, verify the target step exists to avoid orphaning the task.
+		if _, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID); err != nil {
+			s.logger.Warn("target step not found, skipping transition",
+				zap.String("step_id", result.ToStepID),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
+	}
+
 	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
@@ -902,15 +928,6 @@ func (s *Service) applyEngineTransition(
 	}
 
 	if !triggerOnEnter {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return true
-	}
-
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
-	if err != nil {
-		s.logger.Warn("failed to load target step for on_enter",
-			zap.String("step_id", result.ToStepID),
-			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return true
 	}

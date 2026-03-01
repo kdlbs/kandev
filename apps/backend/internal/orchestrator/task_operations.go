@@ -163,6 +163,11 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 		zap.String("agent_profile_id", agentProfileID),
 		zap.Bool("plan_mode", planMode))
 
+	// Process on_turn_start before launching the agent.
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
+		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
+
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
@@ -257,6 +262,16 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	effectivePrompt := prompt
 	if effectivePrompt == "" {
 		effectivePrompt = task.Description
+	}
+
+	// Process on_turn_start before launching the agent, just like user-initiated messages.
+	// This allows workflow transitions (e.g. move_to_next) to fire on the initial prompt.
+	s.processOnTurnStartViaEngine(ctx, taskID, session)
+
+	// Re-read the session after on_turn_start may have changed the workflow step.
+	session, err = s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
 
 	// Apply workflow step prompt wrapping and plan mode injection.

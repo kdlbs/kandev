@@ -8,6 +8,8 @@ const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
 const KANDEV_BIN = path.join(BACKEND_DIR, "bin", "kandev");
 const STANDALONE_SERVER = path.join(WEB_DIR, ".next/standalone/web/server.js");
+const STANDALONE_STATIC_DIR = path.join(WEB_DIR, ".next/standalone/web/.next/static");
+const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
 const BACKEND_BASE_PORT = 18080;
 const FRONTEND_BASE_PORT = 13000;
 const HEALTH_TIMEOUT_MS = 30_000;
@@ -129,6 +131,18 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
 
       const baseUrl = `http://localhost:${backendPort}`;
       await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
+
+      // Ensure Next.js static assets are available to the standalone server.
+      // The CLI start command does this via symlink; replicate it here.
+      // Use try/catch to handle concurrent workers racing to create the same symlink.
+      if (fs.existsSync(SOURCE_STATIC_DIR) && !fs.existsSync(STANDALONE_STATIC_DIR)) {
+        fs.mkdirSync(path.dirname(STANDALONE_STATIC_DIR), { recursive: true });
+        try {
+          fs.symlinkSync(SOURCE_STATIC_DIR, STANDALONE_STATIC_DIR, "junction");
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        }
+      }
 
       // --- Spawn frontend (Next.js standalone server) ---
       const frontendProc: ChildProcess = spawn("node", [STANDALONE_SERVER], {

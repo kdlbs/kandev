@@ -221,6 +221,20 @@ func TestProcessOnTurnComplete(t *testing.T) {
 func TestProcessOnTurnStart(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("nil step returns false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "unknown-step")
+
+		// Step getter returns (nil, nil) for unknown steps — must not panic.
+		stepGetter := newMockStepGetter()
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		got := svc.processOnTurnStart(ctx, "t1", session)
+		if got {
+			t.Error("expected false when step is nil")
+		}
+	})
+
 	t.Run("no actions returns false", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

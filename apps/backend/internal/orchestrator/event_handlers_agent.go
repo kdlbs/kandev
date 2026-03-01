@@ -229,6 +229,13 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		}
 	}
 
+	// Process on_turn_start before sending the queued prompt, just like
+	// dispatchPromptAsync does for user-initiated messages. This allows
+	// workflow transitions (e.g. move_to_next) to fire on auto-started prompts.
+	if session, sErr := s.repo.GetTaskSession(promptCtx, queuedMsg.SessionID); sErr == nil {
+		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
+	}
+
 	// Convert queue attachments to v1 attachments
 	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
 	for i, att := range queuedMsg.Attachments {
