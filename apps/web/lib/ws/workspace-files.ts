@@ -136,7 +136,7 @@ export type FileRenameResponse = {
 };
 
 /**
- * Rename a file in the workspace
+ * Rename a file or directory in the workspace
  */
 export async function renameFile(
   client: WebSocketClient,

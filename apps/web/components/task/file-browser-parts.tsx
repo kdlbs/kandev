@@ -91,21 +91,35 @@ export function removeNodeFromTree(root: FileTreeNode, targetPath: string): File
 }
 
 /** Rename a node in the tree, updating its name and path. */
+function replacePathPrefix(path: string, oldPrefix: string, newPrefix: string): string {
+  if (path === oldPrefix) return newPrefix;
+  if (path.startsWith(`${oldPrefix}/`)) return `${newPrefix}${path.slice(oldPrefix.length)}`;
+  return path;
+}
+
+function renameSubtree(node: FileTreeNode, oldPath: string, newPath: string): FileTreeNode {
+  const nextPath = replacePathPrefix(node.path, oldPath, newPath);
+  const nextName = nextPath.split("/").pop() || nextPath;
+  const nextChildren = node.children?.map((child) => renameSubtree(child, oldPath, newPath));
+  return {
+    ...node,
+    name: nextName,
+    path: nextPath,
+    children: nextChildren,
+  };
+}
+
 export function renameNodeInTree(
   root: FileTreeNode,
   oldPath: string,
-  newName: string,
+  newPath: string,
 ): FileTreeNode {
   if (root.path === oldPath) {
-    const parentPath = oldPath.includes("/") ? oldPath.substring(0, oldPath.lastIndexOf("/")) : "";
-    const newPath = parentPath ? `${parentPath}/${newName}` : newName;
-    return { ...root, name: newName, path: newPath };
+    return renameSubtree(root, oldPath, newPath);
   }
   if (!root.children) return root;
-  return {
-    ...root,
-    children: root.children.map((c) => renameNodeInTree(c, oldPath, newName)),
-  };
+  const nextChildren = root.children.map((c) => renameNodeInTree(c, oldPath, newPath));
+  return { ...root, children: nextChildren.sort(compareTreeNodes) };
 }
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
@@ -210,7 +224,7 @@ function FileContextMenu({
 
   const hasActions = onDeleteFile || onRenameFile;
 
-  if (!hasActions || node.is_dir) {
+  if (!hasActions) {
     return <>{children}</>;
   }
 
@@ -267,7 +281,7 @@ function useFileRename(
       : "";
     const newPath = parentPath ? `${parentPath}/${newName}` : newName;
     const snapshot = tree;
-    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newName) : prev));
+    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
     setIsRenaming(false);
     onRenameFile(node.path, newPath)
       .then((ok) => {

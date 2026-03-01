@@ -46,7 +46,7 @@ export function useFileOperations(sessionId: string | null) {
         const response = await deleteFile(client, sessionId, path);
         if (!response.success) {
           toast({
-            title: "Failed to delete file",
+            title: "Failed to delete item",
             description: response.error || UNKNOWN_ERROR,
             variant: ERROR_VARIANT,
           });
@@ -55,7 +55,7 @@ export function useFileOperations(sessionId: string | null) {
         return true;
       } catch (error) {
         toast({
-          title: "Failed to delete file",
+          title: "Failed to delete item",
           description: error instanceof Error ? error.message : UNKNOWN_ERROR,
           variant: ERROR_VARIANT,
         });
@@ -74,7 +74,7 @@ export function useFileOperations(sessionId: string | null) {
         const response = await renameFile(client, sessionId, oldPath, newPath);
         if (!response.success) {
           toast({
-            title: "Failed to rename file",
+            title: "Failed to rename item",
             description: response.error || UNKNOWN_ERROR,
             variant: ERROR_VARIANT,
           });
@@ -83,7 +83,7 @@ export function useFileOperations(sessionId: string | null) {
         return true;
       } catch (error) {
         toast({
-          title: "Failed to rename file",
+          title: "Failed to rename item",
           description: error instanceof Error ? error.message : UNKNOWN_ERROR,
           variant: ERROR_VARIANT,
         });
