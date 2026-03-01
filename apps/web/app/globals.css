@@ -692,6 +692,13 @@
   font-weight: 700;
 }
 
+/* User message markdown overrides — adjust for primary background */
+.markdown-body-user :not(pre) > code,
+.markdown-body-user code:not(pre code) {
+  background: color-mix(in oklch, var(--primary) 20%, transparent);
+  color: var(--foreground);
+}
+
 /* TipTap editor styles */
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
