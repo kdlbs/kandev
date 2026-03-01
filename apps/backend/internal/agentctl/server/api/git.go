@@ -39,6 +39,12 @@ type GitAbortRequest struct {
 type GitCommitRequest struct {
 	Message  string `json:"message"`
 	StageAll bool   `json:"stage_all"`
+	Amend    bool   `json:"amend"`
+}
+
+// GitRenameBranchRequest for POST /api/v1/git/rename-branch
+type GitRenameBranchRequest struct {
+	NewName string `json:"new_name"`
 }
 
 // GitStageRequest for POST /api/v1/git/stage
@@ -72,6 +78,12 @@ type GitCreatePRRequest struct {
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
 	Draft      bool   `json:"draft"`
+}
+
+// GitResetRequest for POST /api/v1/git/reset
+type GitResetRequest struct {
+	CommitSHA string `json:"commit_sha"`
+	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
 }
 
 // handleGitPull handles POST /api/v1/git/pull
@@ -233,9 +245,40 @@ func (s *Server) handleGitCommit(c *gin.Context) {
 	}
 
 	gitOp := s.procMgr.GitOperator()
-	result, err := gitOp.Commit(c.Request.Context(), req.Message, req.StageAll)
+	result, err := gitOp.Commit(c.Request.Context(), req.Message, req.StageAll, req.Amend)
 	if err != nil {
 		s.handleGitError(c, "commit", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitRenameBranch handles POST /api/v1/git/rename-branch
+func (s *Server) handleGitRenameBranch(c *gin.Context) {
+	var req GitRenameBranchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "rename_branch",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.NewName == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "rename_branch",
+			Error:     "new_name is required",
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	if err != nil {
+		s.handleGitError(c, "rename_branch", err)
 		return
 	}
 
@@ -408,6 +451,41 @@ func (s *Server) handleGitShowCommit(c *gin.Context) {
 			CommitSHA: req.CommitSHA,
 			Error:     err.Error(),
 		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitReset handles POST /api/v1/git/reset
+func (s *Server) handleGitReset(c *gin.Context) {
+	var req GitResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.CommitSHA == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     "commit_sha is required",
+		})
+		return
+	}
+
+	if req.Mode == "" {
+		req.Mode = "mixed" // Default to mixed reset
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.Reset(c.Request.Context(), req.CommitSHA, req.Mode)
+	if err != nil {
+		s.handleGitError(c, "reset", err)
 		return
 	}
 

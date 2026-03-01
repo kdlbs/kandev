@@ -198,6 +198,7 @@ const (
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
 	ActionWorkspaceFileCreate        = "workspace.file.create"
 	ActionWorkspaceFileDelete        = "workspace.file.delete"
+	ActionWorkspaceFileRename        = "workspace.file.rename"
 	ActionWorkspaceFilesSearch       = "workspace.files.search"
 	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
@@ -242,6 +243,8 @@ const (
 	ActionWorktreeDiscard      = "worktree.discard"       // Discard changes to files
 	ActionWorktreeCreatePR     = "worktree.create_pr"     // Create a pull request
 	ActionWorktreeRevertCommit = "worktree.revert_commit" // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch = "worktree.rename_branch" // Rename the current branch
+	ActionWorktreeReset        = "worktree.reset"         // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet             = "user.get"
