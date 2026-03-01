@@ -67,6 +67,12 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
+/** Convert plain text with newlines to HTML paragraphs for TipTap */
+export function textToHtml(text: string): string {
+  const lines = text.split("\n");
+  return lines.map((line) => `<p>${escapeHtml(line) || "<br>"}</p>`).join("");
+}
+
 // ── Code fence parsing ──────────────────────────────────────────────
 
 export type FenceSegment =

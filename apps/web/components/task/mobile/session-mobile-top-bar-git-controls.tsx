@@ -32,6 +32,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@kandev/ui/dropdown-menu";
+import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
@@ -135,12 +136,10 @@ export function CommitDialog({
               uncommittedDeletions={uncommittedDeletions}
             />
           </div>
-          <Textarea
+          <Input
             placeholder="Enter commit message..."
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}
-            rows={4}
-            className="resize-none"
             autoFocus
           />
           <div className="flex items-center gap-2">
@@ -249,7 +248,7 @@ export function PRDialog({
               value={prBody}
               onChange={(e) => setPrBody(e.target.value)}
               rows={4}
-              className="resize-none"
+              className="resize-none max-h-[200px] overflow-y-auto"
             />
           </div>
           <div className="flex items-center space-x-2">

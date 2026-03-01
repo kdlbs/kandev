@@ -14,7 +14,7 @@ import { common, createLowlight } from "lowlight";
 import { Extension } from "@tiptap/core";
 import { cn } from "@/lib/utils";
 import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
-import { getMarkdownText, escapeHtml, handleEditorPaste } from "./tiptap-helpers";
+import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { ContextMention } from "./tiptap-mention-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
@@ -279,7 +279,7 @@ function syncEditorValue({
   }
 
   isSyncingRef.current = true;
-  editor.commands.setContent(`<p>${escapeHtml(value)}</p>`);
+  editor.commands.setContent(textToHtml(value));
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
 }
@@ -346,7 +346,7 @@ function useEditorImperativeHandle(
         if (v === "") {
           editor.commands.clearContent();
         } else {
-          editor.commands.setContent(`<p>${escapeHtml(v)}</p>`);
+          editor.commands.setContent(textToHtml(v));
         }
         isSyncingRef.current = false;
         onChange(v);

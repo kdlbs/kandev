@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useCallback } from "react";
 import { IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
@@ -14,6 +14,7 @@ import {
   type ChatInputEditorAreaProps,
 } from "./chat-input-body";
 import type { ContextItem } from "@/lib/types/context";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -137,9 +138,15 @@ function buildContextAreaProps(
   };
 }
 
+type EnhancePromptExtras = {
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt?: boolean;
+};
+
 function buildEditorAreaProps(
   s: ContainerState,
   p: ChatInputContainerProps,
+  extras: EnhancePromptExtras = {},
 ): ChatInputEditorAreaProps {
   return {
     inputRef: s.inputRef,
@@ -173,6 +180,8 @@ function buildEditorAreaProps(
     setContextPopoverOpen: s.setContextPopoverOpen,
     contextFiles: p.contextFiles ?? [],
     onImplementPlan: p.onImplementPlan,
+    onEnhancePrompt: extras.onEnhancePrompt,
+    isEnhancingPrompt: extras.isEnhancingPrompt,
   };
 }
 
@@ -223,6 +232,21 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
+    const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
+      sessionId,
+      taskTitle,
+      taskDescription,
+    });
+
+    const handleEnhancePrompt = useCallback(() => {
+      const currentValue = s.value?.trim();
+      if (!currentValue) return;
+      enhancePrompt(currentValue, (enhanced) => {
+        // Use setValue to directly update TipTap editor (handleChange only updates React state)
+        s.inputRef.current?.setValue(enhanced);
+      });
+    }, [s, enhancePrompt]);
+
     if (p.isFailed) {
       return (
         <FailedSessionBanner
@@ -249,7 +273,10 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
         contextAreaProps={buildContextAreaProps(s, p)}
-        editorAreaProps={buildEditorAreaProps(s, p)}
+        editorAreaProps={buildEditorAreaProps(s, p, {
+          onEnhancePrompt: handleEnhancePrompt,
+          isEnhancingPrompt,
+        })}
       />
     );
   },

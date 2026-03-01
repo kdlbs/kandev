@@ -45,6 +45,8 @@ export type ChatInputEditorAreaProps = {
   setContextPopoverOpen: (open: boolean) => void;
   contextFiles: ContextFile[];
   onImplementPlan?: () => void;
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt?: boolean;
 };
 
 export function ChatInputEditorArea({
@@ -79,17 +81,27 @@ export function ChatInputEditorArea({
   setContextPopoverOpen,
   contextFiles,
   onImplementPlan,
+  onEnhancePrompt,
+  isEnhancingPrompt,
 }: ChatInputEditorAreaProps) {
+  // Block submit while enhancing prompt, but keep editor editable for programmatic updates
+  const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tooltip open={showRequestChangesTooltip}>
         <TooltipTrigger asChild>
-          <div className="flex-1 min-h-0">
+          <div
+            className={cn(
+              "flex-1 min-h-0 transition-opacity",
+              isEnhancingPrompt && "opacity-50 pointer-events-none",
+            )}
+          >
             <TipTapInput
               ref={inputRef}
               value={value}
               onChange={handleChange}
-              onSubmit={handleSubmitWithReset}
+              onSubmit={wrappedSubmit}
               placeholder={inputPlaceholder}
               disabled={isDisabled || hasClarification}
               planModeEnabled={planModeEnabled}
@@ -133,6 +145,8 @@ export function ChatInputEditorArea({
         contextFiles={contextFiles}
         onToggleFile={onToggleContextFile}
         onImplementPlan={onImplementPlan}
+        onEnhancePrompt={onEnhancePrompt}
+        isEnhancingPrompt={isEnhancingPrompt}
       />
     </div>
   );

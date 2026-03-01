@@ -9,6 +9,7 @@ import {
   IconPlugConnected,
   IconPlugConnectedX,
   IconRocket,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { Button } from "@kandev/ui/button";
@@ -45,6 +46,10 @@ export type ChatInputToolbarProps = {
   contextFiles?: ContextFile[];
   onToggleFile?: (file: ContextFile) => void;
   onImplementPlan?: () => void;
+  /** Callback to enhance the current prompt with AI */
+  onEnhancePrompt?: () => void;
+  /** Whether prompt enhancement is in progress */
+  isEnhancingPrompt?: boolean;
 };
 
 type SubmitButtonProps = {
@@ -157,30 +162,83 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
-  const hasMcp = mcpServers.length > 0;
-  const tooltipText = hasMcp
-    ? `MCP Servers: ${mcpServers.join(", ")}`
-    : "Agent does not support MCP";
-
+function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLoading: boolean }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div
-          className={cn(
-            "h-7 w-7 flex items-center justify-center rounded-md",
-            hasMcp ? "text-foreground" : "text-muted-foreground/40",
-          )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
+          onClick={onClick}
+          disabled={isLoading}
         >
-          {hasMcp ? (
-            <IconPlugConnected className="h-4 w-4" />
+          {isLoading ? (
+            <GridSpinner className="h-4 w-4" />
           ) : (
-            <IconPlugConnectedX className="h-4 w-4" />
+            <IconSparkles className="h-4 w-4" />
           )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Enhance prompt with AI</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
+  const hasMcp = mcpServers.length > 0;
+  const tooltipText = hasMcp ? `MCP Servers: ${mcpServers.join(", ")}` : "Agent does not support MCP";
+  const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className={cn("h-7 w-7 flex items-center justify-center rounded-md", hasMcp ? "text-foreground" : "text-muted-foreground/40")}>
+          <Icon className="h-4 w-4" />
         </div>
       </TooltipTrigger>
       <TooltipContent>{tooltipText}</TooltipContent>
     </Tooltip>
+  );
+}
+
+type ToolbarRightSectionProps = {
+  taskId: string | null;
+  sessionId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+  planModeEnabled: boolean;
+  isAgentBusy: boolean;
+  isDisabled: boolean;
+  isSending: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt?: boolean;
+  onImplementPlan?: () => void;
+};
+
+function ToolbarRightSection({
+  taskId, sessionId, taskTitle, taskDescription, planModeEnabled, isAgentBusy, isDisabled, isSending,
+  onCancel, onSubmit, submitShortcut, onEnhancePrompt, isEnhancingPrompt, onImplementPlan,
+}: ToolbarRightSectionProps) {
+  const showEnhance = onEnhancePrompt && !isAgentBusy;
+  const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      <SessionsDropdown taskId={taskId} activeSessionId={sessionId} taskTitle={taskTitle} taskDescription={taskDescription} />
+      <TokenUsageDisplay sessionId={sessionId} />
+      <ModelSelector sessionId={sessionId} />
+      {showEnhance && <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />}
+      {showImplement && <ImplementPlanButton onClick={onImplementPlan} />}
+      <div className="ml-1">
+        <SubmitButton
+          isAgentBusy={isAgentBusy} isDisabled={isDisabled} isSending={isSending}
+          planModeEnabled={planModeEnabled} onCancel={onCancel} onSubmit={onSubmit} submitShortcut={submitShortcut}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -206,6 +264,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   contextFiles = [],
   onToggleFile,
   onImplementPlan,
+  onEnhancePrompt,
+  isEnhancingPrompt = false,
 }: ChatInputToolbarProps) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
@@ -247,30 +307,22 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-0.5 shrink-0">
-        <SessionsDropdown
-          taskId={taskId}
-          activeSessionId={sessionId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
-        <TokenUsageDisplay sessionId={sessionId} />
-        <ModelSelector sessionId={sessionId} />
-        {planModeEnabled && !isAgentBusy && onImplementPlan && (
-          <ImplementPlanButton onClick={onImplementPlan} />
-        )}
-        <div className="ml-1">
-          <SubmitButton
-            isAgentBusy={isAgentBusy}
-            isDisabled={isDisabled}
-            isSending={isSending}
-            planModeEnabled={planModeEnabled}
-            onCancel={onCancel}
-            onSubmit={onSubmit}
-            submitShortcut={submitShortcut}
-          />
-        </div>
-      </div>
+      <ToolbarRightSection
+        taskId={taskId}
+        sessionId={sessionId}
+        taskTitle={taskTitle}
+        taskDescription={taskDescription}
+        planModeEnabled={planModeEnabled}
+        isAgentBusy={isAgentBusy}
+        isDisabled={isDisabled}
+        isSending={isSending}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+        submitShortcut={submitShortcut}
+        onEnhancePrompt={onEnhancePrompt}
+        isEnhancingPrompt={isEnhancingPrompt}
+        onImplementPlan={onImplementPlan}
+      />
     </div>
   );
 });

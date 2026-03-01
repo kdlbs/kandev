@@ -38,7 +38,6 @@ type TaskTopBarProps = {
   taskId?: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  taskDescription?: string;
   baseBranch?: string;
   onStartAgent?: (agentProfileId: string) => void;
   onStopAgent?: () => void;

@@ -240,7 +240,6 @@ function buildTaskTopBarProps(params: {
     taskId: taskProps.taskId,
     activeSessionId: params.effectiveSessionId,
     taskTitle: taskProps.taskTitle,
-    taskDescription: taskProps.taskDescription,
     baseBranch: taskProps.baseBranch ?? undefined,
     onStartAgent: agent.handleStartAgent,
     onStopAgent: agent.handleStopAgent,

@@ -23,6 +23,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
+import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 
 // --- Discard Confirmation Dialog ---
@@ -104,12 +105,10 @@ export function CommitDialog({
             stagedAdditions={stagedAdditions}
             stagedDeletions={stagedDeletions}
           />
-          <Textarea
+          <Input
             placeholder="Enter commit message..."
             value={commitMessage}
             onChange={(e) => onCommitMessageChange(e.target.value)}
-            rows={4}
-            className="resize-none"
             autoFocus
           />
         </div>
@@ -234,7 +233,7 @@ export function PRDialog({
               value={prBody}
               onChange={(e) => onPrBodyChange(e.target.value)}
               rows={6}
-              className="resize-none"
+              className="resize-none max-h-[200px] overflow-y-auto"
             />
           </div>
           <div className="flex items-center space-x-2">
