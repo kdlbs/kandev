@@ -75,9 +75,11 @@ function renderUserMessageBody(
   }
   if (hasContent) {
     return (
-      <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
-        {renderContentWithFileRefs(content)}
-      </p>
+      <div className="markdown-body markdown-body-user max-w-none">
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+          {content}
+        </ReactMarkdown>
+      </div>
     );
   }
   if (!hasAttachments) {
