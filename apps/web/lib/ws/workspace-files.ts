@@ -36,6 +36,23 @@ export async function requestFileContent(
 }
 
 /**
+ * Request file content at a specific git ref (branch, commit, HEAD, etc.)
+ * Used for diff expansion to fetch old/base version of a file.
+ */
+export async function requestFileContentAtRef(
+  client: WebSocketClient,
+  sessionId: string,
+  path: string,
+  ref: string,
+): Promise<FileContentResponse> {
+  return client.request<FileContentResponse>("workspace.file.get_at_ref", {
+    session_id: sessionId,
+    path,
+    ref,
+  });
+}
+
+/**
  * Search for files in the workspace matching a query
  */
 export async function searchWorkspaceFiles(

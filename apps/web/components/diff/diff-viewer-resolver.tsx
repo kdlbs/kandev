@@ -28,6 +28,10 @@ interface DiffViewerResolverProps {
   wordWrap?: boolean;
   editable?: boolean;
   onModifiedContentChange?: (filePath: string, content: string) => void;
+  /** Enable diff expansion (show expand up/down buttons at hunk separators) */
+  enableExpansion?: boolean;
+  /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
+  baseRef?: string;
 }
 
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {

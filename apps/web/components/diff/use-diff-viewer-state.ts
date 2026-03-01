@@ -9,6 +9,7 @@ import type { FileDiffData, DiffComment } from "@/lib/diff/types";
 import { buildDiffComment, useCommentActions } from "@/lib/diff/comment-utils";
 import { useDiffComments } from "./use-diff-comments";
 import { useDiffMetadata } from "./use-diff-metadata";
+import { useExpandableDiff } from "./use-expandable-diff";
 import type { RevertBlockInfo } from "./diff-viewer";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
@@ -130,6 +131,10 @@ type UseDiffViewerStateOpts = {
   onCommentDelete?: (commentId: string) => void;
   externalComments?: DiffComment[];
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
+  /** Enable diff expansion (requires fetching full file content) */
+  enableExpansion?: boolean;
+  /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
+  baseRef?: string;
 };
 
 function useDiffViewerAnnotations({
@@ -253,6 +258,22 @@ function useDiffViewerCommentHandlers({
   return { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate };
 }
 
+function useRevertBlock(
+  filePath: string,
+  onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void,
+) {
+  const revertInfoRef = useRef<Map<string, RevertBlockInfo>>(new Map());
+  const handleRevertBlock = useCallback(
+    async (changeBlockId: string) => {
+      const info = revertInfoRef.current.get(changeBlockId);
+      if (!info) return;
+      await onRevertBlock?.(filePath, info);
+    },
+    [filePath, onRevertBlock],
+  );
+  return { revertInfoRef, handleRevertBlock };
+}
+
 export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   const {
     data,
@@ -263,6 +284,8 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     onCommentDelete,
     externalComments,
     onRevertBlock,
+    enableExpansion = false,
+    baseRef,
   } = opts;
 
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
@@ -284,22 +307,27 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   });
 
   const comments = externalComments || internalComments;
-  const fileDiffMetadata = useDiffMetadata(data);
+  const baseDiffMetadata = useDiffMetadata(data);
 
-  // Revert info per change block
-  const revertInfoRef = useRef<Map<string, RevertBlockInfo>>(new Map());
-  const handleRevertBlock = useCallback(
-    async (changeBlockId: string) => {
-      const info = revertInfoRef.current.get(changeBlockId);
-      if (!info) return;
-      await onRevertBlock?.(data.filePath, info);
-    },
-    [data.filePath, onRevertBlock],
-  );
+  const {
+    metadata: fileDiffMetadata,
+    isContentLoaded: isExpansionContentLoaded,
+    isLoading: isExpansionLoading,
+    error: expansionError,
+    loadContent: loadExpansionContent,
+    canExpand,
+  } = useExpandableDiff({
+    sessionId,
+    filePath: data.filePath,
+    baseRef,
+    fileDiffMetadata: baseDiffMetadata,
+    enableExpansion,
+  });
 
-  // Change line map for hover detection
+  const { revertInfoRef, handleRevertBlock } = useRevertBlock(data.filePath, onRevertBlock);
   const changeLineMapRef = useRef<Map<string, string>>(new Map());
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const annotations = useDiffViewerAnnotations({
     comments,
     editingCommentId,
@@ -310,6 +338,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     changeLineMapRef,
     revertInfoRef,
   });
+
   const { handleLineSelectionEnd, handleCommentSubmit, handleCommentDelete, handleCommentUpdate } =
     useDiffViewerCommentHandlers({
       selectedLines,
@@ -344,5 +373,11 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     handleCommentUpdate,
     changeLineMapRef,
     hideTimeoutRef,
+    // Expansion state
+    isExpansionContentLoaded,
+    isExpansionLoading,
+    expansionError,
+    loadExpansionContent,
+    canExpand,
   };
 }

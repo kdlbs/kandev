@@ -68,6 +68,10 @@ type UseDiffOptionsArgs = {
   onLineLeave: () => void;
   onOpenFile?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  /** Enable diff expansion (requires oldLines/newLines in metadata) */
+  enableExpansion?: boolean;
+  /** Number of lines to expand per click (default: 20) */
+  expansionLineCount?: number;
 };
 
 type UseDiffOptionsResult = {
@@ -90,6 +94,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onLineLeave,
     onOpenFile,
     onRevert,
+    enableExpansion = false,
+    expansionLineCount = 20,
   } = args;
 
   const { resolvedTheme } = useTheme();
@@ -139,6 +145,9 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       disableFileHeader: !showHeader,
       overflow: wordWrap ? "wrap" : "scroll",
       unsafeCSS: DIFF_UNSAFE_CSS,
+      // Expansion options - requires oldLines/newLines in metadata to work
+      expandUnchanged: enableExpansion,
+      expansionLineCount,
     }),
     [
       globalViewMode,
@@ -149,6 +158,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       wordWrap,
       onLineEnter,
       onLineLeave,
+      enableExpansion,
+      expansionLineCount,
     ],
   );
 
