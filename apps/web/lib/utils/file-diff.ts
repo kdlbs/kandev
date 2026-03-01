@@ -26,21 +26,42 @@ export function generateUnifiedDiff(original: string, modified: string, filename
 }
 
 /**
- * Calculate SHA256 hash of content
+ * Simple hash function for non-secure contexts (HTTP).
+ * Uses djb2 algorithm - not cryptographically secure but sufficient for
+ * content change detection.
+ */
+function simpleHash(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  // Convert to unsigned 32-bit integer, then to hex
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Calculate hash of content for change detection.
+ * Uses Web Crypto API (SHA-256) when available, falls back to simple hash
+ * in non-secure contexts (HTTP).
  * @param content - Content to hash
- * @returns Hex-encoded SHA256 hash
+ * @returns Hex-encoded hash
  */
 export async function calculateHash(content: string): Promise<string> {
-  // Use Web Crypto API for SHA256 hashing
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  // crypto.subtle is only available in secure contexts (HTTPS, localhost)
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(content);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Fall through to simple hash
+    }
+  }
 
-  // Convert buffer to hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-  return hashHex;
+  // Fallback for non-secure contexts (HTTP)
+  return simpleHash(content);
 }
 
 /**
