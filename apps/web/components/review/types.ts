@@ -1,3 +1,5 @@
+import { djb2Hash } from "@/lib/utils/hash";
+
 export type ReviewFile = {
   path: string;
   diff: string;
@@ -35,16 +37,10 @@ export function normalizeDiffContent(diffContent: string): string {
 }
 
 /**
- * Simple djb2 hash of a string — fast, non-cryptographic.
+ * Hash diff content for change detection.
  * Used to detect if a diff has changed since the user last reviewed it.
  */
-export function hashDiff(content: string): string {
-  let hash = 5381;
-  for (let i = 0; i < content.length; i++) {
-    hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
-  }
-  return hash.toString(36);
-}
+export const hashDiff = djb2Hash;
 
 /**
  * Build a hierarchical file tree from flat file paths.
