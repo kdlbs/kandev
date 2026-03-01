@@ -26,23 +26,23 @@ export function generateUnifiedDiff(original: string, modified: string, filename
 }
 
 /**
- * Simple hash function for non-secure contexts (HTTP).
- * Uses djb2 algorithm - not cryptographically secure but sufficient for
- * content change detection.
+ * Simple djb2 hash — fast, non-cryptographic.
+ * Used for change detection in non-secure contexts (HTTP) where crypto.subtle
+ * is unavailable. This is the same algorithm used in review/types.ts.
  */
-function simpleHash(str: string): string {
+function djb2Hash(str: string): string {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
-    hash = (hash * 33) ^ str.charCodeAt(i);
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
   }
-  // Convert to unsigned 32-bit integer, then to hex
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return (hash >>> 0).toString(16);
 }
 
 /**
  * Calculate hash of content for change detection.
- * Uses Web Crypto API (SHA-256) when available, falls back to simple hash
- * in non-secure contexts (HTTP).
+ * Uses Web Crypto API (SHA-256) in secure contexts (HTTPS, localhost).
+ * Falls back to djb2 in non-secure contexts (HTTP) — sufficient for detecting
+ * content changes, not for security purposes.
  * @param content - Content to hash
  * @returns Hex-encoded hash
  */
@@ -56,12 +56,10 @@ export async function calculateHash(content: string): Promise<string> {
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
     } catch {
-      // Fall through to simple hash
+      // Fall through to djb2
     }
   }
-
-  // Fallback for non-secure contexts (HTTP)
-  return simpleHash(content);
+  return djb2Hash(content);
 }
 
 /**
