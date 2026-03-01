@@ -223,7 +223,16 @@ export const createSessionRuntimeSlice: StateCreator<
   addSessionCommit: (sessionId, commit) =>
     set((draft) => {
       const existing = draft.sessionCommits.bySessionId[sessionId] || [];
-      draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
+      // For amend: if a commit with the same parent already exists, replace it
+      const parentMatch = existing.findIndex((c) => c.parent_sha === commit.parent_sha);
+      if (parentMatch !== -1) {
+        // Replace the commit with matching parent (this is an amend)
+        existing[parentMatch] = commit;
+        draft.sessionCommits.bySessionId[sessionId] = existing;
+      } else {
+        // Normal commit: prepend to list
+        draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
+      }
     }),
   clearSessionCommits: (sessionId) =>
     set((draft) => {

@@ -52,12 +52,14 @@ export type SessionGit = {
   rebase: (baseBranch: string) => Promise<GitOperationResult>;
   merge: (baseBranch: string) => Promise<GitOperationResult>;
   abort: (operation: "merge" | "rebase") => Promise<GitOperationResult>;
-  commit: (message: string, stageAll?: boolean) => Promise<GitOperationResult>;
+  commit: (message: string, stageAll?: boolean, amend?: boolean) => Promise<GitOperationResult>;
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   stageAll: () => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
+  renameBranch: (newName: string) => Promise<GitOperationResult>;
+  reset: (commitSHA: string, mode: "soft" | "hard") => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -133,6 +135,8 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     unstage: gitOps.unstage,
     discard: gitOps.discard,
     revertCommit: gitOps.revertCommit,
+    renameBranch: gitOps.renameBranch,
+    reset: gitOps.reset,
     createPR: gitOps.createPR,
   };
 }
