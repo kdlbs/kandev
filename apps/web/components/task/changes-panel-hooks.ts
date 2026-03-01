@@ -9,11 +9,12 @@ interface GitOps {
   pull: (rebase?: boolean) => Promise<GitOperationResult>;
   push: (options?: { force?: boolean; setUpstream?: boolean }) => Promise<GitOperationResult>;
   rebase: (baseBranch: string) => Promise<GitOperationResult>;
-  commit: (message: string, stageAll?: boolean) => Promise<GitOperationResult>;
+  commit: (message: string, stageAll?: boolean, amend?: boolean) => Promise<GitOperationResult>;
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
+  reset: (commitSHA: string, mode: "soft" | "hard") => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -96,6 +97,7 @@ function useChangesDiscardCommitHandlers(
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [isAmendCommit, setIsAmendCommit] = useState(false);
 
   const handleDiscardClick = useCallback((filePath: string) => {
     setFileToDiscard(filePath);
@@ -125,14 +127,39 @@ function useChangesDiscardCommitHandlers(
 
   const handleOpenCommitDialog = useCallback(() => {
     setCommitMessage("");
+    setIsAmendCommit(false);
     setCommitDialogOpen(true);
   }, []);
   const handleCommit = useCallback(async () => {
     if (!commitMessage.trim()) return;
     setCommitDialogOpen(false);
-    await handleGitOperation(() => gitOps.commit(commitMessage.trim(), false), "Commit");
+    const operationName = isAmendCommit ? "Amend commit" : "Commit";
+    await handleGitOperation(
+      () => gitOps.commit(commitMessage.trim(), false, isAmendCommit),
+      operationName,
+    );
     setCommitMessage("");
-  }, [commitMessage, handleGitOperation, gitOps]);
+    setIsAmendCommit(false);
+  }, [commitMessage, isAmendCommit, handleGitOperation, gitOps]);
+
+  // Amend dialog state (for editing last commit message directly)
+  const [amendDialogOpen, setAmendDialogOpen] = useState(false);
+  const [amendMessage, setAmendMessage] = useState("");
+
+  const handleOpenAmendDialog = useCallback((currentMessage: string) => {
+    setAmendMessage(currentMessage);
+    setAmendDialogOpen(true);
+  }, []);
+
+  const handleAmend = useCallback(async () => {
+    if (!amendMessage.trim()) return;
+    setAmendDialogOpen(false);
+    await handleGitOperation(
+      () => gitOps.commit(amendMessage.trim(), false, true),
+      "Amend commit",
+    );
+    setAmendMessage("");
+  }, [amendMessage, handleGitOperation, gitOps]);
 
   return {
     showDiscardDialog,
@@ -142,10 +169,48 @@ function useChangesDiscardCommitHandlers(
     setCommitDialogOpen,
     commitMessage,
     setCommitMessage,
+    isAmendCommit,
+    setIsAmendCommit,
     handleDiscardClick,
     handleDiscardConfirm,
     handleOpenCommitDialog,
     handleCommit,
+    // Amend dialog
+    amendDialogOpen,
+    setAmendDialogOpen,
+    amendMessage,
+    setAmendMessage,
+    handleOpenAmendDialog,
+    handleAmend,
+  };
+}
+
+function useChangesResetHandlers(gitOps: GitOps, handleGitOperation: GitOperationFn) {
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetCommitSha, setResetCommitSha] = useState<string | null>(null);
+
+  const handleOpenResetDialog = useCallback((sha: string) => {
+    setResetCommitSha(sha);
+    setResetDialogOpen(true);
+  }, []);
+
+  const handleReset = useCallback(
+    async (mode: "soft" | "hard") => {
+      if (!resetCommitSha) return;
+      setResetDialogOpen(false);
+      const operationName = mode === "hard" ? "Hard reset" : "Soft reset";
+      await handleGitOperation(() => gitOps.reset(resetCommitSha, mode), operationName);
+      setResetCommitSha(null);
+    },
+    [resetCommitSha, handleGitOperation, gitOps],
+  );
+
+  return {
+    resetDialogOpen,
+    setResetDialogOpen,
+    resetCommitSha,
+    handleOpenResetDialog,
+    handleReset,
   };
 }
 
@@ -217,6 +282,7 @@ export function useChangesDialogHandlers(
   baseBranch: string | undefined,
 ) {
   const discardCommit = useChangesDiscardCommitHandlers(gitOps, toast, handleGitOperation);
+  const reset = useChangesResetHandlers(gitOps, handleGitOperation);
   const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch);
-  return { ...discardCommit, ...pr };
+  return { ...discardCommit, ...reset, ...pr };
 }

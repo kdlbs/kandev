@@ -87,15 +87,28 @@ func (c *Client) GitAbort(ctx context.Context, operation string) (*GitOperationR
 
 // GitCommit creates a commit with the specified message.
 // If stageAll is true, all changes are staged before committing.
-func (c *Client) GitCommit(ctx context.Context, message string, stageAll bool) (*GitOperationResult, error) {
+// If amend is true, it amends the previous commit instead of creating a new one.
+func (c *Client) GitCommit(ctx context.Context, message string, stageAll bool, amend bool) (*GitOperationResult, error) {
 	payload := struct {
 		Message  string `json:"message"`
 		StageAll bool   `json:"stage_all"`
+		Amend    bool   `json:"amend"`
 	}{
 		Message:  message,
 		StageAll: stageAll,
+		Amend:    amend,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/commit", payload)
+}
+
+// GitRenameBranch renames the current branch to a new name.
+func (c *Client) GitRenameBranch(ctx context.Context, newName string) (*GitOperationResult, error) {
+	payload := struct {
+		NewName string `json:"new_name"`
+	}{
+		NewName: newName,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/rename-branch", payload)
 }
 
 // GitStage stages files for commit.
@@ -139,6 +152,19 @@ func (c *Client) GitRevertCommit(ctx context.Context, commitSHA string) (*GitOpe
 		CommitSHA: commitSHA,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/revert-commit", payload)
+}
+
+// GitReset resets HEAD to the specified commit.
+// Mode can be "soft" (keep changes staged), "mixed" (keep changes unstaged), or "hard" (discard all changes).
+func (c *Client) GitReset(ctx context.Context, commitSHA, mode string) (*GitOperationResult, error) {
+	payload := struct {
+		CommitSHA string `json:"commit_sha"`
+		Mode      string `json:"mode"`
+	}{
+		CommitSHA: commitSHA,
+		Mode:      mode,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/reset", payload)
 }
 
 // GitCreatePR creates a pull request using the gh CLI.

@@ -26,21 +26,40 @@ export function generateUnifiedDiff(original: string, modified: string, filename
 }
 
 /**
- * Calculate SHA256 hash of content
+ * Simple djb2 hash — fast, non-cryptographic.
+ * Used for change detection in non-secure contexts (HTTP) where crypto.subtle
+ * is unavailable. This is the same algorithm used in review/types.ts.
+ */
+function djb2Hash(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/**
+ * Calculate hash of content for change detection.
+ * Uses Web Crypto API (SHA-256) in secure contexts (HTTPS, localhost).
+ * Falls back to djb2 in non-secure contexts (HTTP) — sufficient for detecting
+ * content changes, not for security purposes.
  * @param content - Content to hash
- * @returns Hex-encoded SHA256 hash
+ * @returns Hex-encoded hash
  */
 export async function calculateHash(content: string): Promise<string> {
-  // Use Web Crypto API for SHA256 hashing
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-
-  // Convert buffer to hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-  return hashHex;
+  // crypto.subtle is only available in secure contexts (HTTPS, localhost)
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(content);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Fall through to djb2
+    }
+  }
+  return djb2Hash(content);
 }
 
 /**
