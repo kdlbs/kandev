@@ -32,6 +32,7 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileCreate, h.wsCreateFile)
 	d.RegisterFunc(ws.ActionWorkspaceFileDelete, h.wsDeleteFile)
+	d.RegisterFunc(ws.ActionWorkspaceFileRename, h.wsRenameFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 }
 
@@ -264,6 +265,53 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	if err != nil {
 		h.logger.Error("failed to search files", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to search files: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsRenameFile handles workspace.file.rename action
+func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+		OldPath   string `json:"old_path"`
+		NewPath   string `json:"new_path"`
+	}
+
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.OldPath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "old_path is required", nil)
+	}
+	if req.NewPath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "new_path is required", nil)
+	}
+
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
+	if !found {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	}
+
+	// Get agentctl client
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+
+	// Rename file via agentctl
+	response, err := client.RenameFile(ctx, req.OldPath, req.NewPath)
+	if err != nil {
+		h.logger.Error("failed to rename file", zap.Error(err),
+			zap.String("session_id", req.SessionID),
+			zap.String("old_path", req.OldPath),
+			zap.String("new_path", req.NewPath))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to rename file: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)

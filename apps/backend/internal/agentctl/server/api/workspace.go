@@ -233,6 +233,42 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 	})
 }
 
+// handleFileRename handles file rename requests via HTTP POST
+func (s *Server) handleFileRename(c *gin.Context) {
+	var req streams.FileRenameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, streams.FileRenameResponse{Error: "invalid request: " + err.Error()})
+		return
+	}
+
+	if req.OldPath == "" {
+		c.JSON(400, streams.FileRenameResponse{Error: "old_path is required"})
+		return
+	}
+
+	if req.NewPath == "" {
+		c.JSON(400, streams.FileRenameResponse{Error: "new_path is required"})
+		return
+	}
+
+	err := s.procMgr.GetWorkspaceTracker().RenameFile(req.OldPath, req.NewPath)
+	if err != nil {
+		c.JSON(400, streams.FileRenameResponse{
+			OldPath: req.OldPath,
+			NewPath: req.NewPath,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(200, streams.FileRenameResponse{
+		OldPath: req.OldPath,
+		NewPath: req.NewPath,
+		Success: true,
+	})
+}
+
 func (s *Server) handleWorkspaceStreamInput(conn *websocket.Conn, shell io.Writer, done <-chan struct{}) {
 	for {
 		select {
