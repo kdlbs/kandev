@@ -9,7 +9,7 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
-import { DiscardDialog, CommitDialog, PRDialog } from "./changes-panel-dialogs";
+import { DiscardDialog, CommitDialog, PRDialog, AmendDialog, ResetDialog } from "./changes-panel-dialogs";
 import { ChangesPanelHeader } from "./changes-panel-header";
 import {
   FileListSection,
@@ -233,6 +233,7 @@ function ChangesPanelDialogsSection({
   stagedDeletions,
   displayBranch,
   baseBranch,
+  lastCommitMessage,
 }: Pick<
   ChangesPanelBodyProps,
   | "dialogs"
@@ -242,7 +243,7 @@ function ChangesPanelDialogsSection({
   | "stagedDeletions"
   | "displayBranch"
   | "baseBranch"
->) {
+> & { lastCommitMessage?: string | null }) {
   return (
     <>
       <DiscardDialog
@@ -261,6 +262,9 @@ function ChangesPanelDialogsSection({
         stagedFileCount={stagedFileCount}
         stagedAdditions={stagedAdditions}
         stagedDeletions={stagedDeletions}
+        isAmend={dialogs.isAmendCommit}
+        onAmendChange={dialogs.setIsAmendCommit}
+        lastCommitMessage={lastCommitMessage}
       />
       <PRDialog
         open={dialogs.prDialogOpen}
@@ -275,6 +279,21 @@ function ChangesPanelDialogsSection({
         isLoading={isLoading}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
+      />
+      <AmendDialog
+        open={dialogs.amendDialogOpen}
+        onOpenChange={dialogs.setAmendDialogOpen}
+        amendMessage={dialogs.amendMessage}
+        onAmendMessageChange={dialogs.setAmendMessage}
+        onAmend={dialogs.handleAmend}
+        isLoading={isLoading}
+      />
+      <ResetDialog
+        open={dialogs.resetDialogOpen}
+        onOpenChange={dialogs.setResetDialogOpen}
+        commitSha={dialogs.resetCommitSha}
+        onReset={dialogs.handleReset}
+        isLoading={isLoading}
       />
     </>
   );
@@ -353,6 +372,8 @@ function TimelineLocalChanges(props: TimelineProps) {
           isLast={false}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
+          onAmendCommit={props.dialogs.handleOpenAmendDialog}
+          onResetToCommit={props.dialogs.handleOpenResetDialog}
         />
       )}
       {showCommits && (
@@ -404,6 +425,9 @@ function ChangesPanelTimeline(props: TimelineProps) {
 }
 
 function ChangesPanelBody(props: ChangesPanelBodyProps) {
+  // Get last commit message for amend feature
+  const lastCommitMessage = props.commits?.[0]?.commit_message ?? null;
+
   return (
     <PanelBody className="flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
@@ -422,6 +446,7 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         stagedDeletions={props.stagedDeletions}
         displayBranch={props.displayBranch}
         baseBranch={props.baseBranch}
+        lastCommitMessage={lastCommitMessage}
       />
     </PanelBody>
   );
