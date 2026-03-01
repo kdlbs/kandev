@@ -28,17 +28,18 @@ interface DiffViewerResolverProps {
   wordWrap?: boolean;
   editable?: boolean;
   onModifiedContentChange?: (filePath: string, content: string) => void;
-  /** Enable diff expansion (show expand up/down buttons at hunk separators) */
+  /** Enable diff expansion (pierre-diffs only - Monaco has built-in expansion) */
   enableExpansion?: boolean;
-  /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
+  /** Base git ref for fetching old content (pierre-diffs only) */
   baseRef?: string;
 }
 
 export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffViewerResolverProps) {
   const provider = useEditorProvider("diff-viewer");
   if (provider === "monaco") {
+    // Monaco has built-in diff expansion - strip pierre-diffs-only props
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { enableComments, ...rest } = props;
+    const { enableComments, enableExpansion, baseRef, ...rest } = props;
     return <MonacoDiffViewer {...rest} />;
   }
   return <PierreDiffViewer {...props} />;
