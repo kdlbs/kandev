@@ -124,3 +124,29 @@ export async function deleteFile(
     path,
   });
 }
+
+/**
+ * File rename response from backend
+ */
+export type FileRenameResponse = {
+  old_path: string;
+  new_path: string;
+  success: boolean;
+  error?: string;
+};
+
+/**
+ * Rename a file in the workspace
+ */
+export async function renameFile(
+  client: WebSocketClient,
+  sessionId: string,
+  oldPath: string,
+  newPath: string,
+): Promise<FileRenameResponse> {
+  return client.request<FileRenameResponse>("workspace.file.rename", {
+    session_id: sessionId,
+    old_path: oldPath,
+    new_path: newPath,
+  });
+}

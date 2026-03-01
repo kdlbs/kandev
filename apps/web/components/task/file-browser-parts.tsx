@@ -1,27 +1,28 @@
 "use client";
 
-import React from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { Input } from "@kandev/ui/input";
 import {
   IconChevronRight,
   IconChevronDown,
   IconFolder,
   IconFolderOpen,
-  IconSearch,
+  IconPencil,
   IconTrash,
   IconRefresh,
-  IconListTree,
-  IconFolderShare,
-  IconCopy,
-  IconCheck,
-  IconPlus,
 } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  ContextMenuSeparator,
+} from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import { InlineFileInput } from "./inline-file-input";
-import { PanelHeaderBarSplit } from "./panel-primitives";
 import { renderSessionOrLoadState } from "./file-browser-load-state";
 
 type GitFileStatus = FileInfo["status"] | undefined;
@@ -77,6 +78,7 @@ type TreeNodeItemProps = {
   onToggleExpand: (node: FileTreeNode) => void;
   onOpenFile: (path: string) => void;
   onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
@@ -86,6 +88,24 @@ export function removeNodeFromTree(root: FileTreeNode, targetPath: string): File
   if (!root.children) return root;
   const filtered = root.children.filter((c) => c.path !== targetPath);
   return { ...root, children: filtered.map((c) => removeNodeFromTree(c, targetPath)) };
+}
+
+/** Rename a node in the tree, updating its name and path. */
+export function renameNodeInTree(
+  root: FileTreeNode,
+  oldPath: string,
+  newName: string,
+): FileTreeNode {
+  if (root.path === oldPath) {
+    const parentPath = oldPath.includes("/") ? oldPath.substring(0, oldPath.lastIndexOf("/")) : "";
+    const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+    return { ...root, name: newName, path: newPath };
+  }
+  if (!root.children) return root;
+  return {
+    ...root,
+    children: root.children.map((c) => renameNodeInTree(c, oldPath, newName)),
+  };
 }
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
@@ -157,142 +177,264 @@ function getGitStatusTextClass(status: GitFileStatus): string {
   }
 }
 
-/** Delete button shown on hover for file nodes. */
-function TreeNodeDeleteButton({
+/** Context menu for file nodes with Rename and Delete options */
+function FileContextMenu({
+  children,
   node,
   tree,
   setTree,
   onDeleteFile,
+  onRenameFile,
+  onStartRename,
 }: {
+  children: React.ReactNode;
   node: FileTreeNode;
   tree: FileTreeNode | null;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  onDeleteFile: (path: string) => Promise<boolean>;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onStartRename: () => void;
 }) {
+  const handleDelete = useCallback(() => {
+    if (!onDeleteFile) return;
+    const snapshot = tree;
+    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
+    onDeleteFile(node.path)
+      .then((ok) => {
+        if (!ok) setTree(snapshot);
+      })
+      .catch(() => {
+        setTree(snapshot);
+      });
+  }, [tree, setTree, node.path, onDeleteFile]);
+
+  const hasActions = onDeleteFile || onRenameFile;
+
+  if (!hasActions || node.is_dir) {
+    return <>{children}</>;
+  }
+
   return (
-    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-destructive cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              const snapshot = tree;
-              setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-              onDeleteFile(node.path)
-                .then((ok) => {
-                  if (!ok) setTree(snapshot);
-                })
-                .catch(() => {
-                  setTree(snapshot);
-                });
-            }}
-          >
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        {onRenameFile && (
+          <ContextMenuItem onSelect={onStartRename}>
+            <IconPencil className="h-3.5 w-3.5" />
+            Rename
+          </ContextMenuItem>
+        )}
+        {onRenameFile && onDeleteFile && <ContextMenuSeparator />}
+        {onDeleteFile && (
+          <ContextMenuItem variant="destructive" onSelect={handleDelete}>
             <IconTrash className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Delete file</TooltipContent>
-      </Tooltip>
+            Delete
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Hook for managing inline file rename state */
+function useFileRename(
+  node: FileTreeNode,
+  tree: FileTreeNode | null,
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
+) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(node.name);
+
+  const handleStartRename = useCallback(() => {
+    setRenameValue(node.name);
+    setIsRenaming(true);
+  }, [node.name]);
+
+  const handleCancelRename = useCallback(() => {
+    setIsRenaming(false);
+    setRenameValue(node.name);
+  }, [node.name]);
+
+  const handleConfirmRename = useCallback(() => {
+    const newName = renameValue.trim();
+    if (!newName || newName === node.name || !onRenameFile) {
+      handleCancelRename();
+      return;
+    }
+    const parentPath = node.path.includes("/")
+      ? node.path.substring(0, node.path.lastIndexOf("/"))
+      : "";
+    const newPath = parentPath ? `${parentPath}/${newName}` : newName;
+    const snapshot = tree;
+    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newName) : prev));
+    setIsRenaming(false);
+    onRenameFile(node.path, newPath)
+      .then((ok) => {
+        if (!ok) setTree(snapshot);
+      })
+      .catch(() => {
+        setTree(snapshot);
+      });
+  }, [renameValue, node.name, node.path, onRenameFile, tree, setTree, handleCancelRename]);
+
+  const handleRenameKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleConfirmRename();
+      } else if (e.key === "Escape") {
+        handleCancelRename();
+      }
+    },
+    [handleConfirmRename, handleCancelRename],
+  );
+
+  return {
+    isRenaming,
+    renameValue,
+    setRenameValue,
+    handleStartRename,
+    handleConfirmRename,
+    handleRenameKeyDown,
+  };
+}
+
+/** Inline rename input or static file name */
+function TreeNodeName({
+  node,
+  isActive,
+  gitStatus,
+  rename,
+}: {
+  node: FileTreeNode;
+  isActive: boolean;
+  gitStatus: GitFileStatus;
+  rename: ReturnType<typeof useFileRename>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const blurEnabledRef = useRef(false);
+
+  // Focus input after context menu closes (autoFocus doesn't work reliably with context menus)
+  // Context menus restore focus to trigger on close, so we need to wait for that to complete
+  useEffect(() => {
+    if (rename.isRenaming) {
+      blurEnabledRef.current = false;
+      // Focus after context menu has fully closed and restored focus to trigger
+      const focusTimer = setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 150);
+      // Enable blur handling after focus is stable
+      const blurTimer = setTimeout(() => {
+        blurEnabledRef.current = true;
+      }, 400);
+      return () => {
+        clearTimeout(focusTimer);
+        clearTimeout(blurTimer);
+      };
+    }
+  }, [rename.isRenaming]);
+
+  const handleBlur = useCallback(() => {
+    // Only handle blur after the input has been properly focused
+    if (blurEnabledRef.current) {
+      rename.handleConfirmRename();
+    }
+  }, [rename]);
+
+  if (rename.isRenaming) {
+    return (
+      <Input
+        ref={inputRef}
+        value={rename.renameValue}
+        onChange={(e) => rename.setRenameValue(e.target.value)}
+        onKeyDown={rename.handleRenameKeyDown}
+        onBlur={handleBlur}
+        onClick={(e) => e.stopPropagation()}
+        className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "flex-1 truncate group-hover:text-foreground",
+        isActive ? "text-foreground" : "text-muted-foreground",
+        node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
+      )}
+    >
+      {node.name}
+    </span>
+  );
+}
+
+/** Expanded directory children */
+function TreeNodeChildren({ props, depth }: { props: TreeNodeItemProps; depth: number }) {
+  const { node, creatingInPath, onCreateFileSubmit, onCancelCreate } = props;
+  return (
+    <div>
+      {creatingInPath === node.path && (
+        <InlineFileInput
+          depth={depth + 1}
+          onSubmit={(name) => onCreateFileSubmit(node.path, name)}
+          onCancel={onCancelCreate}
+        />
+      )}
+      {node.children?.map((child) => (
+        <TreeNodeItem key={child.path} {...props} node={child} depth={depth + 1} />
+      ))}
     </div>
   );
 }
 
-export function TreeNodeItem({
-  node,
-  depth,
-  expandedPaths,
-  activeFolderPath,
-  activeFilePath,
-  visibleLoadingPaths,
-  creatingInPath,
-  fileStatuses,
-  tree,
-  onToggleExpand,
-  onOpenFile,
-  onDeleteFile,
-  onCreateFileSubmit,
-  onCancelCreate,
-  setTree,
-}: TreeNodeItemProps) {
+export function TreeNodeItem(props: TreeNodeItemProps) {
+  const { node, depth, expandedPaths, activeFolderPath, activeFilePath, visibleLoadingPaths } =
+    props;
+  const { fileStatuses, tree, onToggleExpand, onOpenFile, onDeleteFile, onRenameFile, setTree } =
+    props;
+
   const isExpanded = expandedPaths.has(node.path);
   const isLoading = visibleLoadingPaths.has(node.path);
   const isActive = !node.is_dir && activeFilePath === node.path;
   const isActiveFolder = node.is_dir && activeFolderPath === node.path;
   const gitStatus = node.is_dir ? undefined : fileStatuses.get(node.path);
+  const rename = useFileRename(node, tree, setTree, onRenameFile);
+
+  const rowContent = (
+    <div
+      className={cn(
+        "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
+        "hover:bg-muted",
+        isActive && "bg-muted",
+        isActiveFolder && "bg-muted/50",
+      )}
+      style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
+      onClick={() => handleTreeNodeClick(node, onToggleExpand, onOpenFile)}
+    >
+      {node.is_dir && (
+        <span className="flex-shrink-0">
+          <TreeNodeExpandChevron isLoading={isLoading} isExpanded={isExpanded} />
+        </span>
+      )}
+      <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
+      <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
+    </div>
+  );
 
   return (
     <div>
-      <div
-        className={cn(
-          "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
-          "hover:bg-muted",
-          isActive && "bg-muted",
-          isActiveFolder && "bg-muted/50",
-        )}
-        style={{ paddingLeft: treeNodePaddingLeft(depth, node.is_dir) }}
-        onClick={() => handleTreeNodeClick(node, onToggleExpand, onOpenFile)}
+      <FileContextMenu
+        node={node}
+        tree={tree}
+        setTree={setTree}
+        onDeleteFile={onDeleteFile}
+        onRenameFile={onRenameFile}
+        onStartRename={rename.handleStartRename}
       >
-        {node.is_dir && (
-          <span className="flex-shrink-0">
-            <TreeNodeExpandChevron isLoading={isLoading} isExpanded={isExpanded} />
-          </span>
-        )}
-        <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
-        <span
-          className={cn(
-            "flex-1 truncate group-hover:text-foreground",
-            isActive ? "text-foreground" : "text-muted-foreground",
-            node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
-          )}
-        >
-          {node.name}
-        </span>
-        {!node.is_dir && onDeleteFile && (
-          <div className="ml-auto flex items-center gap-1">
-            <TreeNodeDeleteButton
-              node={node}
-              tree={tree}
-              setTree={setTree}
-              onDeleteFile={onDeleteFile}
-            />
-          </div>
-        )}
-      </div>
-      {node.is_dir && isExpanded && (
-        <div>
-          {creatingInPath === node.path && (
-            <InlineFileInput
-              depth={depth + 1}
-              onSubmit={(name) => onCreateFileSubmit(node.path, name)}
-              onCancel={onCancelCreate}
-            />
-          )}
-          {node.children &&
-            [...node.children]
-              .sort(compareTreeNodes)
-              .map((child) => (
-                <TreeNodeItem
-                  key={child.path}
-                  node={child}
-                  depth={depth + 1}
-                  expandedPaths={expandedPaths}
-                  activeFolderPath={activeFolderPath}
-                  activeFilePath={activeFilePath}
-                  visibleLoadingPaths={visibleLoadingPaths}
-                  creatingInPath={creatingInPath}
-                  fileStatuses={fileStatuses}
-                  tree={tree}
-                  onToggleExpand={onToggleExpand}
-                  onOpenFile={onOpenFile}
-                  onDeleteFile={onDeleteFile}
-                  onCreateFileSubmit={onCreateFileSubmit}
-                  onCancelCreate={onCancelCreate}
-                  setTree={setTree}
-                />
-              ))}
-        </div>
-      )}
+        {rowContent}
+      </FileContextMenu>
+      {node.is_dir && isExpanded && <TreeNodeChildren props={props} depth={depth} />}
     </div>
   );
 }
@@ -351,119 +493,7 @@ export function SearchResultsList({
   );
 }
 
-type FileBrowserToolbarProps = {
-  displayPath: string;
-  fullPath: string;
-  copied: boolean;
-  expandedPathsSize: number;
-  onCopyPath: (text: string) => void;
-  onStartCreate?: () => void;
-  onOpenFolder: () => void;
-  onStartSearch: () => void;
-  onCollapseAll: () => void;
-  showCreateButton: boolean;
-};
-
-export function FileBrowserToolbar({
-  displayPath,
-  fullPath,
-  copied,
-  expandedPathsSize,
-  onCopyPath,
-  onStartCreate,
-  onOpenFolder,
-  onStartSearch,
-  onCollapseAll,
-  showCreateButton,
-}: FileBrowserToolbarProps) {
-  return (
-    <PanelHeaderBarSplit
-      className="group/header"
-      left={
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="relative shrink-0 cursor-pointer"
-                onClick={() => {
-                  if (fullPath) void onCopyPath(fullPath);
-                }}
-              >
-                <IconFolderOpen
-                  className={cn(
-                    "h-3.5 w-3.5 text-muted-foreground transition-opacity",
-                    copied ? "opacity-0" : "group-hover/header:opacity-0",
-                  )}
-                />
-                {copied ? (
-                  <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
-                ) : (
-                  <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Copy workspace path</TooltipContent>
-          </Tooltip>
-          <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-            {displayPath}
-          </span>
-        </>
-      }
-      right={
-        <>
-          {showCreateButton && onStartCreate && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                  onClick={onStartCreate}
-                >
-                  <IconPlus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>New file</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                onClick={onOpenFolder}
-              >
-                <IconFolderShare className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Open workspace folder</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                onClick={onStartSearch}
-              >
-                <IconSearch className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Search files</TooltipContent>
-          </Tooltip>
-          {expandedPathsSize > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                  onClick={onCollapseAll}
-                >
-                  <IconListTree className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Collapse all</TooltipContent>
-            </Tooltip>
-          )}
-        </>
-      }
-    />
-  );
-}
+export { FileBrowserToolbar } from "./file-browser-toolbar";
 
 type FileBrowserContentAreaProps = {
   isSearchActive: boolean;
@@ -483,6 +513,7 @@ type FileBrowserContentAreaProps = {
   onOpenFile: (path: string) => void;
   onToggleExpand: (node: FileTreeNode) => void;
   onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onCreateFileSubmit: (parentPath: string, name: string) => void;
   onCancelCreate: () => void;
   onRetry: () => void;
@@ -507,6 +538,7 @@ export function FileBrowserContentArea({
   onOpenFile,
   onToggleExpand,
   onDeleteFile,
+  onRenameFile,
   onCreateFileSubmit,
   onCancelCreate,
   onRetry,
@@ -559,6 +591,7 @@ export function FileBrowserContentArea({
                 onToggleExpand={onToggleExpand}
                 onOpenFile={onOpenFile}
                 onDeleteFile={onDeleteFile}
+                onRenameFile={onRenameFile}
                 onCreateFileSubmit={onCreateFileSubmit}
                 onCancelCreate={onCancelCreate}
                 setTree={setTree}

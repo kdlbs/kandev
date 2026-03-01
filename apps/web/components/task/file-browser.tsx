@@ -86,6 +86,7 @@ type FileBrowserProps = {
   onOpenFile: (file: OpenFileTab) => void;
   onCreateFile?: (path: string) => Promise<boolean>;
   onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   activeFilePath?: string | null;
 };
 
@@ -163,6 +164,7 @@ export function FileBrowser({
   onOpenFile,
   onCreateFile,
   onDeleteFile,
+  onRenameFile,
   activeFilePath,
 }: FileBrowserProps) {
   const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
@@ -247,6 +249,7 @@ export function FileBrowser({
           onOpenFile={openFileByPath}
           onToggleExpand={toggleExpand}
           onDeleteFile={onDeleteFile}
+          onRenameFile={onRenameFile}
           onCreateFileSubmit={handleCreateFileSubmit}
           onCancelCreate={handleCancelCreate}
           onRetry={() => void treeState.loadTree({ resetRetry: true })}

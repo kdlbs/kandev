@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { TabsContent } from "@kandev/ui/tabs";
 import { SessionPanel, SessionPanelContent } from "@kandev/ui/pannel-session";
 import { FileBrowser } from "@/components/task/file-browser";
@@ -14,6 +14,40 @@ import {
   useDiscardDialog,
 } from "./task-files-panel-hooks";
 import { DiffTabContent, DiscardDialog } from "./task-files-panel-parts";
+
+function FilesTabContent({
+  sessionId,
+  onOpenFile,
+  handleCreateFile,
+  hookDeleteFile,
+  hookRenameFile,
+  activeFilePath,
+}: {
+  sessionId: string | null;
+  onOpenFile: (file: OpenFileTab) => void;
+  handleCreateFile: (path: string) => Promise<boolean>;
+  hookDeleteFile: (path: string) => Promise<boolean>;
+  hookRenameFile: (oldPath: string, newPath: string) => Promise<boolean>;
+  activeFilePath?: string | null;
+}) {
+  if (!sessionId) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+        No task selected
+      </div>
+    );
+  }
+  return (
+    <FileBrowser
+      sessionId={sessionId}
+      onOpenFile={onOpenFile}
+      onCreateFile={handleCreateFile}
+      onDeleteFile={hookDeleteFile}
+      onRenameFile={hookRenameFile}
+      activeFilePath={activeFilePath}
+    />
+  );
+}
 
 type TaskFilesPanelProps = {
   onSelectDiff: (path: string, content?: string) => void;
@@ -33,6 +67,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     reviewedCount,
     totalFileCount,
     hookDeleteFile,
+    hookRenameFile,
     handleCreateFile,
     handleOpenFileInDocumentPanel,
     handleOpenInEditor,
@@ -57,13 +92,13 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     handleDiscardConfirm,
   } = useDiscardDialog(activeSessionId);
 
-  const tabs: SessionTab[] = [
-    {
-      id: "diff",
-      label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ""}`,
-    },
-    { id: "files", label: "All files" },
-  ];
+  const tabs: SessionTab[] = useMemo(
+    () => [
+      { id: "diff", label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ""}` },
+      { id: "files", label: "All files" },
+    ],
+    [changedFiles.length],
+  );
 
   return (
     <SessionPanel borderSide="left">
@@ -97,19 +132,14 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
         </TabsContent>
         <TabsContent value="files" className="flex-1 min-h-0">
           <SessionPanelContent>
-            {activeSessionId ? (
-              <FileBrowser
-                sessionId={activeSessionId}
-                onOpenFile={onOpenFile}
-                onCreateFile={handleCreateFile}
-                onDeleteFile={hookDeleteFile}
-                activeFilePath={activeFilePath}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                No task selected
-              </div>
-            )}
+            <FilesTabContent
+              sessionId={activeSessionId}
+              onOpenFile={onOpenFile}
+              handleCreateFile={handleCreateFile}
+              hookDeleteFile={hookDeleteFile}
+              hookRenameFile={hookRenameFile}
+              activeFilePath={activeFilePath}
+            />
           </SessionPanelContent>
         </TabsContent>
       </SessionTabs>

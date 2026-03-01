@@ -275,9 +275,11 @@ export function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
-  const { createFile: baseCreateFile, deleteFile: hookDeleteFile } = useFileOperations(
-    activeSessionId ?? null,
-  );
+  const {
+    createFile: baseCreateFile,
+    deleteFile: hookDeleteFile,
+    renameFile: hookRenameFile,
+  } = useFileOperations(activeSessionId ?? null);
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { diff: cumulativeDiff } = useCumulativeDiff(activeSessionId);
   const { openFile: panelOpenFile } = usePanelActions();
@@ -347,6 +349,7 @@ export function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
     reviewedCount,
     totalFileCount,
     hookDeleteFile,
+    hookRenameFile,
     handleCreateFile,
     handleOpenFileInDocumentPanel,
     handleOpenInEditor,
