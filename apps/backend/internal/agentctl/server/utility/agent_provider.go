@@ -44,28 +44,8 @@ func (e *InferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*P
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if cfg.StdinInput {
-		// Send prompt via stdin
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
-		}
-
-		if err := cmd.Start(); err != nil {
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
-		}
-
-		if _, err := stdin.Write([]byte(req.Prompt)); err != nil {
-			_ = cmd.Process.Kill()
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("write: %v", err)}, nil
-		}
-		stdin.Close()
-	} else {
-		// Add prompt as positional argument
-		cmd.Args = append(cmd.Args, req.Prompt)
-		if err := cmd.Start(); err != nil {
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
-		}
+	if err := e.startCommand(cmd, cfg.StdinInput, req.Prompt); err != nil {
+		return &PromptResponse{Success: false, Error: err.Error()}, nil
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -87,12 +67,39 @@ func (e *InferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*P
 	}, nil
 }
 
+// startCommand starts the command with optional stdin input.
+func (e *InferenceExecutor) startCommand(cmd *exec.Cmd, stdinInput bool, prompt string) error {
+	if !stdinInput {
+		cmd.Args = append(cmd.Args, prompt)
+		return cmd.Start()
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	if _, err := stdin.Write([]byte(prompt)); err != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("write: %w", err)
+	}
+
+	if err := stdin.Close(); err != nil {
+		return fmt.Errorf("close stdin: %w", err)
+	}
+
+	return nil
+}
+
 // buildCommand builds the command arguments from inference config.
 func (e *InferenceExecutor) buildCommand(cfg *InferenceConfigDTO, model string) []string {
 	args := make([]string, len(cfg.Command))
 	copy(args, cfg.Command)
 
-	// Add model flag if specified
 	if model != "" && len(cfg.ModelFlag) > 0 {
 		for _, part := range cfg.ModelFlag {
 			args = append(args, strings.ReplaceAll(part, "{model}", model))
@@ -125,30 +132,57 @@ func parseStreamJSON(output string) string {
 			continue
 		}
 
-		var msg map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-
-		// Extract text from assistant messages
-		if msgType, ok := msg["type"].(string); ok && msgType == "assistant" {
-			if message, ok := msg["message"].(map[string]interface{}); ok {
-				if content, ok := message["content"].([]interface{}); ok {
-					for _, block := range content {
-						if b, ok := block.(map[string]interface{}); ok {
-							if blockType, ok := b["type"].(string); ok && blockType == "text" {
-								if text, ok := b["text"].(string); ok {
-									result.WriteString(text)
-								}
-							}
-						}
-					}
-				}
-			}
+		text := extractAssistantText(line)
+		if text != "" {
+			result.WriteString(text)
 		}
 	}
 
 	return strings.TrimSpace(result.String())
+}
+
+// extractAssistantText extracts text content from a JSON line if it's an assistant message.
+func extractAssistantText(line string) string {
+	var msg map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return ""
+	}
+
+	msgType, ok := msg["type"].(string)
+	if !ok || msgType != "assistant" {
+		return ""
+	}
+
+	message, ok := msg["message"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	content, ok := message["content"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	return extractTextFromContent(content)
+}
+
+// extractTextFromContent extracts text from content blocks.
+func extractTextFromContent(content []interface{}) string {
+	var result strings.Builder
+	for _, block := range content {
+		b, ok := block.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		blockType, ok := b["type"].(string)
+		if !ok || blockType != "text" {
+			continue
+		}
+		if text, ok := b["text"].(string); ok {
+			result.WriteString(text)
+		}
+	}
+	return result.String()
 }
 
 // parseAuggieJSON extracts the result field from auggie JSON output.
