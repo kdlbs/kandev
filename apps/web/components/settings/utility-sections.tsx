@@ -4,13 +4,7 @@ import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
@@ -51,7 +45,9 @@ export function DefaultModelSection({
             </SelectTrigger>
             <SelectContent>
               {inferenceAgents.map((ia) => (
-                <SelectItem key={ia.id} value={ia.id}>{ia.display_name}</SelectItem>
+                <SelectItem key={ia.id} value={ia.id}>
+                  {ia.display_name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -68,7 +64,9 @@ export function DefaultModelSection({
             </SelectTrigger>
             <SelectContent>
               {modelOptions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -87,8 +85,15 @@ type BuiltinActionRowProps = {
   onEdit: (agent: UtilityAgent) => void;
 };
 
-export function BuiltinActionRow({ agent, allModels, defaultLabel, onModelChange, onEdit }: BuiltinActionRowProps) {
-  const currentValue = agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
+export function BuiltinActionRow({
+  agent,
+  allModels,
+  defaultLabel,
+  onModelChange,
+  onEdit,
+}: BuiltinActionRowProps) {
+  const currentValue =
+    agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
 
   return (
     <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50 group">
@@ -103,7 +108,9 @@ export function BuiltinActionRow({ agent, allModels, defaultLabel, onModelChange
         <SelectContent>
           <SelectItem value={USE_DEFAULT}>{defaultLabel}</SelectItem>
           {allModels.map((m) => (
-            <SelectItem key={m.value} value={m.value}>{m.agentName} / {m.modelName}</SelectItem>
+            <SelectItem key={m.value} value={m.value}>
+              {m.agentName} / {m.modelName}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -227,4 +234,3 @@ export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomA
 
 // Export the USE_DEFAULT constant
 export { USE_DEFAULT };
-

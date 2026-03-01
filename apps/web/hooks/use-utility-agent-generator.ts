@@ -114,7 +114,10 @@ export function useUtilityAgentGenerator({
   );
 
   const generatePRDescription = useCallback(
-    (onSuccess: (description: string) => void, extra?: { commitLog?: string; diffSummary?: string }) => {
+    (
+      onSuccess: (description: string) => void,
+      extra?: { commitLog?: string; diffSummary?: string },
+    ) => {
       return generate("pr-description", { onSuccess, ...extra });
     },
     [generate],
@@ -137,4 +140,3 @@ export function useUtilityAgentGenerator({
     enhancePrompt,
   };
 }
-

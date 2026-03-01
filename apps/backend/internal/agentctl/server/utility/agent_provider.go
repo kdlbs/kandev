@@ -7,9 +7,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// modelNameRegex validates model names - alphanumeric, hyphens, underscores, dots, slashes, colons.
+var modelNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._:/-]*$`)
+
+// validateModelName ensures the model name doesn't contain shell metacharacters.
+func validateModelName(model string) error {
+	if model == "" {
+		return nil // Empty model is allowed (uses default)
+	}
+	if len(model) > 256 {
+		return fmt.Errorf("model name too long")
+	}
+	if !modelNameRegex.MatchString(model) {
+		return fmt.Errorf("invalid model name: contains disallowed characters")
+	}
+	return nil
+}
 
 // InferenceExecutor executes one-shot prompts using the agent's inference config.
 type InferenceExecutor struct {
@@ -32,11 +50,20 @@ func (e *InferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*P
 		return &PromptResponse{Success: false, Error: "inference command is empty"}, nil
 	}
 
+	// Validate model name to prevent command injection.
+	// Model is user-provided and substituted into command arguments.
+	if err := validateModelName(req.Model); err != nil {
+		return &PromptResponse{Success: false, Error: err.Error()}, nil
+	}
+
 	startTime := time.Now()
 
-	// Build command from inference config
+	// Build command from inference config.
+	// Note: Command and ModelFlag come from hardcoded agent definitions in the registry,
+	// not from user input. Only the model name (validated above) and prompt are user-provided.
 	args := e.buildCommand(cfg, req.Model)
 
+	// #nosec G204 -- Command comes from agent registry (hardcoded), model is validated above
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = e.workDir
 

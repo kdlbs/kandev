@@ -174,11 +174,7 @@ function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLo
           onClick={onClick}
           disabled={isLoading}
         >
-          {isLoading ? (
-            <GridSpinner className="h-4 w-4" />
-          ) : (
-            <IconSparkles className="h-4 w-4" />
-          )}
+          {isLoading ? <GridSpinner className="h-4 w-4" /> : <IconSparkles className="h-4 w-4" />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>Enhance prompt with AI</TooltipContent>
@@ -188,12 +184,19 @@ function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLo
 
 function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
   const hasMcp = mcpServers.length > 0;
-  const tooltipText = hasMcp ? `MCP Servers: ${mcpServers.join(", ")}` : "Agent does not support MCP";
+  const tooltipText = hasMcp
+    ? `MCP Servers: ${mcpServers.join(", ")}`
+    : "Agent does not support MCP";
   const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={cn("h-7 w-7 flex items-center justify-center rounded-md", hasMcp ? "text-foreground" : "text-muted-foreground/40")}>
+        <div
+          className={cn(
+            "h-7 w-7 flex items-center justify-center rounded-md",
+            hasMcp ? "text-foreground" : "text-muted-foreground/40",
+          )}
+        >
           <Icon className="h-4 w-4" />
         </div>
       </TooltipTrigger>
@@ -220,22 +223,46 @@ type ToolbarRightSectionProps = {
 };
 
 function ToolbarRightSection({
-  taskId, sessionId, taskTitle, taskDescription, planModeEnabled, isAgentBusy, isDisabled, isSending,
-  onCancel, onSubmit, submitShortcut, onEnhancePrompt, isEnhancingPrompt, onImplementPlan,
+  taskId,
+  sessionId,
+  taskTitle,
+  taskDescription,
+  planModeEnabled,
+  isAgentBusy,
+  isDisabled,
+  isSending,
+  onCancel,
+  onSubmit,
+  submitShortcut,
+  onEnhancePrompt,
+  isEnhancingPrompt,
+  onImplementPlan,
 }: ToolbarRightSectionProps) {
   const showEnhance = onEnhancePrompt && !isAgentBusy;
   const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      <SessionsDropdown taskId={taskId} activeSessionId={sessionId} taskTitle={taskTitle} taskDescription={taskDescription} />
+      <SessionsDropdown
+        taskId={taskId}
+        activeSessionId={sessionId}
+        taskTitle={taskTitle}
+        taskDescription={taskDescription}
+      />
       <TokenUsageDisplay sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />
-      {showEnhance && <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />}
+      {showEnhance && (
+        <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />
+      )}
       {showImplement && <ImplementPlanButton onClick={onImplementPlan} />}
       <div className="ml-1">
         <SubmitButton
-          isAgentBusy={isAgentBusy} isDisabled={isDisabled} isSending={isSending}
-          planModeEnabled={planModeEnabled} onCancel={onCancel} onSubmit={onSubmit} submitShortcut={submitShortcut}
+          isAgentBusy={isAgentBusy}
+          isDisabled={isDisabled}
+          isSending={isSending}
+          planModeEnabled={planModeEnabled}
+          onCancel={onCancel}
+          onSubmit={onSubmit}
+          submitShortcut={submitShortcut}
         />
       </div>
     </div>

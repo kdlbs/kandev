@@ -1,23 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@kandev/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import {
   type UtilityAgent,
   createUtilityAgent,
@@ -90,7 +78,9 @@ function AgentModelSelect({
           </SelectTrigger>
           <SelectContent>
             {inferenceAgents.map((ia) => (
-              <SelectItem key={ia.id} value={ia.id}>{ia.display_name}</SelectItem>
+              <SelectItem key={ia.id} value={ia.id}>
+                {ia.display_name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -103,7 +93,9 @@ function AgentModelSelect({
           </SelectTrigger>
           <SelectContent>
             {availableModels.map((m) => (
-              <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+              <SelectItem key={m.id} value={m.id}>
+                {m.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -122,7 +114,12 @@ type UtilityAgentFormProps = {
 };
 
 function UtilityAgentForm({
-  form, setForm, isBuiltin, inferenceAgents, availableModels, placeholders,
+  form,
+  setForm,
+  isBuiltin,
+  inferenceAgents,
+  availableModels,
+  placeholders,
 }: UtilityAgentFormProps) {
   return (
     <div className="space-y-4 py-4">
@@ -165,7 +162,9 @@ function UtilityAgentForm({
             lineNumbers="off"
           />
         </div>
-        <p className="text-xs text-muted-foreground">Type {"{{"} to see available variables with autocomplete</p>
+        <p className="text-xs text-muted-foreground">
+          Type {"{{"} to see available variables with autocomplete
+        </p>
       </div>
     </div>
   );
@@ -266,11 +265,14 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
           placeholders={placeholders}
         />
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={saving || !form.name} className="cursor-pointer">{getSubmitLabel()}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={saving || !form.name} className="cursor-pointer">
+            {getSubmitLabel()}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-

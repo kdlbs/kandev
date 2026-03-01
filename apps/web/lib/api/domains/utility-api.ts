@@ -111,10 +111,7 @@ export async function updateUtilityAgent(
   });
 }
 
-export async function deleteUtilityAgent(
-  id: string,
-  options?: ApiRequestOptions,
-): Promise<void> {
+export async function deleteUtilityAgent(id: string, options?: ApiRequestOptions): Promise<void> {
   await fetchJson<{ success: boolean }>(`/api/v1/utility/agents/${id}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
@@ -124,7 +121,10 @@ export async function deleteUtilityAgent(
 export async function getTemplateVariables(
   options?: ApiRequestOptions,
 ): Promise<{ variables: TemplateVariable[] }> {
-  return fetchJson<{ variables: TemplateVariable[] }>("/api/v1/utility/template-variables", options);
+  return fetchJson<{ variables: TemplateVariable[] }>(
+    "/api/v1/utility/template-variables",
+    options,
+  );
 }
 
 export async function listInferenceAgents(
@@ -153,4 +153,3 @@ export async function listUtilityCalls(
     options,
   );
 }
-

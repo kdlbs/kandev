@@ -1,7 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck, IconSparkles } from "@tabler/icons-react";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import {
+  IconGitCommit,
+  IconGitPullRequest,
+  IconLoader2,
+  IconCheck,
+  IconSparkles,
+} from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -63,10 +69,13 @@ function FileSummaryText({ count, additions, deletions }: FileSummary) {
   if (count === 0) return <span>No changes to commit</span>;
   return (
     <span>
-      <span className="font-medium text-foreground">{count}</span> file{count !== 1 ? "s" : ""} changed
+      <span className="font-medium text-foreground">{count}</span> file{count !== 1 ? "s" : ""}{" "}
+      changed
       {(additions > 0 || deletions > 0) && (
         <span className="ml-2">
-          (<span className="text-green-600">+{additions}</span>{" / "}<span className="text-red-600">-{deletions}</span>)
+          (<span className="text-green-600">+{additions}</span>
+          {" / "}
+          <span className="text-red-600">-{deletions}</span>)
         </span>
       )}
     </span>
@@ -82,7 +91,14 @@ type GenerateButtonProps = {
   showLabel?: boolean;
 };
 
-function GenerateButton({ onClick, isGenerating, disabled, tooltip, size = "icon", showLabel }: GenerateButtonProps) {
+function GenerateButton({
+  onClick,
+  isGenerating,
+  disabled,
+  tooltip,
+  size = "icon",
+  showLabel,
+}: GenerateButtonProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -90,11 +106,17 @@ function GenerateButton({ onClick, isGenerating, disabled, tooltip, size = "icon
           type="button"
           size={size}
           variant="ghost"
-          className={size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"}
+          className={
+            size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
+          }
           onClick={onClick}
           disabled={disabled || isGenerating}
         >
-          {isGenerating ? <IconLoader2 className="h-4 w-4 animate-spin" /> : <IconSparkles className="h-4 w-4" />}
+          {isGenerating ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconSparkles className="h-4 w-4" />
+          )}
           {showLabel && "Generate"}
         </Button>
       </TooltipTrigger>
@@ -118,8 +140,17 @@ type CommitDialogProps = {
 };
 
 function CommitDialog({
-  open, onOpenChange, fileSummary, commitMessage, onCommitMessageChange,
-  stageAll, onStageAllChange, isGitLoading, onCommit, onGenerateMessage, isGenerating,
+  open,
+  onOpenChange,
+  fileSummary,
+  commitMessage,
+  onCommitMessageChange,
+  stageAll,
+  onStageAllChange,
+  isGitLoading,
+  onCommit,
+  onGenerateMessage,
+  isGenerating,
 }: CommitDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -232,9 +263,20 @@ function PRBranchSummary({
 }
 
 function PRDialog({
-  open, onOpenChange, displayBranch, baseBranch, prTitle, onPrTitleChange,
-  prBody, onPrBodyChange, prDraft, onPrDraftChange, isGitLoading, onCreatePR,
-  onGenerateDescription, isGenerating,
+  open,
+  onOpenChange,
+  displayBranch,
+  baseBranch,
+  prTitle,
+  onPrTitleChange,
+  prBody,
+  onPrBodyChange,
+  prDraft,
+  onPrDraftChange,
+  isGitLoading,
+  onCreatePR,
+  onGenerateDescription,
+  isGenerating,
 }: PRDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -248,7 +290,9 @@ function PRDialog({
         <div className="space-y-4 py-2">
           <PRBranchSummary displayBranch={displayBranch} baseBranch={baseBranch} />
           <div className="space-y-2">
-            <Label htmlFor="vcs-pr-title" className="text-sm">Title</Label>
+            <Label htmlFor="vcs-pr-title" className="text-sm">
+              Title
+            </Label>
             <Input
               id="vcs-pr-title"
               placeholder="Pull request title..."
@@ -259,7 +303,9 @@ function PRDialog({
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="vcs-pr-body" className="text-sm">Description</Label>
+              <Label htmlFor="vcs-pr-body" className="text-sm">
+                Description
+              </Label>
               {onGenerateDescription && (
                 <GenerateButton
                   onClick={onGenerateDescription}
@@ -315,93 +361,150 @@ function PRDialog({
   );
 }
 
-export function VcsDialogsProvider({
-  sessionId, baseBranch, taskTitle, displayBranch, children,
-}: VcsDialogsProviderProps) {
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [stageAll, setStageAll] = useState(true);
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prTitle, setPrTitle] = useState("");
-  const [prBody, setPrBody] = useState("");
-  const [prDraft, setPrDraft] = useState(true);
+type UseCommitDialogReturn = {
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  message: string;
+  setMessage: (v: string) => void;
+  stageAll: boolean;
+  setStageAll: (v: boolean) => void;
+  openDialog: () => void;
+};
 
+function useCommitDialogState(): UseCommitDialogReturn {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [stageAll, setStageAll] = useState(true);
+  const openDialog = useCallback(() => {
+    setMessage("");
+    setStageAll(true);
+    setOpen(true);
+  }, []);
+  return { open, setOpen, message, setMessage, stageAll, setStageAll, openDialog };
+}
+
+type UsePRDialogReturn = {
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  title: string;
+  setTitle: (v: string) => void;
+  body: string;
+  setBody: (v: string) => void;
+  draft: boolean;
+  setDraft: (v: boolean) => void;
+  openDialog: (taskTitle?: string) => void;
+};
+
+function usePRDialogState(): UsePRDialogReturn {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [draft, setDraft] = useState(true);
+  const openDialog = useCallback((taskTitle?: string) => {
+    setTitle(taskTitle || "");
+    setBody("");
+    setOpen(true);
+  }, []);
+  return { open, setOpen, title, setTitle, body, setBody, draft, setDraft, openDialog };
+}
+
+export function VcsDialogsProvider({
+  sessionId,
+  baseBranch,
+  taskTitle,
+  displayBranch,
+  children,
+}: VcsDialogsProviderProps) {
+  const cs = useCommitDialogState();
+  const ps = usePRDialogState();
   const { toast } = useToast();
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const { commit, createPR, isLoading: isGitLoading } = useGitOperations(sessionId);
-  const { isGeneratingCommitMessage, isGeneratingPRDescription, generateCommitMessage, generatePRDescription } =
-    useUtilityAgentGenerator({ sessionId, taskTitle });
-
+  const {
+    isGeneratingCommitMessage,
+    isGeneratingPRDescription,
+    generateCommitMessage,
+    generatePRDescription,
+  } = useUtilityAgentGenerator({ sessionId, taskTitle });
   const fileSummary = computeFileSummary(gitStatus?.files);
 
-  const openCommitDialog = useCallback(() => {
-    setCommitMessage(""); setStageAll(true); setCommitDialogOpen(true);
-  }, []);
-
   const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    setCommitDialogOpen(false);
-    await gitWithFeedback(() => commit(commitMessage.trim(), stageAll), "Commit");
-    setCommitMessage("");
-  }, [commitMessage, stageAll, gitWithFeedback, commit]);
-
-  const handleGenerateCommitMessage = useCallback(() => generateCommitMessage(setCommitMessage), [generateCommitMessage]);
-
-  const openPRDialog = useCallback(() => {
-    setPrTitle(taskTitle || ""); setPrBody(""); setPrDialogOpen(true);
-  }, [taskTitle]);
+    if (!cs.message.trim()) return;
+    cs.setOpen(false);
+    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
+    cs.setMessage("");
+  }, [cs, gitWithFeedback, commit]);
 
   const handleCreatePR = useCallback(async () => {
-    if (!prTitle.trim()) return;
-    setPrDialogOpen(false);
+    if (!ps.title.trim()) return;
+    ps.setOpen(false);
     try {
-      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
+      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft);
       if (result.success) {
-        const title = prDraft ? "Draft PR created" : "PR created";
-        toast({ title, description: result.pr_url || "PR created successfully", variant: "success" });
+        const title = ps.draft ? "Draft PR created" : "PR created";
+        toast({
+          title,
+          description: result.pr_url || "PR created successfully",
+          variant: "success",
+        });
         if (result.pr_url) window.open(result.pr_url, "_blank");
       } else {
-        toast({ title: "Create PR failed", description: result.error || "An error occurred", variant: "error" });
+        toast({
+          title: "Create PR failed",
+          description: result.error || "An error occurred",
+          variant: "error",
+        });
       }
     } catch (e) {
-      toast({ title: "Create PR failed", description: e instanceof Error ? e.message : "An error occurred", variant: "error" });
+      toast({
+        title: "Create PR failed",
+        description: e instanceof Error ? e.message : "An error occurred",
+        variant: "error",
+      });
     }
-    setPrTitle(""); setPrBody("");
-  }, [prTitle, prBody, baseBranch, prDraft, createPR, toast]);
+    ps.setTitle("");
+    ps.setBody("");
+  }, [ps, baseBranch, createPR, toast]);
 
-  const handleGeneratePRDescription = useCallback(() => generatePRDescription(setPrBody), [generatePRDescription]);
+  const contextValue = useMemo(
+    () => ({
+      openCommitDialog: cs.openDialog,
+      openPRDialog: () => ps.openDialog(taskTitle),
+    }),
+    [cs.openDialog, ps, taskTitle],
+  );
 
   return (
-    <VcsDialogsContext.Provider value={{ openCommitDialog, openPRDialog }}>
+    <VcsDialogsContext.Provider value={contextValue}>
       {children}
       <CommitDialog
-        open={commitDialogOpen}
-        onOpenChange={setCommitDialogOpen}
+        open={cs.open}
+        onOpenChange={cs.setOpen}
         fileSummary={fileSummary}
-        commitMessage={commitMessage}
-        onCommitMessageChange={setCommitMessage}
-        stageAll={stageAll}
-        onStageAllChange={setStageAll}
+        commitMessage={cs.message}
+        onCommitMessageChange={cs.setMessage}
+        stageAll={cs.stageAll}
+        onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
-        onGenerateMessage={handleGenerateCommitMessage}
+        onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
         isGenerating={isGeneratingCommitMessage}
       />
       <PRDialog
-        open={prDialogOpen}
-        onOpenChange={setPrDialogOpen}
+        open={ps.open}
+        onOpenChange={ps.setOpen}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
-        prTitle={prTitle}
-        onPrTitleChange={setPrTitle}
-        prBody={prBody}
-        onPrBodyChange={setPrBody}
-        prDraft={prDraft}
-        onPrDraftChange={setPrDraft}
+        prTitle={ps.title}
+        onPrTitleChange={ps.setTitle}
+        prBody={ps.body}
+        onPrBodyChange={ps.setBody}
+        prDraft={ps.draft}
+        onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
-        onGenerateDescription={handleGeneratePRDescription}
+        onGenerateDescription={() => generatePRDescription(ps.setBody)}
         isGenerating={isGeneratingPRDescription}
       />
     </VcsDialogsContext.Provider>
