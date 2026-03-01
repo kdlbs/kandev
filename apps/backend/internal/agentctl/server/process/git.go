@@ -383,7 +383,8 @@ func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperati
 
 // Commit creates a git commit with the specified message.
 // If stageAll is true, it stages all changes before committing.
-func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool) (*GitOperationResult, error) {
+// If amend is true, it amends the previous commit instead of creating a new one.
+func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool, amend bool) (*GitOperationResult, error) {
 	if !g.tryLock("commit") {
 		return nil, ErrOperationInProgress
 	}
@@ -393,16 +394,19 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 		Operation: "commit",
 	}
 
-	// Check if there are changes to commit
-	hasChanges, err := g.hasUncommittedChanges(ctx)
-	if err != nil {
-		result.Error = err.Error()
-		return result, nil
-	}
+	// For amend, we don't require staged changes if we're just changing the message
+	if !amend {
+		// Check if there are changes to commit
+		hasChanges, err := g.hasUncommittedChanges(ctx)
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 
-	if !hasChanges {
-		result.Error = "no changes to commit"
-		return result, nil
+		if !hasChanges {
+			result.Error = "no changes to commit"
+			return result, nil
+		}
 	}
 
 	// Stage all changes if requested
@@ -416,8 +420,12 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 		result.Output = stageOutput
 	}
 
-	// Create the commit
-	commitOutput, err := g.runGitCommand(ctx, "commit", "-m", message)
+	// Create the commit (with --amend if requested)
+	args := []string{"commit", "-m", message}
+	if amend {
+		args = append(args, "--amend")
+	}
+	commitOutput, err := g.runGitCommand(ctx, args...)
 	result.Output += commitOutput
 
 	if err != nil {
@@ -426,7 +434,7 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 	}
 
 	result.Success = true
-	g.logger.Info("commit completed", zap.String("message", message))
+	g.logger.Info("commit completed", zap.String("message", message), zap.Bool("amend", amend))
 
 	// Publish commit notification if we have a workspace tracker
 	if g.workspaceTracker != nil {
@@ -666,6 +674,112 @@ func (g *GitOperator) RevertCommit(ctx context.Context, commitSHA string) (*GitO
 	g.logger.Info("revert commit completed",
 		zap.String("commit_sha", commitSHA),
 		zap.Bool("success", result.Success))
+	return result, nil
+}
+
+// RenameBranch renames the current branch to a new name.
+// Uses git branch -m <new_name>.
+func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOperationResult, error) {
+	if !isValidBranchName(newName) {
+		return nil, ErrInvalidBranchName
+	}
+
+	if !g.tryLock("rename_branch") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "rename_branch",
+	}
+
+	// Get current branch name for logging
+	currentBranch, err := g.getCurrentBranch(ctx)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
+		return result, nil
+	}
+
+	// Rename the branch
+	output, err := g.runGitCommand(ctx, "branch", "-m", newName)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.logger.Info("branch renamed",
+		zap.String("from", currentBranch),
+		zap.String("to", newName))
+
+	// Refresh git status so the UI reflects the new branch name
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
+	return result, nil
+}
+
+// Reset resets HEAD to the specified commit.
+// mode can be "soft" (keep changes staged), "mixed" (keep changes unstaged), or "hard" (discard all changes).
+func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) (*GitOperationResult, error) {
+	if !g.tryLock("reset") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "reset",
+	}
+
+	// Validate mode
+	validModes := map[string]bool{"soft": true, "mixed": true, "hard": true}
+	if !validModes[mode] {
+		result.Error = fmt.Sprintf("invalid reset mode: %s (must be soft, mixed, or hard)", mode)
+		return result, nil
+	}
+
+	// Validate commit SHA exists
+	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", commitSHA); err != nil {
+		result.Error = fmt.Sprintf("invalid commit: %s", commitSHA)
+		return result, nil
+	}
+
+	// Capture current HEAD for reset notification
+	previousHead, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	previousHead = strings.TrimSpace(previousHead)
+
+	// Perform the reset
+	output, err := g.runGitCommand(ctx, "reset", "--"+mode, commitSHA)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.logger.Info("reset completed",
+		zap.String("mode", mode),
+		zap.String("commit", commitSHA))
+
+	// Send reset notification and refresh git status
+	if g.workspaceTracker != nil {
+		// Notify about the reset
+		newHead, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
+		reset := &streams.GitResetNotification{
+			Timestamp:    time.Now().UTC(),
+			PreviousHead: previousHead,
+			CurrentHead:  strings.TrimSpace(newHead),
+		}
+		g.workspaceTracker.NotifyGitReset(reset)
+
+		// Refresh git status
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
 	return result, nil
 }
 

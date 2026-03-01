@@ -1,5 +1,7 @@
 import { createTwoFilesPatch } from "diff";
 
+import { djb2Hash } from "./hash";
+
 /**
  * Generate a unified diff between original and modified content
  * @param original - Original file content
@@ -26,21 +28,13 @@ export function generateUnifiedDiff(original: string, modified: string, filename
 }
 
 /**
- * Calculate SHA256 hash of content
+ * Calculate hash of content for change detection.
+ * Uses djb2 — a fast, non-cryptographic hash sufficient for detecting content changes.
  * @param content - Content to hash
- * @returns Hex-encoded SHA256 hash
+ * @returns Hex-encoded hash
  */
 export async function calculateHash(content: string): Promise<string> {
-  // Use Web Crypto API for SHA256 hashing
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-
-  // Convert buffer to hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-  return hashHex;
+  return djb2Hash(content);
 }
 
 /**

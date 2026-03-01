@@ -89,6 +89,19 @@ func (wt *WorkspaceTracker) NotifyGitCommit(commit *types.GitCommitNotification)
 	wt.notifyWorkspaceStreamGitCommit(commit)
 }
 
+// NotifyGitReset notifies all subscribers about a git reset (HEAD moved backward).
+// It also updates the cached HEAD SHA to the new position.
+func (wt *WorkspaceTracker) NotifyGitReset(reset *types.GitResetNotification) {
+	// Update cached HEAD to the new position
+	if reset.CurrentHead != "" {
+		wt.gitStateMu.Lock()
+		wt.cachedHeadSHA = reset.CurrentHead
+		wt.gitStateMu.Unlock()
+	}
+
+	wt.notifyWorkspaceStreamGitReset(reset)
+}
+
 // notifyWorkspaceStreamGitReset sends git reset notification to all workspace stream subscribers
 func (wt *WorkspaceTracker) notifyWorkspaceStreamGitReset(reset *types.GitResetNotification) {
 	wt.workspaceSubMu.RLock()

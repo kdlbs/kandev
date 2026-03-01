@@ -17,7 +17,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const isArchived = useIsTaskArchived();
-  const { createFile, deleteFile } = useFileOperations(activeSessionId ?? null);
+  const { createFile, deleteFile, renameFile } = useFileOperations(activeSessionId ?? null);
 
   const handleCreateFile = useCallback(
     async (path: string): Promise<boolean> => {
@@ -51,6 +51,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onOpenFile={onOpenFile}
             onCreateFile={handleCreateFile}
             onDeleteFile={deleteFile}
+            onRenameFile={renameFile}
             activeFilePath={activeFilePath}
           />
         ) : (
