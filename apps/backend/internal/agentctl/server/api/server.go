@@ -89,7 +89,6 @@ func (s *Server) setupRoutes() {
 		api.POST("/workspace/file/create", s.handleFileCreate)
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
-		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.GET("/workspace/search", s.handleFileSearch)
 
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)

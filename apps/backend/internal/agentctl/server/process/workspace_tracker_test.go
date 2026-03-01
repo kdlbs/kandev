@@ -539,7 +539,7 @@ func TestDeleteFile(t *testing.T) {
 	})
 }
 
-func TestRenamePath(t *testing.T) {
+func TestRenameFile(t *testing.T) {
 	t.Run("renames file", func(t *testing.T) {
 		dir, wt := setupTestDir(t)
 		oldPath := filepath.Join(dir, "from.txt")
@@ -547,8 +547,8 @@ func TestRenamePath(t *testing.T) {
 		if err := os.WriteFile(oldPath, []byte("hello"), 0o644); err != nil {
 			t.Fatalf("write failed: %v", err)
 		}
-		if err := wt.RenamePath("from.txt", "to.txt"); err != nil {
-			t.Fatalf("RenamePath failed: %v", err)
+		if err := wt.RenameFile("from.txt", "to.txt"); err != nil {
+			t.Fatalf("RenameFile failed: %v", err)
 		}
 		if _, err := os.Stat(newPath); err != nil {
 			t.Fatalf("expected new path to exist, got: %v", err)
@@ -568,8 +568,8 @@ func TestRenamePath(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(oldDir, "file.txt"), []byte("hello"), 0o644); err != nil {
 			t.Fatalf("write failed: %v", err)
 		}
-		if err := wt.RenamePath("dir-a", "dir-b"); err != nil {
-			t.Fatalf("RenamePath failed: %v", err)
+		if err := wt.RenameFile("dir-a", "dir-b"); err != nil {
+			t.Fatalf("RenameFile failed: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(newDir, "file.txt")); err != nil {
 			t.Fatalf("expected file to be moved with directory, got: %v", err)
