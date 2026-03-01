@@ -51,6 +51,8 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreeDiscard, h.wsDiscard)
 	d.RegisterFunc(ws.ActionWorktreeCreatePR, h.wsCreatePR)
 	d.RegisterFunc(ws.ActionWorktreeRevertCommit, h.wsRevertCommit)
+	d.RegisterFunc(ws.ActionWorktreeRenameBranch, h.wsRenameBranch)
+	d.RegisterFunc(ws.ActionWorktreeReset, h.wsReset)
 	d.RegisterFunc(ws.ActionSessionCommitDiff, h.wsCommitDiff)
 }
 
@@ -90,6 +92,13 @@ type GitCommitRequest struct {
 	SessionID string `json:"session_id"`
 	Message   string `json:"message"`
 	StageAll  bool   `json:"stage_all"`
+	Amend     bool   `json:"amend"`
+}
+
+// GitRenameBranchRequest for worktree.rename_branch action
+type GitRenameBranchRequest struct {
+	SessionID string `json:"session_id"`
+	NewName   string `json:"new_name"`
 }
 
 // GitStageRequest for worktree.stage action
@@ -123,6 +132,13 @@ type GitCreatePRRequest struct {
 type GitRevertCommitRequest struct {
 	SessionID string `json:"session_id"`
 	CommitSHA string `json:"commit_sha"`
+}
+
+// GitResetRequest for worktree.reset action
+type GitResetRequest struct {
+	SessionID string `json:"session_id"`
+	CommitSHA string `json:"commit_sha"`
+	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
 }
 
 // GitShowCommitRequest for session.commit_diff action
@@ -279,9 +295,66 @@ func (h *GitHandlers) wsCommit(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, err
 	}
 
-	result, err := client.GitCommit(ctx, req.Message, req.StageAll)
+	result, err := client.GitCommit(ctx, req.Message, req.StageAll, req.Amend)
 	if err != nil {
 		return nil, fmt.Errorf("commit failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// wsRenameBranch handles worktree.rename_branch action
+func (h *GitHandlers) wsRenameBranch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitRenameBranchRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if req.NewName == "" {
+		return nil, fmt.Errorf("new_name is required")
+	}
+
+	client, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.GitRenameBranch(ctx, req.NewName)
+	if err != nil {
+		return nil, fmt.Errorf("rename branch failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// wsReset handles worktree.reset action
+func (h *GitHandlers) wsReset(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitResetRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if req.CommitSHA == "" {
+		return nil, fmt.Errorf("commit_sha is required")
+	}
+	if req.Mode == "" {
+		req.Mode = "mixed" // Default to mixed reset
+	}
+
+	client, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.GitReset(ctx, req.CommitSHA, req.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("reset failed: %w", err)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)
