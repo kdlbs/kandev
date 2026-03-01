@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { createFile, deleteFile } from "@/lib/ws/workspace-files";
+import { createFile, deleteFile, renameFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
 
 const ERROR_VARIANT = "error" as const;
@@ -65,5 +65,37 @@ export function useFileOperations(sessionId: string | null) {
     [sessionId, toast],
   );
 
-  return { createFile: handleCreateFile, deleteFile: handleDeleteFile };
+  const handleRenameFile = useCallback(
+    async (oldPath: string, newPath: string): Promise<boolean> => {
+      const client = getWebSocketClient();
+      if (!client || !sessionId) return false;
+
+      try {
+        const response = await renameFile(client, sessionId, oldPath, newPath);
+        if (!response.success) {
+          toast({
+            title: "Failed to rename file",
+            description: response.error || UNKNOWN_ERROR,
+            variant: ERROR_VARIANT,
+          });
+          return false;
+        }
+        return true;
+      } catch (error) {
+        toast({
+          title: "Failed to rename file",
+          description: error instanceof Error ? error.message : UNKNOWN_ERROR,
+          variant: ERROR_VARIANT,
+        });
+        return false;
+      }
+    },
+    [sessionId, toast],
+  );
+
+  return {
+    createFile: handleCreateFile,
+    deleteFile: handleDeleteFile,
+    renameFile: handleRenameFile,
+  };
 }
