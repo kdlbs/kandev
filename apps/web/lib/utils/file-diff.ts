@@ -29,11 +29,25 @@ export function generateUnifiedDiff(original: string, modified: string, filename
 
 /**
  * Calculate hash of content for change detection.
- * Uses djb2 — a fast, non-cryptographic hash sufficient for detecting content changes.
+ * Uses Web Crypto API (SHA-256) in secure contexts (HTTPS, localhost).
+ * Falls back to djb2 in non-secure contexts (HTTP) — sufficient for detecting
+ * content changes, not for security purposes.
  * @param content - Content to hash
- * @returns Hex-encoded hash
+ * @returns Hex-encoded hash string
  */
 export async function calculateHash(content: string): Promise<string> {
+  // crypto.subtle is only available in secure contexts (HTTPS, localhost)
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(content);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Fall through to djb2
+    }
+  }
   return djb2Hash(content);
 }
 
