@@ -12,6 +12,16 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@kandev/ui/alert-dialog";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -20,6 +30,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
+import { useToast } from "@/components/toast-provider";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import { InlineFileInput } from "./inline-file-input";
@@ -113,6 +124,12 @@ function treeContainsPath(root: FileTreeNode, targetPath: string): boolean {
   if (root.path === targetPath) return true;
   if (!root.children) return false;
   return root.children.some((child) => treeContainsPath(child, targetPath));
+}
+
+function countFilesInTree(node: FileTreeNode): number {
+  if (!node.children || node.children.length === 0) return node.is_dir ? 0 : 1;
+  const base = node.is_dir ? 0 : 1;
+  return node.children.reduce((sum, child) => sum + countFilesInTree(child), base);
 }
 
 export function renameNodeInTree(
@@ -215,7 +232,12 @@ function FileContextMenu({
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onStartRename: () => void;
 }) {
-  const handleDelete = useCallback(() => {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const isDirectory = node.is_dir;
+  const fileCount = countFilesInTree(node);
+
+  const handleConfirmDelete = useCallback(() => {
+    setDeleteDialogOpen(false);
     if (!onDeleteFile) return;
     const snapshot = tree;
     setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
@@ -228,6 +250,23 @@ function FileContextMenu({
       });
   }, [tree, setTree, node.path, onDeleteFile]);
 
+  const handleDelete = useCallback(() => {
+    if (!onDeleteFile) return;
+    if (isDirectory) {
+      setDeleteDialogOpen(true);
+      return;
+    }
+    const snapshot = tree;
+    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
+    onDeleteFile(node.path)
+      .then((ok) => {
+        if (!ok) setTree(snapshot);
+      })
+      .catch(() => {
+        setTree(snapshot);
+      });
+  }, [tree, setTree, node.path, onDeleteFile, isDirectory]);
+
   const hasActions = onDeleteFile || onRenameFile;
 
   if (!hasActions) {
@@ -235,24 +274,48 @@ function FileContextMenu({
   }
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
-        {onRenameFile && (
-          <ContextMenuItem onSelect={onStartRename}>
-            <IconPencil className="h-3.5 w-3.5" />
-            Rename
-          </ContextMenuItem>
-        )}
-        {onRenameFile && onDeleteFile && <ContextMenuSeparator />}
-        {onDeleteFile && (
-          <ContextMenuItem variant="destructive" onSelect={handleDelete}>
-            <IconTrash className="h-3.5 w-3.5" />
-            Delete
-          </ContextMenuItem>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {onRenameFile && (
+            <ContextMenuItem onSelect={onStartRename}>
+              <IconPencil className="h-3.5 w-3.5" />
+              Rename
+            </ContextMenuItem>
+          )}
+          {onRenameFile && onDeleteFile && <ContextMenuSeparator />}
+          {onDeleteFile && (
+            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
+              <IconTrash className="h-3.5 w-3.5" />
+              Delete
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      {isDirectory && (
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold">{node.name}</span> and{" "}
+              <span className="font-semibold">{fileCount}</span>{" "}
+              {fileCount === 1 ? "file" : "files"} inside it. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      )}
+    </AlertDialog>
   );
 }
 
@@ -263,6 +326,7 @@ function useFileRename(
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
 ) {
+  const { toast } = useToast();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
 
@@ -289,13 +353,12 @@ function useFileRename(
     const snapshot = tree;
     setIsRenaming(false);
     if (tree && treeContainsPath(tree, newPath)) {
-      onRenameFile(node.path, newPath)
-        .then((ok) => {
-          if (ok) setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
-        })
-        .catch(() => {
-          return;
-        });
+      toast({
+        title: "Failed to rename item",
+        description: `Target already exists: ${newPath}`,
+        variant: "error",
+      });
+      handleCancelRename();
       return;
     }
     setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
@@ -314,6 +377,7 @@ function useFileRename(
     tree,
     setTree,
     handleCancelRename,
+    toast,
   ]);
 
   const handleRenameKeyDown = useCallback(
