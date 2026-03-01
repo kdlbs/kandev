@@ -228,6 +228,48 @@ func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDele
 	return &response, nil
 }
 
+// RenameFile renames/moves a file via HTTP POST
+func (c *Client) RenameFile(ctx context.Context, oldPath, newPath string) (*streams.FileRenameResponse, error) {
+	reqBody := streams.FileRenameRequest{OldPath: oldPath, NewPath: newPath}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/rename", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rename file: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file rename response body", zap.Error(err))
+		}
+	}()
+
+	var response streams.FileRenameResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file rename error: %s", response.Error)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("file rename failed")
+	}
+
+	return &response, nil
+}
+
 // FileSearchResponse represents a response with matching files
 type FileSearchResponse struct {
 	Files []string `json:"files"`

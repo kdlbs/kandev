@@ -372,6 +372,58 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 	return nil
 }
 
+// RenameFile renames/moves a file in the workspace
+func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
+	oldFullPath, err := wt.resolveSafePath(oldPath)
+	if err != nil {
+		return err
+	}
+
+	newFullPath, err := wt.resolveSafePath(newPath)
+	if err != nil {
+		return err
+	}
+
+	// Check if source file exists
+	info, err := os.Stat(oldFullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file does not exist: %s", oldPath)
+		}
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Don't allow renaming directories
+	if info.IsDir() {
+		return fmt.Errorf("cannot rename directory: %s", oldPath)
+	}
+
+	// Check if destination already exists
+	if _, err := os.Stat(newFullPath); err == nil {
+		return fmt.Errorf("destination file already exists: %s", newPath)
+	}
+
+	// Create destination directory if needed
+	newDir := filepath.Dir(newFullPath)
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// Rename the file
+	if err := os.Rename(oldFullPath, newFullPath); err != nil {
+		return fmt.Errorf("failed to rename file: %w", err)
+	}
+
+	// Notify with the relative paths
+	cleanWorkDir := filepath.Clean(wt.workDir)
+	oldRelPath := strings.TrimPrefix(oldFullPath, cleanWorkDir+string(os.PathSeparator))
+	newRelPath := strings.TrimPrefix(newFullPath, cleanWorkDir+string(os.PathSeparator))
+	wt.addPendingChange(oldRelPath, types.FileOpRemove)
+	wt.addPendingChange(newRelPath, types.FileOpCreate)
+
+	return nil
+}
+
 // calculateSHA256 calculates the SHA256 hash of a string
 func calculateSHA256(content string) string {
 	hash := sha256.Sum256([]byte(content))
