@@ -14,7 +14,12 @@ import (
 
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
+	reqURL := fmt.Sprintf(
+		"%s/api/v1/workspace/tree?path=%s&depth=%d",
+		c.baseURL,
+		url.QueryEscape(path),
+		depth,
+	)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -76,7 +81,7 @@ func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*Fil
 
 // RequestFileContent requests file content via HTTP GET
 func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, url.QueryEscape(path))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -195,7 +200,7 @@ func (c *Client) CreateFile(ctx context.Context, path string) (*streams.FileCrea
 
 // DeleteFile deletes a file via HTTP DELETE
 func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDeleteResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, path)
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, url.QueryEscape(path))
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
 	if err != nil {
