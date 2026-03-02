@@ -228,6 +228,132 @@ func TestParseCodexStderrLines(t *testing.T) {
 	}
 }
 
+func TestParseCodexLogError(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantMsg string
+	}{
+		{
+			name:    "empty string",
+			input:   "",
+			wantMsg: "",
+		},
+		{
+			name:    "INFO line - no match",
+			input:   "2026-03-02T16:17:50Z INFO codex_core::auth: Starting up",
+			wantMsg: "",
+		},
+		{
+			name:    "DEBUG line - no match",
+			input:   "2026-03-02T16:17:50Z DEBUG codex_core::auth: Debug info",
+			wantMsg: "",
+		},
+		{
+			name:    "auth error - human readable",
+			input:   "2026-03-02T16:17:50.825663Z ERROR codex_core::auth: Failed to refresh token: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+			wantMsg: "Failed to refresh token: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+		},
+		{
+			name:    "models manager error",
+			input:   "2026-03-02T16:17:51.031854Z ERROR codex_core::models_manager::manager: failed to refresh available models: unexpected status 401 Unauthorized",
+			wantMsg: "failed to refresh available models: unexpected status 401 Unauthorized",
+		},
+		{
+			name:    "multi-line JSON start - skipped",
+			input:   "2026-03-02T16:17:50.825623Z ERROR codex_core::auth: Failed to refresh token: 401 Unauthorized: {",
+			wantMsg: "",
+		},
+		{
+			name:    "JSON fragment starting with brace - skipped",
+			input:   `2026-03-02T16:17:50Z ERROR codex_core::auth: {"error": "something"}`,
+			wantMsg: "",
+		},
+		{
+			name:    "JSON fragment starting with quote - skipped",
+			input:   `2026-03-02T16:17:50Z ERROR codex_core::auth: "message": "something"`,
+			wantMsg: "",
+		},
+		{
+			name:    "closing brace - skipped",
+			input:   `2026-03-02T16:17:50Z ERROR codex_core::auth: }`,
+			wantMsg: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseCodexLogError(tt.input)
+			if result != tt.wantMsg {
+				t.Errorf("ParseCodexLogError() = %q, want %q", result, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestParseCodexStderrLines_LogErrorFallback(t *testing.T) {
+	tests := []struct {
+		name            string
+		lines           []string
+		wantNil         bool
+		wantMsgContains string
+	}{
+		{
+			name: "auth error lines - falls back to log format",
+			lines: []string{
+				"npm warn Unknown env config",
+				"2026-03-02T16:17:50.825623Z ERROR codex_core::auth: Failed to refresh token: 401 Unauthorized: {",
+				`  "error": {`,
+				`    "message": "Your refresh token has already been used"`,
+				"  }",
+				"}",
+				"2026-03-02T16:17:50.825663Z ERROR codex_core::auth: Failed to refresh token: Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
+			},
+			wantNil:         false,
+			wantMsgContains: "Please log out and sign in again",
+		},
+		{
+			name: "structured error takes priority over log error",
+			lines: []string{
+				"2026-03-02T16:17:50Z ERROR codex_core::auth: Some auth error message",
+				`error=http 429 Too Many Requests: Some("{\"error\":{\"message\":\"Rate limited\"}}")`,
+			},
+			wantNil:         false,
+			wantMsgContains: "Rate limited",
+		},
+		{
+			name: "only JSON fragments - no match",
+			lines: []string{
+				"2026-03-02T16:17:50Z ERROR codex_core::auth: Failed to refresh token: 401 Unauthorized: {",
+				`  "error": {`,
+				`    "message": "something"`,
+				"  }",
+				"}",
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseCodexStderrLines(tt.lines)
+
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got %+v", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Fatal("expected non-nil result, got nil")
+			} else if !strings.Contains(result.Message, tt.wantMsgContains) {
+				t.Errorf("Message = %q, want to contain %q", result.Message, tt.wantMsgContains)
+			}
+		})
+	}
+}
+
 func TestParseCodexStderrError_ResetsInSeconds(t *testing.T) {
 	// Test that ResetsInSeconds is correctly extracted
 	input := `error=http 429 Too Many Requests: Some("{\"error\":{\"type\":\"usage_limit_reached\",\"resets_in_seconds\":3600}}")`

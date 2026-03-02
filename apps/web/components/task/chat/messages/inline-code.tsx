@@ -39,7 +39,7 @@ export function InlineCode({ children }: InlineCodeProps) {
         className={cn(
           "absolute bottom-full left-1/2 -translate-x-1/2 mb-1",
           "px-2 py-1 text-xs text-popover-foreground bg-popover border border-border rounded shadow-md whitespace-nowrap",
-          "pointer-events-none transition-opacity duration-200",
+          "pointer-events-none select-none transition-opacity duration-200",
           "opacity-0 group-hover/inline-code:opacity-100",
           showTooltip && "opacity-100",
         )}

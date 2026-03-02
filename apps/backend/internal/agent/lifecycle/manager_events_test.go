@@ -713,6 +713,90 @@ func TestHandleAgentEvent_ReasoningWithNewlinesThenToolCall(t *testing.T) {
 	}
 }
 
+// TestExtractErrorMessage verifies the priority chain: Error > Text > default.
+func TestExtractErrorMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		event *agentctl.AgentEvent
+		want  string
+	}{
+		{
+			name:  "Error field takes priority",
+			event: &agentctl.AgentEvent{Error: "explicit error", Text: "text fallback"},
+			want:  "explicit error",
+		},
+		{
+			name:  "Text field used when Error is empty",
+			event: &agentctl.AgentEvent{Error: "", Text: "text fallback"},
+			want:  "text fallback",
+		},
+		{
+			name:  "default when both empty",
+			event: &agentctl.AgentEvent{Error: "", Text: ""},
+			want:  "agent error completion",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractErrorMessage(tt.event)
+			if got != tt.want {
+				t.Errorf("extractErrorMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleAgentEvent_ErrorCompleteWithTextFallback verifies that when an error
+// completion has no Error field but has Text, the Text is used as the error message.
+func TestHandleAgentEvent_ErrorCompleteWithTextFallback(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "complete",
+		Text: "Operation timed out",
+		Data: map[string]any{"is_error": true},
+	})
+
+	select {
+	case signal := <-execution.promptDoneCh:
+		if !signal.IsError {
+			t.Error("expected error signal")
+		}
+		if signal.Error != "Operation timed out" {
+			t.Errorf("expected error 'Operation timed out', got %q", signal.Error)
+		}
+	default:
+		t.Error("expected signal on promptDoneCh, got none")
+	}
+}
+
+// TestHandleAgentEvent_ErrorCompleteWithDefaultMessage verifies that when both
+// Error and Text fields are empty, the default message is used.
+func TestHandleAgentEvent_ErrorCompleteWithDefaultMessage(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	mgr.executionStore.Add(execution)
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "complete",
+		Data: map[string]any{"is_error": true},
+	})
+
+	select {
+	case signal := <-execution.promptDoneCh:
+		if !signal.IsError {
+			t.Error("expected error signal")
+		}
+		if signal.Error != "agent error completion" {
+			t.Errorf("expected default error message, got %q", signal.Error)
+		}
+	default:
+		t.Error("expected signal on promptDoneCh, got none")
+	}
+}
+
 // TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution verifies that on error
 // completion, the execution is NOT removed from the store. The orchestrator's cleanup
 // (StopExecution → StopAgentWithReason) handles full teardown including port release;

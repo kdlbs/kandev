@@ -69,14 +69,23 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	}
 }
 
+// extractErrorMessage returns the best error message from an agent event.
+// Priority: Error field > Text field > default message.
+func extractErrorMessage(event *agentctl.AgentEvent) string {
+	if event.Error != "" {
+		return event.Error
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	return "agent error completion"
+}
+
 // handleCompleteEventMarkState marks the execution state after a complete event:
 // failed+removed on error, ready on success.
 func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
 	if isError {
-		errorMsg := "agent error completion"
-		if event.Error != "" {
-			errorMsg = event.Error
-		}
+		errorMsg := extractErrorMessage(event)
 		m.logger.Warn("error completion received, marking execution as failed",
 			zap.String("execution_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
@@ -106,10 +115,7 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	errorMsg := ""
 	if isError {
 		stopReason = "error"
-		errorMsg = "agent error completion"
-		if event.Error != "" {
-			errorMsg = event.Error
-		}
+		errorMsg = extractErrorMessage(event)
 	} else if event.Data != nil {
 		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
 		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
