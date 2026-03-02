@@ -30,61 +30,99 @@ func ShellEscape(s string) string {
 // - Backslash escaping outside quotes
 // - Whitespace as argument separator
 func SplitShellCommand(cmd string) ([]string, error) {
-	var args []string
-	var current strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-	escape := false
+	state := &parseState{
+		args:    make([]string, 0),
+		current: &strings.Builder{},
+	}
 
 	for i, r := range cmd {
-		if escape {
-			current.WriteRune(r)
-			escape = false
+		if state.escape {
+			state.current.WriteRune(r)
+			state.escape = false
 			continue
 		}
 
-		switch r {
-		case '\\':
-			if inSingleQuote {
-				// Backslash is literal in single quotes
-				current.WriteRune(r)
-			} else {
-				escape = true
-			}
-		case '\'':
-			if inDoubleQuote {
-				current.WriteRune(r)
-			} else {
-				inSingleQuote = !inSingleQuote
-			}
-		case '"':
-			if inSingleQuote {
-				current.WriteRune(r)
-			} else {
-				inDoubleQuote = !inDoubleQuote
-			}
-		case ' ', '\t', '\n':
-			if inSingleQuote || inDoubleQuote {
-				current.WriteRune(r)
-			} else if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(r)
+		if !handleSpecialChar(r, state) {
+			state.current.WriteRune(r)
 		}
 
 		// Check for unclosed quotes at end
-		if i == len(cmd)-1 {
-			if inSingleQuote || inDoubleQuote {
-				return nil, fmt.Errorf("unclosed quote in command")
-			}
+		if i == len(cmd)-1 && (state.inSingleQuote || state.inDoubleQuote) {
+			return nil, fmt.Errorf("unclosed quote in command")
 		}
 	}
 
-	if current.Len() > 0 {
-		args = append(args, current.String())
+	if state.current.Len() > 0 {
+		state.args = append(state.args, state.current.String())
 	}
 
-	return args, nil
+	return state.args, nil
+}
+
+// parseState tracks the current parsing state
+type parseState struct {
+	inSingleQuote bool
+	inDoubleQuote bool
+	escape        bool
+	args          []string
+	current       *strings.Builder
+}
+
+// handleSpecialChar processes special characters and returns true if handled
+func handleSpecialChar(r rune, state *parseState) bool {
+	switch r {
+	case '\\':
+		return handleBackslash(state)
+	case '\'':
+		return handleSingleQuote(state)
+	case '"':
+		return handleDoubleQuote(state)
+	case ' ', '\t', '\n':
+		return handleWhitespace(state)
+	default:
+		return false
+	}
+}
+
+// handleBackslash processes backslash escape sequences
+func handleBackslash(state *parseState) bool {
+	if state.inSingleQuote {
+		state.current.WriteRune('\\')
+	} else {
+		state.escape = true
+	}
+	return true
+}
+
+// handleSingleQuote processes single quote characters
+func handleSingleQuote(state *parseState) bool {
+	if state.inDoubleQuote {
+		state.current.WriteRune('\'')
+	} else {
+		state.inSingleQuote = !state.inSingleQuote
+	}
+	return true
+}
+
+// handleDoubleQuote processes double quote characters
+func handleDoubleQuote(state *parseState) bool {
+	if state.inSingleQuote {
+		state.current.WriteRune('"')
+	} else {
+		state.inDoubleQuote = !state.inDoubleQuote
+	}
+	return true
+}
+
+// handleWhitespace processes whitespace as argument separator
+func handleWhitespace(state *parseState) bool {
+	if state.inSingleQuote || state.inDoubleQuote {
+		state.current.WriteRune(' ')
+		return true
+	}
+	if state.current.Len() > 0 {
+		state.args = append(state.args, state.current.String())
+		state.current.Reset()
+	}
+	return true
 }
