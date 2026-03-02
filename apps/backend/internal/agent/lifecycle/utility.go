@@ -57,7 +57,13 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 }
 
 // ListInferenceAgents returns agents that support inference with their models.
+// Only returns agents that are actually installed on the system.
 func (m *Manager) ListInferenceAgents() []InferenceAgentInfo {
+	return m.ListInferenceAgentsWithContext(context.Background())
+}
+
+// ListInferenceAgentsWithContext returns installed inference agents using the provided context.
+func (m *Manager) ListInferenceAgentsWithContext(ctx context.Context) []InferenceAgentInfo {
 	inferenceAgents := m.registry.ListInferenceAgents()
 	result := make([]InferenceAgentInfo, 0, len(inferenceAgents))
 
@@ -65,6 +71,12 @@ func (m *Manager) ListInferenceAgents() []InferenceAgentInfo {
 		// Get base agent for metadata
 		ag, ok := ia.(agents.Agent)
 		if !ok {
+			continue
+		}
+
+		// Only include agents that are installed
+		installed, err := ag.IsInstalled(ctx)
+		if err != nil || installed == nil || !installed.Available {
 			continue
 		}
 

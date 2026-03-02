@@ -21,8 +21,8 @@ import (
 type InferenceExecutor interface {
 	// ExecuteInferencePrompt executes an inference prompt via an active session's agentctl.
 	ExecuteInferencePrompt(ctx context.Context, sessionID, agentID, model, prompt string) (*agentctlutil.PromptResponse, error)
-	// ListInferenceAgents returns agents that support inference.
-	ListInferenceAgents() []lifecycle.InferenceAgentInfo
+	// ListInferenceAgentsWithContext returns installed agents that support inference.
+	ListInferenceAgentsWithContext(ctx context.Context) []lifecycle.InferenceAgentInfo
 }
 
 // UserSettingsProvider provides user settings for default utility agent/model.
@@ -247,7 +247,7 @@ func (h *Handlers) httpListCalls(c *gin.Context) {
 }
 
 func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
-	inferenceAgents := h.executor.ListInferenceAgents()
+	inferenceAgents := h.executor.ListInferenceAgentsWithContext(c.Request.Context())
 
 	// Convert to DTO
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
