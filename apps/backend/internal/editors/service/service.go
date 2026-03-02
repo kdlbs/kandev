@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/editors/models"
 	"github.com/kandev/kandev/internal/editors/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -503,7 +504,7 @@ func parseHostedURLConfig(data json.RawMessage) (hostedURLConfig, error) {
 
 func launchCommand(commandTemplate, worktreePath, absPath string, line, column int) (string, error) {
 	expanded := expandCommandPlaceholders(commandTemplate, worktreePath, absPath, line, column)
-	parts, err := splitShellCommand(expanded)
+	parts, err := securityutil.SplitShellCommand(expanded)
 	if err != nil {
 		return "", fmt.Errorf("invalid command template: %w", err)
 	}
@@ -529,9 +530,9 @@ func expandCommandPlaceholders(template, worktreePath, absPath string, line, col
 	}
 	// Shell-escape paths to handle spaces and special characters safely
 	replacements := map[string]string{
-		"{cwd}":    shellEscape(worktreePath),
-		"{file}":   shellEscape(absPath),
-		"{rel}":    shellEscape(relPath),
+		"{cwd}":    securityutil.ShellEscape(worktreePath),
+		"{file}":   securityutil.ShellEscape(absPath),
+		"{rel}":    securityutil.ShellEscape(relPath),
 		"{line}":   strconv.Itoa(line),
 		"{column}": strconv.Itoa(column),
 	}
@@ -540,82 +541,6 @@ func expandCommandPlaceholders(template, worktreePath, absPath string, line, col
 		result = strings.ReplaceAll(result, key, value)
 	}
 	return result
-}
-
-// shellEscape escapes a string for safe use in shell commands.
-// Returns the string wrapped in single quotes with internal single quotes escaped.
-func shellEscape(s string) string {
-	if s == "" {
-		return "''"
-	}
-	// If no special characters, return as-is
-	if !strings.ContainsAny(s, " \t\n'\"\\$`!*?[](){};<>|&") {
-		return s
-	}
-	// Single-quote and escape internal single quotes
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-// splitShellCommand splits a shell command string into arguments,
-// respecting quoted strings and escape sequences.
-func splitShellCommand(cmd string) ([]string, error) {
-	var args []string
-	var current strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-	escape := false
-
-	for i, r := range cmd {
-		if escape {
-			current.WriteRune(r)
-			escape = false
-			continue
-		}
-
-		switch r {
-		case '\\':
-			if inSingleQuote {
-				// Backslash is literal in single quotes
-				current.WriteRune(r)
-			} else {
-				escape = true
-			}
-		case '\'':
-			if inDoubleQuote {
-				current.WriteRune(r)
-			} else {
-				inSingleQuote = !inSingleQuote
-			}
-		case '"':
-			if inSingleQuote {
-				current.WriteRune(r)
-			} else {
-				inDoubleQuote = !inDoubleQuote
-			}
-		case ' ', '\t', '\n':
-			if inSingleQuote || inDoubleQuote {
-				current.WriteRune(r)
-			} else if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(r)
-		}
-
-		// Check for unclosed quotes at end
-		if i == len(cmd)-1 {
-			if inSingleQuote || inDoubleQuote {
-				return nil, fmt.Errorf("unclosed quote in command")
-			}
-		}
-	}
-
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-
-	return args, nil
 }
 
 func isCustomKind(kind string) bool {

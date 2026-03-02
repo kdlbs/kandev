@@ -1,4 +1,4 @@
-package service
+package securityutil
 
 import (
 	"testing"
@@ -39,9 +39,9 @@ func TestShellEscape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shellEscape(tt.input)
+			result := ShellEscape(tt.input)
 			if result != tt.expected {
-				t.Errorf("shellEscape(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("ShellEscape(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -98,62 +98,22 @@ func TestSplitShellCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := splitShellCommand(tt.input)
+			got, err := SplitShellCommand(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("splitShellCommand() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("SplitShellCommand() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
 				return
 			}
 			if len(got) != len(tt.want) {
-				t.Errorf("splitShellCommand() = %v, want %v", got, tt.want)
+				t.Errorf("SplitShellCommand() = %v, want %v", got, tt.want)
 				return
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
-					t.Errorf("splitShellCommand() arg[%d] = %q, want %q", i, got[i], tt.want[i])
+					t.Errorf("SplitShellCommand() arg[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
-			}
-		})
-	}
-}
-
-func TestExpandCommandPlaceholdersWithSpaces(t *testing.T) {
-	tests := []struct {
-		name         string
-		template     string
-		worktreePath string
-		absPath      string
-		line         int
-		column       int
-		expected     string
-	}{
-		{
-			name:         "template with path containing spaces",
-			template:     "code {file}:{line}:{column}",
-			worktreePath: "/workspace",
-			absPath:      "/workspace/my file.txt",
-			line:         10,
-			column:       5,
-			expected:     "code '/workspace/my file.txt':10:5",
-		},
-		{
-			name:         "template with path containing single quote",
-			template:     "code {file}",
-			worktreePath: "/workspace",
-			absPath:      "/workspace/user's file.txt",
-			line:         0,
-			column:       0,
-			expected:     "code '/workspace/user'\\''s file.txt'",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := expandCommandPlaceholders(tt.template, tt.worktreePath, tt.absPath, tt.line, tt.column)
-			if result != tt.expected {
-				t.Errorf("expandCommandPlaceholders() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
