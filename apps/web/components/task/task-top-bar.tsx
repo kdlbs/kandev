@@ -95,18 +95,13 @@ const TaskTopBar = memo(function TaskTopBar({
   // Callback for renaming branch
   const handleRenameBranch = useCallback(
     async (newName: string) => {
-      try {
-        const result = await git.renameBranch(newName);
-        if (result.success) {
-          toast.success(`Branch renamed to "${newName}"`);
-        } else {
-          const msg = result.error || "Failed to rename branch";
-          toast.error(msg);
-          throw new Error(msg);
-        }
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to rename branch");
-        throw e;
+      const result = await git.renameBranch(newName);
+      if (result.success) {
+        toast.success(`Branch renamed to "${newName}"`);
+      } else {
+        const msg = result.error || "Failed to rename branch";
+        toast.error(msg);
+        throw new Error(msg);
       }
     },
     [git],
@@ -254,37 +249,24 @@ function BranchRenameInput({
   );
 }
 
-function BranchPathPopover({
-  displayBranch,
-  repositoryPath,
-  worktreePath,
-  onRenameBranch,
-}: {
-  displayBranch?: string;
-  repositoryPath?: string | null;
-  worktreePath?: string | null;
-  onRenameBranch?: (newName: string) => Promise<void>;
-}) {
-  const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
-  const [popoverOpen, setPopoverOpen] = useState(false);
+/** Hook for branch rename editing state */
+function useBranchRenameEdit(
+  displayBranch: string | undefined,
+  onRenameBranch: ((newName: string) => Promise<void>) | undefined,
+) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(displayBranch ?? "");
   const [isRenaming, setIsRenaming] = useState(false);
 
-  // Update edit value when branch changes
   useEffect(() => {
     if (!isEditing) setEditValue(displayBranch ?? "");
   }, [displayBranch, isEditing]);
 
-  const handleStartEdit = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsEditing(true);
-      setPopoverOpen(false);
-    },
-    [setIsEditing, setPopoverOpen],
-  );
+  const handleStartEdit = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsEditing(true);
+  }, []);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -307,6 +289,47 @@ function BranchPathPopover({
       setIsRenaming(false);
     }
   }, [onRenameBranch, editValue, displayBranch, handleCancelEdit, isRenaming]);
+
+  return {
+    isEditing,
+    editValue,
+    setEditValue,
+    isRenaming,
+    handleStartEdit,
+    handleCancelEdit,
+    handleConfirmRename,
+  };
+}
+
+function BranchPathPopover({
+  displayBranch,
+  repositoryPath,
+  worktreePath,
+  onRenameBranch,
+}: {
+  displayBranch?: string;
+  repositoryPath?: string | null;
+  worktreePath?: string | null;
+  onRenameBranch?: (newName: string) => Promise<void>;
+}) {
+  const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const {
+    isEditing,
+    editValue,
+    setEditValue,
+    isRenaming,
+    handleStartEdit: startEdit,
+    handleCancelEdit,
+    handleConfirmRename,
+  } = useBranchRenameEdit(displayBranch, onRenameBranch);
+  const handleStartEdit = useCallback(
+    (e: React.MouseEvent) => {
+      startEdit(e);
+      setPopoverOpen(false);
+    },
+    [startEdit],
+  );
 
   if (!displayBranch) return null;
 
@@ -352,7 +375,9 @@ function BranchPathPopover({
             </div>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="right">Click to see paths, or click pencil to rename</TooltipContent>
+        <TooltipContent side="right">
+          {onRenameBranch ? "Click to see paths, or click pencil to rename" : "Click to see paths"}
+        </TooltipContent>
       </Tooltip>
       <PopoverContent side="bottom" sideOffset={5} className="p-0 w-auto max-w-[600px] gap-1">
         <div className="px-2 pt-1 pb-2 space-y-1.5">
