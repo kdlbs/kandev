@@ -138,7 +138,6 @@ func codexStaticModels() []Model {
 		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Frontier agentic coding model", Provider: "openai", ContextWindow: 200000, Source: "static"},
 		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", Description: "Codex-optimized flagship for deep and fast reasoning", Provider: "openai", ContextWindow: 200000, Source: "static"},
 		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Description: "Optimized for codex. Cheaper, faster, but less capable", Provider: "openai", ContextWindow: 200000, Source: "static"},
-		{ID: "gpt-5.3", Name: "GPT-5.3", Description: "Latest frontier model with improvements across knowledge, reasoning and coding", Provider: "openai", ContextWindow: 400000, Source: "static"},
 		{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Latest frontier model with improvements across knowledge, reasoning and coding", Provider: "openai", ContextWindow: 200000, Source: "static"},
 	}
 }
