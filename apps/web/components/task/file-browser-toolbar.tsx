@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   IconSearch,
   IconListTree,
@@ -12,6 +13,31 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
+
+function ToolbarButton({
+  onClick,
+  label,
+  icon,
+}: {
+  onClick: () => void;
+  label: string;
+  icon: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+          aria-label={label}
+          onClick={onClick}
+        >
+          {icon}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 type FileBrowserToolbarProps = {
   displayPath: string;
@@ -47,6 +73,7 @@ export function FileBrowserToolbar({
             <TooltipTrigger asChild>
               <button
                 className="relative shrink-0 cursor-pointer"
+                aria-label="Copy workspace path"
                 onClick={() => {
                   if (fullPath) void onCopyPath(fullPath);
                 }}
@@ -74,52 +101,28 @@ export function FileBrowserToolbar({
       right={
         <>
           {showCreateButton && onStartCreate && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                  onClick={onStartCreate}
-                >
-                  <IconPlus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>New file</TooltipContent>
-            </Tooltip>
+            <ToolbarButton
+              onClick={onStartCreate}
+              label="New file"
+              icon={<IconPlus className="h-3.5 w-3.5" />}
+            />
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                onClick={onOpenFolder}
-              >
-                <IconFolderShare className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Open workspace folder</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                onClick={onStartSearch}
-              >
-                <IconSearch className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Search files</TooltipContent>
-          </Tooltip>
+          <ToolbarButton
+            onClick={onOpenFolder}
+            label="Open workspace folder"
+            icon={<IconFolderShare className="h-3.5 w-3.5" />}
+          />
+          <ToolbarButton
+            onClick={onStartSearch}
+            label="Search files"
+            icon={<IconSearch className="h-3.5 w-3.5" />}
+          />
           {expandedPathsSize > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
-                  onClick={onCollapseAll}
-                >
-                  <IconListTree className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Collapse all</TooltipContent>
-            </Tooltip>
+            <ToolbarButton
+              onClick={onCollapseAll}
+              label="Collapse all"
+              icon={<IconListTree className="h-3.5 w-3.5" />}
+            />
           )}
         </>
       }

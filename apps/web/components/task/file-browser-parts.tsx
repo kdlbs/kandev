@@ -1,80 +1,36 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
-import { Input } from "@kandev/ui/input";
+import React from "react";
 import {
   IconChevronRight,
   IconChevronDown,
   IconFolder,
   IconFolderOpen,
-  IconPencil,
-  IconTrash,
   IconRefresh,
 } from "@tabler/icons-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-  ContextMenuSeparator,
-} from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
-import { useToast } from "@/components/toast-provider";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import { InlineFileInput } from "./inline-file-input";
 import { renderSessionOrLoadState } from "./file-browser-load-state";
+import { compareTreeNodes } from "./file-tree-utils";
+import {
+  FileContextMenu,
+  useFileRename,
+  TreeNodeName,
+  getGitStatusTextClass,
+} from "./file-context-menu";
+
+export {
+  compareTreeNodes,
+  mergeTreeNodes,
+  insertNodeInTree,
+  removeNodeFromTree,
+  renameNodeInTree,
+} from "./file-tree-utils";
 
 type GitFileStatus = FileInfo["status"] | undefined;
-
-/** Sort comparator: directories first, then alphabetical by name. */
-export const compareTreeNodes = (a: FileTreeNode, b: FileTreeNode): number => {
-  if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-  return a.name.localeCompare(b.name);
-};
-
-/**
- * Merge a freshly-fetched tree node into an existing one, preserving
- * already-loaded children so expanded folders don't collapse.
- */
-export function mergeTreeNodes(existing: FileTreeNode, incoming: FileTreeNode): FileTreeNode {
-  if (!incoming.children) return { ...existing, ...incoming, children: existing.children };
-  if (!existing.children) return incoming;
-  const existingByPath = new Map(existing.children.map((c) => [c.path, c]));
-  const mergedChildren = incoming.children.map((inChild) => {
-    const exChild = existingByPath.get(inChild.path);
-    if (exChild && exChild.is_dir && inChild.is_dir) {
-      return mergeTreeNodes(exChild, inChild);
-    }
-    return inChild;
-  });
-  return { ...existing, ...incoming, children: mergedChildren };
-}
-
-/** Insert a file node into a parent folder, keeping children sorted (dirs first, then alpha). */
-export function insertNodeInTree(
-  root: FileTreeNode,
-  parentPath: string,
-  node: FileTreeNode,
-): FileTreeNode {
-  if (root.path === parentPath || (parentPath === "" && root.path === "")) {
-    const children = [...(root.children ?? []), node].sort(compareTreeNodes);
-    return { ...root, children };
-  }
-  if (!root.children) return root;
-  return { ...root, children: root.children.map((c) => insertNodeInTree(c, parentPath, node)) };
-}
 
 type TreeNodeItemProps = {
   node: FileTreeNode;
@@ -94,56 +50,6 @@ type TreeNodeItemProps = {
   onCancelCreate: () => void;
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
 };
-
-export function removeNodeFromTree(root: FileTreeNode, targetPath: string): FileTreeNode {
-  if (!root.children) return root;
-  const filtered = root.children.filter((c) => c.path !== targetPath);
-  return { ...root, children: filtered.map((c) => removeNodeFromTree(c, targetPath)) };
-}
-
-/** Rename a node in the tree, updating its name and path. */
-function replacePathPrefix(path: string, oldPrefix: string, newPrefix: string): string {
-  if (path === oldPrefix) return newPrefix;
-  if (path.startsWith(`${oldPrefix}/`)) return `${newPrefix}${path.slice(oldPrefix.length)}`;
-  return path;
-}
-
-function renameSubtree(node: FileTreeNode, oldPath: string, newPath: string): FileTreeNode {
-  const nextPath = replacePathPrefix(node.path, oldPath, newPath);
-  const nextName = nextPath.split("/").pop() || nextPath;
-  const nextChildren = node.children?.map((child) => renameSubtree(child, oldPath, newPath));
-  return {
-    ...node,
-    name: nextName,
-    path: nextPath,
-    children: nextChildren,
-  };
-}
-
-function treeContainsPath(root: FileTreeNode, targetPath: string): boolean {
-  if (root.path === targetPath) return true;
-  if (!root.children) return false;
-  return root.children.some((child) => treeContainsPath(child, targetPath));
-}
-
-function countFilesInTree(node: FileTreeNode): number {
-  if (!node.children || node.children.length === 0) return node.is_dir ? 0 : 1;
-  const base = node.is_dir ? 0 : 1;
-  return node.children.reduce((sum, child) => sum + countFilesInTree(child), base);
-}
-
-export function renameNodeInTree(
-  root: FileTreeNode,
-  oldPath: string,
-  newPath: string,
-): FileTreeNode {
-  if (root.path === oldPath) {
-    return renameSubtree(root, oldPath, newPath);
-  }
-  if (!root.children) return root;
-  const nextChildren = root.children.map((c) => renameNodeInTree(c, oldPath, newPath));
-  return { ...root, children: nextChildren.sort(compareTreeNodes) };
-}
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
   return `${depth * 12 + 8 + (isDir ? 0 : 20)}px`;
@@ -199,266 +105,6 @@ function TreeNodeFileIcon({
       className="flex-shrink-0"
       style={{ width: "14px", height: "14px", opacity: isActive ? 1 : 0.7 }}
     />
-  );
-}
-
-function getGitStatusTextClass(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-    case "untracked":
-      return "text-green-700 dark:text-green-600";
-    case "modified":
-      return "text-yellow-600";
-    default:
-      return "";
-  }
-}
-
-/** Context menu for file nodes with Rename and Delete options */
-function FileContextMenu({
-  children,
-  node,
-  tree,
-  setTree,
-  onDeleteFile,
-  onRenameFile,
-  onStartRename,
-}: {
-  children: React.ReactNode;
-  node: FileTreeNode;
-  tree: FileTreeNode | null;
-  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
-  onDeleteFile?: (path: string) => Promise<boolean>;
-  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
-  onStartRename: () => void;
-}) {
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const isDirectory = node.is_dir;
-  const fileCount = countFilesInTree(node);
-
-  const handleConfirmDelete = useCallback(() => {
-    setDeleteDialogOpen(false);
-    if (!onDeleteFile) return;
-    const snapshot = tree;
-    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-    onDeleteFile(node.path)
-      .then((ok) => {
-        if (!ok) setTree(snapshot);
-      })
-      .catch(() => {
-        setTree(snapshot);
-      });
-  }, [tree, setTree, node.path, onDeleteFile]);
-
-  const handleDelete = useCallback(() => {
-    if (!onDeleteFile) return;
-    if (isDirectory) {
-      setDeleteDialogOpen(true);
-      return;
-    }
-    const snapshot = tree;
-    setTree((prev) => (prev ? removeNodeFromTree(prev, node.path) : prev));
-    onDeleteFile(node.path)
-      .then((ok) => {
-        if (!ok) setTree(snapshot);
-      })
-      .catch(() => {
-        setTree(snapshot);
-      });
-  }, [tree, setTree, node.path, onDeleteFile, isDirectory]);
-
-  const hasActions = onDeleteFile || onRenameFile;
-
-  if (!hasActions) {
-    return <>{children}</>;
-  }
-
-  return (
-    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent>
-          {onRenameFile && (
-            <ContextMenuItem onSelect={onStartRename}>
-              <IconPencil className="h-3.5 w-3.5" />
-              Rename
-            </ContextMenuItem>
-          )}
-          {onRenameFile && onDeleteFile && <ContextMenuSeparator />}
-          {onDeleteFile && (
-            <ContextMenuItem variant="destructive" onSelect={handleDelete}>
-              <IconTrash className="h-3.5 w-3.5" />
-              Delete
-            </ContextMenuItem>
-          )}
-        </ContextMenuContent>
-      </ContextMenu>
-      {isDirectory && (
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete folder?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete <span className="font-semibold">{node.name}</span> and{" "}
-              <span className="font-semibold">{fileCount}</span>{" "}
-              {fileCount === 1 ? "file" : "files"} inside it. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              variant="destructive"
-              className="cursor-pointer"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      )}
-    </AlertDialog>
-  );
-}
-
-/** Hook for managing inline file rename state */
-function useFileRename(
-  node: FileTreeNode,
-  tree: FileTreeNode | null,
-  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>,
-  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>,
-) {
-  const { toast } = useToast();
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(node.name);
-
-  const handleStartRename = useCallback(() => {
-    setRenameValue(node.name);
-    setIsRenaming(true);
-  }, [node.name]);
-
-  const handleCancelRename = useCallback(() => {
-    setIsRenaming(false);
-    setRenameValue(node.name);
-  }, [node.name]);
-
-  const handleConfirmRename = useCallback(() => {
-    const newName = renameValue.trim();
-    if (!newName || newName === node.name || !onRenameFile) {
-      handleCancelRename();
-      return;
-    }
-    const parentPath = node.path.includes("/")
-      ? node.path.substring(0, node.path.lastIndexOf("/"))
-      : "";
-    const newPath = parentPath ? `${parentPath}/${newName}` : newName;
-    const snapshot = tree;
-    setIsRenaming(false);
-    if (tree && treeContainsPath(tree, newPath)) {
-      toast({
-        title: "Failed to rename item",
-        description: `Target already exists: ${newPath}`,
-        variant: "error",
-      });
-      handleCancelRename();
-      return;
-    }
-    setTree((prev) => (prev ? renameNodeInTree(prev, node.path, newPath) : prev));
-    onRenameFile(node.path, newPath)
-      .then((ok) => {
-        if (!ok) setTree(snapshot);
-      })
-      .catch(() => {
-        setTree(snapshot);
-      });
-  }, [renameValue, node.name, node.path, onRenameFile, tree, setTree, handleCancelRename, toast]);
-
-  const handleRenameKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleConfirmRename();
-      } else if (e.key === "Escape") {
-        handleCancelRename();
-      }
-    },
-    [handleConfirmRename, handleCancelRename],
-  );
-
-  return {
-    isRenaming,
-    renameValue,
-    setRenameValue,
-    handleStartRename,
-    handleConfirmRename,
-    handleRenameKeyDown,
-  };
-}
-
-/** Inline rename input or static file name */
-function TreeNodeName({
-  node,
-  isActive,
-  gitStatus,
-  rename,
-}: {
-  node: FileTreeNode;
-  isActive: boolean;
-  gitStatus: GitFileStatus;
-  rename: ReturnType<typeof useFileRename>;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const blurEnabledRef = useRef(false);
-
-  // Focus input after context menu closes (autoFocus doesn't work reliably with context menus)
-  // Context menus restore focus to trigger on close, so we need to wait for that to complete
-  useEffect(() => {
-    if (rename.isRenaming) {
-      blurEnabledRef.current = false;
-      // Focus after context menu has fully closed and restored focus to trigger
-      const focusTimer = setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 150);
-      // Enable blur handling after focus is stable
-      const blurTimer = setTimeout(() => {
-        blurEnabledRef.current = true;
-      }, 400);
-      return () => {
-        clearTimeout(focusTimer);
-        clearTimeout(blurTimer);
-      };
-    }
-  }, [rename.isRenaming]);
-
-  const handleBlur = useCallback(() => {
-    // Only handle blur after the input has been properly focused
-    if (blurEnabledRef.current) {
-      rename.handleConfirmRename();
-    }
-  }, [rename]);
-
-  if (rename.isRenaming) {
-    return (
-      <Input
-        ref={inputRef}
-        value={rename.renameValue}
-        onChange={(e) => rename.setRenameValue(e.target.value)}
-        onKeyDown={rename.handleRenameKeyDown}
-        onBlur={handleBlur}
-        onClick={(e) => e.stopPropagation()}
-        className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
-      />
-    );
-  }
-  return (
-    <span
-      className={cn(
-        "flex-1 truncate group-hover:text-foreground",
-        isActive ? "text-foreground" : "text-muted-foreground",
-        node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
-      )}
-    >
-      {node.name}
-    </span>
   );
 }
 
