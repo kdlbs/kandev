@@ -298,8 +298,7 @@ function FileContextMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete folder?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete{" "}
-              <span className="font-semibold">{node.name}</span> and{" "}
+              This will permanently delete <span className="font-semibold">{node.name}</span> and{" "}
               <span className="font-semibold">{fileCount}</span>{" "}
               {fileCount === 1 ? "file" : "files"} inside it. This action cannot be undone.
             </AlertDialogDescription>
@@ -370,16 +369,7 @@ function useFileRename(
       .catch(() => {
         setTree(snapshot);
       });
-  }, [
-    renameValue,
-    node.name,
-    node.path,
-    onRenameFile,
-    tree,
-    setTree,
-    handleCancelRename,
-    toast,
-  ]);
+  }, [renameValue, node.name, node.path, onRenameFile, tree, setTree, handleCancelRename, toast]);
 
   const handleRenameKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

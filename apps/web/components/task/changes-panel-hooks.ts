@@ -154,10 +154,7 @@ function useChangesDiscardCommitHandlers(
   const handleAmend = useCallback(async () => {
     if (!amendMessage.trim()) return;
     setAmendDialogOpen(false);
-    await handleGitOperation(
-      () => gitOps.commit(amendMessage.trim(), false, true),
-      "Amend commit",
-    );
+    await handleGitOperation(() => gitOps.commit(amendMessage.trim(), false, true), "Amend commit");
     setAmendMessage("");
   }, [amendMessage, handleGitOperation, gitOps]);
 

@@ -94,7 +94,10 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
 
   const tabs: SessionTab[] = useMemo(
     () => [
-      { id: "diff", label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ""}` },
+      {
+        id: "diff",
+        label: `Diff files${changedFiles.length > 0 ? ` (${changedFiles.length})` : ""}`,
+      },
       { id: "files", label: "All files" },
     ],
     [changedFiles.length],

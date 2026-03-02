@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  IconGitCommit,
-  IconArrowBackUp,
-  IconPencil,
-  IconHistoryToggle,
-} from "@tabler/icons-react";
+import { IconGitCommit, IconArrowBackUp, IconPencil, IconHistoryToggle } from "@tabler/icons-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -197,4 +192,3 @@ export function CommitRow({
     </CommitContextMenu>
   );
 }
-

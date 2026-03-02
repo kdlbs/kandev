@@ -9,7 +9,13 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
-import { DiscardDialog, CommitDialog, PRDialog, AmendDialog, ResetDialog } from "./changes-panel-dialogs";
+import {
+  DiscardDialog,
+  CommitDialog,
+  PRDialog,
+  AmendDialog,
+  ResetDialog,
+} from "./changes-panel-dialogs";
 import { ChangesPanelHeader } from "./changes-panel-header";
 import {
   FileListSection,

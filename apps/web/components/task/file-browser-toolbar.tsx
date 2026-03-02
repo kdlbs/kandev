@@ -47,7 +47,9 @@ export function FileBrowserToolbar({
             <TooltipTrigger asChild>
               <button
                 className="relative shrink-0 cursor-pointer"
-                onClick={() => { if (fullPath) void onCopyPath(fullPath); }}
+                onClick={() => {
+                  if (fullPath) void onCopyPath(fullPath);
+                }}
               >
                 <IconFolderOpen
                   className={cn(
@@ -124,4 +126,3 @@ export function FileBrowserToolbar({
     />
   );
 }
-
