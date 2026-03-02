@@ -29,10 +29,28 @@ function upsertTaskSessionList(
   sessionUpdate: Record<string, unknown>,
 ): void {
   const sessionsByTask = store.getState().taskSessionsByTask.itemsByTaskId[taskId];
-  if (!sessionsByTask) return;
+  const newState = payload.new_state as TaskSessionState | undefined;
+
+  if (!sessionsByTask) {
+    // Initialize per-task sessions from WS event so the sidebar can
+    // display up-to-date status even for tasks not yet clicked.
+    if (newState) {
+      store.getState().setTaskSessionsForTask(taskId, [
+        {
+          id: sessionId,
+          task_id: taskId,
+          state: newState,
+          started_at: "",
+          updated_at: "",
+          ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
+          ...sessionUpdate,
+        },
+      ]);
+    }
+    return;
+  }
 
   const hasSession = sessionsByTask.some((s) => s.id === sessionId);
-  const newState = payload.new_state as TaskSessionState | undefined;
 
   if (!hasSession && newState) {
     store.getState().setTaskSessionsForTask(taskId, [
@@ -114,7 +132,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const sessionId = payload.session_id;
       const isQueued = payload.is_queued as boolean;
       const queuedMessage = payload.message as QueuedMessage | null | undefined;
-      console.log("[Queue] Status changed:", { sessionId, isQueued, hasMessage: !!queuedMessage });
       store.getState().setQueueStatus(sessionId, { is_queued: isQueued, message: queuedMessage });
     },
     "session.state_changed": (message) => {

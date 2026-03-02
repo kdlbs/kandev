@@ -101,7 +101,7 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		if action == ws.ActionSessionStateChanged {
 			if data, ok := event.Data.(map[string]interface{}); ok {
 				if metadata, ok := data["metadata"]; ok {
-					b.logger.Info("received session.state_changed with metadata",
+					b.logger.Debug("received session.state_changed with metadata",
 						zap.String("action", action),
 						zap.String("session_id", sessionID),
 						zap.Any("metadata", metadata))
@@ -110,11 +110,16 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		}
 
 		switch action {
-		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError, ws.ActionSessionStateChanged:
+		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
 			}
+		case ws.ActionSessionStateChanged:
+			// Broadcast globally so the sidebar task switcher can track
+			// session state changes for all tasks, not just the active one.
+			b.hub.Broadcast(msg)
+			return nil
 		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)

@@ -16,6 +16,7 @@ import (
 const (
 	agentEventComplete = "complete"
 	agentEventError    = "error"
+	agentEventToolCall = "tool_call"
 )
 
 // buildTaskEventPayload builds the standard map payload for TaskUpdated events.

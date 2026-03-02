@@ -83,6 +83,9 @@ type AgentExecution struct {
 	lastActivityAt   time.Time
 	lastActivityAtMu sync.Mutex
 
+	// Fires once on the first agent event to publish AgentRunning.
+	firstActivityOnce sync.Once
+
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex

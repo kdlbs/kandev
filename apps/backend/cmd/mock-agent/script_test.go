@@ -612,8 +612,11 @@ func assertContentText(t *testing.T, msg map[string]any, wantText string) {
 	if content["type"] != BlockText {
 		t.Errorf("content type = %q, want %q", content["type"], BlockText)
 	}
-	if content["text"] != wantText {
-		t.Errorf("text = %q, want %q", content["text"], wantText)
+	// emitTextBlock appends a trailing newline to match real agent streaming behavior;
+	// allow the expected text with or without the trailing newline.
+	got, _ := content["text"].(string)
+	if got != wantText && got != wantText+"\n" {
+		t.Errorf("text = %q, want %q (or with trailing newline)", got, wantText)
 	}
 }
 

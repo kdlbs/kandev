@@ -31,6 +31,14 @@ export class SessionPage {
     return this.sidebar.getByTestId(`sidebar-section-${label}`);
   }
 
+  /** Task title scoped to a specific sidebar section (Review, In Progress, Backlog). */
+  taskInSection(title: string, sectionLabel: string): Locator {
+    return this.sidebar
+      .getByTestId(`sidebar-section-${sectionLabel}`)
+      .locator("..")
+      .getByText(title, { exact: false });
+  }
+
   /** Agent STARTING or RUNNING status indicator. */
   agentStatus(): Locator {
     return this.page.getByRole("status", { name: /Agent is (starting|running)/ });

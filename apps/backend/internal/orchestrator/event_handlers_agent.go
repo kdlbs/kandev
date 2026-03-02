@@ -34,7 +34,12 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.Error(err))
 		return
 	}
-	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
+	// on_turn_start is only needed for passthrough sessions where there's
+	// no PromptTask call to handle it. For ACP sessions, PromptTask or
+	// dispatchPromptAsync already processes on_turn_start.
+	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
+		s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
+	}
 
 	// Move session to running and task to in progress
 	s.setSessionRunning(ctx, data.TaskID, data.SessionID, session)

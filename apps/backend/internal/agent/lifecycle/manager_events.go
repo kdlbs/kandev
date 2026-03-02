@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/events"
 )
 
 const toolStatusComplete = "complete"
@@ -261,6 +263,13 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
+
+	// Publish AgentRunning on the first event from this execution.
+	// This transitions STARTING → RUNNING for sessions where the initial prompt
+	// is dispatched via dispatchInitialPrompt (bypasses orchestrator's PromptTask).
+	execution.firstActivityOnce.Do(func() {
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+	})
 
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
