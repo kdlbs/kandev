@@ -136,11 +136,10 @@ func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 }
 
 // InferenceConfig returns configuration for one-shot inference.
-// Uses npx without version to match PassthroughConfig pattern.
 func (a *Gemini) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("npx", "-y", "@google/gemini-cli", "-p"),
+		Command:      NewCommand("gemini", "-p"),
 		ModelFlag:    NewParam("--model", "{model}"),
 		OutputFormat: "text",
 		StdinInput:   true,

@@ -118,11 +118,10 @@ func (a *Copilot) PermissionSettings() map[string]PermissionSetting {
 }
 
 // InferenceConfig returns configuration for one-shot inference.
-// Uses npx without version to match PassthroughConfig pattern.
 func (a *Copilot) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("npx", "-y", "@github/copilot", "-p"),
+		Command:      NewCommand("github-copilot", "-p"),
 		ModelFlag:    NewParam("--model", "{model}"),
 		OutputFormat: "text",
 		StdinInput:   true,

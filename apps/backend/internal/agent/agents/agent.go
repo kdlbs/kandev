@@ -242,7 +242,8 @@ var DefaultResourceLimits = ResourceLimits{
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the base command for one-shot inference (e.g., ["claude", "--print"]).
+	// Command is the CLI command for one-shot inference (e.g., ["claude", "--print"]).
+	// Uses the local CLI directly since agents must be installed/authenticated to work.
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param

@@ -152,7 +152,7 @@ func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 func (a *Auggie) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("npx", "-y", "@augmentcode/auggie", "--print", "--output-format", "json"),
+		Command:      NewCommand("auggie", "--print", "--output-format", "json"),
 		ModelFlag:    NewParam("--model", "{model}"),
 		OutputFormat: "auggie-json",
 		StdinInput:   true,

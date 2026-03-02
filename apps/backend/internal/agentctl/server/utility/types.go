@@ -24,7 +24,7 @@ type PromptRequest struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the base command for one-shot inference (e.g., ["claude", "--print"]).
+	// Command is the CLI command for one-shot inference (e.g., ["claude", "--print"]).
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag []string `json:"model_flag,omitempty"`

@@ -131,7 +131,7 @@ func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 func (a *Codex) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("npx", "-y", "@openai/codex", "exec"),
+		Command:      NewCommand("codex", "exec"),
 		ModelFlag:    NewParam("-m", "{model}"),
 		OutputFormat: "text",
 		StdinInput:   true,
