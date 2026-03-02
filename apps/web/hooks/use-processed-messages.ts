@@ -25,6 +25,7 @@ const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "thinking",
   "todo",
   "script_execution",
+  "agent_plan",
 ]);
 
 function isVisibleMessageType(type: MessageType | undefined): boolean {

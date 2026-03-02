@@ -417,11 +417,9 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 
 // handleCompleteStreamEvent handles the agentEventComplete stream event.
 func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	s.logger.Debug("orchestrator received complete event",
+	s.logger.Debug("handling complete stream event",
 		zap.String("task_id", payload.TaskID),
-		zap.String("session_id", payload.SessionID),
-		zap.Int("text_length", len(payload.Data.Text)),
-		zap.Bool("has_text", payload.Data.Text != ""))
+		zap.String("session_id", payload.SessionID))
 
 	// Load session once up front — used by storeResumeToken, state check, and setSessionWaitingForInput.
 	var session *models.TaskSession
@@ -449,6 +447,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	}
 
 	s.saveAgentTextIfPresent(ctx, payload)
+	s.publishAgentPlanIfPresent(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
 
 	// READY events own workflow transitions and queued prompt execution.
@@ -461,6 +460,33 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	}
 
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+// publishAgentPlanIfPresent extracts plan_content from a complete event and creates
+// a dedicated agent_plan message in the session.
+func (s *Service) publishAgentPlanIfPresent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload.SessionID == "" || payload.Data.Data == nil || s.messageCreator == nil {
+		return
+	}
+	dataMap, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	planContent, ok := dataMap["plan_content"].(string)
+	if !ok || planContent == "" {
+		return
+	}
+
+	sessionID := payload.SessionID
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx, payload.TaskID, planContent, sessionID,
+		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	); err != nil {
+		s.logger.Error("failed to create agent plan message",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // handleAvailableCommandsEvent broadcasts available_commands events to the WebSocket for the frontend.
@@ -480,9 +506,10 @@ func (s *Service) handleAvailableCommandsEvent(ctx context.Context, payload *lif
 }
 
 // handleSessionModeEvent broadcasts session_mode events to the WebSocket for the frontend.
+// An empty CurrentModeID means the agent has exited its special mode (e.g. plan mode ended).
 func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil || payload.Data.CurrentModeID == "" {
+	if sessionID == "" || s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.SessionModeEventPayload{

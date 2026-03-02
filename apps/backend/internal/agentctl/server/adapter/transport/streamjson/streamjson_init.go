@@ -84,6 +84,10 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.client.SetRequestHandler(a.handleControlRequest)
 	a.client.SetCancelHandler(a.handleControlCancel)
 	a.client.SetMessageHandler(a.handleMessage)
+	a.client.SetCloseHandler(func() {
+		a.logger.Info("stream closed (EOF), signaling completion")
+		a.signalResultCompletion(true, "")
+	})
 
 	// Start reading from stdout with the adapter's context
 	// Wait for the read loop to be ready before sending initialize
@@ -141,47 +145,55 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 }
 
 // buildHooks constructs hook configuration based on the permission policy.
-// Returns nil for autonomous mode (no hooks).
+// Always registers at least an ExitPlanMode auto-approve hook (ExitPlanMode
+// doesn't send a result message, so it needs special completion handling
+// regardless of policy).
 func (a *Adapter) buildHooks() map[string]any {
 	policy := a.cfg.PermissionPolicy
-	if policy == "" || policy == "autonomous" {
-		return nil
-	}
-
 	cfg := &claudecode.HookConfig{}
 
 	switch policy {
 	case "supervised":
-		// Match write/dangerous tools — everything except read-only tools.
-		// Non-matching tools (Glob, Grep, Read, Task, TodoWrite, etc.) are
-		// implicitly auto-approved by Claude Code when no hook matches.
+		// ExitPlanMode auto-approved; write/dangerous tools require approval.
+		// Non-matching read-only tools are implicitly auto-approved by Claude Code.
 		cfg.PreToolUse = []claudecode.HookEntry{
 			{
-				Matcher:         `^(?!(Glob|Grep|NotebookRead|Read|Task|TodoWrite)$).*`,
+				Matcher:         `^ExitPlanMode$`,
+				HookCallbackIDs: []string{"auto_approve"},
+			},
+			{
+				Matcher:         `^(?!(Glob|Grep|NotebookRead|Read|Task|TodoWrite|ExitPlanMode)$).*`,
 				HookCallbackIDs: []string{"tool_approval"},
 			},
 		}
 	case "plan":
-		// Only ExitPlanMode requires approval — all other tools run freely during planning.
-		// The auto_approve callback explicitly approves so Claude doesn't fall through.
+		// All tools auto-approved during planning, including ExitPlanMode.
 		cfg.PreToolUse = []claudecode.HookEntry{
 			{
 				Matcher:         `^ExitPlanMode$`,
-				HookCallbackIDs: []string{"tool_approval"},
+				HookCallbackIDs: []string{"auto_approve"},
 			},
 			{
 				Matcher:         `^(?!ExitPlanMode$).*`,
 				HookCallbackIDs: []string{"auto_approve"},
 			},
 		}
+	default:
+		// Autonomous / empty: only hook ExitPlanMode for completion handling.
+		// All other tools have no matching hook → implicitly auto-approved.
+		cfg.PreToolUse = []claudecode.HookEntry{
+			{
+				Matcher:         `^ExitPlanMode$`,
+				HookCallbackIDs: []string{"auto_approve"},
+			},
+		}
 	}
 
-	// Always register a Stop hook to check for uncommitted changes
-	cfg.Stop = []claudecode.HookEntry{
-		{
-			HookCallbackIDs: []string{"stop_git_check"},
-		},
-	}
+	// NOTE: Do NOT register Stop hooks here until proper completion handling
+	// is implemented. Stop hooks fire on every turn end — when approved,
+	// Claude Code terminates without sending a result message, leaving
+	// Prompt() blocked forever. A Stop hook would need its own delayed
+	// completion logic (like scheduleExitPlanModeCompletion) to work.
 
 	return cfg.ToMap()
 }

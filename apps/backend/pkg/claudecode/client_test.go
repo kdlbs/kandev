@@ -411,6 +411,46 @@ func TestClient_HandleControlCancelRequest_NoHandler(t *testing.T) {
 	// Test passes if no panic occurs
 }
 
+func TestClient_CloseHandler_CalledOnEOF(t *testing.T) {
+	// Reader that immediately returns EOF
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(""), newTestLogger())
+
+	var called bool
+	var mu sync.Mutex
+	client.SetCloseHandler(func() {
+		mu.Lock()
+		called = true
+		mu.Unlock()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(100 * time.Millisecond) // Give time for readLoop to exit
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !called {
+		t.Error("close handler was not called on EOF")
+	}
+}
+
+func TestClient_CloseHandler_NotSetNoPanic(t *testing.T) {
+	// Verify no panic when close handler is not set
+	var buf bytes.Buffer
+	client := NewClient(&buf, strings.NewReader(""), newTestLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	client.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Test passes if no panic occurs
+}
+
 func TestClient_HandleControlCancelRequest_NotForwardedAsMessage(t *testing.T) {
 	// control_cancel_request should be handled by the cancel handler,
 	// not forwarded to the message handler

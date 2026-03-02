@@ -558,7 +558,8 @@ export type MessageType =
   | "todo"
   | "permission_request"
   | "clarification_request"
-  | "script_execution";
+  | "script_execution"
+  | "agent_plan";
 
 export type Message = {
   id: string;

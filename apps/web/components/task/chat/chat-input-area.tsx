@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { IconBrain } from "@tabler/icons-react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useMessageHandler } from "@/hooks/use-message-handler";
+import { useAppStore } from "@/components/state-provider";
 import { type ContextFile } from "@/lib/state/context-files-store";
 import {
   ChatInputContainer,
@@ -302,6 +304,10 @@ export function ChatInputArea({
     chatInputRef,
   );
 
+  const agentMode = useAppStore((state) =>
+    resolvedSessionId ? state.sessionMode.bySessionId[resolvedSessionId] : undefined,
+  );
+
   const hasClarification = !!panelState.pendingClarification;
   const placeholder = resolveInputPlaceholder(
     isAgentBusy,
@@ -311,6 +317,12 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
+      {agentMode && (
+        <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
+          <IconBrain className="h-3 w-3" />
+          <span className="capitalize">{agentMode} mode</span>
+        </div>
+      )}
       <ChatInputContainer
         ref={chatInputRef}
         key={clarificationKey}

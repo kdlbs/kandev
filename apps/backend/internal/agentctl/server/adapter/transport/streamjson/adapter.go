@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -101,6 +102,13 @@ type Adapter struct {
 	lastMessageUUID      string // Latest committed message UUID (safe to resume from)
 	pendingAssistantUUID string // UUID from assistant message, committed on result
 
+	// Plan content from ExitPlanMode tool_call, published as agent_plan message on result
+	exitPlanContent string
+
+	// ExitPlanMode completion guard: set to true when a delayed completion goroutine
+	// is pending, cleared on result message arrival or goroutine execution.
+	exitPlanPending atomic.Bool
+
 	// lastRawData holds the raw JSON of the current message being processed.
 	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
@@ -117,6 +125,10 @@ type Adapter struct {
 
 // defaultContextWindow is the fallback context window size for Claude models
 const defaultContextWindow = 200000
+
+// toolExitPlanMode is the Claude Code tool name for exiting plan mode.
+// Used in hook matching, permission handling, and completion detection.
+const toolExitPlanMode = "ExitPlanMode"
 
 // resultComplete holds the result of a completed prompt
 type resultComplete struct {

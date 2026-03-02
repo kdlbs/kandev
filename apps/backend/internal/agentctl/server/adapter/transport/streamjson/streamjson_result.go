@@ -27,6 +27,15 @@ func (a *Adapter) updateContextWindowFromModelUsage(msg *claudecode.CLIMessage) 
 	return contextUsed, contextSize
 }
 
+// drainExitPlanContent atomically reads and clears the captured ExitPlanMode plan content.
+func (a *Adapter) drainExitPlanContent() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	content := a.exitPlanContent
+	a.exitPlanContent = ""
+	return content
+}
+
 // drainPendingToolCalls atomically removes and returns all pending tool call IDs.
 func (a *Adapter) drainPendingToolCalls() []string {
 	a.mu.Lock()
@@ -80,6 +89,10 @@ func (a *Adapter) signalResultCompletion(success bool, errMsg string) {
 
 // handleResultMessage processes result (completion) messages.
 func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, operationID string) {
+	// Cancel any pending ExitPlanMode delayed completion — this result message
+	// will handle completion instead.
+	a.exitPlanPending.Store(false)
+
 	a.logger.Info("received result message",
 		zap.Bool("is_error", msg.IsError),
 		zap.Int("num_turns", msg.NumTurns))
@@ -155,6 +168,9 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 	// Build error message from errors array if available
 	errorMsg := a.extractResultErrorMsg(msg)
 
+	// Drain captured plan content from ExitPlanMode (if any)
+	planContent := a.drainExitPlanContent()
+
 	// Send completion event AFTER any result text chunk
 	completeData := map[string]any{
 		"cost_usd":      msg.CostUSD,
@@ -163,6 +179,9 @@ func (a *Adapter) handleResultMessage(msg *claudecode.CLIMessage, sessionID, ope
 		"input_tokens":  msg.TotalInputTokens,
 		"output_tokens": msg.TotalOutputTokens,
 		"is_error":      msg.IsError,
+	}
+	if planContent != "" {
+		completeData["plan_content"] = planContent
 	}
 	if len(msg.Errors) > 0 {
 		completeData["errors"] = msg.Errors

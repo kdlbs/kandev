@@ -2,6 +2,7 @@ package streamjson
 
 import (
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -164,8 +165,32 @@ func TestBuildHooks_Autonomous(t *testing.T) {
 			}, newTestLogger(t))
 
 			hooks := a.buildHooks()
-			if hooks != nil {
-				t.Errorf("buildHooks() = %v, want nil for autonomous mode", hooks)
+			if hooks == nil {
+				t.Fatal("buildHooks() returned nil, want hooks with ExitPlanMode")
+			}
+
+			// Should have PreToolUse with only ExitPlanMode auto-approve
+			preToolUse, ok := hooks["PreToolUse"]
+			if !ok {
+				t.Fatal("buildHooks() missing PreToolUse key")
+			}
+			entries, ok := preToolUse.([]claudecode.HookEntry)
+			if !ok {
+				t.Fatalf("PreToolUse is %T, want []claudecode.HookEntry", preToolUse)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("PreToolUse has %d entries, want 1", len(entries))
+			}
+			if entries[0].Matcher != `^ExitPlanMode$` {
+				t.Errorf("entries[0].Matcher = %q, want %q", entries[0].Matcher, `^ExitPlanMode$`)
+			}
+			if entries[0].HookCallbackIDs[0] != "auto_approve" {
+				t.Errorf("entries[0].HookCallbackIDs[0] = %q, want %q", entries[0].HookCallbackIDs[0], "auto_approve")
+			}
+
+			// Should NOT have Stop (not registered until completion handling is implemented)
+			if _, ok := hooks["Stop"]; ok {
+				t.Error("buildHooks() has Stop key, but Stop hooks should not be registered")
 			}
 		})
 	}
@@ -182,7 +207,7 @@ func TestBuildHooks_Supervised(t *testing.T) {
 		t.Fatal("buildHooks() returned nil, want hooks")
 	}
 
-	// Should have PreToolUse
+	// Should have PreToolUse with 2 entries: ExitPlanMode auto-approve + tool_approval
 	preToolUse, ok := hooks["PreToolUse"]
 	if !ok {
 		t.Fatal("buildHooks() missing PreToolUse key")
@@ -191,27 +216,24 @@ func TestBuildHooks_Supervised(t *testing.T) {
 	if !ok {
 		t.Fatalf("PreToolUse is %T, want []claudecode.HookEntry", preToolUse)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("PreToolUse has %d entries, want 1", len(entries))
+	if len(entries) != 2 {
+		t.Fatalf("PreToolUse has %d entries, want 2", len(entries))
 	}
-	if entries[0].HookCallbackIDs[0] != "tool_approval" {
-		t.Errorf("PreToolUse[0].HookCallbackIDs[0] = %q, want %q", entries[0].HookCallbackIDs[0], "tool_approval")
+	// First: ExitPlanMode auto-approve
+	if entries[0].Matcher != `^ExitPlanMode$` {
+		t.Errorf("entries[0].Matcher = %q, want %q", entries[0].Matcher, `^ExitPlanMode$`)
+	}
+	if entries[0].HookCallbackIDs[0] != "auto_approve" {
+		t.Errorf("entries[0].HookCallbackIDs[0] = %q, want %q", entries[0].HookCallbackIDs[0], "auto_approve")
+	}
+	// Second: tool_approval for write/dangerous tools
+	if entries[1].HookCallbackIDs[0] != "tool_approval" {
+		t.Errorf("entries[1].HookCallbackIDs[0] = %q, want %q", entries[1].HookCallbackIDs[0], "tool_approval")
 	}
 
-	// Should have Stop
-	stop, ok := hooks["Stop"]
-	if !ok {
-		t.Fatal("buildHooks() missing Stop key")
-	}
-	stopEntries, ok := stop.([]claudecode.HookEntry)
-	if !ok {
-		t.Fatalf("Stop is %T, want []claudecode.HookEntry", stop)
-	}
-	if len(stopEntries) != 1 {
-		t.Fatalf("Stop has %d entries, want 1", len(stopEntries))
-	}
-	if stopEntries[0].HookCallbackIDs[0] != "stop_git_check" {
-		t.Errorf("Stop[0].HookCallbackIDs[0] = %q, want %q", stopEntries[0].HookCallbackIDs[0], "stop_git_check")
+	// Should NOT have Stop
+	if _, ok := hooks["Stop"]; ok {
+		t.Error("buildHooks() has Stop key, but Stop hooks should not be registered")
 	}
 }
 
@@ -239,12 +261,12 @@ func TestBuildHooks_Plan(t *testing.T) {
 		t.Fatalf("PreToolUse has %d entries, want 2", len(entries))
 	}
 
-	// First entry: ExitPlanMode requires approval
+	// First entry: ExitPlanMode auto-approved
 	if entries[0].Matcher != `^ExitPlanMode$` {
 		t.Errorf("entries[0].Matcher = %q, want %q", entries[0].Matcher, `^ExitPlanMode$`)
 	}
-	if entries[0].HookCallbackIDs[0] != "tool_approval" {
-		t.Errorf("entries[0].HookCallbackIDs[0] = %q, want %q", entries[0].HookCallbackIDs[0], "tool_approval")
+	if entries[0].HookCallbackIDs[0] != "auto_approve" {
+		t.Errorf("entries[0].HookCallbackIDs[0] = %q, want %q", entries[0].HookCallbackIDs[0], "auto_approve")
 	}
 
 	// Second entry: everything else auto-approved
@@ -252,9 +274,9 @@ func TestBuildHooks_Plan(t *testing.T) {
 		t.Errorf("entries[1].HookCallbackIDs[0] = %q, want %q", entries[1].HookCallbackIDs[0], "auto_approve")
 	}
 
-	// Should have Stop
-	if _, ok := hooks["Stop"]; !ok {
-		t.Error("buildHooks() missing Stop key")
+	// Should NOT have Stop
+	if _, ok := hooks["Stop"]; ok {
+		t.Error("buildHooks() has Stop key, but Stop hooks should not be registered")
 	}
 }
 
@@ -541,7 +563,7 @@ func (b *syncBuf) Bytes() []byte { return b.data }
 // emptyReader always returns EOF.
 type emptyReader struct{}
 
-func (e *emptyReader) Read(p []byte) (int, error) { return 0, nil }
+func (e *emptyReader) Read([]byte) (int, error) { return 0, io.EOF }
 
 // --- TodoWrite normalizer tests ---
 

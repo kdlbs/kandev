@@ -13,10 +13,29 @@ import (
 // handleSystemMessage processes system messages.
 // Subtypes:
 //   - "init" (or empty): Session initialization with slash commands and status
+//   - "status": Permission mode changes (e.g. plan mode entry)
 //   - "task_started": Sub-agent task lifecycle event — logged and skipped
 //
 // Note: Turn completion is signaled by result messages, not system messages.
 func (a *Adapter) handleSystemMessage(msg *claudecode.CLIMessage) {
+	// Handle permission mode changes from system status messages.
+	// "bypassPermissions" is the default/normal mode — map it to empty (no mode).
+	if msg.Subtype == "status" && msg.PermissionMode != "" {
+		modeID := msg.PermissionMode
+		if modeID == "bypassPermissions" {
+			modeID = ""
+		}
+		a.mu.RLock()
+		sessionID := a.sessionID
+		operationID := a.operationID
+		a.mu.RUnlock()
+		a.logger.Info("permission mode changed",
+			zap.String("raw_mode", msg.PermissionMode),
+			zap.String("mode_id", modeID))
+		a.emitSessionMode(sessionID, operationID, modeID)
+		return
+	}
+
 	// Skip non-init system messages (e.g. task_started for sub-agent lifecycle)
 	if msg.Subtype != "" && msg.Subtype != "init" {
 		a.logger.Debug("skipping system message with subtype",
@@ -143,6 +162,17 @@ func (a *Adapter) processToolUseBlock(block claudecode.ContentBlock, sessionID, 
 		zap.String("tool_name", block.Name),
 		zap.String("tool_type", toolType),
 		zap.String("title", toolTitle))
+
+	// Capture plan content from ExitPlanMode for dedicated agent_plan message
+	// Also emit mode-clear since Claude Code doesn't send a system status reset on exit
+	if block.Name == toolExitPlanMode {
+		if plan, ok := block.Input["plan"].(string); ok {
+			a.mu.Lock()
+			a.exitPlanContent = plan
+			a.mu.Unlock()
+		}
+		a.emitSessionMode(sessionID, operationID, "")
+	}
 
 	// Track this tool call as pending with its payload for result enrichment
 	a.mu.Lock()
@@ -413,4 +443,14 @@ func (a *Adapter) enrichSubagentResult(payload *streams.NormalizedPayload, data 
 	if v, ok := data["totalToolUseCount"].(float64); ok {
 		st.ToolUseCount = int(v)
 	}
+}
+
+// emitSessionMode sends a session_mode event to indicate the agent's mode has changed.
+func (a *Adapter) emitSessionMode(sessionID, operationID, modeID string) {
+	a.sendUpdate(AgentEvent{
+		Type:          streams.EventTypeSessionMode,
+		SessionID:     sessionID,
+		OperationID:   operationID,
+		CurrentModeID: modeID,
+	})
 }
