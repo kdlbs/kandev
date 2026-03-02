@@ -61,6 +61,9 @@ func NewAgentChecker(provider AgentDiscoveryProvider) *AgentChecker {
 }
 
 func (c *AgentChecker) Check(ctx context.Context) []Issue {
+	if c.provider == nil {
+		return nil
+	}
 	available, err := c.provider.HasAvailableAgents(ctx)
 	if err != nil {
 		return nil

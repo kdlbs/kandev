@@ -98,3 +98,11 @@ func TestAgentChecker_Error(t *testing.T) {
 		t.Errorf("expected 0 issues on error, got %d", len(issues))
 	}
 }
+
+func TestAgentChecker_NilProvider(t *testing.T) {
+	checker := NewAgentChecker(nil)
+	issues := checker.Check(context.Background())
+	if len(issues) != 0 {
+		t.Errorf("expected 0 issues for nil provider, got %d", len(issues))
+	}
+}

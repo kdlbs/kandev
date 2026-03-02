@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,6 +17,7 @@ import (
 
 // Service coordinates GitHub integration operations.
 type Service struct {
+	mu         sync.Mutex
 	client     Client
 	authMethod string
 	secrets    SecretProvider
@@ -58,20 +60,25 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 		s.retryClientCreation(ctx)
 	}
 
+	s.mu.Lock()
+	client := s.client
+	authMethod := s.authMethod
+	s.mu.Unlock()
+
 	status := &GitHubStatus{
-		AuthMethod: s.authMethod,
+		AuthMethod: authMethod,
 	}
-	if s.client == nil {
+	if client == nil {
 		status.Diagnostics = runGHDiagnostics(ctx)
 		return status, nil
 	}
-	ok, err := s.client.IsAuthenticated(ctx)
+	ok, err := client.IsAuthenticated(ctx)
 	if err != nil {
 		return status, nil
 	}
 	status.Authenticated = ok
 	if ok {
-		user, err := s.client.GetAuthenticatedUser(ctx)
+		user, err := client.GetAuthenticatedUser(ctx)
 		if err == nil {
 			status.Username = user
 		}
@@ -83,8 +90,14 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 
 // retryClientCreation attempts to create a GitHub client when none exists.
 func (s *Service) retryClientCreation(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil {
+		return // another goroutine already recovered
+	}
 	client, authMethod, err := NewClient(ctx, s.secrets, s.logger)
 	if err != nil {
+		s.logger.Debug("GitHub client retry failed", zap.Error(err))
 		return
 	}
 	s.client = client

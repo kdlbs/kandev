@@ -55,6 +55,7 @@ export function GitHubStatusCard() {
           </span>
           <Button variant="ghost" size="sm" onClick={refresh} className="cursor-pointer h-6 px-2">
             <IconRefresh className="h-3.5 w-3.5" />
+            <span className="sr-only">Refresh GitHub status</span>
           </Button>
         </div>
         {status?.diagnostics && <DiagnosticsOutput diagnostics={status.diagnostics} />}

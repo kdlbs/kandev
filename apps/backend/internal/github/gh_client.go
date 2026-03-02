@@ -31,7 +31,15 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 	// where a secondary account has an invalid token. GHAvailable() already
 	// guards binary existence before this method is called.
 	_, err := c.run(ctx, "auth", "status", "--hostname", "github.com")
-	return err == nil, nil
+	if err == nil {
+		return true, nil
+	}
+	// Propagate context errors so callers can distinguish cancellation/timeout
+	// from a genuine "not authenticated" result.
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	return false, nil
 }
 
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
