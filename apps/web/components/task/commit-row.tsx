@@ -167,8 +167,16 @@ export function CommitRow({
       onResetToCommit={onResetToCommit}
     >
       <li
+        role="button"
+        tabIndex={0}
         className="group relative flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
         onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpenCommitDetail?.(commit.commit_sha);
+          }
+        }}
       >
         <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
         <code className="font-mono text-muted-foreground text-[11px]">

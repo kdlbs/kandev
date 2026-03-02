@@ -413,7 +413,7 @@ export function ResetDialog({
   const [confirmation, setConfirmation] = useState("");
 
   const isHardResetConfirmed = mode === "hard" && confirmation === shortSha;
-  const canReset = mode === "soft" || isHardResetConfirmed;
+  const canReset = !!commitSha && (mode === "soft" || isHardResetConfirmed);
 
   const handleOpenChange = (newOpen: boolean) => {
     if (!newOpen) {

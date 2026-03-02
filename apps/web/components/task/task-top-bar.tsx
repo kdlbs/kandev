@@ -100,10 +100,13 @@ const TaskTopBar = memo(function TaskTopBar({
         if (result.success) {
           toast.success(`Branch renamed to "${newName}"`);
         } else {
-          toast.error(result.error || "Failed to rename branch");
+          const msg = result.error || "Failed to rename branch";
+          toast.error(msg);
+          throw new Error(msg);
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to rename branch");
+        throw e;
       }
     },
     [git],
@@ -289,20 +292,21 @@ function BranchPathPopover({
   }, [displayBranch]);
 
   const handleConfirmRename = useCallback(async () => {
-    if (!onRenameBranch || !editValue.trim() || editValue === displayBranch) {
+    const trimmed = editValue.trim();
+    if (!onRenameBranch || !trimmed || trimmed === displayBranch?.trim() || isRenaming) {
       handleCancelEdit();
       return;
     }
     setIsRenaming(true);
     try {
-      await onRenameBranch(editValue.trim());
+      await onRenameBranch(trimmed);
       setIsEditing(false);
     } catch {
       // Error is handled by onRenameBranch (shows toast), keep edit mode open
     } finally {
       setIsRenaming(false);
     }
-  }, [onRenameBranch, editValue, displayBranch, handleCancelEdit]);
+  }, [onRenameBranch, editValue, displayBranch, handleCancelEdit, isRenaming]);
 
   if (!displayBranch) return null;
 
@@ -331,6 +335,7 @@ function BranchPathPopover({
                   type="button"
                   onClick={handleStartEdit}
                   className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 hover:bg-muted rounded"
+                  aria-label="Rename branch"
                   title="Rename branch"
                 >
                   <IconPencil className="h-3 w-3 text-muted-foreground" />
