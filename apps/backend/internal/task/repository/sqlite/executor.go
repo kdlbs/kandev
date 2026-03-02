@@ -152,13 +152,22 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	}
 	running.UpdatedAt = now
 
+	metadataJSON := "{}"
+	if running.Metadata != nil {
+		b, err := json.Marshal(running.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to serialize executor running metadata: %w", err)
+		}
+		metadataJSON = string(b)
+	}
+
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
-			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			id = excluded.id,
 			task_id = excluded.task_id,
@@ -178,6 +187,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			worktree_branch = excluded.worktree_branch,
 			last_seen_at = excluded.last_seen_at,
 			error_message = excluded.error_message,
+			metadata = excluded.metadata,
 			updated_at = excluded.updated_at
 	`),
 		running.ID,
@@ -199,6 +209,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.WorktreeBranch,
 		running.LastSeenAt,
 		running.ErrorMessage,
+		metadataJSON,
 		running.CreatedAt,
 		running.UpdatedAt,
 	)
@@ -209,7 +220,7 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port,
-			worktree_id, worktree_path, worktree_branch, created_at, updated_at
+			worktree_id, worktree_path, worktree_branch, metadata, created_at, updated_at
 		FROM executors_running
 		ORDER BY updated_at DESC
 	`)
@@ -221,6 +232,7 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 	var results []*models.ExecutorRunning
 	for rows.Next() {
 		running := &models.ExecutorRunning{}
+		var metadataJSON string
 		if scanErr := rows.Scan(
 			&running.ID,
 			&running.SessionID,
@@ -238,10 +250,16 @@ func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.Execut
 			&running.WorktreeID,
 			&running.WorktreePath,
 			&running.WorktreeBranch,
+			&metadataJSON,
 			&running.CreatedAt,
 			&running.UpdatedAt,
 		); scanErr != nil {
 			return nil, scanErr
+		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
+				return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
+			}
 		}
 		results = append(results, running)
 	}
@@ -258,11 +276,12 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	running := &models.ExecutorRunning{}
 	var resumable int
 	var lastSeen sql.NullTime
+	var metadataJSON string
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
 		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
-		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message,
+		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 		       created_at, updated_at
 		FROM executors_running
 		WHERE session_id = ?
@@ -286,6 +305,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.WorktreeBranch,
 		&lastSeen,
 		&running.ErrorMessage,
+		&metadataJSON,
 		&running.CreatedAt,
 		&running.UpdatedAt,
 	)
@@ -298,6 +318,11 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 	running.Resumable = resumable == 1
 	if lastSeen.Valid {
 		running.LastSeenAt = &lastSeen.Time
+	}
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if jsonErr := json.Unmarshal([]byte(metadataJSON), &running.Metadata); jsonErr != nil {
+			return nil, fmt.Errorf("failed to deserialize executor running metadata: %w", jsonErr)
+		}
 	}
 	return running, nil
 }

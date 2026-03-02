@@ -13,11 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -176,7 +178,7 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "terminalId required for shell mode"})
 			return
 		}
-		if h.shouldUseWorkspaceShell(sessionID) {
+		if h.shouldUseWorkspaceShell(c.Request.Context(), sessionID) {
 			h.handleRemoteUserShellWS(c, sessionID, terminalID)
 			return
 		}
@@ -198,25 +200,68 @@ func (h *TerminalHandler) HandleTerminalWS(c *gin.Context) {
 	}
 }
 
-func (h *TerminalHandler) shouldUseWorkspaceShell(sessionID string) bool {
+func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID string) bool {
+	// Check in-memory execution first (fast path when execution is already running).
 	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !exists {
+	if exists {
+		if execution.RuntimeName == string(executor.NameSprites) {
+			return true
+		}
+		if execution.Metadata != nil {
+			if isRemote, ok := execution.Metadata[lifecycle.MetadataKeyIsRemote].(bool); ok && isRemote {
+				return true
+			}
+		}
 		return false
 	}
-	if execution.RuntimeName == "sprites" {
-		return true
+
+	// Execution not in memory — check DB records. After a backend restart the
+	// execution may not exist yet (resume in progress), but the session's
+	// executor type is persisted in the database.
+	return h.lifecycleMgr.IsRemoteSession(ctx, sessionID)
+}
+
+// waitForRemoteExecution polls the lifecycle manager for the session's execution,
+// waiting up to 30 seconds for it to become available. After a backend restart the
+// resume flow recreates the execution asynchronously; this bridges the gap so the
+// terminal doesn't fall back to a local shell.
+func (h *TerminalHandler) waitForRemoteExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, bool) {
+	// Fast path: execution already exists.
+	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
+		return execution, true
 	}
-	if execution.Metadata == nil {
-		return false
+
+	h.logger.Info("waiting for remote execution to become available",
+		zap.String("session_id", sessionID))
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-timer.C:
+			h.logger.Warn("timed out waiting for remote execution",
+				zap.String("session_id", sessionID))
+			return nil, false
+		case <-ticker.C:
+			if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
+				h.logger.Info("remote execution became available",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", execution.ID))
+				return execution, true
+			}
+		}
 	}
-	isRemote, ok := execution.Metadata[lifecycle.MetadataKeyIsRemote].(bool)
-	return ok && isRemote
 }
 
 func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, terminalID string) {
-	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	execution, exists := h.waitForRemoteExecution(c.Request.Context(), sessionID)
 	if !exists || execution.GetAgentCtlClient() == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "execution not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "remote execution not available"})
 		return
 	}
 	baseClient := execution.GetAgentCtlClient()

@@ -40,6 +40,7 @@ func (a *availabilityTestAgent) PermissionSettings() map[string]agents.Permissio
 }
 func (a *availabilityTestAgent) Runtime() *agents.RuntimeConfig { return nil }
 func (a *availabilityTestAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *availabilityTestAgent) InstallScript() string          { return "" }
 
 func (a *availabilityTestAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
 	a.mu.Lock()

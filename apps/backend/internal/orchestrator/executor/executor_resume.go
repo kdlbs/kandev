@@ -95,10 +95,22 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
+		Metadata:         resp.Metadata,
 	}
 	if existingRunning != nil {
 		running.ResumeToken = existingRunning.ResumeToken
 		running.LastMessageUUID = existingRunning.LastMessageUUID
+		if running.Metadata == nil && existingRunning.Metadata != nil {
+			filtered := make(map[string]interface{})
+			for k, v := range existingRunning.Metadata {
+				if lifecycle.ShouldPersistMetadataKey(k) {
+					filtered[k] = v
+				}
+			}
+			if len(filtered) > 0 {
+				running.Metadata = filtered
+			}
+		}
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after launch",
@@ -338,6 +350,20 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 		req.PreviousExecutionID = running.AgentExecutionID
 	}
 
+	// Carry forward only persistent metadata from the previous run.
+	// Keys not in lifecycle.ShouldPersistMetadataKey() are launch-time-only
+	// and are intentionally NOT carried forward (e.g., task_description).
+	if running.Metadata != nil {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		for k, v := range running.Metadata {
+			if _, exists := req.Metadata[k]; !exists && lifecycle.ShouldPersistMetadataKey(k) {
+				req.Metadata[k] = v
+			}
+		}
+	}
+
 	if running.ResumeToken != "" && startAgent {
 		req.ACPSessionID = running.ResumeToken
 		// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
@@ -346,7 +372,8 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 		req.TaskDescription = ""
 		e.logger.Info("found resume token for session resumption",
 			zap.String("task_id", task.ID),
-			zap.String("session_id", session.ID))
+			zap.String("session_id", session.ID),
+			zap.String("resume_token", running.ResumeToken))
 	} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task description.
 		req.TaskDescription = ""
@@ -452,10 +479,22 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 		WorktreeID:       resp.WorktreeID,
 		WorktreePath:     resp.WorktreePath,
 		WorktreeBranch:   resp.WorktreeBranch,
+		Metadata:         resp.Metadata,
 	}
 	if existingRunning != nil {
 		running.ResumeToken = existingRunning.ResumeToken
 		running.LastMessageUUID = existingRunning.LastMessageUUID
+		if running.Metadata == nil && existingRunning.Metadata != nil {
+			filtered := make(map[string]interface{})
+			for k, v := range existingRunning.Metadata {
+				if lifecycle.ShouldPersistMetadataKey(k) {
+					filtered[k] = v
+				}
+			}
+			if len(filtered) > 0 {
+				running.Metadata = filtered
+			}
+		}
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after resume",

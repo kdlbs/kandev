@@ -3,6 +3,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -65,6 +66,54 @@ const (
 	MetadataKeyGitUserName     = "git_user_name"
 	MetadataKeyGitUserEmail    = "git_user_email"
 )
+
+// persistentMetadataKeys lists metadata keys carried forward from a previous
+// ExecutorRunning record when a session is resumed. Keys not listed here
+// (e.g., task_description, session_id) are treated as launch-time-only and
+// are NOT copied on resume.
+var persistentMetadataKeys = map[string]bool{
+	// Sprites runtime
+	"sprite_name":       true,
+	"sprite_state":      true,
+	"sprite_created_at": true,
+	"local_port":        true,
+	"instance_port":     true,
+
+	// Executor type marker
+	MetadataKeyIsRemote: true,
+
+	// Executor profile / auth config
+	MetadataKeyCleanupScript:       true,
+	MetadataKeyRepoSetupScript:     true,
+	MetadataKeyRemoteAuthHome:      true,
+	MetadataKeyGitUserName:         true,
+	MetadataKeyGitUserEmail:        true,
+	"remote_credentials":           true,
+	"remote_auth_secrets":          true,
+	"executor_mcp_policy":          true,
+	"sprites_network_policy_rules": true,
+	"executor_profile_id":          true,
+}
+
+// persistentMetadataPrefixes lists key prefixes that should persist.
+// Any key starting with one of these prefixes is carried forward.
+var persistentMetadataPrefixes = []string{
+	"env_secret_id_", // Secret store UUIDs for profile env vars
+}
+
+// ShouldPersistMetadataKey returns true if the given metadata key should
+// be carried forward when resuming a session from an ExecutorRunning record.
+func ShouldPersistMetadataKey(key string) bool {
+	if persistentMetadataKeys[key] {
+		return true
+	}
+	for _, prefix := range persistentMetadataPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // RemoteStatus describes runtime health/details for remote executors.
 // It is intentionally generic so each executor can include extra details in Details.

@@ -101,6 +101,12 @@ var DefaultPlaceholders = []PlaceholderInfo{
 		ExecutorTypes: []string{"worktree"},
 	},
 	{
+		Key:           "kandev.agents.install",
+		Description:   "Pre-installs agent CLIs globally for all agents configured on the profile",
+		Example:       "npm install -g @anthropic-ai/claude-code@2.1.50",
+		ExecutorTypes: []string{"local_docker", "remote_docker", "sprites"},
+	},
+	{
 		Key:           "kandev.agentctl.install",
 		Description:   "Expands to full agentctl binary upload and install commands",
 		Example:       "# (multi-line: upload binary, chmod, verify)",

@@ -54,6 +54,7 @@ func (a *handlersTestAgent) PermissionSettings() map[string]agents.PermissionSet
 }
 func (a *handlersTestAgent) Runtime() *agents.RuntimeConfig { return nil }
 func (a *handlersTestAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *handlersTestAgent) InstallScript() string          { return "" }
 
 func (a *handlersTestAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
 	return &agents.DiscoveryResult{Available: true}, nil

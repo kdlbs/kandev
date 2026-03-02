@@ -14,6 +14,8 @@ var claudeCodeLogoLight []byte
 //go:embed logos/claude_code_dark.svg
 var claudeCodeLogoDark []byte
 
+const claudeCodePkg = "@anthropic-ai/claude-code@2.1.50"
+
 var (
 	_ Agent            = (*ClaudeCode)(nil)
 	_ PassthroughAgent = (*ClaudeCode)(nil)
@@ -79,7 +81,7 @@ func (a *ClaudeCode) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *ClaudeCode) BuildCommand(opts CommandOptions) Command {
-	b := Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.50",
+	b := Cmd("npx", "-y", claudeCodePkg,
 		"-p", "--output-format=stream-json", "--input-format=stream-json",
 		"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
 		"--setting-sources=user,project", "--verbose",
@@ -107,7 +109,7 @@ func (a *ClaudeCode) BuildCommand(opts CommandOptions) Command {
 func (a *ClaudeCode) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd: Cmd("npx", "-y", "@anthropic-ai/claude-code@2.1.50",
+		Cmd: Cmd("npx", "-y", claudeCodePkg,
 			"-p", "--output-format=stream-json", "--input-format=stream-json",
 			"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
 			"--setting-sources=user,project", "--verbose",
@@ -145,6 +147,10 @@ chmod 600 "${HOME}/.claude.json"`,
 			},
 		},
 	}
+}
+
+func (a *ClaudeCode) InstallScript() string {
+	return "npm install -g " + claudeCodePkg
 }
 
 func (a *ClaudeCode) PermissionSettings() map[string]PermissionSetting {

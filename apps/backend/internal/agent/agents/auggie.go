@@ -17,6 +17,8 @@ var auggieLogoLight []byte
 //go:embed logos/auggie_dark.svg
 var auggieLogoDark []byte
 
+const auggiePkg = "@augmentcode/auggie@0.16.2"
+
 var (
 	_ Agent            = (*Auggie)(nil)
 	_ PassthroughAgent = (*Auggie)(nil)
@@ -90,7 +92,7 @@ func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@augmentcode/auggie@0.16.2", "--acp").
+	return Cmd("npx", "-y", auggiePkg, "--acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
 		Resume(NewParam("--resume"), opts.SessionID, false).
 		Permissions("--permission", auggiePermTools, opts).
@@ -103,7 +105,7 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", "@augmentcode/auggie@0.16.2", "--acp").Build(),
+		Cmd:         Cmd("npx", "-y", auggiePkg, "--acp").Build(),
 		WorkingDir:  "/workspace",
 		RequiredEnv: []string{"AUGMENT_SESSION_AUTH"},
 		Env:         map[string]string{},
@@ -142,6 +144,10 @@ func (a *Auggie) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *Auggie) InstallScript() string {
+	return "npm install -g " + auggiePkg
 }
 
 func (a *Auggie) PermissionSettings() map[string]PermissionSetting {

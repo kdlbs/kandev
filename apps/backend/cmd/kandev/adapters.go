@@ -118,6 +118,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeID:       worktreeID,
 		WorktreePath:     worktreePath,
 		WorktreeBranch:   worktreeBranch,
+		Metadata:         execution.Metadata,
 	}, nil
 }
 
@@ -230,6 +231,7 @@ func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, recor
 			Runtime:          r.Runtime,
 			AgentExecutionID: r.AgentExecutionID,
 			ContainerID:      r.ContainerID,
+			Metadata:         r.Metadata,
 		}
 	}
 	a.mgr.PollRemoteStatusForRecords(ctx, lcRecords)

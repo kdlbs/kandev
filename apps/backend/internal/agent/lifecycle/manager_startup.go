@@ -36,7 +36,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	if execution.AgentCommand == "" {
+
+	// Check if we're reconnecting to an existing running agent process.
+	// When the existing process is still alive inside a remote executor (e.g., Sprites),
+	// we skip subprocess launch and go directly to ACP session initialization.
+	reuseExisting, _ := execution.Metadata["reuse_existing_process"].(bool)
+
+	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
 	}
 
@@ -47,25 +53,35 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-
-	m.logger.Warn("StartAgentProcess: task description resolved",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", execution.TaskID),
-		zap.Int("task_description_length", len(taskDescription)),
-		zap.String("agent_command", execution.AgentCommand),
-		zap.String("acp_session_id", execution.ACPSessionID))
-
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
 
-	bootCommand, err := m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy)
-	if err != nil {
-		return err
-	}
+	var bootCommand string
+	if reuseExisting {
+		// Agent subprocess is already running inside the remote executor.
+		// Skip configureAndStartAgent (which would spawn a conflicting subprocess)
+		// and go directly to ACP session initialization.
+		bootCommand = "reconnecting to running agent"
+		m.logger.Info("reusing existing agent process, skipping subprocess launch",
+			zap.String("execution_id", executionID),
+			zap.String("task_id", execution.TaskID))
+	} else {
+		m.logger.Info("StartAgentProcess: starting subprocess",
+			zap.String("execution_id", executionID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("agent_command", execution.AgentCommand),
+			zap.String("acp_session_id", execution.ACPSessionID))
 
-	m.logger.Info("agent process started",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", execution.TaskID),
-		zap.String("command", bootCommand))
+		var err error
+		bootCommand, err = m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy)
+		if err != nil {
+			return err
+		}
+
+		m.logger.Info("agent process started",
+			zap.String("execution_id", executionID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("command", bootCommand))
+	}
 
 	return m.initializeAgentSession(ctx, execution, bootCommand, agentDisplayName, taskDescription)
 }

@@ -141,11 +141,16 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	client := sprites.New(token, sprites.WithDisableControl())
 	reconnectRequired := req.PreviousExecutionID != ""
 	if reconnectRequired {
-		suffix := req.PreviousExecutionID
-		if len(suffix) > 12 {
-			suffix = suffix[:12]
+		// Prefer persisted sprite_name from metadata (survives restarts, avoids ID drift)
+		if name := getMetadataString(req.Metadata, "sprite_name"); name != "" {
+			spriteName = name
+		} else {
+			suffix := req.PreviousExecutionID
+			if len(suffix) > 12 {
+				suffix = suffix[:12]
+			}
+			spriteName = spritesNamePrefix + suffix
 		}
-		spriteName = spritesNamePrefix + suffix
 	}
 
 	r.logger.Info("creating sprite instance",
@@ -254,14 +259,36 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	report(step, 4)
 
 	// Step 5: Create agent instance (control server → per-instance server)
+	// On reconnect, check if the existing instance is still running first.
 	step = beginStep("Creating agent instance")
 	report(step, 5)
-	instancePort, err := r.createAgentInstance(ctx, sprite, req)
-	if err != nil {
-		completeStepError(&step, err.Error())
-		report(step, 5)
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
-		return nil, err
+	var instancePort int
+	var reusingExistingProcess bool
+	if reconnectRequired {
+		port, portErr := r.getExistingInstancePort(ctx, sprite, req.PreviousExecutionID)
+		if portErr == nil && port > 0 {
+			// Instance server is running. Now verify the agent subprocess is still alive.
+			// If only the instance HTTP server survived but the subprocess exited (e.g.,
+			// because the backend disconnected), we must create a fresh instance to avoid
+			// stale error events on the updates WebSocket stream.
+			if r.isAgentSubprocessRunning(ctx, sprite, port) {
+				instancePort = port
+				reusingExistingProcess = true
+			} else {
+				r.logger.Info("existing instance found but agent subprocess not running, creating fresh instance",
+					zap.String("instance_id", req.PreviousExecutionID),
+					zap.Int("port", port))
+			}
+		}
+	}
+	if instancePort == 0 {
+		instancePort, err = r.createAgentInstance(ctx, sprite, req)
+		if err != nil {
+			completeStepError(&step, err.Error())
+			report(step, 5)
+			r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+			return nil, err
+		}
 	}
 	completeStepSuccess(&step)
 	report(step, 5)
@@ -302,11 +329,12 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		Client:        agentctlClient,
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			"sprite_name":       spriteName,
-			"sprite_state":      strings.TrimSpace(spriteInfo.Status),
-			"sprite_created_at": spriteInfo.CreatedAt,
-			"local_port":        localPort,
-			MetadataKeyIsRemote: true,
+			"sprite_name":            spriteName,
+			"sprite_state":           strings.TrimSpace(spriteInfo.Status),
+			"sprite_created_at":      spriteInfo.CreatedAt,
+			"local_port":             localPort,
+			"reuse_existing_process": reusingExistingProcess,
+			MetadataKeyIsRemote:      true,
 		},
 	}, nil
 }
@@ -337,6 +365,9 @@ func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorIn
 	r.mu.RLock()
 	token := r.tokens[instance.InstanceID]
 	r.mu.RUnlock()
+	if token == "" {
+		token = r.resolveTokenFromMetadata(ctx, instance)
+	}
 	if token == "" {
 		r.logger.Warn("no cached API token for sprite instance, cannot destroy",
 			zap.String("instance_id", instance.InstanceID))
@@ -419,14 +450,32 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 	}
 	spriteName := strings.TrimSpace(getMetadataString(instance.Metadata, "sprite_name"))
 	if spriteName == "" {
-		return nil, fmt.Errorf("sprite name not available in metadata")
+		// No sprite name in metadata (pre-migration row or missing data).
+		// Return unknown status instead of error so the UI shows gray (stale)
+		// rather than red (error). The name gets populated on first successful resume.
+		return &RemoteStatus{
+			RuntimeName:   string(r.Name()),
+			State:         "unknown",
+			LastCheckedAt: time.Now().UTC(),
+		}, nil
 	}
 
 	r.mu.RLock()
 	token := r.tokens[instance.InstanceID]
 	r.mu.RUnlock()
 	if token == "" {
-		return nil, fmt.Errorf("sprites api token is not cached for instance")
+		token = r.resolveTokenFromMetadata(ctx, instance)
+	}
+	if token == "" {
+		// No cached token and secret store couldn't resolve it.
+		// Return stale/unknown status instead of error so the UI shows gray (stale)
+		// rather than red (error). The token gets cached on first lazy resume.
+		return &RemoteStatus{
+			RuntimeName:   string(r.Name()),
+			RemoteName:    spriteName,
+			State:         "unknown",
+			LastCheckedAt: time.Now().UTC(),
+		}, nil
 	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -445,6 +494,27 @@ func (r *SpritesExecutor) GetRemoteStatus(ctx context.Context, instance *Executo
 		CreatedAt:     nonZeroTimePtr(sprite.CreatedAt),
 		LastCheckedAt: time.Now().UTC(),
 	}, nil
+}
+
+// resolveTokenFromMetadata resolves the Sprites API token from the secret store
+// using the secret ID persisted in metadata. This handles the post-restart case
+// where the in-memory token cache is empty. On success, the token is cached.
+func (r *SpritesExecutor) resolveTokenFromMetadata(ctx context.Context, instance *ExecutorInstance) string {
+	if r.secretStore == nil || instance == nil {
+		return ""
+	}
+	secretID := getMetadataString(instance.Metadata, "env_secret_id_SPRITES_API_TOKEN")
+	if secretID == "" {
+		return ""
+	}
+	revealed, err := r.secretStore.Reveal(ctx, secretID)
+	if err != nil || revealed == "" {
+		return ""
+	}
+	r.mu.Lock()
+	r.tokens[instance.InstanceID] = revealed
+	r.mu.Unlock()
+	return revealed
 }
 
 func normalizeSpriteState(raw string) string {
@@ -481,6 +551,9 @@ func (r *SpritesExecutor) createAgentInstance(
 		ID:            req.InstanceID,
 		WorkspacePath: spritesWorkspacePath,
 		SessionID:     req.SessionID,
+		Protocol:      req.Protocol,
+		AgentType:     agentTypeFromReq(req),
+		McpServers:    toAgentctlMcpServers(req.McpServers),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
@@ -509,6 +582,94 @@ func (r *SpritesExecutor) createAgentInstance(
 		zap.Int("port", resp.Port))
 
 	return resp.Port, nil
+}
+
+// getExistingInstancePort queries agentctl inside the sprite to check if a
+// previously created instance is still running. Returns its port if found.
+func (r *SpritesExecutor) getExistingInstancePort(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+) (int, error) {
+	if instanceID == "" {
+		return 0, fmt.Errorf("no instance ID")
+	}
+
+	checkCmd := fmt.Sprintf(
+		"curl -sf http://localhost:%d/api/v1/instances/%s",
+		r.agentctlPort, instanceID)
+
+	stepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	out, err := sprite.CommandContext(stepCtx, "sh", "-c", checkCmd).Output()
+	if err != nil {
+		return 0, fmt.Errorf("instance %s not found: %w", instanceID, err)
+	}
+
+	var resp struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil || resp.Port == 0 {
+		return 0, fmt.Errorf("failed to parse instance response: %v", err)
+	}
+
+	r.logger.Info("reusing existing agent instance",
+		zap.String("instance_id", instanceID),
+		zap.Int("port", resp.Port))
+	return resp.Port, nil
+}
+
+// isAgentSubprocessRunning checks whether the agent subprocess (e.g., Claude Code)
+// is still alive inside an existing agentctl instance by querying the status endpoint.
+func (r *SpritesExecutor) isAgentSubprocessRunning(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instancePort int,
+) bool {
+	statusCmd := fmt.Sprintf("curl -sf http://localhost:%d/api/v1/status", instancePort)
+	stepCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	out, err := sprite.CommandContext(stepCtx, "sh", "-c", statusCmd).Output()
+	if err != nil {
+		return false
+	}
+
+	var status struct {
+		AgentStatus string `json:"agent_status"`
+	}
+	if json.Unmarshal(out, &status) != nil {
+		return false
+	}
+
+	alive := status.AgentStatus == "running" || status.AgentStatus == "ready"
+	r.logger.Debug("checked agent subprocess status",
+		zap.Int("instance_port", instancePort),
+		zap.String("agent_status", status.AgentStatus),
+		zap.Bool("alive", alive))
+	return alive
+}
+
+func agentTypeFromReq(req *ExecutorCreateRequest) string {
+	if req.AgentConfig != nil {
+		return req.AgentConfig.ID()
+	}
+	return ""
+}
+
+func toAgentctlMcpServers(servers []McpServerConfig) []agentctl.McpServerConfig {
+	result := make([]agentctl.McpServerConfig, len(servers))
+	for i, s := range servers {
+		result[i] = agentctl.McpServerConfig{
+			Name:    s.Name,
+			URL:     s.URL,
+			Type:    s.Type,
+			Command: s.Command,
+			Args:    s.Args,
+		}
+	}
+	return result
 }
 
 // uploadCredentials reads the remote_credentials metadata and uploads the selected
@@ -860,10 +1021,13 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		return ""
 	}
 
+	installScripts := r.collectAgentInstallScripts(req)
+
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(spritesWorkspacePath)).
 		WithProvider(scriptengine.AgentctlProvider(r.agentctlPort, spritesWorkspacePath)).
 		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
+		WithProvider(scriptengine.AgentInstallProvider(installScripts)).
 		WithProvider(scriptengine.RepositoryProvider(
 			req.Metadata,
 			req.Env,
@@ -872,6 +1036,61 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		))
 
 	return resolver.Resolve(script)
+}
+
+// collectAgentInstallScripts extracts agent IDs from the executor profile metadata
+// and the current task's agent config, then collects their install scripts.
+func (r *SpritesExecutor) collectAgentInstallScripts(req *ExecutorCreateRequest) []string {
+	agentIDs := map[string]bool{}
+
+	// Always include the current task's agent.
+	if req.AgentConfig != nil {
+		agentIDs[req.AgentConfig.ID()] = true
+	}
+
+	// Extract agent IDs from remote_credentials (e.g., "agent:claude-code:files:0").
+	if credsJSON, _ := req.Metadata["remote_credentials"].(string); credsJSON != "" {
+		var methodIDs []string
+		if json.Unmarshal([]byte(credsJSON), &methodIDs) == nil {
+			for _, id := range methodIDs {
+				if agentID := extractAgentID(id); agentID != "" {
+					agentIDs[agentID] = true
+				}
+			}
+		}
+	}
+
+	// Extract agent IDs from remote_auth_secrets (e.g., "agent:codex:env:OPENAI_API_KEY").
+	if secretsJSON, _ := req.Metadata["remote_auth_secrets"].(string); secretsJSON != "" {
+		var secretsMap map[string]string
+		if json.Unmarshal([]byte(secretsJSON), &secretsMap) == nil {
+			for methodID := range secretsMap {
+				if agentID := extractAgentID(methodID); agentID != "" {
+					agentIDs[agentID] = true
+				}
+			}
+		}
+	}
+
+	// Look up install scripts from the agent list.
+	var scripts []string
+	if r.agentList != nil {
+		for _, ag := range r.agentList.ListEnabled() {
+			if agentIDs[ag.ID()] {
+				scripts = append(scripts, ag.InstallScript())
+			}
+		}
+	}
+	return scripts
+}
+
+// extractAgentID extracts the agent ID from method IDs like "agent:claude-code:env:TOKEN".
+func extractAgentID(methodID string) string {
+	parts := strings.SplitN(methodID, ":", 3)
+	if len(parts) >= 2 && parts[0] == "agent" {
+		return parts[1]
+	}
+	return ""
 }
 
 func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Sprite) error {

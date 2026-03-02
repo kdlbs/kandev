@@ -291,17 +291,28 @@ function InstancesContent({
 }
 
 function HealthBadge({ status }: { status: string }) {
+  const label = status.charAt(0).toUpperCase() + status.slice(1);
   switch (status) {
-    case "healthy":
+    case "running":
       return (
         <Badge variant="default" className="bg-green-600">
-          Healthy
+          {label}
         </Badge>
       );
-    case "unhealthy":
-      return <Badge variant="destructive">Unhealthy</Badge>;
+    case "cold":
+      return (
+        <Badge variant="secondary" className="bg-blue-600 text-white">
+          {label}
+        </Badge>
+      );
+    case "starting":
+      return <Badge variant="secondary">{label}</Badge>;
+    case "stopped":
+    case "stopping":
+    case "failed":
+      return <Badge variant="destructive">{label}</Badge>;
     default:
-      return <Badge variant="secondary">Unknown</Badge>;
+      return <Badge variant="secondary">{label}</Badge>;
   }
 }
 

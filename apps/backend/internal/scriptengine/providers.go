@@ -145,6 +145,24 @@ func repoNameFromPath(repoPath string) string {
 	return repoPath
 }
 
+// AgentInstallProvider returns a placeholder with combined install scripts for multiple agents.
+func AgentInstallProvider(installScripts []string) PlaceholderProvider {
+	return func() map[string]string {
+		seen := map[string]bool{}
+		var lines []string
+		for _, s := range installScripts {
+			s = strings.TrimSpace(s)
+			if s != "" && !seen[s] {
+				seen[s] = true
+				lines = append(lines, s)
+			}
+		}
+		return map[string]string{
+			"kandev.agents.install": strings.Join(lines, "\n"),
+		}
+	}
+}
+
 func shellSingleQuote(value string) string {
 	return strings.ReplaceAll(value, "'", `'"'"'`)
 }

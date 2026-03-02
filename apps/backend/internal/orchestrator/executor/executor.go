@@ -137,6 +137,7 @@ type RemoteStatusPollRequest struct {
 	Runtime          string
 	AgentExecutionID string
 	ContainerID      string
+	Metadata         map[string]interface{}
 }
 
 // AgentProfileInfo contains resolved profile information
@@ -200,6 +201,7 @@ type LaunchAgentResponse struct {
 	WorktreeID       string
 	WorktreePath     string
 	WorktreeBranch   string
+	Metadata         map[string]interface{}
 }
 
 // TaskExecution tracks an active task execution

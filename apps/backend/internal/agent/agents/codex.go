@@ -14,6 +14,8 @@ var codexLogoLight []byte
 //go:embed logos/codex_dark.svg
 var codexLogoDark []byte
 
+const codexPkg = "@openai/codex@0.104.0"
+
 var (
 	_ Agent            = (*Codex)(nil)
 	_ PassthroughAgent = (*Codex)(nil)
@@ -74,7 +76,7 @@ func (a *Codex) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Codex) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@openai/codex@0.104.0", "app-server").
+	return Cmd("npx", "-y", codexPkg, "app-server").
 		Model(NewParam("-c", "model=\"{model}\""), opts.Model).
 		Settings(codexPermSettings, opts.PermissionValues).
 		Build()
@@ -85,7 +87,7 @@ func (a *Codex) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:      "kandev/multi-agent",
 		Tag:        "latest",
-		Cmd:        Cmd("npx", "-y", "@openai/codex@0.104.0", "app-server").Build(),
+		Cmd:        Cmd("npx", "-y", codexPkg, "app-server").Build(),
 		WorkingDir: "/workspace",
 		Env:        map[string]string{},
 		Mounts: []MountTemplate{
@@ -120,6 +122,10 @@ func (a *Codex) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *Codex) InstallScript() string {
+	return "npm install -g " + codexPkg
 }
 
 func (a *Codex) PermissionSettings() map[string]PermissionSetting {
