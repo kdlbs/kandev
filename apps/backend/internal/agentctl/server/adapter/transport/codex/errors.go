@@ -12,6 +12,10 @@ import (
 // TIMESTAMP ERROR module: error=HTTP_ERROR: Some("JSON")
 var codexErrorRegex = regexp.MustCompile(`error=(.+?):\s*Some\("(.+)"\)\s*$`)
 
+// codexLogErrorRegex matches general Codex ERROR log lines:
+// TIMESTAMP ERROR module::submodule: Human-readable error message
+var codexLogErrorRegex = regexp.MustCompile(`\S+\s+ERROR\s+\S+:\s+(.+)$`)
+
 // CodexParsedError contains the parsed error information from Codex stderr.
 type CodexParsedError struct {
 	// Message is the user-friendly error message
@@ -126,13 +130,46 @@ func ParseCodexStderrError(line string) *CodexParsedError {
 	return result
 }
 
+// ParseCodexLogError attempts to extract an error message from a general
+// Codex ERROR log line (e.g., auth failures). Returns empty string if
+// the line doesn't match or contains unhelpful content (JSON fragments).
+//
+// Example input:
+//
+//	2026-03-02T16:17:50Z ERROR codex_core::auth: Failed to refresh token: Please log out and sign in again.
+func ParseCodexLogError(line string) string {
+	matches := codexLogErrorRegex.FindStringSubmatch(line)
+	if len(matches) < 2 {
+		return ""
+	}
+	msg := strings.TrimSpace(matches[1])
+	// Skip JSON fragments from multi-line error output
+	if msg == "" || strings.HasPrefix(msg, "{") || strings.HasPrefix(msg, "}") || strings.HasPrefix(msg, "\"") {
+		return ""
+	}
+	// Skip lines that end with '{' (start of multi-line JSON block)
+	if strings.HasSuffix(msg, "{") {
+		return ""
+	}
+	return msg
+}
+
 // ParseCodexStderrLines attempts to parse Codex stderr lines and extract
 // error information. Searches from the end (most recent) first.
+// First tries the structured error=...Some("...") format, then falls back
+// to general ERROR log lines (e.g., auth failures).
 // Returns nil if no parseable error is found.
 func ParseCodexStderrLines(lines []string) *CodexParsedError {
+	// First pass: try structured error format (rate limits, API errors)
 	for i := len(lines) - 1; i >= 0; i-- {
 		if parsed := ParseCodexStderrError(lines[i]); parsed != nil {
 			return parsed
+		}
+	}
+	// Second pass: try general ERROR log lines (auth errors, etc.)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if msg := ParseCodexLogError(lines[i]); msg != "" {
+			return &CodexParsedError{Message: msg}
 		}
 	}
 	return nil
