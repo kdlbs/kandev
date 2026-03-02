@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -125,8 +126,12 @@ func run(cfg *config.Config, log *logger.Logger) {
 		}
 	}()
 
-	// Wait for shutdown signal
-	waitForShutdown(log, func(ctx context.Context) {
+	// Monitor parent liveness via inherited pipe (standalone mode only).
+	// Returns a channel that closes when the parent dies.
+	parentDied := monitorParentLiveness(log)
+
+	// Wait for shutdown signal (OS signal or parent death)
+	waitForShutdown(log, parentDied, func(ctx context.Context) {
 		// Flush pending traces before stopping instances
 		if err := shared.ShutdownTracing(ctx); err != nil {
 			log.Error("error shutting down tracing", zap.Error(err))
@@ -141,11 +146,24 @@ func run(cfg *config.Config, log *logger.Logger) {
 	})
 }
 
-// waitForShutdown waits for shutdown signal and calls cleanup
-func waitForShutdown(log *logger.Logger, cleanup func(ctx context.Context)) {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+// waitForShutdown waits for a shutdown trigger (OS signal or parent death) and
+// runs the cleanup function. parentDied may be nil when no parent monitor is active.
+func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, cleanup func(ctx context.Context)) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	if parentDied == nil {
+		// No parent monitor — wait for OS signal only.
+		sig := <-sigCh
+		log.Info("received signal", zap.String("signal", sig.String()))
+	} else {
+		select {
+		case sig := <-sigCh:
+			log.Info("received signal", zap.String("signal", sig.String()))
+		case <-parentDied:
+			log.Warn("parent process died, initiating shutdown")
+		}
+	}
 
 	log.Info("shutting down agentctl...")
 
@@ -155,4 +173,41 @@ func waitForShutdown(log *logger.Logger, cleanup func(ctx context.Context)) {
 	cleanup(ctx)
 
 	log.Info("agentctl stopped")
+}
+
+// monitorParentLiveness watches a pipe inherited from the parent process.
+// The parent (kandev backend) passes the read-end of a pipe via ExtraFiles
+// and sets KANDEV_PARENT_PIPE_FD to the FD number. A goroutine blocks on
+// reading the pipe. When the parent dies — even via SIGKILL — the kernel
+// closes the write-end, the read returns, and the returned channel is closed.
+// Returns nil when the env var is absent (Docker, manual start, remote executors).
+func monitorParentLiveness(log *logger.Logger) <-chan struct{} {
+	fdStr := os.Getenv("KANDEV_PARENT_PIPE_FD")
+	if fdStr == "" {
+		return nil
+	}
+
+	fd, err := strconv.Atoi(fdStr)
+	if err != nil {
+		log.Warn("invalid KANDEV_PARENT_PIPE_FD", zap.String("value", fdStr), zap.Error(err))
+		return nil
+	}
+
+	pipe := os.NewFile(uintptr(fd), "parent-liveness-pipe")
+	if pipe == nil {
+		log.Warn("failed to open parent liveness pipe", zap.Int("fd", fd))
+		return nil
+	}
+
+	log.Info("parent liveness monitor started", zap.Int("fd", fd))
+
+	ch := make(chan struct{})
+	go func() {
+		buf := make([]byte, 1)
+		_, _ = pipe.Read(buf) // blocks until pipe breaks
+		_ = pipe.Close()
+		close(ch)
+	}()
+
+	return ch
 }

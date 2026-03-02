@@ -52,6 +52,45 @@ function killProcess(proc: ChildProcess): Promise<void> {
 }
 
 /**
+ * Kills an entire process group. Used for the backend process which is spawned
+ * with `detached: true` so it becomes a process group leader. Sending signals
+ * to the negative PID targets all processes in that group (backend + agentctl).
+ * The 7s grace period gives agentctl time to cascade cleanup to agent process groups.
+ */
+function killProcessGroup(proc: ChildProcess): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (!proc.pid) {
+      resolve();
+      return;
+    }
+
+    const pid = proc.pid;
+
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      // Process group may already be gone
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // Already dead
+      }
+      resolve();
+    }, 7_000);
+
+    proc.on("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+/**
  * Worker-scoped fixture that spawns an isolated backend process and
  * a dedicated Next.js frontend. Each Playwright worker gets its own
  * backend on a unique port with an isolated HOME, database, and data
@@ -113,6 +152,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const backendProc: ChildProcess = spawn(KANDEV_BIN, [], {
         env: backendEnv as unknown as NodeJS.ProcessEnv,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true, // Own process group so we can kill backend + agentctl together
       });
 
       const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${backendPort}.log`) : null;
@@ -167,9 +207,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       try {
         await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir });
       } finally {
-        // Shutdown frontend first, then backend
+        // Shutdown frontend first (simple process), then backend (process group)
         await killProcess(frontendProc);
-        await killProcess(backendProc);
+        await killProcessGroup(backendProc);
 
         // Cleanup temp directory — ignore errors (backend may still hold files briefly)
         try {

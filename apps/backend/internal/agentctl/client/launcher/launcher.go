@@ -33,6 +33,11 @@ type Launcher struct {
 
 	// For clean shutdown
 	stopping bool
+
+	// Parent liveness pipe: write-end kept open by the launcher.
+	// When the backend dies (even SIGKILL), the kernel closes this FD,
+	// breaking the pipe. agentctl detects the break and self-terminates.
+	parentPipe *os.File
 }
 
 // Config holds configuration for the launcher.
@@ -144,8 +149,18 @@ func (l *Launcher) Start(ctx context.Context) error {
 
 	// Set process attributes:
 	// - Pdeathsig on Linux: kernel sends SIGTERM to child when parent dies.
-	// - Setpgid: create new process group so Ctrl+C doesn't propagate directly.
 	l.cmd.SysProcAttr = buildSysProcAttr()
+
+	// Parent liveness pipe: agentctl inherits the read-end (FD 3 via ExtraFiles)
+	// and blocks on it. When this process dies — even via SIGKILL — the kernel
+	// closes the write-end, breaking the pipe. agentctl detects the break and
+	// initiates graceful shutdown. This is the portable equivalent of Pdeathsig.
+	pipeRead, pipeWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create parent liveness pipe: %w", err)
+	}
+	l.cmd.ExtraFiles = []*os.File{pipeRead} // child FD 3
+	l.cmd.Env = append(l.cmd.Env, "KANDEV_PARENT_PIPE_FD=3")
 
 	// Capture stdout and stderr
 	stdout, err := l.cmd.StdoutPipe()
@@ -159,8 +174,15 @@ func (l *Launcher) Start(ctx context.Context) error {
 
 	// Start the process
 	if err := l.cmd.Start(); err != nil {
+		_ = pipeRead.Close()
+		_ = pipeWrite.Close()
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
+
+	// Close read-end in parent (child inherited it). Keep write-end open —
+	// it closes automatically when this process exits, signaling agentctl.
+	_ = pipeRead.Close()
+	l.parentPipe = pipeWrite
 
 	l.logger.Info("agentctl process started", zap.Int("pid", l.cmd.Process.Pid))
 
@@ -177,6 +199,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 		if killErr := l.cmd.Process.Kill(); killErr != nil {
 			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
 		}
+		l.closeParentPipeLocked()
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
 	}
 
@@ -208,6 +231,10 @@ func (l *Launcher) Stop(ctx context.Context) error {
 
 	l.logger.Info("stopping agentctl subprocess", zap.Int("pid", pid))
 
+	// Close the liveness pipe first — this signals agentctl that the parent
+	// is shutting down, complementing the SIGTERM that follows.
+	l.closeParentPipe()
+
 	// Send graceful stop signal (SIGTERM on Unix, interrupt on Windows)
 	if err := l.gracefulStop(pid); err != nil {
 		return err
@@ -228,6 +255,22 @@ func (l *Launcher) Stop(ctx context.Context) error {
 		case <-time.After(1 * time.Second):
 			return fmt.Errorf("agentctl did not exit after force kill")
 		}
+	}
+}
+
+// closeParentPipe closes and nils the parent liveness pipe if open.
+// Safe for concurrent use.
+func (l *Launcher) closeParentPipe() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.closeParentPipeLocked()
+}
+
+// closeParentPipeLocked is like closeParentPipe but assumes mu is already held.
+func (l *Launcher) closeParentPipeLocked() {
+	if l.parentPipe != nil {
+		_ = l.parentPipe.Close()
+		l.parentPipe = nil
 	}
 }
 

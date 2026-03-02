@@ -20,8 +20,6 @@ func (l *Launcher) gracefulStop(pid int) error {
 }
 
 // forceKill sends SIGKILL to the agentctl process.
-// agentctl shares the backend's process group, so we kill the single process
-// rather than the group (which would kill the backend itself).
 func (l *Launcher) forceKill(pid int) {
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
