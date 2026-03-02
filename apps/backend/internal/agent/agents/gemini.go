@@ -14,6 +14,8 @@ var geminiLogoLight []byte
 //go:embed logos/gemini_dark.svg
 var geminiLogoDark []byte
 
+const geminiPkg = "@google/gemini-cli@0.25.2"
+
 var (
 	_ Agent            = (*Gemini)(nil)
 	_ PassthroughAgent = (*Gemini)(nil)
@@ -89,7 +91,7 @@ func (a *Gemini) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@google/gemini-cli@0.25.2", "--experimental-acp").
+	return Cmd("npx", "-y", geminiPkg, "--experimental-acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
 		Settings(geminiPermSettings, opts.PermissionValues).
 		Build()
@@ -98,7 +100,7 @@ func (a *Gemini) BuildCommand(opts CommandOptions) Command {
 func (a *Gemini) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", "@google/gemini-cli@0.25.2", "--experimental-acp").Build(),
+		Cmd:            Cmd("npx", "-y", geminiPkg, "--experimental-acp").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -129,6 +131,10 @@ func (a *Gemini) RemoteAuth() *RemoteAuth {
 			},
 		},
 	}
+}
+
+func (a *Gemini) InstallScript() string {
+	return "npm install -g " + geminiPkg
 }
 
 func (a *Gemini) PermissionSettings() map[string]PermissionSetting {

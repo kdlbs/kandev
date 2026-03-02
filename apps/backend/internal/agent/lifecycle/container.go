@@ -89,18 +89,6 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		return "", nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
-	// Convert MCP server configs
-	var mcpServers []agentctl.McpServerConfig
-	for _, mcp := range config.McpServers {
-		mcpServers = append(mcpServers, agentctl.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-		})
-	}
-
 	// Create an instance via the control API (same flow as standalone mode)
 	agentType := ""
 	if config.AgentConfig != nil {
@@ -113,7 +101,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		AgentType:     agentType,
 		Env:           config.Credentials,
 		AutoStart:     false,
-		McpServers:    mcpServers,
+		McpServers:    config.McpServers,
 		SessionID:     config.SessionID,
 	}
 

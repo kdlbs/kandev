@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -11,7 +12,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -331,4 +336,114 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 			t.Fatalf("did not expect %q event on failed restart", events.AgentContextReset)
 		}
 	}
+}
+
+// --- IsRemoteSession tests ---
+
+type mockWorkspaceInfoProvider struct {
+	infos map[string]*WorkspaceInfo
+	err   error
+}
+
+func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context, _, sessionID string) (*WorkspaceInfo, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.infos[sessionID], nil
+}
+
+func TestIsRemoteSession(t *testing.T) {
+	t.Run("in-memory execution with sprites runtime", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-1",
+			SessionID:   "session-1",
+			RuntimeName: string(executor.NameSprites),
+			Status:      v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store}
+		require.True(t, mgr.IsRemoteSession(context.Background(), "session-1"))
+	})
+
+	t.Run("in-memory execution with is_remote metadata", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-2",
+			SessionID:   "session-2",
+			RuntimeName: string(executor.NameStandalone),
+			Status:      v1.AgentStatusRunning,
+			Metadata:    map[string]interface{}{MetadataKeyIsRemote: true},
+		})
+		mgr := &Manager{executionStore: store}
+		require.True(t, mgr.IsRemoteSession(context.Background(), "session-2"))
+	})
+
+	t.Run("in-memory execution with local runtime", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:          "exec-3",
+			SessionID:   "session-3",
+			RuntimeName: string(executor.NameStandalone),
+			Status:      v1.AgentStatusRunning,
+		})
+		mgr := &Manager{executionStore: store}
+		require.False(t, mgr.IsRemoteSession(context.Background(), "session-3"))
+	})
+
+	t.Run("not in memory, DB returns sprites executor type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-4": {ExecutorType: string(models.ExecutorTypeSprites)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.IsRemoteSession(context.Background(), "session-4"))
+	})
+
+	t.Run("not in memory, DB returns remote_docker executor type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-5": {ExecutorType: string(models.ExecutorTypeRemoteDocker)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.IsRemoteSession(context.Background(), "session-5"))
+	})
+
+	t.Run("not in memory, DB returns sprites runtime name", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-6": {RuntimeName: string(executor.NameSprites)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.True(t, mgr.IsRemoteSession(context.Background(), "session-6"))
+	})
+
+	t.Run("not in memory, DB returns local type", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-7": {ExecutorType: string(models.ExecutorTypeLocal)},
+			},
+		}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.False(t, mgr.IsRemoteSession(context.Background(), "session-7"))
+	})
+
+	t.Run("not in memory, DB error returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		provider := &mockWorkspaceInfoProvider{err: fmt.Errorf("db error")}
+		mgr := &Manager{executionStore: store, workspaceInfoProvider: provider}
+		require.False(t, mgr.IsRemoteSession(context.Background(), "session-8"))
+	})
+
+	t.Run("nil workspaceInfoProvider returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		mgr := &Manager{executionStore: store}
+		require.False(t, mgr.IsRemoteSession(context.Background(), "nonexistent"))
+	})
 }

@@ -16,6 +16,7 @@ import (
 const (
 	agentEventComplete = "complete"
 	agentEventError    = "error"
+	agentEventToolCall = "tool_call"
 )
 
 // buildTaskEventPayload builds the standard map payload for TaskUpdated events.
@@ -58,7 +59,9 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.
 // This is called from handleACPSessionCreated, handleSessionStatusEvent, and handleCompleteStreamEvent.
 // The optional lastMessageUUID is persisted alongside the token for --resume-session-at support.
-// The resume token is only stored for agents that support native session resume (ACP session/load).
+// The token is always stored. NativeSessionResume only gates ACP session/load vs session/new
+// in session.go — agents without native resume (e.g., Claude Code) use the token for their
+// own --resume CLI flag instead.
 func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSessionID, lastMessageUUID string, preloadedSession ...*models.TaskSession) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
@@ -75,17 +78,6 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 		}
 	}
 
-	// Clear the resume token for agents that don't support native session resume (ACP session/load).
-	// The ExecutorRunning record is still created (for worktree info etc.) but without a token,
-	// so the frontend won't attempt to auto-resume with a stale ACP session ID.
-	if session.AgentProfileID != "" {
-		profileInfo, profileErr := s.agentManager.ResolveAgentProfile(ctx, session.AgentProfileID)
-		if profileErr == nil && profileInfo != nil && !profileInfo.NativeSessionResume {
-			acpSessionID = ""
-			lastMessageUUID = ""
-		}
-	}
-
 	resumable := true
 	runtimeName := ""
 	if session.ExecutorID != "" {
@@ -93,6 +85,13 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 			resumable = executor.Resumable
 			runtimeName = string(executor.Type)
 		}
+	}
+
+	// Preserve existing metadata (e.g., sprite_name) from previous upsert by persistLaunchState.
+	// Without this, the full ON CONFLICT DO UPDATE in UpsertExecutorRunning would wipe metadata.
+	var existingMetadata map[string]interface{}
+	if existing, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && existing != nil {
+		existingMetadata = existing.Metadata
 	}
 
 	running := &models.ExecutorRunning{
@@ -107,6 +106,7 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, acpSe
 		LastMessageUUID:  lastMessageUUID,
 		AgentExecutionID: session.AgentExecutionID,
 		ContainerID:      session.ContainerID,
+		Metadata:         existingMetadata,
 	}
 	if len(session.Worktrees) > 0 {
 		running.WorktreeID = session.Worktrees[0].WorktreeID

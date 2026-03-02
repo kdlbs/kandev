@@ -369,21 +369,49 @@
 @keyframes chat-input-running-plan {
   0%,
   100% {
-    border-color: color-mix(in oklab, oklch(0.6 0.05 260) 40%, var(--border));
+    border-color: color-mix(in oklab, oklch(0.65 0.2 300) 40%, var(--border));
     box-shadow:
-      0 0 6px 1px color-mix(in oklab, oklch(0.6 0.05 260) 12%, transparent),
-      0 0 15px 3px color-mix(in oklab, oklch(0.6 0.05 260) 6%, transparent);
+      0 0 6px 1px color-mix(in oklab, oklch(0.65 0.2 300) 12%, transparent),
+      0 0 15px 3px color-mix(in oklab, oklch(0.65 0.2 300) 6%, transparent);
   }
   50% {
-    border-color: color-mix(in oklab, oklch(0.6 0.05 260) 70%, var(--border));
+    border-color: color-mix(in oklab, oklch(0.65 0.2 300) 70%, var(--border));
     box-shadow:
-      0 0 20px 4px color-mix(in oklab, oklch(0.6 0.05 260) 20%, transparent),
-      0 0 50px 8px color-mix(in oklab, oklch(0.6 0.05 260) 10%, transparent);
+      0 0 20px 4px color-mix(in oklab, oklch(0.65 0.2 300) 20%, transparent),
+      0 0 50px 8px color-mix(in oklab, oklch(0.65 0.2 300) 10%, transparent);
   }
 }
 
 .chat-input-running-plan {
   animation: chat-input-running-plan 3s ease-in-out infinite;
+}
+
+@keyframes chat-input-starting {
+  0%,
+  100% {
+    border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
+    box-shadow:
+      0 0 4px 1px color-mix(in oklab, var(--primary) 10%, transparent),
+      0 0 10px 2px color-mix(in oklab, var(--primary) 5%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, var(--primary) 60%, var(--border));
+    box-shadow:
+      0 0 12px 3px color-mix(in oklab, var(--primary) 15%, transparent),
+      0 0 30px 6px color-mix(in oklab, var(--primary) 8%, transparent);
+  }
+}
+
+.chat-input-starting {
+  animation: chat-input-starting 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-input-running,
+  .chat-input-running-plan,
+  .chat-input-starting {
+    animation: none;
+  }
 }
 
 @layer components {

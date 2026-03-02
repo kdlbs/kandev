@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getChatInputHeight, setChatInputHeight } from "@/lib/local-storage";
 
-const MIN_HEIGHT = 100;
-const DEFAULT_HEIGHT = 134;
-const MAX_ABSOLUTE = 450;
+const MIN_HEIGHT = 110;
+const DEFAULT_HEIGHT = 110;
+const MAX_ABSOLUTE = 400;
 
 function clampHeight(value: number): number {
   const maxHeight = Math.min(window.innerHeight * 0.6, MAX_ABSOLUTE);
@@ -20,6 +20,13 @@ function measureContentHeight(container: HTMLElement, content: HTMLElement): num
   const naturalHeight = content.scrollHeight;
   content.style.height = prev;
   return clampHeight(naturalHeight + chrome);
+}
+
+/** When the input grows, scroll the chat down so messages don't shift up. */
+function compensateChatScroll(delta: number) {
+  if (delta <= 0) return;
+  const el = document.querySelector<HTMLElement>(".chat-message-list");
+  if (el) el.scrollTop += delta;
 }
 
 export function useResizableInput(
@@ -104,8 +111,12 @@ export function useResizableInput(
     const container = containerRef.current;
     const content = getContentElement?.();
     if (!container || !content || isDragging.current) return;
-    const needed = measureContentHeight(container, content);
+    const raw = measureContentHeight(container, content);
+    // Never shrink below DEFAULT_HEIGHT during auto-expand;
+    // MIN_HEIGHT is only for manual drag-resize.
+    const needed = Math.max(raw, DEFAULT_HEIGHT);
     if (needed !== height) {
+      compensateChatScroll(needed - height);
       setHeight(needed);
       persistHeight(needed);
     }

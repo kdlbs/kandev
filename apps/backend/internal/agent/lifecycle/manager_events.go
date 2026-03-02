@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/events"
 )
 
 const toolStatusComplete = "complete"
@@ -69,14 +71,23 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	}
 }
 
+// extractErrorMessage returns the best error message from an agent event.
+// Priority: Error field > Text field > default message.
+func extractErrorMessage(event *agentctl.AgentEvent) string {
+	if event.Error != "" {
+		return event.Error
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	return "agent error completion"
+}
+
 // handleCompleteEventMarkState marks the execution state after a complete event:
 // failed+removed on error, ready on success.
 func (m *Manager) handleCompleteEventMarkState(execution *AgentExecution, event *agentctl.AgentEvent, isError bool) {
 	if isError {
-		errorMsg := "agent error completion"
-		if event.Error != "" {
-			errorMsg = event.Error
-		}
+		errorMsg := extractErrorMessage(event)
 		m.logger.Warn("error completion received, marking execution as failed",
 			zap.String("execution_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
@@ -106,10 +117,7 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	errorMsg := ""
 	if isError {
 		stopReason = "error"
-		errorMsg = "agent error completion"
-		if event.Error != "" {
-			errorMsg = event.Error
-		}
+		errorMsg = extractErrorMessage(event)
 	} else if event.Data != nil {
 		// Read StopReason from the complete event (set by ACP adapter from PromptResponse)
 		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
@@ -225,6 +233,29 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 	return event
 }
 
+// handleToolUpdateEvent stores completed tool results in session history.
+func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
+		if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
+			m.logger.Warn("failed to store tool result to history", zap.Error(err))
+		}
+	}
+}
+
+// handleErrorEvent processes the "error" agent event: flushes buffers, marks state as failed,
+// and signals prompt completion. The raw error event is not published to the frontend stream;
+// the agent failure path (handleAgentFailed) sets session FAILED with the error message.
+func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	m.flushMessageBuffer(execution)
+	m.logger.Error("agent error",
+		zap.String("execution_id", execution.ID),
+		zap.String("error", event.Error),
+		zap.String("text", event.Text),
+		zap.Any("data", event.Data))
+	m.handleCompleteEventMarkState(execution, &event, true)
+	handleCompleteEventSignal(execution, &event, true)
+}
+
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
 // Returns true because no further stream publishing is needed.
 func (m *Manager) handleContextWindowEvent(execution *AgentExecution, event agentctl.AgentEvent) {
@@ -255,12 +286,21 @@ func (m *Manager) handleAvailableCommandsEvent(execution *AgentExecution, event 
 	m.eventPublisher.PublishAvailableCommands(execution, event.AvailableCommands)
 }
 
-// handleAgentEvent processes incoming agent events from the agent
-func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	// Update last activity timestamp for stall detection
+// recordActivity updates the last-activity timestamp and, on the very first
+// event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
+func (m *Manager) recordActivity(execution *AgentExecution) {
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
+
+	execution.firstActivityOnce.Do(func() {
+		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
+	})
+}
+
+// handleAgentEvent processes incoming agent events from the agent
+func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	m.recordActivity(execution)
 
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
@@ -281,29 +321,15 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		event = m.handleToolCallEvent(execution, event)
 
 	case "tool_update":
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
-			if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
-				m.logger.Warn("failed to store tool result to history", zap.Error(err))
-			}
-		}
+		m.handleToolUpdateEvent(execution, event)
 
 	case "plan":
 		m.logger.Debug("agent plan update",
 			zap.String("execution_id", execution.ID))
 
 	case "error":
-		m.flushMessageBuffer(execution)
-		m.logger.Error("agent error",
-			zap.String("execution_id", execution.ID),
-			zap.String("error", event.Error),
-			zap.String("text", event.Text),
-			zap.Any("data", event.Data))
-		// Signal prompt completion as an error so waitForPromptDone unblocks
-		// and the session state transitions from RUNNING to FAILED.
-		m.handleCompleteEventMarkState(execution, &event, true)
-		handleCompleteEventSignal(execution, &event, true)
-		return // Don't publish raw error event to frontend stream; the agent failure
-		// path (handleAgentFailed) sets session FAILED with the error message.
+		m.handleErrorEvent(execution, event)
+		return
 
 	case "complete":
 		m.handleCompleteEvent(execution, &event)

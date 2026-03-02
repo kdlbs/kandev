@@ -259,7 +259,6 @@ type ChatInputAreaProps = {
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  isPanelFocused?: boolean;
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
 };
@@ -272,7 +271,6 @@ export function ChatInputArea({
   handleCancelTurn,
   showRequestChangesTooltip,
   onRequestChangesTooltipDismiss,
-  isPanelFocused,
   panelState,
   isSending,
 }: ChatInputAreaProps) {
@@ -317,7 +315,7 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      {agentMode && (
+      {agentMode && agentMode !== "default" && (
         <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
           <IconBrain className="h-3 w-3" />
           <span className="capitalize">{agentMode} mode</span>
@@ -357,7 +355,6 @@ export function ChatInputArea({
         onToggleContextFile={handleToggleContextFile}
         onAddContextFile={handleAddContextFile}
         todoItems={todoItems}
-        isPanelFocused={isPanelFocused}
         onImplementPlan={handleImplementPlan}
       />
     </div>

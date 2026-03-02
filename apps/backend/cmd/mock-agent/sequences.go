@@ -58,7 +58,13 @@ func emitThinkingBlock(enc *json.Encoder, thought, parentToolUseID string) {
 }
 
 // emitTextBlock emits an assistant message with a text content block.
+// Text always ends with a newline to match real agent streaming behavior,
+// which allows the lifecycle manager's message buffer to flush immediately
+// and publish "message_streaming" events for activity detection.
 func emitTextBlock(enc *json.Encoder, text, parentToolUseID string) {
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
 	_ = enc.Encode(AssistantMsg{
 		Type:            TypeAssistant,
 		ParentToolUseID: parentToolUseID,

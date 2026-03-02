@@ -81,18 +81,6 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
 
-	// Convert MCP server configs
-	var mcpServers []agentctl.McpServerConfig
-	for _, mcp := range req.McpServers {
-		mcpServers = append(mcpServers, agentctl.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-		})
-	}
-
 	// Create instance via control API
 	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
 	agentType := ""
@@ -107,7 +95,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		AgentType:     agentType,
 		Env:           env,
 		AutoStart:     false,
-		McpServers:    mcpServers,
+		McpServers:    req.McpServers,
 		SessionID:     req.SessionID,
 	}
 

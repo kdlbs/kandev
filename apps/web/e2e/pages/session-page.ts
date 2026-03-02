@@ -31,6 +31,14 @@ export class SessionPage {
     return this.sidebar.getByTestId(`sidebar-section-${label}`);
   }
 
+  /** Task title scoped to a specific sidebar section (Review, In Progress, Backlog). */
+  taskInSection(title: string, sectionLabel: string): Locator {
+    return this.sidebar
+      .getByTestId(`sidebar-section-${sectionLabel}`)
+      .locator("..")
+      .getByText(title, { exact: false });
+  }
+
   /** Agent STARTING or RUNNING status indicator. */
   agentStatus(): Locator {
     return this.page.getByRole("status", { name: /Agent is (starting|running)/ });
@@ -58,6 +66,28 @@ export class SessionPage {
    */
   planModeBadge(): Locator {
     return this.chat.getByText("Plan mode", { exact: true });
+  }
+
+  /**
+   * Delete a task via the sidebar context menu.
+   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
+   */
+  async deleteTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
+    await taskRow.hover();
+    await taskRow.getByRole("button", { name: "Task actions" }).click();
+    await this.page.getByRole("menuitem", { name: "Delete" }).click();
+  }
+
+  /**
+   * Archive a task via the sidebar context menu.
+   * Hovers to reveal the menu trigger, opens it, and clicks "Archive".
+   */
+  async archiveTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
+    await taskRow.hover();
+    await taskRow.getByRole("button", { name: "Task actions" }).click();
+    await this.page.getByRole("menuitem", { name: "Archive" }).click();
   }
 
   stepperStep(name: string): Locator {

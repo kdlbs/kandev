@@ -62,6 +62,7 @@ func (a *testAgent) Runtime() *agents.RuntimeConfig {
 	}
 }
 func (a *testAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *testAgent) InstallScript() string          { return "" }
 
 var (
 	_ agents.Agent            = (*testAgent)(nil)

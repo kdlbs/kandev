@@ -5,7 +5,7 @@ import { IconCloud, IconCloudOff } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
-type SessionStatusResponse = {
+type RemoteStatusData = {
   remote_name?: string;
   remote_state?: string;
   remote_created_at?: string;
@@ -18,7 +18,19 @@ type RemoteCloudTooltipProps = {
   sessionId?: string | null;
   fallbackName?: string | null;
   iconClassName?: string;
+  /** When provided, uses this data directly instead of fetching via WS on hover. */
+  status?: RemoteStatusData | null;
 };
+
+const CONNECTED_THRESHOLD_MS = 2 * 60 * 1000;
+
+function getCloudState(status: RemoteStatusData | null): "connected" | "error" | "stale" {
+  if (status?.remote_status_error) return "error";
+  if (!status?.remote_checked_at) return "stale";
+  const elapsed = Date.now() - new Date(status.remote_checked_at).getTime();
+  if (elapsed < CONNECTED_THRESHOLD_MS) return "connected";
+  return "stale";
+}
 
 function formatTimestamp(value?: string): string | null {
   if (!value) return null;
@@ -56,55 +68,62 @@ function RemoteCloudStatusContent({
   );
 }
 
+const CLOUD_STATE_CLASSES: Record<ReturnType<typeof getCloudState>, string> = {
+  error: "text-destructive",
+  connected: "text-emerald-500",
+  stale: "text-muted-foreground",
+};
+
 export function RemoteCloudTooltip({
   taskId,
   sessionId,
   fallbackName,
   iconClassName = "h-3.5 w-3.5",
+  status: externalStatus,
 }: RemoteCloudTooltipProps) {
+  const hasExternalStatus = externalStatus !== undefined;
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<SessionStatusResponse | null>(null);
+  const [fetchedStatus, setFetchedStatus] = useState<RemoteStatusData | null>(null);
   const [fetchedSessionId, setFetchedSessionId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (hasExternalStatus) return;
     if (!open || !sessionId || fetchedSessionId === sessionId) return;
 
     const client = getWebSocketClient();
     if (!client) return;
 
     client
-      .request<SessionStatusResponse>(
+      .request<RemoteStatusData>(
         "task.session.status",
         { task_id: taskId, session_id: sessionId },
         10000,
       )
-      .then((res) => setStatus(res))
+      .then((res) => setFetchedStatus(res))
       .catch(() => {})
       .finally(() => setFetchedSessionId(sessionId));
-  }, [open, fetchedSessionId, sessionId, taskId]);
+  }, [hasExternalStatus, open, fetchedSessionId, sessionId, taskId]);
 
+  const status = hasExternalStatus ? (externalStatus ?? null) : fetchedStatus;
   const remoteName = status?.remote_name ?? fallbackName ?? "Remote executor";
-  const hasError = Boolean(status?.remote_status_error);
-  const loading = Boolean(open && sessionId && fetchedSessionId !== sessionId);
-  const Icon = hasError ? IconCloudOff : IconCloud;
-  const iconClass = hasError
-    ? `${iconClassName} text-destructive`
-    : `${iconClassName} text-muted-foreground`;
-  const createdAt = formatTimestamp(status?.remote_created_at);
-  const checkedAt = formatTimestamp(status?.remote_checked_at);
+  const cloudState = getCloudState(status);
+  const loading = Boolean(
+    !hasExternalStatus && open && sessionId && fetchedSessionId !== sessionId,
+  );
+  const Icon = cloudState === "error" ? IconCloudOff : IconCloud;
 
   return (
     <Tooltip onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <span className="cursor-default">
-          <Icon className={iconClass} />
+          <Icon className={`${iconClassName} ${CLOUD_STATE_CLASSES[cloudState]}`} />
         </span>
       </TooltipTrigger>
       <RemoteCloudStatusContent
         remoteName={remoteName}
         remoteState={status?.remote_state}
-        createdAt={createdAt}
-        checkedAt={checkedAt}
+        createdAt={formatTimestamp(status?.remote_created_at)}
+        checkedAt={formatTimestamp(status?.remote_checked_at)}
         remoteStatusError={status?.remote_status_error}
         loading={loading}
       />

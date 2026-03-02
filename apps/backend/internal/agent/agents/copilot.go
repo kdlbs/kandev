@@ -14,6 +14,8 @@ var copilotLogoLight []byte
 //go:embed logos/copilot_dark.svg
 var copilotLogoDark []byte
 
+const copilotPkg = "@github/copilot@0.0.406"
+
 var (
 	_ Agent            = (*Copilot)(nil)
 	_ PassthroughAgent = (*Copilot)(nil)
@@ -87,7 +89,7 @@ func (a *Copilot) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Copilot) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@github/copilot@0.0.406", "--server", "--log-level", "error").
+	return Cmd("npx", "-y", copilotPkg, "--server", "--log-level", "error").
 		Model(NewParam("--model", "{model}"), opts.Model).
 		Settings(copilotPermSettings, opts.PermissionValues).
 		Build()
@@ -96,7 +98,7 @@ func (a *Copilot) BuildCommand(opts CommandOptions) Command {
 func (a *Copilot) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", "@github/copilot@0.0.406", "--server", "--log-level", "error").Build(),
+		Cmd:            Cmd("npx", "-y", copilotPkg, "--server", "--log-level", "error").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -112,6 +114,10 @@ func (a *Copilot) Runtime() *RuntimeConfig {
 }
 
 func (a *Copilot) RemoteAuth() *RemoteAuth { return nil }
+
+func (a *Copilot) InstallScript() string {
+	return "npm install -g " + copilotPkg
+}
 
 func (a *Copilot) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings

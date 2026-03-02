@@ -30,6 +30,7 @@ func (a *discoveryTestAgent) PermissionSettings() map[string]agents.PermissionSe
 }
 func (a *discoveryTestAgent) Runtime() *agents.RuntimeConfig { return nil }
 func (a *discoveryTestAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *discoveryTestAgent) InstallScript() string          { return "" }
 func (a *discoveryTestAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	return agents.NewCommand()
 }

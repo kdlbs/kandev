@@ -191,14 +191,7 @@ function ChatContent({ panelId }: { panelId: string }) {
     );
   }
 
-  return (
-    <TaskChatPanel
-      sessionId={sessionId}
-      onOpenFile={openFile}
-      onOpenFileAtLine={openFile}
-      isPanelFocused={false}
-    />
-  );
+  return <TaskChatPanel sessionId={sessionId} onOpenFile={openFile} onOpenFileAtLine={openFile} />;
 }
 
 function DiffViewerContent({

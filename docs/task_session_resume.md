@@ -305,7 +305,7 @@ The session is NOT marked as failed -- the user can send a new message to start 
 
 | Agent | NativeSessionResume | HistoryContextInjection | Notes |
 |-------|:---:|:---:|-------|
-| Claude Code | - | - | Uses `--resume` CLI flag for its own session restore |
+| Claude Code | - | - | Uses `--resume` CLI flag with stored resume token |
 | Codex | yes | - | ACP `session/load` restores context |
 | Copilot | yes | - | ACP `session/load` restores context |
 | Auggie | - | yes | Fresh start + history injection on first prompt |
@@ -325,7 +325,7 @@ Persists runtime state for a session across backend restarts:
 
 | Field | Purpose |
 |-------|---------|
-| `ResumeToken` | ACP session ID for native resume (`session/load`) |
+| `ResumeToken` | ACP session ID (used for `session/load` or `--resume` CLI flag) |
 | `LastMessageUUID` | For `--resume-session-at` flag |
 | `ContainerID` | Docker container ID (for recovery) |
 | `AgentctlURL` / `AgentctlPort` | agentctl connection info |
@@ -338,7 +338,7 @@ The resume token is stored/updated in `storeResumeToken()` (`internal/orchestrat
 - `handleSessionStatusEvent` -- on session status updates
 - `handleCompleteStreamEvent` -- on stream completion
 
-If the agent's profile does NOT have `NativeSessionResume`, the token is cleared to prevent stale resume attempts.
+The token is always stored regardless of `NativeSessionResume`. Agents with native resume use it for ACP `session/load`; others (e.g., Claude Code) use it for their `--resume` CLI flag.
 
 ---
 

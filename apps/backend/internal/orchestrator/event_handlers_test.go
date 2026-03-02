@@ -756,6 +756,93 @@ func TestCleanupAgentExecution_SkipsEmptyExecutionID(t *testing.T) {
 	}
 }
 
+func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ACP session skips on_turn_start", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnStart: []wfmodels.OnTurnStartAction{
+					{Type: wfmodels.OnTurnStartMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{isPassthrough: false}
+		svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		// Workflow step must remain step1 because on_turn_start is skipped for ACP sessions.
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step1" {
+			got := "<nil>"
+			if updated.WorkflowStepID != nil {
+				got = *updated.WorkflowStepID
+			}
+			t.Errorf("expected session workflow step to remain 'step1', got %s", got)
+		}
+	})
+
+	t.Run("passthrough session fires on_turn_start", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnStart: []wfmodels.OnTurnStartAction{
+					{Type: wfmodels.OnTurnStartMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		// Workflow step must move to step2 because passthrough sessions fire on_turn_start.
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if updated.WorkflowStepID == nil || *updated.WorkflowStepID != "step2" {
+			got := "<nil>"
+			if updated.WorkflowStepID != nil {
+				got = *updated.WorkflowStepID
+			}
+			t.Errorf("expected session workflow step to be 'step2', got %s", got)
+		}
+	})
+
+	t.Run("missing session_id is ignored", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		taskRepo := newMockTaskRepo()
+		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+		// Should not panic or error with empty session ID.
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: ""})
+	})
+}
+
 // waitForStopCall polls until the mock agent manager has received at least one
 // StopAgentWithReason call, or fails the test after a timeout.
 func waitForStopCall(t *testing.T, agentMgr *mockAgentManager) {

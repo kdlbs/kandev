@@ -304,27 +304,35 @@ function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolea
 
   const handleArchiveTask = useCallback(
     async (taskId: string) => {
+      // Capture active state before the async API call — the WS "task.updated"
+      // handler removes the archived task from kanbans before removeTaskFromBoard runs.
+      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+        store.getState().tasks;
       try {
         await archiveTaskById(taskId);
-        await removeTaskFromBoard(taskId);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
       } catch (error) {
         console.error("Failed to archive task:", error);
       }
     },
-    [archiveTaskById, removeTaskFromBoard],
+    [archiveTaskById, removeTaskFromBoard, store],
   );
 
   const handleDeleteTask = useCallback(
     async (taskId: string) => {
       setDeletingTaskId(taskId);
+      // Capture active state before the async API call — the WS "task.deleted"
+      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
+      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
+        store.getState().tasks;
       try {
         await deleteTaskById(taskId);
-        await removeTaskFromBoard(taskId);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, removeTaskFromBoard],
+    [deleteTaskById, removeTaskFromBoard, store],
   );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({

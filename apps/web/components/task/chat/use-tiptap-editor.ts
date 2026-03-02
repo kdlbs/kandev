@@ -56,7 +56,7 @@ const DynamicPlaceholder = Extension.create({
         key: new PluginKey("dynamicPlaceholder"),
         props: {
           decorations: ({ doc, selection }) => {
-            if (!editor.isEditable) return null;
+            if (!editor.isEditable && !editor.isEmpty) return null;
             const { anchor } = selection;
             const decorations: InstanceType<typeof Decoration>[] = [];
             const isEmptyDoc = editor.isEmpty;

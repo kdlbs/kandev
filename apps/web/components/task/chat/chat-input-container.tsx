@@ -15,6 +15,7 @@ import {
 } from "./chat-input-body";
 import type { ContextItem } from "@/lib/types/context";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -72,7 +73,6 @@ type ChatInputContainerProps = {
   onToggleContextFile?: (file: ContextFile) => void;
   onAddContextFile?: (file: ContextFile) => void;
   todoItems?: TodoItem[];
-  isPanelFocused?: boolean;
   onImplementPlan?: () => void;
 };
 
@@ -196,7 +196,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isStarting,
       isSending,
       isFailed = false,
-      isPanelFocused,
       showRequestChangesTooltip = false,
     } = props;
 
@@ -232,6 +231,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
+    const isUtilityConfigured = useIsUtilityConfigured();
     const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
       sessionId,
       taskTitle,
@@ -264,8 +264,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         containerRef={s.containerRef}
         height={s.height}
         resizeHandleProps={s.resizeHandleProps}
-        isPanelFocused={isPanelFocused}
-        isInputFocused={s.isInputFocused}
+        isStarting={isStarting}
         isAgentBusy={isAgentBusy}
         hasClarification={s.hasClarification}
         showRequestChangesTooltip={showRequestChangesTooltip}
@@ -273,10 +272,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
         contextAreaProps={buildContextAreaProps(s, p)}
-        editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: handleEnhancePrompt,
-          isEnhancingPrompt,
-        })}
+        editorAreaProps={buildEditorAreaProps(
+          s,
+          p,
+          isUtilityConfigured ? { onEnhancePrompt: handleEnhancePrompt, isEnhancingPrompt } : {},
+        )}
       />
     );
   },

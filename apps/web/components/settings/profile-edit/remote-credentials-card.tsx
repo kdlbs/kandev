@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
@@ -372,13 +373,20 @@ function EnvOnlySection({
   secrets: SecretListItem[];
 }) {
   return (
-    <InlineSecretSelect
-      secretId={secretId}
-      onSecretIdChange={onSecretIdChange}
-      secrets={secrets}
-      label={envMethod.env_var}
-      placeholder="Select or create a secret..."
-    />
+    <>
+      {envMethod.setup_hint && (
+        <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
+          <ReactMarkdown>{envMethod.setup_hint}</ReactMarkdown>
+        </div>
+      )}
+      <InlineSecretSelect
+        secretId={secretId}
+        onSecretIdChange={onSecretIdChange}
+        secrets={secrets}
+        label={envMethod.env_var}
+        placeholder="Select or create a secret..."
+      />
+    </>
   );
 }
 
@@ -389,7 +397,9 @@ function GhTokenOption({ method, isSelected }: { method: RemoteAuthMethod; isSel
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{method.label ?? "Copy token from local CLI"}</span>
         {method.setup_hint && (
-          <span className="text-xs text-muted-foreground">{method.setup_hint}</span>
+          <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
+            <ReactMarkdown>{method.setup_hint}</ReactMarkdown>
+          </div>
         )}
       </div>
     </label>
@@ -447,6 +457,11 @@ function EnvOption({
             Set <code className="text-[11px] bg-muted px-1 rounded">{method.env_var}</code> via a
             stored secret
           </span>
+          {method.setup_hint && (
+            <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
+              <ReactMarkdown>{method.setup_hint}</ReactMarkdown>
+            </div>
+          )}
         </div>
       </label>
       {isSelected && (

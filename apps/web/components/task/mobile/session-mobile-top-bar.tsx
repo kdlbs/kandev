@@ -2,16 +2,9 @@
 
 import { memo, useState } from "react";
 import Link from "next/link";
-import {
-  IconArrowLeft,
-  IconMenu2,
-  IconGitBranch,
-  IconCheck,
-  IconCloud,
-  IconCloudOff,
-} from "@tabler/icons-react";
+import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
@@ -24,6 +17,7 @@ import {
 } from "./session-mobile-top-bar-git-controls";
 
 type SessionMobileTopBarProps = {
+  taskId?: string | null;
   taskTitle?: string;
   sessionId?: string | null;
   baseBranch?: string;
@@ -67,49 +61,8 @@ function MobileTaskTitle({
   );
 }
 
-function RemoteExecutorCloudStatus({
-  isRemoteExecutor,
-  remoteExecutorName,
-  remoteExecutorType,
-  remoteState,
-  remoteCreatedAt,
-  remoteCheckedAt,
-  remoteStatusError,
-}: {
-  isRemoteExecutor?: boolean;
-  remoteExecutorType?: string | null;
-  remoteExecutorName?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
-}) {
-  if (!isRemoteExecutor) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex items-center px-1 cursor-default">
-          {remoteStatusError ? (
-            <IconCloudOff className="h-4 w-4 text-destructive" />
-          ) : (
-            <IconCloud className="h-4 w-4 text-muted-foreground" />
-          )}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="space-y-0.5">
-        <div className="font-medium">{remoteExecutorName ?? remoteExecutorType ?? "Remote"}</div>
-        {remoteState && <div>State: {remoteState}</div>}
-        {remoteCreatedAt && <div>Created: {new Date(remoteCreatedAt).toLocaleString()}</div>}
-        {remoteCheckedAt && <div>Last check: {new Date(remoteCheckedAt).toLocaleString()}</div>}
-        {remoteStatusError && (
-          <div className="text-destructive">Status failed: {remoteStatusError}</div>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 type MobileTopBarActionsProps = {
+  taskId?: string | null;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string | null;
   remoteExecutorName?: string | null;
@@ -133,6 +86,7 @@ type MobileTopBarActionsProps = {
 };
 
 function MobileTopBarActions({
+  taskId,
   isRemoteExecutor,
   remoteExecutorType,
   remoteExecutorName,
@@ -156,15 +110,21 @@ function MobileTopBarActions({
 }: MobileTopBarActionsProps) {
   return (
     <div className="flex items-center gap-1">
-      <RemoteExecutorCloudStatus
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorType={remoteExecutorType}
-        remoteExecutorName={remoteExecutorName}
-        remoteState={remoteState}
-        remoteCreatedAt={remoteCreatedAt}
-        remoteCheckedAt={remoteCheckedAt}
-        remoteStatusError={remoteStatusError}
-      />
+      {isRemoteExecutor && (
+        <RemoteCloudTooltip
+          taskId={taskId ?? ""}
+          sessionId={sessionId}
+          fallbackName={remoteExecutorName ?? remoteExecutorType}
+          iconClassName="h-4 w-4"
+          status={{
+            remote_name: remoteExecutorName ?? undefined,
+            remote_state: remoteState ?? undefined,
+            remote_created_at: remoteCreatedAt ?? undefined,
+            remote_checked_at: remoteCheckedAt ?? undefined,
+            remote_status_error: remoteStatusError ?? undefined,
+          }}
+        />
+      )}
       {showApproveButton && onApprove && (
         <Button
           size="sm"
@@ -195,6 +155,7 @@ function MobileTopBarActions({
 }
 
 export const SessionMobileTopBar = memo(function SessionMobileTopBar({
+  taskId,
   taskTitle,
   sessionId,
   baseBranch,
@@ -250,6 +211,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
         />
       </div>
       <MobileTopBarActions
+        taskId={taskId}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}

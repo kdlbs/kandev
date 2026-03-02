@@ -48,6 +48,11 @@ type Agent interface {
 	// RemoteAuth returns the auth methods this agent supports in remote environments.
 	// Returns nil if the agent has no remote auth configuration.
 	RemoteAuth() *RemoteAuth
+
+	// --- Installation ---
+	// InstallScript returns shell commands to pre-install the agent CLI in remote environments.
+	// Returns empty string if no installation is needed.
+	InstallScript() string
 }
 
 // InferenceAgent is an optional capability for agents that support one-shot LLM inference.

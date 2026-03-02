@@ -7,8 +7,6 @@ import {
   IconCopy,
   IconGitBranch,
   IconCheck,
-  IconCloud,
-  IconCloudOff,
   IconHome,
   IconSettings,
   IconPencil,
@@ -34,6 +32,7 @@ import { DocumentControls } from "@/components/task/document/document-controls";
 import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
+import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -110,6 +109,8 @@ const TaskTopBar = memo(function TaskTopBar({
   return (
     <header className="@container/topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
       <TopBarLeft
+        taskId={taskId}
+        activeSessionId={activeSessionId}
         taskTitle={taskTitle}
         repositoryName={repositoryName}
         displayBranch={displayBranch}
@@ -389,50 +390,10 @@ function BranchPathPopover({
   );
 }
 
-function RemoteExecutorIndicator({
-  isRemoteExecutor,
-  remoteExecutorName,
-  remoteExecutorType,
-  remoteState,
-  remoteCreatedAt,
-  remoteCheckedAt,
-  remoteStatusError,
-}: {
-  isRemoteExecutor?: boolean;
-  remoteExecutorName?: string | null;
-  remoteExecutorType?: string | null;
-  remoteState?: string | null;
-  remoteCreatedAt?: string | null;
-  remoteCheckedAt?: string | null;
-  remoteStatusError?: string | null;
-}) {
-  if (!isRemoteExecutor) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex items-center">
-          {remoteStatusError ? (
-            <IconCloudOff className="h-4 w-4 text-destructive" />
-          ) : (
-            <IconCloud className="h-4 w-4 text-muted-foreground" />
-          )}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="space-y-0.5">
-        <div className="font-medium">{remoteExecutorName ?? remoteExecutorType ?? "Remote"}</div>
-        {remoteState && <div>State: {remoteState}</div>}
-        {remoteCreatedAt && <div>Created: {new Date(remoteCreatedAt).toLocaleString()}</div>}
-        {remoteCheckedAt && <div>Last check: {new Date(remoteCheckedAt).toLocaleString()}</div>}
-        {remoteStatusError && (
-          <div className="text-destructive">Status failed: {remoteStatusError}</div>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 /** Left section: breadcrumbs, branch pill */
 function TopBarLeft({
+  taskId,
+  activeSessionId,
   taskTitle,
   repositoryName,
   displayBranch,
@@ -447,6 +408,8 @@ function TopBarLeft({
   remoteStatusError,
   onRenameBranch,
 }: {
+  taskId?: string | null;
+  activeSessionId?: string | null;
   taskTitle?: string;
   repositoryName?: string | null;
   displayBranch?: string;
@@ -511,15 +474,21 @@ function TopBarLeft({
         />
       </div>
 
-      <RemoteExecutorIndicator
-        isRemoteExecutor={isRemoteExecutor}
-        remoteExecutorName={remoteExecutorName}
-        remoteExecutorType={remoteExecutorType}
-        remoteState={remoteState}
-        remoteCreatedAt={remoteCreatedAt}
-        remoteCheckedAt={remoteCheckedAt}
-        remoteStatusError={remoteStatusError}
-      />
+      {isRemoteExecutor && (
+        <RemoteCloudTooltip
+          taskId={taskId ?? ""}
+          sessionId={activeSessionId}
+          fallbackName={remoteExecutorName ?? remoteExecutorType}
+          iconClassName="h-4 w-4"
+          status={{
+            remote_name: remoteExecutorName ?? undefined,
+            remote_state: remoteState ?? undefined,
+            remote_created_at: remoteCreatedAt ?? undefined,
+            remote_checked_at: remoteCheckedAt ?? undefined,
+            remote_status_error: remoteStatusError ?? undefined,
+          }}
+        />
+      )}
     </div>
   );
 }

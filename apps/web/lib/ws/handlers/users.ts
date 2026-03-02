@@ -26,6 +26,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           lspAutoStartLanguages: message.payload.lsp_auto_start_languages ?? [],
           lspAutoInstallLanguages: message.payload.lsp_auto_install_languages ?? [],
           savedLayouts: message.payload.saved_layouts ?? [],
+          defaultUtilityAgentId: message.payload.default_utility_agent_id || null,
           loaded: true,
         },
       }));

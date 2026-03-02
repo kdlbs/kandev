@@ -117,7 +117,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		"type":    claudecode.MessageTypeControlRequest,
 		"request": map[string]any{"subtype": claudecode.SubtypeInitialize, "hooks": hooks},
 	})
-	initResp, err := a.client.Initialize(ctx, 60*time.Second, hooks)
+	initResp, err := a.client.Initialize(ctx, 180*time.Second, hooks)
 	initSpan.End()
 
 	if err != nil {

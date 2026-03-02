@@ -130,6 +130,7 @@ type RemoteStatusPollRecord struct {
 	Runtime          string
 	AgentExecutionID string
 	ContainerID      string
+	Metadata         map[string]interface{}
 }
 
 // PollRemoteStatusForRecords performs a one-time remote status poll for executor records
@@ -157,6 +158,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 			SessionID:   rec.SessionID,
 			RuntimeName: rec.Runtime,
 			ContainerID: rec.ContainerID,
+			Metadata:    rec.Metadata,
 		}
 		status, statusErr := provider.GetRemoteStatus(ctx, instance)
 		if statusErr != nil {

@@ -94,7 +94,7 @@ function SubmitButton({
           size="icon"
           className={cn(
             "h-7 w-7 rounded-full cursor-pointer",
-            planModeEnabled && "bg-slate-600 hover:bg-slate-500",
+            planModeEnabled && "bg-violet-600 hover:bg-violet-500",
           )}
           disabled={isDisabled}
           onClick={onSubmit}
@@ -130,7 +130,7 @@ function PlanToggleButton({
           size="sm"
           className={cn(
             "h-7 gap-1.5 px-2 hover:bg-muted/40 cursor-pointer",
-            planModeEnabled && planModeAvailable && "bg-slate-500/15 text-slate-400",
+            planModeEnabled && planModeAvailable && "bg-violet-500/15 text-violet-400",
           )}
           onClick={() => onPlanModeChange(!planModeEnabled)}
         >
@@ -150,7 +150,7 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-slate-400"
+          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 text-violet-400"
           onClick={onClick}
         >
           <IconRocket className="h-4 w-4" />

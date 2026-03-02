@@ -36,7 +36,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "thinking_streaming":
 		s.handleThinkingStreamingEvent(ctx, payload)
 
-	case "tool_call":
+	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
@@ -329,7 +329,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // goroutine may have changed the state in the DB. The guards are best-effort to avoid
 // unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) {
-
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -510,6 +509,10 @@ func (s *Service) handleAvailableCommandsEvent(ctx context.Context, payload *lif
 func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
+		return
+	}
+	// Don't broadcast "default" mode — it's the baseline state, not worth sending.
+	if payload.Data.CurrentModeID == "default" {
 		return
 	}
 	eventPayload := lifecycle.SessionModeEventPayload{

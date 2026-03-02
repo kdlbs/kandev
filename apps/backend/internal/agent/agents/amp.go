@@ -14,6 +14,8 @@ var ampLogoLight []byte
 //go:embed logos/amp_dark.svg
 var ampLogoDark []byte
 
+const ampPkg = "@sourcegraph/amp@latest"
+
 var (
 	_ Agent            = (*Amp)(nil)
 	_ PassthroughAgent = (*Amp)(nil)
@@ -32,7 +34,7 @@ func NewAmp() *Amp {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", "@sourcegraph/amp@latest"),
+				PassthroughCmd: NewCommand("npx", "-y", ampPkg),
 				ModelFlag:      NewParam("-m", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -87,7 +89,7 @@ func (a *Amp) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Amp) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input").
+	return Cmd("npx", "-y", ampPkg, "--execute", "--stream-json", "--stream-json-input").
 		Model(NewParam("-m", "{model}"), opts.Model).
 		Settings(ampPermSettings, opts.PermissionValues).
 		Build()
@@ -96,7 +98,7 @@ func (a *Amp) BuildCommand(opts CommandOptions) Command {
 func (a *Amp) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", "@sourcegraph/amp@latest", "--execute", "--stream-json", "--stream-json-input").Build(),
+		Cmd:            Cmd("npx", "-y", ampPkg, "--execute", "--stream-json", "--stream-json-input").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -105,13 +107,17 @@ func (a *Amp) Runtime() *RuntimeConfig {
 		SessionConfig: SessionConfig{
 			CanRecover:         &canRecover,
 			SessionDirTemplate: "{home}/.config/amp",
-			ForkSessionCmd:     Cmd("npx", "-y", "@sourcegraph/amp@latest", "threads", "fork").Build(),
-			ContinueSessionCmd: Cmd("npx", "-y", "@sourcegraph/amp@latest", "threads", "continue", "--execute", "--stream-json", "--stream-json-input").Build(),
+			ForkSessionCmd:     Cmd("npx", "-y", ampPkg, "threads", "fork").Build(),
+			ContinueSessionCmd: Cmd("npx", "-y", ampPkg, "threads", "continue", "--execute", "--stream-json", "--stream-json-input").Build(),
 		},
 	}
 }
 
 func (a *Amp) RemoteAuth() *RemoteAuth { return nil }
+
+func (a *Amp) InstallScript() string {
+	return "npm install -g " + ampPkg
+}
 
 func (a *Amp) PermissionSettings() map[string]PermissionSetting {
 	return ampPermSettings
