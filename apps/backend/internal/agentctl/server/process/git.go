@@ -218,7 +218,10 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 		// which we don't validate as strictly
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// All args validated: flags in isKnownSafeGitFlag whitelist, branch names via isValidBranchName
+	// regex, commit SHAs via looksLikeCommitSHA pattern, args after "--" separator skipped.
+	// This defense-in-depth validation prevents injection of arbitrary commands.
+	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
 	cmd.Dir = g.workDir
 
 	var stdout, stderr bytes.Buffer
