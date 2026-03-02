@@ -365,7 +365,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 		e.logger.Info("found resume token for session resumption",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
-			zap.String("resume_token", running.ResumeToken))
+			zap.Bool("has_resume_token", running.ResumeToken != ""))
 	} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task description.
 		req.TaskDescription = ""

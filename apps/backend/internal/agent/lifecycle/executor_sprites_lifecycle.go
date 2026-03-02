@@ -24,6 +24,9 @@ func (r *SpritesExecutor) reconnectSprite(ctx context.Context, client *sprites.C
 }
 
 func (r *SpritesExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, _ bool) error {
+	if instance == nil {
+		return nil
+	}
 	spriteName := getMetadataString(instance.Metadata, "sprite_name")
 	if spriteName == "" {
 		return nil
@@ -203,6 +206,7 @@ func (r *SpritesExecutor) cleanupOnFailure(_ context.Context, sprite *sprites.Sp
 		r.closeProxySession(proxy)
 		delete(r.proxies, instanceID)
 	}
+	delete(r.tokens, instanceID)
 	r.mu.Unlock()
 
 	if !destroySprite {
