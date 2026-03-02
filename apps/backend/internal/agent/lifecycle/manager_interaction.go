@@ -367,22 +367,33 @@ func (m *Manager) ListExecutions() []*AgentExecution {
 
 // IsAgentRunningForSession checks if an agent process is running or starting for a session.
 //
-// This probes agentctl's status endpoint to verify the agent process state. Returns true if:
+// For passthrough sessions (direct PTY mode), it checks whether the PTY process is alive
+// in the InteractiveRunner. For ACP sessions, it probes agentctl's status endpoint.
+//
+// Returns true if:
+//   - Passthrough process is alive in the InteractiveRunner
 //   - Agent status is "running" (actively processing prompts)
 //   - Agent status is "starting" (process launched but not yet ready)
 //
 // Returns false if:
 //   - No execution exists for this session
+//   - Passthrough process ID is set but process is not alive
 //   - agentctl client is not available
 //   - Status check fails (network/timeout error)
 //   - Agent is in any other state (stopped, failed, etc.)
-//
-// Note: The name "IsAgentRunning" is slightly misleading - it includes "starting" state.
-// Use this to check if an agent subprocess exists for the session, regardless of ready state.
 func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists {
+		return false
+	}
+
+	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
+	// bypassing agentctl's ACP protocol. Check the process directly.
+	if execution.PassthroughProcessID != "" {
+		if runner := m.GetInteractiveRunner(); runner != nil {
+			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID)
+		}
 		return false
 	}
 

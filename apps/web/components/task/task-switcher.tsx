@@ -91,7 +91,7 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   return (
     <div
       data-testid={`sidebar-section-${label}`}
-      className="flex items-center justify-between px-3 py-1.5 bg-foreground/[0.03]"
+      className="flex items-center justify-between px-3 py-1.5 bg-background"
     >
       <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
         {icon && <icon.Icon className={`h-3 w-3 ${icon.className}`} />}

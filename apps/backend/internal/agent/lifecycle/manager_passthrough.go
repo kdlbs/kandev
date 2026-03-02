@@ -486,10 +486,10 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 	const restartDelay = 500 * time.Millisecond
 	const cleanupDelay = 100 * time.Millisecond // Wait for old process cleanup
 
+	sessionID := execution.SessionID
+
 	// Wait a bit for the old process to be cleaned up from the process map
 	time.Sleep(cleanupDelay)
-
-	sessionID := execution.SessionID
 
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
