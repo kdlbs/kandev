@@ -99,6 +99,24 @@ func looksLikeCommitSHA(arg string) bool {
 	return true
 }
 
+// validateBranchReference validates a branch reference like "origin/branch".
+// Returns an error if the reference contains invalid branch or remote names.
+func validateBranchReference(arg string) error {
+	parts := strings.SplitN(arg, "/", 2)
+	if len(parts) != 2 {
+		return nil // Not a reference format
+	}
+
+	remote, branch := parts[0], parts[1]
+	if !isValidBranchName(remote) {
+		return fmt.Errorf("invalid remote name in reference '%s'", arg)
+	}
+	if !isValidBranchName(branch) {
+		return fmt.Errorf("invalid branch name in reference '%s'", arg)
+	}
+	return nil
+}
+
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
 	Success       bool     `json:"success"`
@@ -173,18 +191,14 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 		// Validate branch references (e.g., "origin/branch", "upstream/main")
 		// This provides defense-in-depth even though branches are validated at call sites
 		if strings.Contains(arg, "/") {
-			parts := strings.SplitN(arg, "/", 2)
-			if len(parts) == 2 {
-				remote, branch := parts[0], parts[1]
-				// Validate both remote and branch parts
-				if !isValidBranchName(remote) {
-					return "", fmt.Errorf("invalid remote name in reference '%s'", arg)
-				}
-				if !isValidBranchName(branch) {
-					return "", fmt.Errorf("invalid branch name in reference '%s'", arg)
-				}
+			if err := validateBranchReference(arg); err != nil {
+				return "", err
 			}
-		} else if isValidBranchName(arg) {
+			continue
+		}
+
+		// Validate standalone branch names
+		if isValidBranchName(arg) {
 			// Standalone arg that matches branch name pattern - validated and safe
 			continue
 		}
