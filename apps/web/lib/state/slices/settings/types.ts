@@ -114,6 +114,7 @@ export type UserSettingsState = {
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
   savedLayouts: SavedLayout[];
+  defaultUtilityAgentId: string | null;
   loaded: boolean;
 };
 

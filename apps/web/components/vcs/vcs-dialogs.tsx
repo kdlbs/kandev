@@ -26,6 +26,7 @@ import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-sta
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useToast } from "@/components/toast-provider";
 import type { FileInfo } from "@/lib/state/slices";
 
@@ -408,35 +409,13 @@ function usePRDialogState(): UsePRDialogReturn {
   return { open, setOpen, title, setTitle, body, setBody, draft, setDraft, openDialog };
 }
 
-export function VcsDialogsProvider({
-  sessionId,
-  baseBranch,
-  taskTitle,
-  displayBranch,
-  children,
-}: VcsDialogsProviderProps) {
-  const cs = useCommitDialogState();
-  const ps = usePRDialogState();
-  const { toast } = useToast();
-  const gitWithFeedback = useGitWithFeedback();
-  const gitStatus = useSessionGitStatus(sessionId);
-  const { commit, createPR, isLoading: isGitLoading } = useGitOperations(sessionId);
-  const {
-    isGeneratingCommitMessage,
-    isGeneratingPRDescription,
-    generateCommitMessage,
-    generatePRDescription,
-  } = useUtilityAgentGenerator({ sessionId, taskTitle });
-  const fileSummary = computeFileSummary(gitStatus?.files);
-
-  const handleCommit = useCallback(async () => {
-    if (!cs.message.trim()) return;
-    cs.setOpen(false);
-    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
-    cs.setMessage("");
-  }, [cs, gitWithFeedback, commit]);
-
-  const handleCreatePR = useCallback(async () => {
+function useCreatePRHandler(
+  ps: UsePRDialogReturn,
+  baseBranch: string | undefined,
+  createPR: ReturnType<typeof useGitOperations>["createPR"],
+  toast: ReturnType<typeof useToast>["toast"],
+) {
+  return useCallback(async () => {
     if (!ps.title.trim()) return;
     ps.setOpen(false);
     try {
@@ -466,6 +445,38 @@ export function VcsDialogsProvider({
     ps.setTitle("");
     ps.setBody("");
   }, [ps, baseBranch, createPR, toast]);
+}
+
+export function VcsDialogsProvider({
+  sessionId,
+  baseBranch,
+  taskTitle,
+  displayBranch,
+  children,
+}: VcsDialogsProviderProps) {
+  const cs = useCommitDialogState();
+  const ps = usePRDialogState();
+  const { toast } = useToast();
+  const gitWithFeedback = useGitWithFeedback();
+  const gitStatus = useSessionGitStatus(sessionId);
+  const { commit, createPR, isLoading: isGitLoading } = useGitOperations(sessionId);
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const {
+    isGeneratingCommitMessage,
+    isGeneratingPRDescription,
+    generateCommitMessage,
+    generatePRDescription,
+  } = useUtilityAgentGenerator({ sessionId, taskTitle });
+  const fileSummary = computeFileSummary(gitStatus?.files);
+
+  const handleCommit = useCallback(async () => {
+    if (!cs.message.trim()) return;
+    cs.setOpen(false);
+    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
+    cs.setMessage("");
+  }, [cs, gitWithFeedback, commit]);
+
+  const handleCreatePR = useCreatePRHandler(ps, baseBranch, createPR, toast);
 
   const contextValue = useMemo(
     () => ({
@@ -488,8 +499,10 @@ export function VcsDialogsProvider({
         onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
-        onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
-        isGenerating={isGeneratingCommitMessage}
+        onGenerateMessage={
+          isUtilityConfigured ? () => generateCommitMessage(cs.setMessage) : undefined
+        }
+        isGenerating={isUtilityConfigured ? isGeneratingCommitMessage : undefined}
       />
       <PRDialog
         open={ps.open}
@@ -504,8 +517,10 @@ export function VcsDialogsProvider({
         onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
-        onGenerateDescription={() => generatePRDescription(ps.setBody)}
-        isGenerating={isGeneratingPRDescription}
+        onGenerateDescription={
+          isUtilityConfigured ? () => generatePRDescription(ps.setBody) : undefined
+        }
+        isGenerating={isUtilityConfigured ? isGeneratingPRDescription : undefined}
       />
     </VcsDialogsContext.Provider>
   );

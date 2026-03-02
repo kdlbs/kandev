@@ -352,6 +352,7 @@ export type UserSettingsUpdatedPayload = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   saved_layouts?: SavedLayout[];
+  default_utility_agent_id?: string;
   updated_at?: string;
 };
 

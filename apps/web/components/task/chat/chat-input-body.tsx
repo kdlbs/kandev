@@ -176,8 +176,7 @@ export type ChatInputBodyProps = {
   containerRef: React.RefObject<HTMLDivElement | null>;
   height: React.CSSProperties["height"];
   resizeHandleProps: { onMouseDown: (e: React.MouseEvent) => void; onDoubleClick: () => void };
-  isPanelFocused: boolean | undefined;
-  isInputFocused: boolean;
+  isStarting: boolean;
   isAgentBusy: boolean;
   hasClarification: boolean;
   showRequestChangesTooltip: boolean;
@@ -192,8 +191,7 @@ export function ChatInputBody({
   containerRef,
   height,
   resizeHandleProps,
-  isPanelFocused,
-  isInputFocused,
+  isStarting,
   isAgentBusy,
   hasClarification,
   showRequestChangesTooltip,
@@ -204,28 +202,32 @@ export function ChatInputBody({
   editorAreaProps,
 }: ChatInputBodyProps) {
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "relative flex flex-col border rounded ",
-        "bg-background border-border",
-        isAgentBusy && !planModeEnabled && "chat-input-running",
-        isAgentBusy && planModeEnabled && "chat-input-running-plan",
-        planModeEnabled && !isAgentBusy && "border-slate-400/50",
-        hasClarification && "border-sky-400/50",
-        showRequestChangesTooltip && "animate-pulse border-orange-500",
-        hasPendingComments && "border-amber-500/50",
-      )}
-      style={{ height }}
-    >
+    <div className="relative">
       <ResizeHandle
-        visible={isPanelFocused || isInputFocused}
         planModeEnabled={planModeEnabled}
+        isAgentBusy={isAgentBusy}
+        isStarting={isStarting}
         {...resizeHandleProps}
       />
-      <ChatInputFocusHint visible={showFocusHint} />
-      <ChatInputContextArea {...contextAreaProps} />
-      <ChatInputEditorArea {...editorAreaProps} />
+      <div
+        ref={containerRef}
+        className={cn(
+          "flex flex-col overflow-hidden border rounded ",
+          "bg-background border-border",
+          isStarting && !isAgentBusy && "chat-input-starting",
+          isAgentBusy && !planModeEnabled && "chat-input-running",
+          isAgentBusy && planModeEnabled && "chat-input-running-plan",
+          planModeEnabled && !isAgentBusy && "border-slate-400/50",
+          hasClarification && "border-sky-400/50",
+          showRequestChangesTooltip && "animate-pulse border-orange-500",
+          hasPendingComments && "border-amber-500/50",
+        )}
+        style={{ height }}
+      >
+        <ChatInputFocusHint visible={showFocusHint} />
+        <ChatInputContextArea {...contextAreaProps} />
+        <ChatInputEditorArea {...editorAreaProps} />
+      </div>
     </div>
   );
 }

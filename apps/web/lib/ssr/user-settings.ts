@@ -16,6 +16,7 @@ export function buildCoreFields(s: UserSettingsData) {
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: s.release_notes_last_seen_version || null,
     savedLayouts: s.saved_layouts ?? [],
+    defaultUtilityAgentId: s.default_utility_agent_id || null,
   };
 }
 
@@ -49,6 +50,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       showReleaseNotification: true,
       releaseNotesLastSeenVersion: null,
       savedLayouts: [] as SavedLayout[],
+      defaultUtilityAgentId: null,
       ...buildLspFields(undefined),
       loaded: false,
     };

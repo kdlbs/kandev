@@ -60,7 +60,9 @@ function getInputPlaceholder(
   placeholder: string | undefined,
   isAgentBusy: boolean,
   hasAgentCommands: boolean,
+  isStarting: boolean,
 ): string {
+  if (isStarting) return "Preparing workspace...";
   if (placeholder) return placeholder;
   if (isAgentBusy) return "Queue more instructions...";
   if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
@@ -93,6 +95,7 @@ function computeDerivedState(params: {
     params.placeholder,
     params.isAgentBusy,
     params.hasAgentCommands,
+    params.isStarting,
   );
   return {
     isDisabled,

@@ -56,8 +56,6 @@ type TaskChatPanelProps = {
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
   onOpenFileAtLine?: (filePath: string) => void;
-  /** Whether the dockview group containing this panel is focused */
-  isPanelFocused?: boolean;
 };
 
 export const TaskChatPanel = memo(function TaskChatPanel({
@@ -67,7 +65,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
-  isPanelFocused,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const lastAgentMessageCountRef = useRef(0);
@@ -156,7 +153,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           handleCancelTurn={handleCancelTurn}
           showRequestChangesTooltip={showRequestChangesTooltip}
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-          isPanelFocused={isPanelFocused}
           panelState={panelState}
           isSending={isSending}
         />

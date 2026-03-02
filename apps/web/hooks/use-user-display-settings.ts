@@ -38,6 +38,7 @@ function carryForwardSettings(current: DisplaySettings) {
     lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
     lspServerConfigs: current.lspServerConfigs ?? {},
     savedLayouts: current.savedLayouts ?? [],
+    defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
   };
 }
 

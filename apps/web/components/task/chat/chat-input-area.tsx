@@ -259,7 +259,6 @@ type ChatInputAreaProps = {
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  isPanelFocused?: boolean;
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
 };
@@ -272,7 +271,6 @@ export function ChatInputArea({
   handleCancelTurn,
   showRequestChangesTooltip,
   onRequestChangesTooltipDismiss,
-  isPanelFocused,
   panelState,
   isSending,
 }: ChatInputAreaProps) {
@@ -357,7 +355,6 @@ export function ChatInputArea({
         onToggleContextFile={handleToggleContextFile}
         onAddContextFile={handleAddContextFile}
         todoItems={todoItems}
-        isPanelFocused={isPanelFocused}
         onImplementPlan={handleImplementPlan}
       />
     </div>

@@ -4,7 +4,6 @@ import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import dynamic from "next/dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
-import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
 import { useAppStore } from "@/components/state-provider";
@@ -103,6 +102,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     handleEditorReady,
     handleCommentDeleted,
     commentHighlights,
+    isAgentBusy,
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
@@ -131,6 +131,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     handleEditorReady,
     handleCommentDeleted,
     commentHighlights,
+    isAgentBusy,
     isAgentCreatingPlan,
     editorWrapperRef,
     editorInstanceRef,
@@ -163,7 +164,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
       <PanelBody
         padding={false}
         scroll={false}
-        className={cn("relative transition-colors cursor-text")}
+        className={cn("relative transition-colors cursor-text", isAgentBusy && "bg-background")}
         ref={editorWrapperRef}
         onClick={handleEmptyStateClick}
       >
@@ -178,7 +179,6 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
           onCommentDeleted={handleCommentDeleted}
           onEditorReady={handleEditorReady}
         />
-        <PlanCreatingOverlay isAgentCreatingPlan={isAgentCreatingPlan} />
         <PlanEmptyState
           isLoading={isLoading}
           draftContent={draftContent}
@@ -260,19 +260,6 @@ function PlanSelectionPopoverWrapper({
       editingComment={editingComment}
       onDelete={onDelete}
     />
-  );
-}
-
-/** Agent creating plan overlay */
-function PlanCreatingOverlay({ isAgentCreatingPlan }: { isAgentCreatingPlan: boolean }) {
-  if (!isAgentCreatingPlan) return null;
-  return (
-    <div className="absolute inset-0 flex items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-4">
-        <GridSpinner className="h-5 w-5" />
-        <span className="text-sm text-muted-foreground">Agent is creating a plan...</span>
-      </div>
-    </div>
   );
 }
 

@@ -3,15 +3,25 @@
 import { cn } from "@/lib/utils";
 
 type ResizeHandleProps = {
-  visible: boolean;
   planModeEnabled?: boolean;
+  isAgentBusy?: boolean;
+  isStarting?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 };
 
+function getHandleColor(planModeEnabled?: boolean, isAgentBusy?: boolean, isStarting?: boolean) {
+  if (isStarting) return "bg-amber-400/60 hover:bg-amber-400";
+  if (isAgentBusy && planModeEnabled) return "bg-slate-400/60 hover:bg-slate-400";
+  if (isAgentBusy) return "bg-primary/40 hover:bg-primary/70";
+  if (planModeEnabled) return "bg-slate-400/60 hover:bg-slate-400";
+  return "bg-border hover:bg-muted-foreground";
+}
+
 export function ResizeHandle({
-  visible,
   planModeEnabled,
+  isAgentBusy,
+  isStarting,
   onMouseDown,
   onDoubleClick,
 }: ResizeHandleProps) {
@@ -20,9 +30,8 @@ export function ResizeHandle({
       type="button"
       className={cn(
         "absolute left-1/2 top-[-1px] -translate-x-1/2 -translate-y-1/2 z-10",
-        "w-12 h-2 cursor-ns-resize transition-opacity",
+        "w-12 h-2 cursor-ns-resize",
         "flex items-center justify-center",
-        visible ? "opacity-100" : "opacity-0 pointer-events-none",
       )}
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
@@ -31,9 +40,7 @@ export function ResizeHandle({
       <div
         className={cn(
           "w-8 h-0.5 rounded-full transition-colors",
-          planModeEnabled
-            ? "bg-slate-400/60 hover:bg-slate-400"
-            : "bg-border hover:bg-muted-foreground",
+          getHandleColor(planModeEnabled, isAgentBusy, isStarting),
         )}
       />
     </button>

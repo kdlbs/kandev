@@ -386,6 +386,34 @@
   animation: chat-input-running-plan 3s ease-in-out infinite;
 }
 
+@keyframes chat-input-starting {
+  0%,
+  100% {
+    border-color: color-mix(in oklab, oklch(0.7 0.12 85) 40%, var(--border));
+    box-shadow:
+      0 0 4px 1px color-mix(in oklab, oklch(0.7 0.12 85) 10%, transparent),
+      0 0 10px 2px color-mix(in oklab, oklch(0.7 0.12 85) 5%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, oklch(0.7 0.12 85) 60%, var(--border));
+    box-shadow:
+      0 0 12px 3px color-mix(in oklab, oklch(0.7 0.12 85) 15%, transparent),
+      0 0 30px 6px color-mix(in oklab, oklch(0.7 0.12 85) 8%, transparent);
+  }
+}
+
+.chat-input-starting {
+  animation: chat-input-starting 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-input-running,
+  .chat-input-running-plan,
+  .chat-input-starting {
+    animation: none;
+  }
+}
+
 @layer components {
   .border-flash-animation {
     position: relative;

@@ -36,6 +36,7 @@ export const defaultSettingsState: SettingsSliceState = {
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
     savedLayouts: [],
+    defaultUtilityAgentId: null,
     loaded: false,
   },
 };
