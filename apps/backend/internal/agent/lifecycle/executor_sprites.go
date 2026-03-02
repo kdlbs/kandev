@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -487,9 +488,11 @@ func (r *SpritesExecutor) createAgentInstance(
 		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
 	}
 
+	// Use base64 encoding to safely pass JSON through shell without quoting issues
+	reqJSON64 := base64.StdEncoding.EncodeToString(reqJSON)
 	createCmd := fmt.Sprintf(
-		"curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' -d '%s'",
-		r.agentctlPort, string(reqJSON))
+		"echo '%s' | base64 -d | curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' --data-binary @-",
+		reqJSON64, r.agentctlPort)
 
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

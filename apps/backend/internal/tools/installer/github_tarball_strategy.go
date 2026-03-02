@@ -169,14 +169,18 @@ func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	case tar.TypeReg:
 		return writeFileFromTar(tr, target, os.FileMode(header.Mode))
 	case tar.TypeSymlink:
-		// Validate symlink target doesn't escape destDir
-		linkTarget := filepath.Join(filepath.Dir(target), header.Linkname)
-		if !strings.HasPrefix(filepath.Clean(linkTarget), filepath.Clean(destDir)) {
+		// Sanitize and validate symlink target to prevent path traversal
+		cleanLinkname := filepath.Clean(header.Linkname)
+		if strings.HasPrefix(cleanLinkname, "..") || filepath.IsAbs(cleanLinkname) {
+			return fmt.Errorf("invalid symlink target: %s -> %s", header.Name, header.Linkname)
+		}
+		linkTarget := filepath.Join(filepath.Dir(target), cleanLinkname)
+		if !strings.HasPrefix(filepath.Clean(linkTarget), filepath.Clean(destDir)+string(os.PathSeparator)) {
 			return fmt.Errorf("symlink %s -> %s escapes install directory", header.Name, header.Linkname)
 		}
 		// Remove existing symlink/file before creating (handles re-installs)
 		_ = os.Remove(target)
-		return os.Symlink(header.Linkname, target)
+		return os.Symlink(cleanLinkname, target)
 	default:
 		// Skip unsupported types (block devices, char devices, etc.)
 		return nil
