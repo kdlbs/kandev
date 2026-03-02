@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -479,7 +480,16 @@ func (s *Server) handleGitReset(c *gin.Context) {
 	}
 
 	if req.Mode == "" {
-		req.Mode = "mixed" // Default to mixed reset
+		req.Mode = "mixed"
+	}
+	validModes := map[string]bool{"soft": true, "mixed": true, "hard": true}
+	if !validModes[req.Mode] {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     fmt.Sprintf("invalid reset mode: %s (must be soft, mixed, or hard)", req.Mode),
+		})
+		return
 	}
 
 	gitOp := s.procMgr.GitOperator()

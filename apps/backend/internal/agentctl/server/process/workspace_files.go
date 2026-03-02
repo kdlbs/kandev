@@ -137,6 +137,15 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	return node, nil
 }
 
+// resolvedWorkDir returns the workspace directory with symlinks resolved.
+func (wt *WorkspaceTracker) resolvedWorkDir() string {
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(wt.workDir))
+	if err != nil {
+		return filepath.Clean(wt.workDir)
+	}
+	return resolved
+}
+
 // resolveSafePath resolves reqPath to an absolute path within workDir,
 // rejecting any path traversal attempts.
 func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
@@ -258,11 +267,17 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 
 	// If the file is a symlink, resolve to the real path and rewrite the diff header.
 	// git apply cannot patch through symlinks — it needs the real file path.
+	// Note: fullPath is already resolved by resolveSafePath, so we check the
+	// unresolved path to detect whether the original request targets a symlink.
 	applyPath := reqPath
-	realPath, evalErr := filepath.EvalSymlinks(fullPath)
-	if evalErr == nil && realPath != fullPath {
-		// File is a symlink. Compute the real path relative to workDir.
-		realRel, relErr := filepath.Rel(cleanWorkDir, realPath)
+	unresolvedPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
+	if info, lErr := os.Lstat(unresolvedPath); lErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		// File is a symlink. fullPath already points to the real target.
+		realWorkDir, _ := filepath.EvalSymlinks(cleanWorkDir)
+		if realWorkDir == "" {
+			realWorkDir = cleanWorkDir
+		}
+		realRel, relErr := filepath.Rel(realWorkDir, fullPath)
 		if relErr == nil {
 			unifiedDiff = rewriteDiffPaths(unifiedDiff, reqPath, realRel)
 			applyPath = realRel
@@ -376,9 +391,12 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return err
 	}
 
-	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanWorkDir := wt.resolvedWorkDir()
 	if fullPath == cleanWorkDir {
 		return fmt.Errorf("cannot delete workspace root")
+	}
+	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) {
+		return fmt.Errorf("path outside workspace: %s", reqPath)
 	}
 
 	// Check if file exists
@@ -421,7 +439,11 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return err
 	}
 
-	cleanWorkDir := filepath.Clean(wt.workDir)
+	cleanWorkDir := wt.resolvedWorkDir()
+	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
+	if !strings.HasPrefix(oldFullPath, workDirPrefix) || !strings.HasPrefix(newFullPath, workDirPrefix) {
+		return fmt.Errorf("path outside workspace")
+	}
 	if oldFullPath == cleanWorkDir || newFullPath == cleanWorkDir {
 		return fmt.Errorf("cannot rename workspace root")
 	}

@@ -741,14 +741,24 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 		return result, nil
 	}
 
-	// Validate commit SHA exists
-	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", commitSHA); err != nil {
+	// Validate commit SHA format
+	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
+		result.Error = errMsg
+		return result, nil
+	}
+
+	// Validate commit SHA exists (peel to commit object)
+	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", commitSHA+"^{commit}"); err != nil {
 		result.Error = fmt.Sprintf("invalid commit: %s", commitSHA)
 		return result, nil
 	}
 
 	// Capture current HEAD for reset notification
-	previousHead, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	previousHead, err := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		result.Error = "failed to resolve HEAD: " + err.Error()
+		return result, nil
+	}
 	previousHead = strings.TrimSpace(previousHead)
 
 	// Perform the reset
@@ -768,7 +778,10 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 	// Send reset notification and refresh git status
 	if g.workspaceTracker != nil {
 		// Notify about the reset
-		newHead, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
+		newHead, headErr := g.runGitCommand(ctx, "rev-parse", "HEAD")
+		if headErr != nil {
+			g.logger.Warn("failed to resolve HEAD after reset", zap.Error(headErr))
+		}
 		reset := &streams.GitResetNotification{
 			Timestamp:    time.Now().UTC(),
 			PreviousHead: previousHead,

@@ -344,7 +344,11 @@ func (h *GitHandlers) wsReset(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("commit_sha is required")
 	}
 	if req.Mode == "" {
-		req.Mode = "mixed" // Default to mixed reset
+		req.Mode = "mixed"
+	}
+	validModes := map[string]bool{"soft": true, "mixed": true, "hard": true}
+	if !validModes[req.Mode] {
+		return nil, fmt.Errorf("invalid reset mode: %s (must be soft, mixed, or hard)", req.Mode)
 	}
 
 	client, err := h.getAgentCtlClient(req.SessionID)
