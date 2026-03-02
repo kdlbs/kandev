@@ -56,6 +56,7 @@ func isKnownSafeGitFlag(arg string) bool {
 		"--format", "--format=", "--stat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
+		"--", // Path separator - everything after this is treated as paths, not flags
 	}
 	for _, safe := range safeFlags {
 		if arg == safe || strings.HasPrefix(arg, safe) {
@@ -154,6 +155,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	// injection where malicious input like "--help" or "--exec=..." could be passed
 	// as what appears to be a file/branch name but is interpreted as a flag by git.
 	skipNextArg := false
+	afterDoubleDash := false // Track if we've seen "--" separator
 	for i, arg := range args {
 		// Skip git subcommand (first argument)
 		if i == 0 {
@@ -166,10 +168,20 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 			continue
 		}
 
+		// After "--", all arguments are file paths - no validation needed
+		if afterDoubleDash {
+			continue
+		}
+
 		// Validate flags against whitelist
 		if strings.HasPrefix(arg, "-") {
 			if !isKnownSafeGitFlag(arg) {
 				return "", fmt.Errorf("potentially unsafe flag: %s", arg)
+			}
+			// Special handling for "--" separator
+			if arg == "--" {
+				afterDoubleDash = true
+				continue
 			}
 			// Flags that take a value in the next argument
 			if arg == "-m" || arg == "--format" {
