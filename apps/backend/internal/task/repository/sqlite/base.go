@@ -128,6 +128,8 @@ func (r *Repository) migrateTaskSessions() error {
 func (r *Repository) runMigrations() error {
 	// Add last_message_uuid column to executors_running (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
+	// Add metadata column to executors_running (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	return nil
 }
 
@@ -187,6 +189,7 @@ func (r *Repository) initInfraSchema() error {
 		worktree_branch TEXT DEFAULT '',
 		last_seen_at TIMESTAMP,
 		error_message TEXT DEFAULT '',
+		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

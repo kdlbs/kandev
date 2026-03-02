@@ -98,6 +98,7 @@ func (a *testAgent) Runtime() *agents.RuntimeConfig {
 	return a.runtime
 }
 func (a *testAgent) RemoteAuth() *agents.RemoteAuth { return nil }
+func (a *testAgent) InstallScript() string          { return "" }
 
 func newTestController(agentList map[string]agents.Agent) *Controller {
 	log, _ := logger.NewLogger(logger.LoggingConfig{

@@ -541,6 +541,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 				Runtime:          running.Runtime,
 				AgentExecutionID: running.AgentExecutionID,
 				ContainerID:      running.ContainerID,
+				Metadata:         running.Metadata,
 			})
 		}
 		s.reconcileOneSessionOnStartup(ctx, running)

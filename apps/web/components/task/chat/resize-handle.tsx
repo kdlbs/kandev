@@ -11,10 +11,10 @@ type ResizeHandleProps = {
 };
 
 function getHandleColor(planModeEnabled?: boolean, isAgentBusy?: boolean, isStarting?: boolean) {
-  if (isStarting) return "bg-amber-400/60 hover:bg-amber-400";
-  if (isAgentBusy && planModeEnabled) return "bg-slate-400/60 hover:bg-slate-400";
+  if (isStarting) return "bg-primary/40 hover:bg-primary/70";
+  if (isAgentBusy && planModeEnabled) return "bg-violet-400/60 hover:bg-violet-400";
   if (isAgentBusy) return "bg-primary/40 hover:bg-primary/70";
-  if (planModeEnabled) return "bg-slate-400/60 hover:bg-slate-400";
+  if (planModeEnabled) return "bg-violet-400/60 hover:bg-violet-400";
   return "bg-border hover:bg-muted-foreground";
 }
 

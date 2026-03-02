@@ -15,6 +15,8 @@ var opencodeLogoLight []byte
 //go:embed logos/opencode_dark.svg
 var opencodeLogoDark []byte
 
+const opencodePkg = "opencode-ai@1.1.59"
+
 var (
 	_ Agent            = (*OpenCode)(nil)
 	_ PassthroughAgent = (*OpenCode)(nil)
@@ -94,13 +96,13 @@ func (a *OpenCode) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *OpenCode) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", "opencode-ai@1.1.59", "serve", "--hostname", "127.0.0.1", "--port", "0").Build()
+	return Cmd("npx", "-y", opencodePkg, "serve", "--hostname", "127.0.0.1", "--port", "0").Build()
 }
 
 func (a *OpenCode) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", "opencode-ai@1.1.59", "serve", "--hostname", "127.0.0.1", "--port", "0").Build(),
+		Cmd:            Cmd("npx", "-y", opencodePkg, "serve", "--hostname", "127.0.0.1", "--port", "0").Build(),
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -114,6 +116,10 @@ func (a *OpenCode) Runtime() *RuntimeConfig {
 }
 
 func (a *OpenCode) RemoteAuth() *RemoteAuth { return nil }
+
+func (a *OpenCode) InstallScript() string {
+	return "npm install -g " + opencodePkg
+}
 
 func (a *OpenCode) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings

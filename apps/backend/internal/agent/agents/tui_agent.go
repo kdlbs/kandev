@@ -116,6 +116,7 @@ func (a *TUIAgent) BuildCommand(_ CommandOptions) Command {
 	return a.cmd
 }
 
+func (a *TUIAgent) InstallScript() string                            { return "" }
 func (a *TUIAgent) RemoteAuth() *RemoteAuth                          { return nil }
 func (a *TUIAgent) PermissionSettings() map[string]PermissionSetting { return nil }
 

@@ -13,6 +13,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -301,6 +302,36 @@ func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {
 	return m.executionStore.GetBySessionID(sessionID)
+}
+
+// IsRemoteSession checks whether a session is associated with a remote executor
+// (e.g., sprites). It first checks the in-memory execution store, then falls back
+// to the database via WorkspaceInfoProvider. This is useful when the execution
+// hasn't been recreated yet after a backend restart.
+func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
+	// Check in-memory execution first (fast path).
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if execution.RuntimeName == string(executor.NameSprites) {
+			return true
+		}
+		if execution.Metadata != nil {
+			if isRemote, ok := execution.Metadata[MetadataKeyIsRemote].(bool); ok && isRemote {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Fall back to database records (post-restart, execution not yet recreated).
+	if m.workspaceInfoProvider == nil {
+		return false
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil || info == nil {
+		return false
+	}
+	return info.RuntimeName == string(executor.NameSprites) || info.ExecutorType == string(models.ExecutorTypeSprites) ||
+		info.ExecutorType == string(models.ExecutorTypeRemoteDocker)
 }
 
 // GetAvailableCommandsForSession returns the available slash commands for a session.

@@ -56,6 +56,9 @@ cd {{workspace.path}}
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
 
+# ---- Pre-install agent CLI(s) ----
+{{kandev.agents.install}}
+
 # ---- Install and start Kandev agent controller ----
 {{kandev.agentctl.install}}
 {{kandev.agentctl.start}}
@@ -84,6 +87,9 @@ cd {{workspace.path}}
 
 # ---- Repository setup (if configured) ----
 {{repository.setup_script}}
+
+# ---- Pre-install agent CLI(s) ----
+{{kandev.agents.install}}
 
 # ---- Install and start Kandev agent controller ----
 echo "Starting agent controller..."

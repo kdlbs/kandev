@@ -227,6 +227,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <SessionMobileTopBar
+          taskId={activeTaskId}
           taskTitle={taskTitle}
           sessionId={effectiveSessionId}
           baseBranch={baseBranch}

@@ -217,7 +217,7 @@ export function ChatInputBody({
           isStarting && !isAgentBusy && "chat-input-starting",
           isAgentBusy && !planModeEnabled && "chat-input-running",
           isAgentBusy && planModeEnabled && "chat-input-running-plan",
-          planModeEnabled && !isAgentBusy && "border-slate-400/50",
+          planModeEnabled && !isAgentBusy && "border-violet-400/50",
           hasClarification && "border-sky-400/50",
           showRequestChangesTooltip && "animate-pulse border-orange-500",
           hasPendingComments && "border-amber-500/50",

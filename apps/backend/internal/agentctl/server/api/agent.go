@@ -261,7 +261,7 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	adapter := s.procMgr.GetAdapter()

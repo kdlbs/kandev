@@ -315,7 +315,7 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      {agentMode && (
+      {agentMode && agentMode !== "default" && (
         <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
           <IconBrain className="h-3 w-3" />
           <span className="capitalize">{agentMode} mode</span>

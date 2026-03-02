@@ -168,6 +168,13 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	cfg.SetupScript = profile.PrepareScript
 	cfg.CleanupScript = profile.CleanupScript
 	cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	// Persist secret store IDs in metadata so runtimes can resolve tokens after restart
+	// (e.g., SpritesExecutor needs SPRITES_API_TOKEN to poll remote status).
+	for _, ev := range profile.EnvVars {
+		if ev.SecretID != "" {
+			metadata["env_secret_id_"+ev.Key] = ev.SecretID
+		}
+	}
 	if profile.CleanupScript != "" {
 		metadata[lifecycle.MetadataKeyCleanupScript] = profile.CleanupScript
 	}

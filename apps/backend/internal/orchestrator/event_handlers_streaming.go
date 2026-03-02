@@ -511,6 +511,10 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
+	// Don't broadcast "default" mode — it's the baseline state, not worth sending.
+	if payload.Data.CurrentModeID == "default" {
+		return
+	}
 	eventPayload := lifecycle.SessionModeEventPayload{
 		TaskID:        payload.TaskID,
 		SessionID:     sessionID,
