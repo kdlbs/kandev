@@ -391,12 +391,12 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return err
 	}
 
+	if err := wt.validateWorkspacePaths(fullPath); err != nil {
+		return err
+	}
 	cleanWorkDir := wt.resolvedWorkDir()
 	if fullPath == cleanWorkDir {
 		return fmt.Errorf("cannot delete workspace root")
-	}
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) {
-		return fmt.Errorf("path outside workspace: %s", reqPath)
 	}
 
 	// Check if file exists
@@ -439,29 +439,18 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return err
 	}
 
-	cleanWorkDir := wt.resolvedWorkDir()
-	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
-	if !strings.HasPrefix(oldFullPath, workDirPrefix) || !strings.HasPrefix(newFullPath, workDirPrefix) {
-		return fmt.Errorf("path outside workspace")
-	}
-	if oldFullPath == cleanWorkDir || newFullPath == cleanWorkDir {
-		return fmt.Errorf("cannot rename workspace root")
+	if err := wt.validateWorkspacePaths(oldFullPath, newFullPath); err != nil {
+		return err
 	}
 	if oldFullPath == newFullPath {
 		return nil
 	}
 
-	if _, err := os.Stat(oldFullPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("path does not exist: %s", oldPath)
-		}
-		return fmt.Errorf("failed to stat path: %w", err)
+	if err := validateSourceExists(oldFullPath, oldPath); err != nil {
+		return err
 	}
-
-	if _, err := os.Stat(newFullPath); err == nil {
-		return fmt.Errorf("target already exists: %s", newPath)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat target: %w", err)
+	if err := validateTargetAvailable(newFullPath, newPath); err != nil {
+		return err
 	}
 
 	parentDir := filepath.Dir(newFullPath)
@@ -473,6 +462,7 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return fmt.Errorf("failed to rename path: %w", err)
 	}
 
+	cleanWorkDir := wt.resolvedWorkDir()
 	oldRelPath := strings.TrimPrefix(oldFullPath, cleanWorkDir+string(os.PathSeparator))
 	newRelPath := strings.TrimPrefix(newFullPath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(oldRelPath, types.FileOpRename)
@@ -481,6 +471,40 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 	}
 
 	return nil
+}
+
+// validateWorkspacePaths checks that all provided paths are strictly inside the workspace.
+func (wt *WorkspaceTracker) validateWorkspacePaths(paths ...string) error {
+	cleanWorkDir := wt.resolvedWorkDir()
+	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
+	for _, p := range paths {
+		if !strings.HasPrefix(p, workDirPrefix) {
+			return fmt.Errorf("path outside workspace")
+		}
+	}
+	return nil
+}
+
+func validateSourceExists(fullPath, reqPath string) error {
+	_, err := os.Stat(fullPath)
+	if err == nil {
+		return nil
+	}
+	if os.IsNotExist(err) {
+		return fmt.Errorf("path does not exist: %s", reqPath)
+	}
+	return fmt.Errorf("failed to stat path: %w", err)
+}
+
+func validateTargetAvailable(fullPath, reqPath string) error {
+	_, err := os.Stat(fullPath)
+	if err == nil {
+		return fmt.Errorf("target already exists: %s", reqPath)
+	}
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return fmt.Errorf("failed to stat target: %w", err)
 }
 
 // calculateSHA256 calculates the SHA256 hash of a string
