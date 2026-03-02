@@ -66,7 +66,7 @@ func (a *Codex) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *Codex) DefaultModel() string { return "gpt-5.2-codex" }
+func (a *Codex) DefaultModel() string { return "gpt-5.3-codex" }
 
 func (a *Codex) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: codexStaticModels(), SupportsDynamic: false}, nil
@@ -134,9 +134,11 @@ var codexPermSettings = map[string]PermissionSetting{
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Latest frontier agentic coding model", Provider: "openai", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", Description: "Most capable agentic coding model to date", Provider: "openai", ContextWindow: 400000, IsDefault: true, Source: "static"},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "Frontier agentic coding model", Provider: "openai", ContextWindow: 200000, Source: "static"},
 		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", Description: "Codex-optimized flagship for deep and fast reasoning", Provider: "openai", ContextWindow: 200000, Source: "static"},
 		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Description: "Optimized for codex. Cheaper, faster, but less capable", Provider: "openai", ContextWindow: 200000, Source: "static"},
+		{ID: "gpt-5.3", Name: "GPT-5.3", Description: "Latest frontier model with improvements across knowledge, reasoning and coding", Provider: "openai", ContextWindow: 400000, Source: "static"},
 		{ID: "gpt-5.2", Name: "GPT-5.2", Description: "Latest frontier model with improvements across knowledge, reasoning and coding", Provider: "openai", ContextWindow: 200000, Source: "static"},
 	}
 }
