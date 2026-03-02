@@ -101,7 +101,10 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
       set((draft) => {
         draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || "") + data;
       }),
-    setShellStatus: (sessionId: string, status: string) =>
+    setShellStatus: (
+      sessionId: string,
+      status: { available: boolean; running?: boolean; shell?: string; cwd?: string },
+    ) =>
       set((draft) => {
         draft.shell.statuses[sessionId] = status;
       }),
@@ -129,7 +132,7 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
       set((draft) => {
         draft.processes.outputsByProcessId[processId] = "";
       }),
-    setActiveProcess: (sessionId: string, processId: string | null) =>
+    setActiveProcess: (sessionId: string, processId: string) =>
       set((draft) => {
         draft.processes.activeProcessBySessionId[sessionId] = processId;
       }),
