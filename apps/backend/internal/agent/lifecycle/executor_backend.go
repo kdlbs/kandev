@@ -41,13 +41,8 @@ type ExecutorBackend interface {
 }
 
 // McpServerConfig holds configuration for an MCP server.
-type McpServerConfig struct {
-	Name    string   `json:"name"`
-	URL     string   `json:"url,omitempty"`
-	Type    string   `json:"type,omitempty"`
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
-}
+// Type alias for agentctl.McpServerConfig to avoid conversion boilerplate.
+type McpServerConfig = agentctl.McpServerConfig
 
 // Metadata keys for runtime-specific configuration
 const (
@@ -113,6 +108,24 @@ func ShouldPersistMetadataKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// FilterPersistentMetadata returns a copy of src containing only keys that
+// should be carried forward across session resumes. Returns nil if no keys match.
+func FilterPersistentMetadata(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	filtered := make(map[string]interface{})
+	for k, v := range src {
+		if ShouldPersistMetadataKey(k) {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // RemoteStatus describes runtime health/details for remote executors.

@@ -85,9 +85,15 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	if req.ModelOverride != "" {
 		model = req.ModelOverride
 	}
+	// Only pass SessionID (for --resume flag) if the agent supports recovery.
+	// Agents with CanRecover=false (e.g. Auggie) use history context injection instead.
+	sessionID := req.ACPSessionID
+	if rt := agentConfig.Runtime(); rt != nil && !rt.SessionConfig.SupportsRecovery() {
+		sessionID = ""
+	}
 	cmdOpts := agents.CommandOptions{
 		Model:            model,
-		SessionID:        req.ACPSessionID,
+		SessionID:        sessionID,
 		AutoApprove:      autoApprove,
 		PermissionValues: permissionValues,
 	}

@@ -107,7 +107,9 @@ export function RemoteCloudTooltip({
   const status = hasExternalStatus ? (externalStatus ?? null) : fetchedStatus;
   const remoteName = status?.remote_name ?? fallbackName ?? "Remote executor";
   const cloudState = getCloudState(status);
-  const loading = Boolean(!hasExternalStatus && open && sessionId && fetchedSessionId !== sessionId);
+  const loading = Boolean(
+    !hasExternalStatus && open && sessionId && fetchedSessionId !== sessionId,
+  );
   const Icon = cloudState === "error" ? IconCloudOff : IconCloud;
 
   return (

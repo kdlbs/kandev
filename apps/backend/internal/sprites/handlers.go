@@ -318,7 +318,7 @@ func (h *Handler) listInstances(ctx context.Context, secretID string) ([]*Sprite
 		createdAt := s.CreatedAt.Format(time.RFC3339)
 		result = append(result, &SpritesInstance{
 			Name:          s.Name,
-			HealthStatus:  normalizeSpriteStatus(s.Status),
+			HealthStatus:  NormalizeSpriteStatus(s.Status),
 			CreatedAt:     createdAt,
 			UptimeSeconds: computeUptime(createdAt),
 		})
@@ -476,9 +476,9 @@ func computeUptime(createdAt string) int64 {
 	return int64(time.Since(t).Seconds())
 }
 
-// normalizeSpriteStatus lowercases and trims the raw Sprites API status.
+// NormalizeSpriteStatus lowercases and trims the raw Sprites API status.
 // The frontend handles display mapping for each state (running, cold, stopped, etc.).
-func normalizeSpriteStatus(status string) string {
+func NormalizeSpriteStatus(status string) string {
 	s := strings.ToLower(strings.TrimSpace(status))
 	if s == "" {
 		return "unknown"

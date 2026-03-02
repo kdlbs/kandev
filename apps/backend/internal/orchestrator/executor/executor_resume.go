@@ -100,16 +100,8 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	if existingRunning != nil {
 		running.ResumeToken = existingRunning.ResumeToken
 		running.LastMessageUUID = existingRunning.LastMessageUUID
-		if running.Metadata == nil && existingRunning.Metadata != nil {
-			filtered := make(map[string]interface{})
-			for k, v := range existingRunning.Metadata {
-				if lifecycle.ShouldPersistMetadataKey(k) {
-					filtered[k] = v
-				}
-			}
-			if len(filtered) > 0 {
-				running.Metadata = filtered
-			}
+		if running.Metadata == nil {
+			running.Metadata = lifecycle.FilterPersistentMetadata(existingRunning.Metadata)
 		}
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
@@ -484,16 +476,8 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	if existingRunning != nil {
 		running.ResumeToken = existingRunning.ResumeToken
 		running.LastMessageUUID = existingRunning.LastMessageUUID
-		if running.Metadata == nil && existingRunning.Metadata != nil {
-			filtered := make(map[string]interface{})
-			for k, v := range existingRunning.Metadata {
-				if lifecycle.ShouldPersistMetadataKey(k) {
-					filtered[k] = v
-				}
-			}
-			if len(filtered) > 0 {
-				running.Metadata = filtered
-			}
+		if running.Metadata == nil {
+			running.Metadata = lifecycle.FilterPersistentMetadata(existingRunning.Metadata)
 		}
 	}
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
