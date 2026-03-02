@@ -40,6 +40,7 @@ type Client struct {
 	requestHandler RequestHandler
 	cancelHandler  CancelHandler
 	messageHandler MessageHandler
+	closeHandler   func() // Called when readLoop exits (EOF or error)
 
 	// Pending control requests (requests we sent, waiting for responses)
 	pendingRequests   map[string]*pendingRequest
@@ -80,6 +81,13 @@ func (c *Client) SetMessageHandler(handler MessageHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messageHandler = handler
+}
+
+// SetCloseHandler sets a handler called when the read loop exits (EOF or error).
+func (c *Client) SetCloseHandler(handler func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closeHandler = handler
 }
 
 // Start begins reading from stdout in a goroutine.
@@ -225,6 +233,14 @@ func (c *Client) readLoop(ctx context.Context, ready chan<- struct{}) {
 
 	if err := scanner.Err(); err != nil {
 		c.logger.Error("read loop error", zap.Error(err))
+	}
+
+	// Notify close handler (e.g., to unblock Prompt on unexpected EOF)
+	c.mu.RLock()
+	handler := c.closeHandler
+	c.mu.RUnlock()
+	if handler != nil {
+		handler()
 	}
 }
 

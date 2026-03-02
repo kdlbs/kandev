@@ -234,6 +234,7 @@ export type SessionRuntimeSliceActions = {
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
   setSessionMode: (sessionId: string, modeId: string) => void;
+  clearSessionMode: (sessionId: string) => void;
   // User shells actions
   setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;

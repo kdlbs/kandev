@@ -63,13 +63,14 @@ function useWorkflowSelection({
       (workflow: WorkflowsState["items"][number]) => workflow.workspaceId === workspaceId,
     );
 
-    const desiredWorkflowId =
+    const hasSettingsWorkflow =
       settings.workflowId &&
       workspaceWorkflows.some(
         (workflow: WorkflowsState["items"][number]) => workflow.id === settings.workflowId,
-      )
-        ? settings.workflowId
-        : null;
+      );
+    const fallbackWorkflowId = workspaceWorkflows.length === 1 ? workspaceWorkflows[0].id : null;
+    const desiredWorkflowId =
+      (hasSettingsWorkflow ? settings.workflowId : fallbackWorkflowId) ?? null;
     setActiveWorkflow(desiredWorkflowId);
     if (!desiredWorkflowId) {
       store.getState().hydrate({

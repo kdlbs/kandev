@@ -64,9 +64,10 @@ type CLIMessage struct {
 	Response *IncomingControlResponse `json:"response,omitempty"`
 
 	// For system messages
-	SessionID     string   `json:"session_id,omitempty"`
-	SessionStatus string   `json:"session_status,omitempty"`
-	SlashCommands []string `json:"slash_commands,omitempty"` // System message uses string array
+	SessionID      string   `json:"session_id,omitempty"`
+	SessionStatus  string   `json:"session_status,omitempty"`
+	SlashCommands  []string `json:"slash_commands,omitempty"` // System message uses string array
+	PermissionMode string   `json:"permissionMode,omitempty"` // From system status messages (e.g. "plan", "bypassPermissions")
 
 	// For subagent context (when running inside a Task tool call)
 	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
@@ -257,10 +258,11 @@ type ControlRequest struct {
 	ToolUseID    string         `json:"tool_use_id,omitempty"`
 	BlockedPaths string         `json:"blocked_paths,omitempty"`
 
-	// For hook_callback requests
-	CallbackID string         `json:"callback_id,omitempty"`
-	HookName   string         `json:"hook_name,omitempty"`
-	HookInput  map[string]any `json:"hook_input,omitempty"`
+	// For hook_callback requests.
+	// Note: hook data (tool_name, tool_input, hook_event_name) is in the Input field,
+	// not a separate field — Claude Code sends it under "input" for both can_use_tool
+	// and hook_callback subtypes.
+	CallbackID string `json:"callback_id,omitempty"`
 
 	// Permission suggestions from Claude
 	PermissionSuggestions []PermissionUpdate `json:"permission_suggestions,omitempty"`

@@ -3,6 +3,7 @@ package streamjson
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -47,11 +48,16 @@ func (a *Adapter) handleControlRequest(requestID string, req *claudecode.Control
 }
 
 // handleToolPermission processes can_use_tool permission requests.
+// This is the fallback path when hooks are not registered or the hook responds "ask".
+// Note: plan content and session-mode-clear for ExitPlanMode are handled in
+// processToolUseBlock (which fires first when the tool_use block is streamed).
 func (a *Adapter) handleToolPermission(requestID string, req *claudecode.ControlRequest) {
 	a.mu.RLock()
 	handler := a.permissionHandler
 	sessionID := a.sessionID
 	a.mu.RUnlock()
+
+	isExitPlanMode := req.ToolName == toolExitPlanMode
 
 	// Determine action type based on tool name
 	actionType := types.ActionTypeOther
@@ -89,7 +95,6 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 	// We pass PendingID so the handler uses Claude Code's requestID
 	// instead of generating a new one - this ensures the frontend and backend
 	// use the same ID for response lookup.
-	// Build action details, including blocked paths if present
 	actionDetails := req.Input
 	if req.BlockedPaths != "" {
 		if actionDetails == nil {
@@ -105,7 +110,7 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 		Options:       options,
 		ActionType:    actionType,
 		ActionDetails: actionDetails,
-		PendingID:     requestID, // Use Claude Code's requestID so response lookup works
+		PendingID:     requestID,
 	}
 
 	// If no handler, auto-allow
@@ -113,6 +118,9 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 		a.logger.Debug("auto-allowing tool (no handler)",
 			zap.String("tool", req.ToolName))
 		a.sendPermissionResponse(requestID, claudecode.BehaviorAllow)
+		if isExitPlanMode {
+			a.scheduleExitPlanModeCompletion()
+		}
 		return
 	}
 
@@ -165,6 +173,12 @@ func (a *Adapter) handleToolPermission(requestID string, req *claudecode.Control
 	}
 
 	a.sendPermissionResponse(requestID, behavior)
+
+	// ExitPlanMode: Claude Code ends the turn after approval without a result message.
+	// Schedule delayed completion to unblock Prompt().
+	if isExitPlanMode && behavior == claudecode.BehaviorAllow {
+		a.scheduleExitPlanModeCompletion()
+	}
 }
 
 // sendControlResult sends a success control response with the given result payload and traces it.
@@ -212,12 +226,12 @@ func (a *Adapter) handleControlCancel(requestID string) {
 // handleHookCallback processes hook callback requests, dispatching based on callback ID.
 // Hook responses use different payload formats than can_use_tool responses:
 // - PreToolUse hooks: hookSpecificOutput with permissionDecision
-// - Stop hooks: decision + optional reason
 func (a *Adapter) handleHookCallback(requestID string, req *claudecode.ControlRequest) {
+	hookEventName, _ := req.Input["hook_event_name"].(string)
 	a.logger.Info("received hook callback",
 		zap.String("request_id", requestID),
 		zap.String("callback_id", req.CallbackID),
-		zap.String("hook_name", req.HookName))
+		zap.String("hook_event_name", hookEventName))
 
 	switch req.CallbackID {
 	case "tool_approval":
@@ -229,9 +243,12 @@ func (a *Adapter) handleHookCallback(requestID string, req *claudecode.ControlRe
 		// Auto-approve via hookSpecificOutput
 		a.sendPreToolUseHookResponse(requestID, "allow", "Auto-approved by SDK")
 
-	case "stop_git_check":
-		// Check for uncommitted changes before stopping
-		a.handleStopGitCheck(requestID, req)
+		// ExitPlanMode: Claude Code ends the turn after approval without a result message.
+		// Capture plan content from hook input and schedule delayed completion.
+		// Note: Claude Code sends hook data in the "input" field (not "hook_input").
+		if toolName, ok := req.Input["tool_name"].(string); ok && toolName == toolExitPlanMode {
+			a.handleExitPlanModeHookApproval()
+		}
 
 	default:
 		a.logger.Warn("unknown hook callback ID, auto-approving",
@@ -252,27 +269,76 @@ func (a *Adapter) sendPreToolUseHookResponse(requestID, permissionDecision, reas
 	}, "hook_response.pre_tool_use")
 }
 
-// handleStopGitCheck processes the stop_git_check hook callback.
-// Checks if the stop hook is active and approves/blocks accordingly.
-func (a *Adapter) handleStopGitCheck(requestID string, req *claudecode.ControlRequest) {
-	// If stop_hook_active is set, just approve (hook is being deactivated)
-	if active, ok := req.HookInput["stop_hook_active"].(bool); ok && active {
-		a.sendStopHookResponse(requestID, "approve", "")
-		return
-	}
-
-	// For now, approve the stop — the workspace tracker integration
-	// can be added later to check for uncommitted changes
-	a.sendStopHookResponse(requestID, "approve", "")
+// handleExitPlanModeHookApproval schedules completion for ExitPlanMode.
+// Called when ExitPlanMode is auto-approved via hook callback.
+// Note: plan content and session-mode-clear are handled in processToolUseBlock
+// (which fires first when the tool_use block is streamed).
+func (a *Adapter) handleExitPlanModeHookApproval() {
+	a.scheduleExitPlanModeCompletion()
 }
 
-// sendStopHookResponse sends a Stop hook callback response with decision format.
-func (a *Adapter) sendStopHookResponse(requestID, decision, reason string) {
-	result := map[string]any{
-		"decision": decision,
-	}
-	if reason != "" {
-		result["reason"] = reason
-	}
-	a.sendControlResult(requestID, result, "hook_response.stop")
+// exitPlanModeCompletionDelay is the time to wait after ExitPlanMode approval before
+// emitting a synthetic completion. This allows trailing stream events to arrive first.
+const exitPlanModeCompletionDelay = 2 * time.Second
+
+// scheduleExitPlanModeCompletion schedules a delayed completion for ExitPlanMode.
+// Claude Code does not send a result message after ExitPlanMode approval — the turn
+// simply ends. This goroutine waits briefly for trailing stream_events, then emits
+// a complete event and signals Prompt() to unblock.
+// Uses exitPlanPending atomic flag to prevent duplicate completion if a result
+// message arrives before the delay expires.
+func (a *Adapter) scheduleExitPlanModeCompletion() {
+	a.exitPlanPending.Store(true)
+
+	a.mu.RLock()
+	sessionID := a.sessionID
+	operationID := a.operationID
+	a.mu.RUnlock()
+
+	go func(expectedSessionID, expectedOperationID string) {
+		select {
+		case <-time.After(exitPlanModeCompletionDelay):
+			// Timer expired, proceed with completion
+		case <-a.ctx.Done():
+			a.exitPlanPending.Store(false)
+			return
+		}
+
+		// Guard against stale goroutine completing the wrong turn
+		a.mu.RLock()
+		currentSessionID := a.sessionID
+		currentOperationID := a.operationID
+		a.mu.RUnlock()
+		if currentSessionID != expectedSessionID || currentOperationID != expectedOperationID {
+			a.logger.Debug("ExitPlanMode completion skipped (stale operation)",
+				zap.String("expected_session_id", expectedSessionID),
+				zap.String("current_session_id", currentSessionID))
+			return
+		}
+
+		if !a.exitPlanPending.CompareAndSwap(true, false) {
+			a.logger.Debug("ExitPlanMode completion cancelled (result message arrived)")
+			return
+		}
+
+		a.logger.Info("ExitPlanMode: emitting delayed completion",
+			zap.String("session_id", sessionID),
+			zap.String("operation_id", operationID))
+
+		// Drain plan content
+		planContent := a.drainExitPlanContent()
+
+		completeData := map[string]any{"is_error": false}
+		if planContent != "" {
+			completeData["plan_content"] = planContent
+		}
+
+		a.sendUpdate(AgentEvent{
+			Type:        streams.EventTypeComplete,
+			SessionID:   sessionID,
+			OperationID: operationID,
+			Data:        completeData,
+		})
+		a.signalResultCompletion(true, "")
+	}(sessionID, operationID)
 }

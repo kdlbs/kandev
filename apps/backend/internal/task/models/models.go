@@ -112,6 +112,8 @@ const (
 	MessageTypeScriptExecution MessageType = "script_execution"
 	// MessageTypeThinking is for agent thinking/reasoning content
 	MessageTypeThinking MessageType = "thinking"
+	// MessageTypeAgentPlan is for agent native plan content (e.g. ExitPlanMode)
+	MessageTypeAgentPlan MessageType = "agent_plan"
 )
 
 // Message represents a message in a task session

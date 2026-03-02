@@ -20,6 +20,7 @@ import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-execution-message";
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
+import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -183,6 +184,10 @@ const adapters: MessageAdapter[] = [
   {
     matches: (comment) => comment.type === "clarification_request",
     render: (comment) => <ClarificationRequestMessage comment={comment} />,
+  },
+  {
+    matches: (comment) => comment.type === "agent_plan",
+    render: (comment) => <AgentPlanMessage comment={comment} />,
   },
   {
     matches: (comment) => comment.type === "script_execution",

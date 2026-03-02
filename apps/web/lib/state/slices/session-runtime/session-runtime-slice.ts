@@ -241,5 +241,9 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       draft.sessionMode.bySessionId[sessionId] = modeId;
     }),
+  clearSessionMode: (sessionId) =>
+    set((draft) => {
+      delete draft.sessionMode.bySessionId[sessionId];
+    }),
   ...buildUserShellActions(set),
 });

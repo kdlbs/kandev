@@ -6,13 +6,18 @@ export function registerSessionModeHandlers(store: StoreApi<AppState>): WsHandle
   return {
     "session.mode_changed": (message) => {
       const payload = message.payload;
-      if (!payload?.session_id || !payload?.current_mode_id) {
+      if (!payload?.session_id) {
         return;
       }
       const sessionId = payload.session_id as string;
-      const modeId = payload.current_mode_id as string;
+      // Empty current_mode_id means the agent exited its special mode
+      const modeId = (payload.current_mode_id as string) || "";
 
-      store.getState().setSessionMode(sessionId, modeId);
+      if (modeId) {
+        store.getState().setSessionMode(sessionId, modeId);
+      } else {
+        store.getState().clearSessionMode(sessionId);
+      }
     },
   };
 }

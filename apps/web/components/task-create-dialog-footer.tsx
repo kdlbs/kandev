@@ -226,6 +226,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   const defaultDisabled = isSessionMode
     ? !agentProfileId
     : !hasTitle || !hasRepositorySelection || !branch || missingCtx;
+
   return { showStartTask, splitDisabled, defaultDisabled };
 }
 
