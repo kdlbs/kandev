@@ -68,6 +68,28 @@ export class SessionPage {
     return this.chat.getByText("Plan mode", { exact: true });
   }
 
+  /**
+   * Delete a task via the sidebar context menu.
+   * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
+   */
+  async deleteTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
+    await taskRow.hover();
+    await taskRow.getByRole("button", { name: "Task actions" }).click();
+    await this.page.getByRole("menuitem", { name: "Delete" }).click();
+  }
+
+  /**
+   * Archive a task via the sidebar context menu.
+   * Hovers to reveal the menu trigger, opens it, and clicks "Archive".
+   */
+  async archiveTaskInSidebar(title: string): Promise<void> {
+    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
+    await taskRow.hover();
+    await taskRow.getByRole("button", { name: "Task actions" }).click();
+    await this.page.getByRole("menuitem", { name: "Archive" }).click();
+  }
+
   stepperStep(name: string): Locator {
     return this.page.getByTestId(`workflow-step-${name}`);
   }
