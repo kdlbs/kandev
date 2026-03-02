@@ -12,6 +12,17 @@ type TaskRemovalOptions = {
   useLayoutSwitch?: boolean;
 };
 
+type RemoveFromBoardOptions = {
+  /**
+   * The active task ID captured **before** the async delete API call.
+   * Avoids a race with the WS "task.deleted" handler that may clear
+   * activeTaskId before removeTaskFromBoard runs.
+   */
+  wasActiveTaskId?: string | null;
+  /** The active session ID captured before the async delete API call. */
+  wasActiveSessionId?: string | null;
+};
+
 /**
  * Hook that provides shared logic for removing a task from the kanban board
  * (after archive or delete) and switching to the next available task.
@@ -100,9 +111,13 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
   /**
    * Remove a task from the kanban board state (both single and multi snapshots)
    * and switch to the next available task if the removed task was active.
+   *
+   * Pass `opts.wasActiveTaskId` / `opts.wasActiveSessionId` when calling after
+   * an async API call (e.g. deleteTaskById) — the WS "task.deleted" handler may
+   * clear activeTaskId before this function runs.
    */
   const removeTaskFromBoard = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, opts?: RemoveFromBoardOptions) => {
       removeTaskFromSnapshots(taskId);
 
       // Collect remaining tasks across snapshots
@@ -114,11 +129,20 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         allRemainingTasks.push(...store.getState().kanban.tasks);
       }
 
-      // If removed task was active, switch to another task or go home
-      const currentActiveTaskId = store.getState().tasks.activeTaskId;
-      if (currentActiveTaskId !== taskId) return;
+      // Use the caller-provided active task ID (captured before the async API
+      // call) to avoid the race with the WS handler that may have already
+      // cleared it.  Fall back to the current store value for callers that
+      // don't provide it (e.g. archive, which doesn't go through the API).
+      const activeTaskId =
+        opts?.wasActiveTaskId !== undefined
+          ? opts.wasActiveTaskId
+          : store.getState().tasks.activeTaskId;
+      if (activeTaskId !== taskId) return;
 
-      const oldSessionId = store.getState().tasks.activeSessionId;
+      const oldSessionId =
+        opts?.wasActiveSessionId !== undefined
+          ? opts.wasActiveSessionId
+          : store.getState().tasks.activeSessionId;
       if (allRemainingTasks.length > 0) {
         await switchToNextTask(allRemainingTasks[0], oldSessionId);
       } else {
