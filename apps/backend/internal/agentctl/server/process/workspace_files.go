@@ -275,7 +275,12 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	// Note: fullPath is already resolved by resolveSafePath, so we check the
 	// unresolved path to detect whether the original request targets a symlink.
 	applyPath := reqPath
-	unresolvedPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
+	cleanReqPath := filepath.Clean(reqPath)
+	// Validate path doesn't attempt traversal before constructing filesystem path
+	if strings.Contains(cleanReqPath, "..") || filepath.IsAbs(cleanReqPath) {
+		return "", fmt.Errorf("invalid path: %s", reqPath)
+	}
+	unresolvedPath := filepath.Join(wt.workDir, cleanReqPath)
 	if info, lErr := os.Lstat(unresolvedPath); lErr == nil && info.Mode()&os.ModeSymlink != 0 {
 		// File is a symlink. fullPath already points to the real target.
 		realWorkDir, _ := filepath.EvalSymlinks(cleanWorkDir)

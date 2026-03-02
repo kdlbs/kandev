@@ -169,18 +169,29 @@ func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	case tar.TypeReg:
 		return writeFileFromTar(tr, target, os.FileMode(header.Mode))
 	case tar.TypeSymlink:
-		// Sanitize and validate symlink target to prevent path traversal
-		cleanLinkname := filepath.Clean(header.Linkname)
-		if strings.HasPrefix(cleanLinkname, "..") || filepath.IsAbs(cleanLinkname) {
-			return fmt.Errorf("invalid symlink target: %s -> %s", header.Name, header.Linkname)
+		// Validate symlink target to prevent path traversal attacks
+		// Reject absolute paths and paths containing ".."
+		if filepath.IsAbs(header.Linkname) {
+			return fmt.Errorf("symlink target must not be absolute: %s -> %s", header.Name, header.Linkname)
 		}
-		linkTarget := filepath.Join(filepath.Dir(target), cleanLinkname)
-		if !strings.HasPrefix(filepath.Clean(linkTarget), filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("symlink %s -> %s escapes install directory", header.Name, header.Linkname)
+		if strings.Contains(header.Linkname, "..") {
+			return fmt.Errorf("symlink target must not contain '..': %s -> %s", header.Name, header.Linkname)
 		}
+
+		// Resolve the symlink target path relative to the symlink's location
+		symlinkDir := filepath.Dir(target)
+		linkTarget := filepath.Join(symlinkDir, header.Linkname)
+
+		// Ensure the resolved symlink target is within destDir
+		cleanLinkTarget := filepath.Clean(linkTarget)
+		cleanDestDir := filepath.Clean(destDir)
+		if !strings.HasPrefix(cleanLinkTarget, cleanDestDir+string(os.PathSeparator)) && cleanLinkTarget != cleanDestDir {
+			return fmt.Errorf("symlink target escapes destination: %s -> %s", header.Name, header.Linkname)
+		}
+
 		// Remove existing symlink/file before creating (handles re-installs)
 		_ = os.Remove(target)
-		return os.Symlink(cleanLinkname, target)
+		return os.Symlink(header.Linkname, target)
 	default:
 		// Skip unsupported types (block devices, char devices, etc.)
 		return nil
