@@ -65,6 +65,40 @@ func isKnownSafeGitFlag(arg string) bool {
 	return false
 }
 
+// isKnownSafeGitLiteral returns true for git-specific literals that are safe to use in commands.
+// This includes git refs, remotes, and special markers that don't need branch name validation.
+func isKnownSafeGitLiteral(arg string) bool {
+	// Common safe git literals
+	safeLiterals := []string{
+		"HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD",
+		"origin", "upstream", ".", "--",
+	}
+	for _, safe := range safeLiterals {
+		if arg == safe {
+			return true
+		}
+	}
+	// HEAD~N, HEAD^N, HEAD@{} patterns are safe
+	if strings.HasPrefix(arg, "HEAD~") || strings.HasPrefix(arg, "HEAD^") || strings.HasPrefix(arg, "HEAD@{") {
+		return true
+	}
+	return false
+}
+
+// looksLikeCommitSHA returns true if the string looks like a git commit SHA (hex chars only).
+// This allows commit SHAs to bypass branch name validation.
+func looksLikeCommitSHA(arg string) bool {
+	if len(arg) < 7 || len(arg) > 64 {
+		return false
+	}
+	for _, c := range arg {
+		if !isHexChar(c) {
+			return false
+		}
+	}
+	return true
+}
+
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
 	Success       bool     `json:"success"`
@@ -94,17 +128,68 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 	}
 }
 
-// runGitCommand executes a git command in the workDir
+// runGitCommand executes a git command in the workDir with defense-in-depth validation.
+// Validates both flags and branch/ref arguments to prevent command injection.
 func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string, error) {
 	// Validate that user-controlled arguments don't introduce command injection risks
 	// Even though exec.CommandContext doesn't use a shell, we must prevent argument
 	// injection where malicious input like "--help" or "--exec=..." could be passed
 	// as what appears to be a file/branch name but is interpreted as a flag by git.
+	skipNextArg := false
 	for i, arg := range args {
-		// Allow known git flags/options in the first few arguments (subcommand flags)
-		if i > 0 && strings.HasPrefix(arg, "-") && !isKnownSafeGitFlag(arg) {
-			return "", fmt.Errorf("potentially unsafe argument: %s", arg)
+		// Skip git subcommand (first argument)
+		if i == 0 {
+			continue
 		}
+
+		// Skip if this argument is a value for a previous flag
+		if skipNextArg {
+			skipNextArg = false
+			continue
+		}
+
+		// Validate flags against whitelist
+		if strings.HasPrefix(arg, "-") {
+			if !isKnownSafeGitFlag(arg) {
+				return "", fmt.Errorf("potentially unsafe flag: %s", arg)
+			}
+			// Flags that take a value in the next argument
+			if arg == "-m" || arg == "--format" {
+				skipNextArg = true
+			}
+			continue
+		}
+
+		// Skip known safe git literals (HEAD, origin, etc.)
+		if isKnownSafeGitLiteral(arg) {
+			continue
+		}
+
+		// Skip commit SHAs (validated elsewhere via validateCommitSHA)
+		if looksLikeCommitSHA(arg) {
+			continue
+		}
+
+		// Validate branch references (e.g., "origin/branch", "upstream/main")
+		// This provides defense-in-depth even though branches are validated at call sites
+		if strings.Contains(arg, "/") {
+			parts := strings.SplitN(arg, "/", 2)
+			if len(parts) == 2 {
+				remote, branch := parts[0], parts[1]
+				// Validate both remote and branch parts
+				if !isValidBranchName(remote) {
+					return "", fmt.Errorf("invalid remote name in reference '%s'", arg)
+				}
+				if !isValidBranchName(branch) {
+					return "", fmt.Errorf("invalid branch name in reference '%s'", arg)
+				}
+			}
+		} else if isValidBranchName(arg) {
+			// Standalone arg that matches branch name pattern - validated and safe
+			continue
+		}
+		// If we reach here, it's a non-branch argument (file path, etc.)
+		// which we don't validate as strictly
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
