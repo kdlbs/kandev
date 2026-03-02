@@ -497,6 +497,17 @@ func (s *Service) pruneOrphanedCommits(sessionID, taskID, previousHead, currentH
 		commitBySHA[c.CommitSHA] = c
 	}
 
+	// If currentHead is not in our commit database, we cannot determine reachability.
+	// This happens after operations like rebase which create new commit SHAs.
+	// In this case, don't delete any commits - they may still be valid history.
+	if _, exists := commitBySHA[currentHead]; !exists {
+		s.logger.Info("currentHead not in session commits, skipping prune to avoid data loss",
+			zap.String("session_id", sessionID),
+			zap.String("current_head", currentHead),
+			zap.Int("commit_count", len(commits)))
+		return
+	}
+
 	// Walk the parent chain from currentHead to find reachable commits
 	reachable := make(map[string]bool)
 	for cur := currentHead; cur != ""; {
