@@ -127,12 +127,12 @@ func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 }
 
 // InferenceConfig returns configuration for one-shot inference.
-// Uses npx without version to match PassthroughConfig pattern.
+// Uses `exec` subcommand for non-interactive execution.
 func (a *Codex) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported:    true,
-		Command:      NewCommand("npx", "-y", "@openai/codex", "-q"),
-		ModelFlag:    NewParam("-c", "model=\"{model}\""),
+		Command:      NewCommand("npx", "-y", "@openai/codex", "exec"),
+		ModelFlag:    NewParam("-m", "{model}"),
 		OutputFormat: "text",
 		StdinInput:   true,
 	}
