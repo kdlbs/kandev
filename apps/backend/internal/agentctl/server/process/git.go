@@ -46,6 +46,25 @@ func isValidBranchName(branch string) bool {
 	return validBranchNameRegex.MatchString(branch)
 }
 
+// isKnownSafeGitFlag returns true if the argument is a known safe git flag used by this codebase.
+// This prevents argument injection where user input could introduce malicious flags.
+func isKnownSafeGitFlag(arg string) bool {
+	// Whitelist of git flags actually used by our codebase
+	safeFlags := []string{
+		"-m", "-M", "--set-upstream", "--all", "--porcelain", "--short",
+		"--abbrev-ref", "--symbolic-full-name", "--verify", "--no-patch",
+		"--format", "--format=", "--stat", "--numstat", "-p", "-A",
+		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
+		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
+	}
+	for _, safe := range safeFlags {
+		if arg == safe || strings.HasPrefix(arg, safe) {
+			return true
+		}
+	}
+	return false
+}
+
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
 	Success       bool     `json:"success"`
@@ -77,6 +96,17 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 
 // runGitCommand executes a git command in the workDir
 func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string, error) {
+	// Validate that user-controlled arguments don't introduce command injection risks
+	// Even though exec.CommandContext doesn't use a shell, we must prevent argument
+	// injection where malicious input like "--help" or "--exec=..." could be passed
+	// as what appears to be a file/branch name but is interpreted as a flag by git.
+	for i, arg := range args {
+		// Allow known git flags/options in the first few arguments (subcommand flags)
+		if i > 0 && strings.HasPrefix(arg, "-") && !isKnownSafeGitFlag(arg) {
+			return "", fmt.Errorf("potentially unsafe argument: %s", arg)
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.workDir
 
