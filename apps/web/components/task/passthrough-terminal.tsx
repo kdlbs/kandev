@@ -98,6 +98,17 @@ function initTerminalInstance(
   }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
+  // Expose buffer reader on the container for e2e tests (xterm renders to
+  // canvas so text isn't accessible in the DOM).
+  (termContainer as HTMLDivElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer =
+    () => {
+      const buf = terminal.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+        lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+      }
+      return lines.join("\n");
+    };
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();
     if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) {
@@ -120,6 +131,8 @@ function initTerminalInstance(
       refs.webglAddonRef.current = null;
     }
     terminal.dispose();
+    (termContainer as HTMLDivElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer =
+      undefined;
     refs.xtermRef.current = null;
     refs.fitAddonRef.current = null;
     refs.isInitializedRef.current = false;

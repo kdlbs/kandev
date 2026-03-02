@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState, memo } from "react";
+import React, { useCallback, useEffect, useRef, memo } from "react";
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -12,7 +12,7 @@ import {
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { applyLayoutFixups, getRootSplitview } from "@/lib/state/dockview-layout-builders";
-import { getSessionLayout, setSessionLayout } from "@/lib/local-storage";
+import { getSessionLayout, setSessionLayout, getSessionMaximizeState } from "@/lib/local-storage";
 import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
@@ -40,14 +40,9 @@ import { CommitDetailPanel } from "./commit-detail-panel";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
-import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
-import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import { useToast } from "@/components/toast-provider";
-import type { DiffComment } from "@/lib/diff/types";
+import { stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { useReviewDialog } from "./use-review-dialog";
 
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -397,6 +392,46 @@ function sanitizeLayout(layout: any): any {
   };
 }
 
+/** Restore maximize store state alongside layout fixups if saved maximize data exists. */
+function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], sessionId: string | null): void {
+  const savedMax = sessionId ? getSessionMaximizeState(sessionId) : null;
+  if (savedMax) {
+    // Restore the actual maximized dockview layout (2-panel: sidebar + maximized content),
+    // not just the store state. Without this, the store thinks it's maximized but dockview
+    // still shows the normal 5-panel layout.
+    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
+    api.layout(api.width, api.height);
+    const ids = applyLayoutFixups(api);
+    type LM = import("@/lib/state/layout-manager").LayoutState;
+    useDockviewStore.setState({
+      ...ids,
+      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+    });
+  } else {
+    const ids = applyLayoutFixups(api);
+    useDockviewStore.setState(ids);
+  }
+}
+
+/** Try restoring maximize-only state (no full session layout saved). */
+function tryRestoreMaximizeOnly(api: DockviewReadyEvent["api"], sessionId: string): boolean {
+  const savedMax = getSessionMaximizeState(sessionId);
+  if (!savedMax) return false;
+  try {
+    api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
+    api.layout(api.width, api.height);
+    const ids = applyLayoutFixups(api);
+    type LM = import("@/lib/state/layout-manager").LayoutState;
+    useDockviewStore.setState({
+      ...ids,
+      preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LM,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function tryRestoreLayout(
   api: DockviewReadyEvent["api"],
   currentSessionId: string | null,
@@ -408,12 +443,16 @@ function tryRestoreLayout(
         const sanitized = sanitizeLayout(sessionLayout);
         if (!sanitized) return false;
         api.fromJSON(sanitized as SerializedDockview);
-        useDockviewStore.setState(applyLayoutFixups(api));
+        applyFixupsWithMaximize(api, currentSessionId);
         return true;
       }
     } catch {
       // Per-session restore failed, try global
     }
+    // No saved session layout, but maximize state may exist
+    // (maximize is saved synchronously, layout persistence is debounced and may not
+    // have fired before refresh). Restore the maximized dockview layout directly.
+    if (tryRestoreMaximizeOnly(api, currentSessionId)) return true;
   }
 
   if (!currentSessionId) {
@@ -436,7 +475,7 @@ function tryRestoreLayout(
 
 function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   if (useDockviewStore.getState().isRestoringLayout) return;
-  if (api.hasMaximizedGroup()) return;
+  if (api.hasMaximizedGroup() || useDockviewStore.getState().preMaximizeLayout !== null) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
@@ -525,74 +564,34 @@ function setupGroupTracking(api: DockviewReadyEvent["api"]) {
 function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
+    const isMax = useDockviewStore.getState().preMaximizeLayout !== null;
+    const remaining = api.panels.filter((p) => p.id !== panel.id);
+    const nonSidebar = remaining.filter((p) => p.api.component !== "sidebar");
+    // If we're in maximize mode and the last non-sidebar panel was just closed,
+    // exit maximize to restore the pre-maximize layout (avoids empty view).
+    // Then remove the closed panel from the restored layout so it doesn't reappear.
+    if (isMax && nonSidebar.length === 0) {
+      const removedId = panel.id;
+      requestAnimationFrame(() => {
+        useDockviewStore.getState().exitMaximizedLayout();
+        // exitMaximizedLayout schedules a rAF to finalize — wait for that, then
+        // remove the panel that was closed (it was re-created from preMaximizeLayout).
+        requestAnimationFrame(() => {
+          const restoredPanel = api.getPanel(removedId);
+          if (restoredPanel) {
+            restoredPanel.api.close();
+          }
+        });
+      });
+    }
     const entry = panelPortalManager.get(panel.id);
     if (entry?.component === "vscode" && entry.sessionId) stopVscode(entry.sessionId);
+    if (entry?.component === "terminal" && entry.sessionId) {
+      const terminalId = entry.params.terminalId as string | undefined;
+      if (terminalId) stopUserShell(entry.sessionId, terminalId);
+    }
     panelPortalManager.release(panel.id);
   });
-}
-
-// ---------------------------------------------------------------------------
-// useReviewDialog hook
-// ---------------------------------------------------------------------------
-
-function useReviewDialog(effectiveSessionId: string | null) {
-  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
-  const { toast } = useToast();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const baseBranch = useAppStore((state) => {
-    if (!effectiveSessionId) return undefined;
-    return state.taskSessions.items[effectiveSessionId]?.base_branch;
-  });
-  const reviewGitStatus = useSessionGitStatus(effectiveSessionId);
-  const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
-  const { openFile: reviewOpenFile } = useFileEditors();
-  const reviewTaskPR = useActiveTaskPR();
-  const { files: reviewPRDiffFiles } = usePRDiff(
-    reviewTaskPR?.owner ?? null,
-    reviewTaskPR?.repo ?? null,
-    reviewTaskPR?.pr_number ?? null,
-  );
-
-  const handleReviewSendComments = useCallback(
-    (comments: DiffComment[]) => {
-      if (!activeTaskId || !effectiveSessionId || comments.length === 0) return;
-      const client = getWebSocketClient();
-      if (!client) return;
-      const markdown = formatReviewCommentsAsMarkdown(comments);
-      client
-        .request(
-          "message.add",
-          {
-            task_id: activeTaskId,
-            session_id: effectiveSessionId,
-            content: markdown,
-          },
-          10000,
-        )
-        .catch(() => {
-          toast({ title: "Failed to send comments", variant: "error" });
-        });
-      setReviewDialogOpen(false);
-    },
-    [activeTaskId, effectiveSessionId, toast],
-  );
-
-  useEffect(() => {
-    const handler = () => setReviewDialogOpen(true);
-    window.addEventListener("open-review-dialog", handler);
-    return () => window.removeEventListener("open-review-dialog", handler);
-  }, []);
-
-  return {
-    reviewDialogOpen,
-    setReviewDialogOpen,
-    baseBranch,
-    reviewGitStatus,
-    reviewCumulativeDiff,
-    reviewPRDiffFiles,
-    reviewOpenFile,
-    handleReviewSendComments,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -645,10 +644,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const setApi = useDockviewStore((s) => s.setApi);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
 
   const effectiveSessionId =
     useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const sessionIdRef = useRef<string | null>(effectiveSessionId);
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const review = useReviewDialog(effectiveSessionId);

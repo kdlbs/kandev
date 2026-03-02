@@ -405,16 +405,34 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+/** Restore a saved maximize state from sessionStorage onto the dockview API. */
+function restoreMaximizeFromStorage(api: DockviewApi, sessionId: string, set: StoreSet): boolean {
+  const saved = getSessionMaximizeState(sessionId);
+  if (!saved) return false;
+  try {
+    api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
+    api.layout(api.width, api.height);
+    const ids = applyLayoutFixups(api);
+    const preMax = saved.preMaximizeLayout as unknown as LayoutState;
+    set({ ...ids, preMaximizeLayout: preMax });
+  } catch {
+    return false;
+  }
+  requestAnimationFrame(() => {
+    set({ isRestoringLayout: false });
+  });
+  return true;
+}
+
 function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
   return (oldSessionId: string | null, newSessionId: string) => {
     const { api, currentLayoutSessionId, preMaximizeLayout } = get();
     if (!api || currentLayoutSessionId === newSessionId) return;
-    // When the first session becomes active (oldSessionId is null and no prior
-    // layout session), onReady already built the correct layout (possibly with
-    // an intent). Just adopt the current layout for the new session without
-    // rebuilding, which would lose the intent-based layout.
+    // First session adoption — onReady already built the layout; just adopt it.
     if (!oldSessionId && !currentLayoutSessionId) {
-      set({ currentLayoutSessionId: newSessionId });
+      set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
+      if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
+      set({ isRestoringLayout: false, currentLayoutSessionId: newSessionId });
       try {
         setSessionLayout(newSessionId, api.toJSON());
       } catch {
@@ -422,9 +440,7 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
       }
       return;
     }
-    // When maximized, save native dockview JSON for the maximized layout so we
-    // can restore it via api.fromJSON() — the same path page refresh uses.
-    // This preserves terminal panel state (shell connections, running processes).
+    // When maximized, save native dockview JSON so we can restore via api.fromJSON().
     if (oldSessionId && preMaximizeLayout) {
       setSessionMaximizeState(oldSessionId, {
         preMaximizeLayout: preMaximizeLayout as unknown as object,
@@ -435,44 +451,25 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
     }
     // Clear maximize state before switching — the new session has its own.
     set({ preMaximizeLayout: null, maximizedGroupId: null });
-    const safeWidth = api.width;
-    const safeHeight = api.height;
+    if (oldSessionId)
+      try {
+        setSessionLayout(oldSessionId, api.toJSON());
+      } catch {
+        /* ignore */
+      }
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
-      // Check if the new session has a saved maximize state.
-      // If so, restore using native dockview JSON (same path as page refresh)
-      // to preserve terminal connections and running processes.
-      const savedMaximize = getSessionMaximizeState(newSessionId);
-      if (savedMaximize) {
-        // Save old session's current layout first
-        if (oldSessionId) {
-          try {
-            setSessionLayout(oldSessionId, api.toJSON());
-          } catch {
-            /* ignore */
-          }
-        }
-        // Restore using native dockview format — preserves terminal state
-        api.fromJSON(savedMaximize.maximizedDockviewJson as SerializedDockview);
-        api.layout(safeWidth, safeHeight);
-        const ids = applyLayoutFixups(api);
-        const preMax = savedMaximize.preMaximizeLayout as unknown as LayoutState;
-        set({ ...ids, preMaximizeLayout: preMax });
-        requestAnimationFrame(() => {
-          set({ isRestoringLayout: false });
-        });
-      } else {
-        const ids = performSessionSwitch({
-          api,
-          oldSessionId,
-          newSessionId,
-          safeWidth,
-          safeHeight,
-          buildDefault: (a) => get().buildDefaultLayout(a),
-        });
-        set(ids);
-        set({ isRestoringLayout: false });
-      }
+      if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
+      const ids = performSessionSwitch({
+        api,
+        oldSessionId,
+        newSessionId,
+        safeWidth: api.width,
+        safeHeight: api.height,
+        buildDefault: (a) => get().buildDefaultLayout(a),
+      });
+      set(ids);
+      set({ isRestoringLayout: false });
     } catch {
       set({ isRestoringLayout: false });
     }
@@ -482,7 +479,7 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
 function buildMaximizeActions(set: StoreSet, get: StoreGet) {
   return {
     maximizeGroup: (groupId: string) => {
-      const { api, preMaximizeLayout } = get();
+      const { api, preMaximizeLayout, currentLayoutSessionId } = get();
       if (!api) return;
       if (preMaximizeLayout) {
         get().exitMaximizedLayout();
@@ -518,6 +515,13 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        // Persist to sessionStorage so maximize survives page refresh
+        if (currentLayoutSessionId) {
+          setSessionMaximizeState(currentLayoutSessionId, {
+            preMaximizeLayout: current as unknown as object,
+            maximizedDockviewJson: api.toJSON(),
+          });
+        }
         set({ isRestoringLayout: false });
       });
     },

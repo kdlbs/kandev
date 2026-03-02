@@ -1,4 +1,4 @@
-import { type Locator, type Page } from "@playwright/test";
+import { type Locator, type Page, expect } from "@playwright/test";
 
 export class SessionPage {
   readonly chat: Locator;
@@ -82,5 +82,89 @@ export class SessionPage {
     const editor = this.page.locator(".tiptap.ProseMirror").first();
     await editor.click();
     await editor.press("Shift+Tab");
+  }
+
+  /**
+   * Wait for the terminal shell to be connected (buffer has content from
+   * the prompt), then type a command and press Enter.
+   */
+  async typeInTerminal(command: string): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          return this.page.evaluate(() => {
+            const panel = document.querySelector('[data-testid="terminal-panel"]');
+            const xtermEl = panel?.querySelector(".xterm");
+            type XC = HTMLElement & { __xtermReadBuffer?: () => string };
+            const container = xtermEl?.parentElement as XC | null | undefined;
+            const buf = container?.__xtermReadBuffer?.();
+            return (buf?.length ?? 0) > 0;
+          });
+        },
+        { timeout: 15_000, message: "Waiting for terminal shell to connect" },
+      )
+      .toBe(true);
+
+    const xterm = this.terminal.locator(".xterm");
+    await xterm.click();
+    await this.page.keyboard.type(command);
+    await this.page.keyboard.press("Enter");
+  }
+
+  /**
+   * Assert the terminal buffer contains the given text.
+   * xterm renders to canvas/WebGL so text isn't in the DOM. Uses the
+   * __xtermReadBuffer() helper exposed on the terminal container element.
+   */
+  async expectTerminalHasText(text: string): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          return this.page.evaluate((marker) => {
+            const panel = document.querySelector('[data-testid="terminal-panel"]');
+            if (!panel) return false;
+            const xtermEl = panel.querySelector(".xterm");
+            type XC = HTMLElement & { __xtermReadBuffer?: () => string };
+            const container = xtermEl?.parentElement as XC | null | undefined;
+            const buf = container?.__xtermReadBuffer?.();
+            return buf?.includes(marker) ?? false;
+          }, text);
+        },
+        { timeout: 10_000, message: `Expected terminal to contain "${text}"` },
+      )
+      .toBe(true);
+  }
+
+  /**
+   * Click the maximize button on the dockview group that contains a tab
+   * with the given name. Defaults to "Terminal".
+   */
+  async clickMaximize(tabName = "Terminal"): Promise<void> {
+    const header = this.page.locator(
+      `.dv-tabs-and-actions-container:has(.dv-default-tab:has-text('${tabName}'))`,
+    );
+    await header.getByTestId("dockview-maximize-btn").click();
+  }
+
+  /**
+   * Assert the layout is in maximized state: terminal visible,
+   * sidebar visible (UI: |sidebar|maximized-group|), chat and files hidden.
+   */
+  async expectMaximized(): Promise<void> {
+    await expect(this.terminal).toBeVisible({ timeout: 10_000 });
+    await expect(this.sidebar).toBeVisible();
+    await expect(this.chat).not.toBeVisible({ timeout: 5_000 });
+    await expect(this.files).not.toBeVisible({ timeout: 5_000 });
+  }
+
+  /**
+   * Assert the layout is in the default (non-maximized) state:
+   * chat, terminal, files, and sidebar are all visible.
+   */
+  async expectDefaultLayout(): Promise<void> {
+    await expect(this.chat).toBeVisible({ timeout: 10_000 });
+    await expect(this.terminal).toBeVisible({ timeout: 10_000 });
+    await expect(this.files).toBeVisible({ timeout: 10_000 });
+    await expect(this.sidebar).toBeVisible();
   }
 }

@@ -362,12 +362,24 @@ export type SessionMaximizeState = {
   maximizedDockviewJson: object;
 };
 
+function isSessionMaximizeState(value: unknown): value is SessionMaximizeState {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.preMaximizeLayout === "object" &&
+    v.preMaximizeLayout !== null &&
+    typeof v.maximizedDockviewJson === "object" &&
+    v.maximizedDockviewJson !== null
+  );
+}
+
 export function getSessionMaximizeState(sessionId: string): SessionMaximizeState | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(`${DOCKVIEW_SESSION_MAXIMIZE_PREFIX}${sessionId}`);
     if (!raw) return null;
-    return JSON.parse(raw) as SessionMaximizeState;
+    const parsed: unknown = JSON.parse(raw);
+    return isSessionMaximizeState(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -579,6 +591,7 @@ export function cleanupTaskStorage(taskId: string, sessionIds: string[]): void {
 
   // Session-keyed storage — clean all sessions belonging to the task
   for (const sessionId of sessionIds) {
+    removeSessionMaximizeState(sessionId);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);

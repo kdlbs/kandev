@@ -206,7 +206,12 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button type="button" className={ACTION_BTN} onClick={handleMaximize}>
+          <button
+            type="button"
+            className={ACTION_BTN}
+            onClick={handleMaximize}
+            data-testid="dockview-maximize-btn"
+          >
             {isMaximized ? (
               <IconArrowsMinimize className="h-3 w-3" />
             ) : (
@@ -235,7 +240,12 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
       {!isChatGroup && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" className={ACTION_BTN} onClick={handleCloseGroup}>
+            <button
+              type="button"
+              className={ACTION_BTN}
+              onClick={handleCloseGroup}
+              data-testid="dockview-close-group-btn"
+            >
               <IconX className="h-3 w-3" />
             </button>
           </TooltipTrigger>

@@ -12,6 +12,7 @@ export type SeedData = {
   startStepId: string;
   steps: WorkflowStep[];
   repositoryId: string;
+  agentProfileId: string;
 };
 
 export const test = backendFixture.extend<
@@ -56,12 +57,19 @@ export const test = backendFixture.extend<
       execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
 
+      const { agents } = await apiClient.listAgents();
+      const agentProfileId = agents[0]?.profiles[0]?.id;
+      if (!agentProfileId) {
+        throw new Error("E2E seed failed: no agent profile available");
+      }
+
       await use({
         workspaceId: workspace.id,
         workflowId: workflow.id,
         startStepId: startStep.id,
         steps: sorted,
         repositoryId: repo.id,
+        agentProfileId,
       });
     },
     { scope: "worker" },
