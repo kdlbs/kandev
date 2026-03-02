@@ -21,7 +21,7 @@ func TestCloseParentPipe_ClosesAndNils(t *testing.T) {
 		t.Error("parentPipe should be nil after closeParentPipe")
 	}
 
-	// Writing to the read-end should fail because the write-end is closed.
+	// Writing to the closed write-end should fail.
 	_, err = w.Write([]byte("x"))
 	if err == nil {
 		t.Error("expected error writing to closed pipe")

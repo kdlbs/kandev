@@ -154,7 +154,8 @@ func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, cleanup fun
 
 	if parentDied == nil {
 		// No parent monitor — wait for OS signal only.
-		<-sigCh
+		sig := <-sigCh
+		log.Info("received signal", zap.String("signal", sig.String()))
 	} else {
 		select {
 		case sig := <-sigCh:

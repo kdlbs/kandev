@@ -199,7 +199,7 @@ func (l *Launcher) Start(ctx context.Context) error {
 		if killErr := l.cmd.Process.Kill(); killErr != nil {
 			l.logger.Warn("failed to kill agentctl process after failed health check", zap.Error(killErr))
 		}
-		l.closeParentPipe()
+		l.closeParentPipeLocked()
 		return fmt.Errorf("agentctl failed to become healthy: %w", err)
 	}
 
@@ -259,7 +259,15 @@ func (l *Launcher) Stop(ctx context.Context) error {
 }
 
 // closeParentPipe closes and nils the parent liveness pipe if open.
+// Safe for concurrent use.
 func (l *Launcher) closeParentPipe() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.closeParentPipeLocked()
+}
+
+// closeParentPipeLocked is like closeParentPipe but assumes mu is already held.
+func (l *Launcher) closeParentPipeLocked() {
 	if l.parentPipe != nil {
 		_ = l.parentPipe.Close()
 		l.parentPipe = nil
