@@ -781,13 +781,14 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 		newHead, headErr := g.runGitCommand(ctx, "rev-parse", "HEAD")
 		if headErr != nil {
 			g.logger.Warn("failed to resolve HEAD after reset", zap.Error(headErr))
+		} else {
+			reset := &streams.GitResetNotification{
+				Timestamp:    time.Now().UTC(),
+				PreviousHead: previousHead,
+				CurrentHead:  strings.TrimSpace(newHead),
+			}
+			g.workspaceTracker.NotifyGitReset(reset)
 		}
-		reset := &streams.GitResetNotification{
-			Timestamp:    time.Now().UTC(),
-			PreviousHead: previousHead,
-			CurrentHead:  strings.TrimSpace(newHead),
-		}
-		g.workspaceTracker.NotifyGitReset(reset)
 
 		// Refresh git status
 		g.workspaceTracker.RefreshGitStatus(ctx)

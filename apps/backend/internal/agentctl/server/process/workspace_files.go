@@ -147,7 +147,9 @@ func (wt *WorkspaceTracker) resolvedWorkDir() string {
 }
 
 // resolveSafePath resolves reqPath to an absolute path within workDir,
-// rejecting any path traversal attempts.
+// rejecting any path traversal attempts. The returned path is always
+// constructed as filepath.Join(resolvedWorkDir, validatedRelPath) so that
+// static analysis tools (CodeQL) can verify it stays within the workspace.
 func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
@@ -191,7 +193,10 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 		return "", fmt.Errorf("path traversal detected: %s", reqPath)
 	}
 
-	return realPath, nil
+	// Reconstruct the absolute path from the trusted workspace root and the
+	// validated relative path. This ensures the returned path is provably
+	// inside the workspace, satisfying static-analysis taint checks.
+	return filepath.Join(realWorkDir, relPath), nil
 }
 
 // GetFileContent returns the content of a file.
@@ -391,12 +396,12 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return err
 	}
 
-	if err := wt.validateWorkspacePaths(fullPath); err != nil {
-		return err
-	}
 	cleanWorkDir := wt.resolvedWorkDir()
 	if fullPath == cleanWorkDir {
 		return fmt.Errorf("cannot delete workspace root")
+	}
+	if err := wt.validateWorkspacePaths(fullPath); err != nil {
+		return err
 	}
 
 	// Check if file exists
