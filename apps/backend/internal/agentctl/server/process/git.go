@@ -168,19 +168,12 @@ func filterGitEnv(env []string) []string {
 	return result
 }
 
-// triggerFsNotify creates and removes a temporary file to trigger fsnotify and refresh git status.
-// This is OS-agnostic and reliably triggers filesystem events that the workspace tracker watches.
-// Called after git operations like commit, push, pull, etc. to refresh the UI.
-func (g *GitOperator) triggerFsNotify() {
-	sentinelPath := filepath.Join(g.workDir, ".git-op-complete")
-	f, err := os.Create(sentinelPath)
-	if err != nil {
-		g.logger.Debug("failed to create sentinel file", zap.Error(err))
-		return
-	}
-	_ = f.Close()
-	if err := os.Remove(sentinelPath); err != nil {
-		g.logger.Debug("failed to remove sentinel file", zap.Error(err))
+// triggerRefresh refreshes git status in the workspace tracker immediately.
+// Called after git operations like commit, push, pull, etc. to refresh the UI
+// without waiting for the next poll cycle.
+func (g *GitOperator) triggerRefresh() {
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(context.Background())
 	}
 }
 
@@ -669,7 +662,7 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		result.Success = true
 	}
 
-	g.triggerFsNotify()
+	g.triggerRefresh()
 	g.logger.Info("discard completed",
 		zap.Int("total_files", len(paths)),
 		zap.Int("untracked_files", len(untrackedFiles)),
@@ -1098,9 +1091,9 @@ func (g *GitOperator) unlock() {
 	g.inProgress = false
 	g.currentOp = ""
 
-	// Trigger fsnotify to refresh git status in the workspace tracker.
+	// Refresh git status in the workspace tracker immediately.
 	// This is called after every git operation completes.
-	g.triggerFsNotify()
+	g.triggerRefresh()
 }
 
 // PRCreateResult represents the result of a PR creation operation.

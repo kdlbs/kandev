@@ -325,7 +325,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 
 	// Notify with the original relative path (not the resolved symlink target)
 	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
-	wt.addPendingChange(relPath, types.FileOpWrite)
+	wt.notifyFileChange(relPath, types.FileOpWrite)
 
 	wt.logger.Debug("applied file diff using git apply",
 		zap.String("path", relPath),
@@ -389,7 +389,7 @@ func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
 	// Notify with the relative path
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
-	wt.addPendingChange(relPath, types.FileOpCreate)
+	wt.notifyFileChange(relPath, types.FileOpCreate)
 
 	return nil
 }
@@ -429,7 +429,7 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 	}
 
 	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
-	wt.addPendingChange(relPath, types.FileOpRemove)
+	wt.notifyFileChange(relPath, types.FileOpRemove)
 
 	return nil
 }
@@ -475,9 +475,9 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 	cleanWorkDir := wt.resolvedWorkDir()
 	oldRelPath := strings.TrimPrefix(oldSafePath, cleanWorkDir+string(os.PathSeparator))
 	newRelPath := strings.TrimPrefix(newSafePath, cleanWorkDir+string(os.PathSeparator))
-	wt.addPendingChange(oldRelPath, types.FileOpRename)
+	wt.notifyFileChange(oldRelPath, types.FileOpRename)
 	if newRelPath != oldRelPath {
-		wt.addPendingChange(newRelPath, types.FileOpRename)
+		wt.notifyFileChange(newRelPath, types.FileOpRename)
 	}
 
 	return nil

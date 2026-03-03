@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -575,28 +574,6 @@ func TestRenameFile(t *testing.T) {
 			t.Fatalf("expected file to be moved with directory, got: %v", err)
 		}
 	})
-}
-
-func TestFsOpToString(t *testing.T) {
-	tests := []struct {
-		op   fsnotify.Op
-		want string
-	}{
-		{fsnotify.Create, types.FileOpCreate},
-		{fsnotify.Write, types.FileOpWrite},
-		{fsnotify.Remove, types.FileOpRemove},
-		{fsnotify.Rename, types.FileOpRename},
-		{fsnotify.Chmod, types.FileOpRefresh},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.op.String(), func(t *testing.T) {
-			got := fsOpToString(tt.op)
-			if got != tt.want {
-				t.Errorf("fsOpToString(%v) = %q, want %q", tt.op, got, tt.want)
-			}
-		})
-	}
 }
 
 func TestRewriteDiffPaths(t *testing.T) {
