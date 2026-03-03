@@ -33,7 +33,13 @@ function ToolbarBtn({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="sm" className={cn(iconBtn, className)} onClick={onClick}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(iconBtn, className)}
+          onClick={onClick}
+          aria-label={tooltip}
+        >
           {children}
         </Button>
       </TooltipTrigger>

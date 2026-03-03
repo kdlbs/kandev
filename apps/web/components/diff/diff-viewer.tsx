@@ -70,12 +70,19 @@ function useAutoLoadExpansion(
   enableExpansion: boolean,
   state: ReturnType<typeof useDiffViewerState>,
 ): boolean {
-  const { isExpansionContentLoaded, isExpansionLoading, loadExpansionContent } = state;
+  const { isExpansionContentLoaded, isExpansionLoading, expansionError, loadExpansionContent } =
+    state;
   useEffect(() => {
-    if (enableExpansion && !isExpansionContentLoaded && !isExpansionLoading) {
-      loadExpansionContent();
+    if (enableExpansion && !isExpansionContentLoaded && !isExpansionLoading && !expansionError) {
+      void loadExpansionContent();
     }
-  }, [enableExpansion, isExpansionContentLoaded, isExpansionLoading, loadExpansionContent]);
+  }, [
+    enableExpansion,
+    isExpansionContentLoaded,
+    isExpansionLoading,
+    expansionError,
+    loadExpansionContent,
+  ]);
   const hasValidData = !!(
     state.fileDiffMetadata?.oldLines?.length && state.fileDiffMetadata?.newLines?.length
   );

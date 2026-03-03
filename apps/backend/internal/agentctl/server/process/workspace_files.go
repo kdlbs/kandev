@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -542,29 +543,40 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	// Use git show to get the file content at the specified ref
 	// Format: git show <ref>:<path>
 	gitRef := fmt.Sprintf("%s:%s", ref, cleanPath)
+
+	// Preflight: check blob size before materializing content to avoid memory spikes.
+	sizeCmd := exec.CommandContext(ctx, "git", "cat-file", "-s", gitRef)
+	sizeCmd.Dir = wt.workDir
+	sizeOut, err := sizeCmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := string(exitErr.Stderr)
+			if strings.Contains(stderr, "does not exist") ||
+				strings.Contains(stderr, "Not a valid object") ||
+				strings.Contains(stderr, "fatal: path") ||
+				strings.Contains(stderr, "fatal: not a valid") {
+				return "", 0, false, fmt.Errorf("file not found at ref %s: %s", ref, cleanPath)
+			}
+		}
+		return "", 0, false, fmt.Errorf("failed to stat file at ref: %w", err)
+	}
+	blobSize, err := strconv.ParseInt(strings.TrimSpace(string(sizeOut)), 10, 64)
+	if err != nil {
+		return "", 0, false, fmt.Errorf("failed to parse file size at ref: %w", err)
+	}
+	if blobSize > maxFileSize {
+		return "", blobSize, false, fmt.Errorf("file too large (max 10MB)")
+	}
+
 	cmd := exec.CommandContext(ctx, "git", "show", gitRef)
 	cmd.Dir = wt.workDir
 
 	content, err := cmd.Output()
 	if err != nil {
-		// Check if it's because the file doesn't exist at that ref
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			if strings.Contains(stderr, "does not exist") ||
-				strings.Contains(stderr, "exists on disk, but not in") ||
-				strings.Contains(stderr, "fatal: path") {
-				return "", 0, false, fmt.Errorf("file not found at ref %s: %s", ref, cleanPath)
-			}
-		}
 		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
 	}
 
 	size := int64(len(content))
-
-	// Check file size
-	if size > maxFileSize {
-		return "", size, false, fmt.Errorf("file too large (max 10MB)")
-	}
 
 	// Detect binary: if content is not valid UTF-8, base64-encode it
 	if !utf8.Valid(content) {
