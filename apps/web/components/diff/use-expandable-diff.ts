@@ -72,17 +72,17 @@ export function useExpandableDiff({
       if (!client) throw new Error("WebSocket client not available");
 
       const newRes = await requestFileContent(client, sessionId, filePath);
-      if (newRes.error || newRes.is_binary) {
-        throw new Error(newRes.error || "Cannot expand binary files");
-      }
+      if (newRes.is_binary) throw new Error("Cannot expand binary files");
+      // "file not found" / "no such file" is expected for deleted files
+      const newContent = newRes.error && /not found|no such file/i.test(newRes.error) ? "" : newRes.content;
+      if (newRes.error && newContent !== "") throw new Error(newRes.error);
 
       const oldContent = baseRef
         ? await fetchOldContent(client, sessionId, filePath, baseRef)
         : "";
 
       const oldLines = oldContent.split(SPLIT_WITH_NEWLINES);
-      const newLines = newRes.content.split(SPLIT_WITH_NEWLINES);
-      if (newLines.length === 0) throw new Error("New file content is empty");
+      const newLines = newContent.split(SPLIT_WITH_NEWLINES);
 
       setLoadedContent({ oldLines, newLines });
     } catch (err) {
