@@ -101,6 +101,12 @@ type AgentManagerClient interface {
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
 
+	// WritePassthroughStdin writes data to the agent's PTY stdin for passthrough sessions.
+	WritePassthroughStdin(ctx context.Context, sessionID string, data string) error
+
+	// MarkPassthroughRunning marks a passthrough execution as running.
+	MarkPassthroughRunning(sessionID string) error
+
 	// GetRemoteRuntimeStatusBySession returns remote runtime status metadata for a session
 	// (used by UI cloud indicators). Returns nil,nil when unavailable.
 	GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error)

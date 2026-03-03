@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -104,12 +105,23 @@ type mockAgentManager struct {
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
+
+	// Passthrough stdin tracking
+	passthroughStdinCalls []passthroughStdinCall
+	passthroughStdinErr   error
+	markPassthroughCalls  []string // session IDs
+	markPassthroughErr    error
 }
 
 type stopAgentCall struct {
 	ExecutionID string
 	Reason      string
 	Force       bool
+}
+
+type passthroughStdinCall struct {
+	SessionID string
+	Data      string
 }
 
 func (m *mockAgentManager) LaunchAgent(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
@@ -157,6 +169,18 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ strin
 }
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough
+}
+func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, sessionID string, data string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.passthroughStdinCalls = append(m.passthroughStdinCalls, passthroughStdinCall{SessionID: sessionID, Data: data})
+	return m.passthroughStdinErr
+}
+func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.markPassthroughCalls = append(m.markPassthroughCalls, sessionID)
+	return m.markPassthroughErr
 }
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(_ context.Context, _ string) (*executor.RemoteRuntimeStatus, error) {
 	return nil, nil
@@ -840,6 +864,183 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 
 		// Should not panic or error with empty session ID.
 		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: ""})
+	})
+}
+
+func TestDeliverPassthroughPrompt(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("writes to stdin and marks running", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		err := svc.deliverPassthroughPrompt(ctx, "s1", "hello")
+		if err != nil {
+			t.Fatalf("deliverPassthroughPrompt returned error: %v", err)
+		}
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+
+		if len(agentMgr.passthroughStdinCalls) != 1 {
+			t.Fatalf("expected 1 stdin call, got %d", len(agentMgr.passthroughStdinCalls))
+		}
+		call := agentMgr.passthroughStdinCalls[0]
+		if call.SessionID != "s1" {
+			t.Errorf("stdin sessionID = %q, want %q", call.SessionID, "s1")
+		}
+		if call.Data != "hello\r" {
+			t.Errorf("stdin data = %q, want %q", call.Data, "hello\r")
+		}
+		if len(agentMgr.markPassthroughCalls) != 1 || agentMgr.markPassthroughCalls[0] != "s1" {
+			t.Errorf("markPassthroughRunning calls = %v, want [s1]", agentMgr.markPassthroughCalls)
+		}
+	})
+
+	t.Run("returns error when stdin write fails", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		agentMgr := &mockAgentManager{
+			isPassthrough:       true,
+			passthroughStdinErr: fmt.Errorf("stdin write failed"),
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		err := svc.deliverPassthroughPrompt(ctx, "s1", "hello")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+
+		// Should not call markPassthroughRunning when stdin write fails
+		if len(agentMgr.markPassthroughCalls) != 0 {
+			t.Errorf("markPassthroughRunning should not be called when stdin fails, got %d calls", len(agentMgr.markPassthroughCalls))
+		}
+	})
+}
+
+func TestHandleAgentReady_PassthroughQueuedMessage(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("delivers queued message to passthrough via stdin", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Set session to RUNNING so handleAgentReady doesn't early-return
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateRunning
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+
+		// Queue a message
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued prompt", "", "test", false, nil); err != nil {
+			t.Fatalf("failed to queue message: %v", err)
+		}
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+
+		// Verify the queued message was delivered to passthrough stdin
+		if len(agentMgr.passthroughStdinCalls) != 1 {
+			t.Fatalf("expected 1 stdin call, got %d", len(agentMgr.passthroughStdinCalls))
+		}
+		call := agentMgr.passthroughStdinCalls[0]
+		if call.Data != "queued prompt\r" {
+			t.Errorf("stdin data = %q, want %q", call.Data, "queued prompt\r")
+		}
+
+		// Queue should be empty after delivery
+		status := svc.messageQueue.GetStatus(ctx, "s1")
+		if status.IsQueued {
+			t.Error("expected queue to be empty after delivery")
+		}
+	})
+
+	t.Run("skips delivery when no queued message exists", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateRunning
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+
+		// No queued message — should return early
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+
+		if len(agentMgr.passthroughStdinCalls) != 0 {
+			t.Errorf("expected no stdin calls, got %d", len(agentMgr.passthroughStdinCalls))
+		}
+	})
+}
+
+func TestAutoStartPassthroughPrompt(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("writes prompt to stdin and logs step name", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		agentMgr := &mockAgentManager{isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		err := svc.autoStartPassthroughPrompt(ctx, "t1", session, "Analyze", "do analysis")
+		if err != nil {
+			t.Fatalf("autoStartPassthroughPrompt returned error: %v", err)
+		}
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+
+		if len(agentMgr.passthroughStdinCalls) != 1 {
+			t.Fatalf("expected 1 stdin call, got %d", len(agentMgr.passthroughStdinCalls))
+		}
+		if agentMgr.passthroughStdinCalls[0].Data != "do analysis\r" {
+			t.Errorf("stdin data = %q, want %q", agentMgr.passthroughStdinCalls[0].Data, "do analysis\r")
+		}
+	})
+
+	t.Run("returns error when stdin write fails", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		agentMgr := &mockAgentManager{
+			isPassthrough:       true,
+			passthroughStdinErr: fmt.Errorf("stdin write failed"),
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		err := svc.autoStartPassthroughPrompt(ctx, "t1", session, "Analyze", "do analysis")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
 	})
 }
 

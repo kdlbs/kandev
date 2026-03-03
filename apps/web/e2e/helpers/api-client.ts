@@ -125,6 +125,39 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents");
   }
 
+  async deleteAgentProfile(profileId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/agent-profiles/${profileId}`);
+  }
+
+  /** Delete all agent profiles except the ones in keepIds. */
+  async cleanupTestProfiles(keepIds: string[]): Promise<void> {
+    const { agents } = await this.listAgents();
+    for (const agent of agents) {
+      for (const profile of agent.profiles ?? []) {
+        if (!keepIds.includes(profile.id)) {
+          await this.deleteAgentProfile(profile.id);
+        }
+      }
+    }
+  }
+
+  async createAgentProfile(
+    agentId: string,
+    name: string,
+    opts: {
+      model: string;
+      auto_approve?: boolean;
+      cli_passthrough?: boolean;
+    },
+  ): Promise<{ id: string }> {
+    return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
+      name,
+      model: opts.model,
+      auto_approve: opts.auto_approve ?? true,
+      cli_passthrough: opts.cli_passthrough ?? false,
+    });
+  }
+
   async createTaskWithAgent(
     workspaceId: string,
     title: string,

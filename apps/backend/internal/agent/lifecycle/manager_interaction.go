@@ -138,14 +138,18 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	return m.StopAgent(ctx, execution.ID, force)
 }
 
-// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session,
-// clearing the agent's conversation context. The execution environment (container/agentctl) is
-// preserved — only the agent process inside agentctl is restarted. Works for both local and remote
-// executors since it operates via the agentctl HTTP API.
+// RestartAgentProcess stops the agent subprocess and starts a fresh one, clearing the agent's
+// conversation context. For ACP agents this restarts via agentctl with a new ACP session.
+// For passthrough (TUI) agents this kills the PTY process and relaunches without --resume.
 func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+
+	// Passthrough agents: kill PTY and relaunch fresh (no --resume).
+	if execution.PassthroughProcessID != "" {
+		return m.restartPassthroughProcess(ctx, execution)
 	}
 
 	if execution.agentctl == nil {

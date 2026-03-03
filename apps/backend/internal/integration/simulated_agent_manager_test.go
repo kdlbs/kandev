@@ -408,6 +408,12 @@ func (s *SimulatedAgentManagerClient) RestartAgentProcess(ctx context.Context, a
 func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }
+func (s *SimulatedAgentManagerClient) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (s *SimulatedAgentManagerClient) MarkPassthroughRunning(_ string) error {
+	return nil
+}
 
 func (s *SimulatedAgentManagerClient) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	return nil, nil

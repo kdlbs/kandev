@@ -450,15 +450,28 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 	}
 
-	// Skip auto-start for passthrough sessions — stdin is unreliable and the
-	// process may not be expecting input. Let the user interact directly.
-	if hasAutoStart && !isPassthrough {
-		// Build prompt from step configuration
+	switch {
+	case hasAutoStart && isPassthrough:
+		// Passthrough path: write prompt directly to PTY stdin.
+		// By the time processOnEnter runs (from an on_turn_complete transition),
+		// the agent has finished its previous turn and the PTY is waiting for input.
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
-		planMode := hasPlanMode
+		if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, effectivePrompt); err != nil {
+			s.logger.Error("failed to auto-start passthrough agent for step",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
+		}
 
+	case hasAutoStart:
+		// ACP path: build prompt from step configuration.
 		// Run auto-start inline so queue state is visible before handleAgentReady
 		// checks for queued messages.
+		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
+		planMode := hasPlanMode
 		err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
 		if err != nil {
 			s.logger.Error("failed to auto-start agent for step",
@@ -468,11 +481,45 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		}
-		return
-	} else {
+
+	default:
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID)
 	}
+}
+
+// deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
+// Appends \r (carriage return) to simulate pressing Enter — TUI agents in raw terminal mode
+// expect CR, not LF, as the submit key. Returns an error only if writing fails.
+func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, content string) error {
+	if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
+		return fmt.Errorf("write to passthrough stdin: %w", err)
+	}
+	if err := s.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		s.logger.Warn("failed to mark passthrough as running",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	return nil
+}
+
+// autoStartPassthroughPrompt writes a workflow prompt to the PTY stdin of a
+// passthrough session and marks it as running. TUI agents read stdin line-by-line;
+// the idle timeout fires when output stops, triggering turn complete.
+func (s *Service) autoStartPassthroughPrompt(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	stepName, prompt string,
+) error {
+	if err := s.deliverPassthroughPrompt(ctx, session.ID, prompt); err != nil {
+		return err
+	}
+	s.logger.Info("auto-start: wrote prompt to passthrough stdin",
+		zap.String("task_id", taskID),
+		zap.String("session_id", session.ID),
+		zap.String("step_name", stepName))
+	return nil
 }
 
 func (s *Service) autoStartStepPrompt(

@@ -27,6 +27,13 @@ var mcpServers map[string]mcpServerDef
 
 func main() {
 	model := parseModelFlag()
+
+	// TUI mode: simple terminal UI for passthrough/PTY testing
+	if parseTUIFlag() {
+		runTUI(model, parsePromptFlag())
+		return
+	}
+
 	mcpServers = parseMCPConfigFlag()
 	defer closeMCPClients()
 

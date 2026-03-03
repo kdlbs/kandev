@@ -80,6 +80,12 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }
+func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
+	return nil
+}
 
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*RemoteRuntimeStatus, error) {
 	return nil, nil

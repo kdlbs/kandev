@@ -162,6 +162,43 @@ func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExe
 	}
 }
 
+// resolvedPassthrough holds the agent config, passthrough config, runtime config, and profile
+// info resolved from an execution. Used as the basis for building passthrough commands.
+type resolvedPassthrough struct {
+	agentID string
+	agent   agents.PassthroughAgent
+	pt      agents.PassthroughConfig
+	rt      *agents.RuntimeConfig
+	profile *AgentProfileInfo
+}
+
+// resolvePassthroughAgent loads the agent config and profile for a passthrough execution.
+// Shared by passthroughAgentCommand, freshPassthroughCommand, and ResumePassthroughSession.
+func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentExecution) (*resolvedPassthrough, error) {
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent config: %w", err)
+	}
+
+	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
+	if !ok {
+		return nil, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
+	}
+
+	var profileInfo *AgentProfileInfo
+	if m.profileResolver != nil && execution.AgentProfileID != "" {
+		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+	}
+
+	return &resolvedPassthrough{
+		agentID: agentConfig.ID(),
+		agent:   ptAgent,
+		pt:      ptAgent.PassthroughConfig(),
+		rt:      agentConfig.Runtime(),
+		profile: profileInfo,
+	}, nil
+}
+
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
@@ -191,6 +228,27 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	return ptAgent, pt, rt, cmd, nil
 }
 
+// buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
+// immediateStart overrides pt.WaitForTerminal when true (used for restart/resume where the
+// terminal WebSocket is already connected).
+func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, immediateStart bool) process.InteractiveStartRequest {
+	return process.InteractiveStartRequest{
+		SessionID:       sessionID,
+		Command:         cmd.Args(),
+		WorkingDir:      execution.WorkspacePath,
+		Env:             env,
+		PromptPattern:   pt.PromptPattern,
+		IdleTimeout:     pt.IdleTimeout,
+		BufferMaxBytes:  pt.BufferMaxBytes,
+		StatusDetector:  pt.StatusDetector,
+		CheckInterval:   pt.CheckInterval,
+		StabilityWindow: pt.StabilityWindow,
+		ImmediateStart:  immediateStart,
+		DefaultCols:     120,
+		DefaultRows:     40,
+	}
+}
+
 // startInteractiveProcess launches the interactive PTY process for a passthrough session.
 // Returns the process info on success.
 func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command) (*process.InteractiveProcessInfo, error) {
@@ -201,21 +259,7 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 
 	// Some agents (like Codex) require the terminal to be connected first because
 	// they query the terminal for cursor position on startup.
-	startReq := process.InteractiveStartRequest{
-		SessionID:       execution.SessionID,
-		Command:         cmd.Args(),
-		WorkingDir:      execution.WorkspacePath,
-		Env:             env,
-		PromptPattern:   pt.PromptPattern,
-		IdleTimeout:     pt.IdleTimeout,
-		BufferMaxBytes:  pt.BufferMaxBytes,
-		StatusDetector:  pt.StatusDetector,
-		CheckInterval:   pt.CheckInterval,
-		StabilityWindow: pt.StabilityWindow,
-		ImmediateStart:  !pt.WaitForTerminal,
-		DefaultCols:     120,
-		DefaultRows:     40,
-	}
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, !pt.WaitForTerminal)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
@@ -283,6 +327,89 @@ func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
 	}
 }
 
+// freshPassthroughCommand resolves the agent config and profile, and builds a
+// bare passthrough command with no session, resume, or prompt flags.
+func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentExecution) (agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
+	if err != nil {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
+
+	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(resolved.profile),
+		PermissionValues: profilePermissionValues(resolved.profile),
+	})
+	if cmd.IsEmpty() {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("passthrough command is empty for agent %s", resolved.agentID)
+	}
+
+	return resolved.pt, resolved.rt, cmd, nil
+}
+
+// restartPassthroughProcess kills the current PTY process and relaunches a fresh one
+// without --resume, effectively clearing the agent's conversation context.
+// The workflow step prompt is delivered afterwards via stdin (autoStartPassthroughPrompt).
+func (m *Manager) restartPassthroughProcess(ctx context.Context, execution *AgentExecution) error {
+	m.logger.Info("restarting passthrough process for context reset",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("old_process_id", execution.PassthroughProcessID))
+
+	// 1. Stop the current PTY process.
+	// Clear PassthroughProcessID before stopping so that handlePassthroughStatus
+	// doesn't trigger auto-restart for the deliberately-killed process.
+	interactiveRunner := m.GetInteractiveRunner()
+	if interactiveRunner == nil {
+		return fmt.Errorf("interactive runner not available")
+	}
+
+	oldProcessID := execution.PassthroughProcessID
+	execution.PassthroughProcessID = ""
+
+	if err := interactiveRunner.Stop(ctx, oldProcessID); err != nil {
+		m.logger.Warn("failed to stop passthrough process during context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("process_id", oldProcessID),
+			zap.Error(err))
+	}
+
+	// 2. Build fresh command (no SessionID, no Resume, no Prompt)
+	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	if err != nil {
+		return err
+	}
+
+	// 3. Start new PTY process with ImmediateStart (terminal is already connected)
+	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
+
+	processInfo, err := interactiveRunner.Start(ctx, startReq)
+	if err != nil {
+		m.updateExecutionError(execution.ID, "failed to restart passthrough session: "+err.Error())
+		return fmt.Errorf("failed to restart passthrough session: %w", err)
+	}
+
+	// 4. Update execution with new process ID
+	execution.PassthroughProcessID = processInfo.ID
+
+	m.logger.Info("passthrough process restarted with fresh context",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("new_process_id", processInfo.ID))
+
+	// 5. Reconnect existing WebSocket to the new process
+	if interactiveRunner.ConnectSessionWebSocket(processInfo.ID) {
+		m.logger.Debug("reconnected WebSocket to restarted passthrough process",
+			zap.String("session_id", execution.SessionID),
+			zap.String("process_id", processInfo.ID))
+	}
+
+	// 6. Publish context reset event
+	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
+
+	return nil
+}
+
 // ResumePassthroughSession restarts a passthrough session after backend restart.
 // This is called when user reconnects to a terminal but the PTY process is no longer running.
 // If the agent supports resume, it uses the resume flag to continue the last conversation.
@@ -293,34 +420,19 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		return fmt.Errorf("no execution found for session: %s", sessionID)
 	}
 
-	// Get agent config
-	agentConfig, err := m.getAgentConfigForExecution(execution)
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
 	if err != nil {
-		return fmt.Errorf("failed to get agent config: %w", err)
-	}
-
-	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
-	if !ok {
-		return fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
-	}
-
-	pt := ptAgent.PassthroughConfig()
-	rt := agentConfig.Runtime()
-
-	// Get profile info for permission settings
-	var profileInfo *AgentProfileInfo
-	if m.profileResolver != nil && execution.AgentProfileID != "" {
-		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		return err
 	}
 
 	// Build the resume command
-	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
-		Model:            profileModel(profileInfo),
+	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
+		Model:            profileModel(resolved.profile),
 		Resume:           true,
-		PermissionValues: profilePermissionValues(profileInfo),
+		PermissionValues: profilePermissionValues(resolved.profile),
 	})
 	if cmd.IsEmpty() {
-		return fmt.Errorf("passthrough resume command is empty for agent %s", agentConfig.ID())
+		return fmt.Errorf("passthrough resume command is empty for agent %s", resolved.agentID)
 	}
 
 	m.logger.Info("resuming passthrough session",
@@ -328,42 +440,25 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		zap.String("execution_id", execution.ID),
 		zap.Strings("command", cmd.Args()))
 
-	// Get the interactive runner
 	interactiveRunner := m.GetInteractiveRunner()
 	if interactiveRunner == nil {
 		return fmt.Errorf("interactive runner not available")
 	}
 
-	// Build environment variables including required credentials
-	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
+	env := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
 
-	// Start the interactive process.
 	// Always use immediate start on resume — the terminal WebSocket is already connected,
 	// so we don't need to wait for a resize to get exact dimensions. The first resize
 	// from the terminal will correct the dimensions. Without this, TUI apps that use
 	// WaitForTerminal would never start because the frontend may not send resizes
 	// to a process it doesn't know about yet.
-	startReq := process.InteractiveStartRequest{
-		SessionID:       sessionID,
-		Command:         cmd.Args(),
-		WorkingDir:      execution.WorkspacePath,
-		Env:             env,
-		IdleTimeout:     pt.IdleTimeout,
-		BufferMaxBytes:  pt.BufferMaxBytes,
-		StatusDetector:  pt.StatusDetector,
-		CheckInterval:   pt.CheckInterval,
-		StabilityWindow: pt.StabilityWindow,
-		ImmediateStart:  true,
-		DefaultCols:     120,
-		DefaultRows:     40,
-	}
+	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
 		return fmt.Errorf("failed to start passthrough session: %w", err)
 	}
 
-	// Update the execution with new process ID
 	execution.PassthroughProcessID = processInfo.ID
 
 	m.logger.Info("passthrough session resumed",

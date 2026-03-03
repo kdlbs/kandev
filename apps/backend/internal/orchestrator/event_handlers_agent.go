@@ -158,12 +158,19 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		zap.Bool("is_queued", queueStatus.IsQueued),
 		zap.Any("message", queueStatus.Message))
 
-	// Skip queued messages for passthrough sessions — PromptTask uses ACP which
-	// doesn't work for passthrough, and writing to PTY stdin is unreliable.
-	// Check before TakeQueued to avoid destructively removing the message.
+	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
 	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
-		s.logger.Info("skipping queued message for passthrough session",
-			zap.String("session_id", data.SessionID))
+		queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID)
+		if !exists {
+			return
+		}
+		if queuedMsg.Content != "" {
+			if err := s.deliverPassthroughPrompt(ctx, data.SessionID, queuedMsg.Content); err != nil {
+				s.logger.Warn("failed to deliver queued message to passthrough",
+					zap.String("session_id", data.SessionID),
+					zap.Error(err))
+			}
+		}
 		return
 	}
 

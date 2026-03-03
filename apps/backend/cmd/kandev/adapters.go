@@ -223,6 +223,14 @@ func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID s
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
+	return a.mgr.WritePassthroughStdin(ctx, sessionID, data)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
+	return a.mgr.MarkPassthroughRunning(sessionID)
+}
+
 func (a *lifecycleAdapter) PollRemoteStatusForRecords(ctx context.Context, records []executor.RemoteStatusPollRequest) {
 	lcRecords := make([]lifecycle.RemoteStatusPollRecord, len(records))
 	for i, r := range records {

@@ -47,9 +47,8 @@ test.describe("Workflow automation", () => {
       enable_preview_on_click: false,
     });
 
-    // Resolve an agent profile so auto_start_agent can pick it up from task metadata
-    const { agents } = await apiClient.listAgents();
-    const agentProfileId = agents[0]?.profiles[0]?.id ?? "";
+    // Use the seed profile so tests don't pick up passthrough profiles from other tests.
+    const agentProfileId = seedData.agentProfileId;
 
     // Create task in Inbox — does NOT trigger auto_start_agent
     const task = await apiClient.createTask(seedData.workspaceId, "Auto Agent Workflow Task", {
@@ -162,8 +161,7 @@ test.describe("Workflow automation", () => {
       enable_preview_on_click: false,
     });
 
-    const { agents } = await apiClient.listAgents();
-    const agentProfileId = agents[0]?.profiles[0]?.id ?? "";
+    const agentProfileId = seedData.agentProfileId;
 
     // Create task in Todo without starting an agent.
     const task = await apiClient.createTask(seedData.workspaceId, "Lifecycle Workflow Task", {
@@ -282,8 +280,7 @@ test.describe("Workflow automation", () => {
       enable_preview_on_click: false,
     });
 
-    const { agents } = await apiClient.listAgents();
-    const agentProfileId = agents[0]?.profiles[0]?.id ?? "";
+    const agentProfileId = seedData.agentProfileId;
 
     const task = await apiClient.createTask(seedData.workspaceId, "Plan Mode Workflow Task", {
       workflow_id: workflow.id,
@@ -394,8 +391,7 @@ test.describe("Workflow automation", () => {
       enable_preview_on_click: false,
     });
 
-    const { agents } = await apiClient.listAgents();
-    const agentProfileId = agents[0]?.profiles[0]?.id ?? "";
+    const agentProfileId = seedData.agentProfileId;
 
     // Create task in Backlog (staging step, no events).
     // The description (not title) is what {{task_prompt}} resolves to in step prompts.

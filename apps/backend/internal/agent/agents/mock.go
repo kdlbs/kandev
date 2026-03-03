@@ -14,21 +14,45 @@ var mockLogoLight []byte
 //go:embed logos/mock_dark.svg
 var mockLogoDark []byte
 
-var _ Agent = (*MockAgent)(nil)
+var (
+	_ Agent            = (*MockAgent)(nil)
+	_ PassthroughAgent = (*MockAgent)(nil)
+)
 
 type MockAgent struct {
+	StandardPassthrough
 	enabled     bool
 	binaryPath  string
 	supportsMCP bool
 }
 
-func NewMockAgent() *MockAgent { return &MockAgent{supportsMCP: true} }
+func NewMockAgent() *MockAgent {
+	return &MockAgent{
+		StandardPassthrough: StandardPassthrough{
+			Cfg: PassthroughConfig{
+				Supported:      true,
+				Label:          "TUI Passthrough",
+				Description:    "Terminal UI mode for testing",
+				PassthroughCmd: NewCommand("mock-agent", "--tui"),
+				ModelFlag:      NewParam("--model", "{model}"),
+				PromptFlag:     NewParam("--prompt", "{prompt}"),
+				IdleTimeout:    2 * time.Second,
+				BufferMaxBytes: DefaultBufferMaxBytes,
+			},
+		},
+		supportsMCP: true,
+	}
+}
 
 // SetEnabled enables or disables the mock agent at runtime.
 func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
 
 // SetBinaryPath overrides the mock-agent binary path.
-func (a *MockAgent) SetBinaryPath(path string) { a.binaryPath = path }
+// Also updates the passthrough command to use the same binary.
+func (a *MockAgent) SetBinaryPath(path string) {
+	a.binaryPath = path
+	a.Cfg.PassthroughCmd = NewCommand(path, "--tui")
+}
 
 // SetSupportsMCP controls whether the mock agent reports MCP support.
 // Defaults to true so plan mode workflow events work in E2E tests.
