@@ -402,6 +402,18 @@ func scenarioDiffExpansionSetup(enc *json.Encoder) {
 		return cmdErr
 	}
 
+	// Clean up from any previous test run so the add+commit is never a no-op.
+	// git rm --force removes the file from both the index and worktree;
+	// the commit records the deletion. Errors are ignored (file may not exist).
+	_ = runGitCmd("rm", "--force", filePath)
+	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
+
+	// Re-write the original content (git rm deleted it from the worktree).
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: re-write failed: "+err.Error(), "")
+		return
+	}
+
 	if err := runGitCmd("add", filePath); err != nil {
 		emitTextBlock(enc, "diff-expansion-setup: git add failed", "")
 		return

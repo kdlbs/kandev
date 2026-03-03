@@ -63,7 +63,7 @@ async function seedExpansionTask(
 
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toBeVisible({ timeout: 45_000 });
 
   return session;
 }
@@ -86,7 +86,7 @@ async function openExpansionFileDiff(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 1, timeout: 120_000 });
 
   test.beforeEach(async ({ testPage }) => {
     await setDiffViewerProvider(testPage, "pierre-diffs");
@@ -176,7 +176,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
 });
 
 test.describe("Diff expansion — Monaco provider", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 1, timeout: 120_000 });
 
   test.beforeEach(async ({ testPage }) => {
     await setDiffViewerProvider(testPage, "monaco");
