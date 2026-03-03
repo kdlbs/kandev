@@ -773,6 +773,118 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 	}
 }
 
+func TestGetFileContentAtRef(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	// Commit a text file at HEAD so we can reference it by ref
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\nline3\n")
+	runGit(t, repoDir, "add", "hello.txt")
+	runGit(t, repoDir, "commit", "-m", "add hello.txt")
+
+	t.Run("existing file at HEAD returns content", func(t *testing.T) {
+		content, size, isBinary, err := wt.GetFileContentAtRef(ctx, "hello.txt", "HEAD")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isBinary {
+			t.Error("expected isBinary=false for text file")
+		}
+		if content != "line1\nline2\nline3\n" {
+			t.Errorf("unexpected content: %q", content)
+		}
+		if size != int64(len("line1\nline2\nline3\n")) {
+			t.Errorf("unexpected size: %d", size)
+		}
+	})
+
+	t.Run("file not found at ref returns sentinel error", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "nonexistent.txt", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for missing file, got nil")
+		}
+		if !strings.Contains(err.Error(), "file not found at ref") {
+			t.Errorf("expected 'file not found at ref' error, got: %v", err)
+		}
+	})
+
+	t.Run("binary file is base64 encoded", func(t *testing.T) {
+		binaryContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE}
+		if err := os.WriteFile(filepath.Join(repoDir, "image.png"), binaryContent, 0o644); err != nil {
+			t.Fatalf("failed to write binary file: %v", err)
+		}
+		runGit(t, repoDir, "add", "image.png")
+		runGit(t, repoDir, "commit", "-m", "add binary file")
+
+		content, _, isBinary, err := wt.GetFileContentAtRef(ctx, "image.png", "HEAD")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !isBinary {
+			t.Error("expected isBinary=true for binary file")
+		}
+		decoded, decErr := base64.StdEncoding.DecodeString(content)
+		if decErr != nil {
+			t.Fatalf("failed to decode base64: %v", decErr)
+		}
+		if string(decoded) != string(binaryContent) {
+			t.Error("decoded binary content does not match original")
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "../../etc/passwd", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for path traversal, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("absolute path rejected", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "/etc/passwd", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for absolute path, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("file exists in older commit but deleted at HEAD", func(t *testing.T) {
+		writeFile(t, repoDir, "temporary.txt", "I will be deleted\n")
+		runGit(t, repoDir, "add", "temporary.txt")
+		runGit(t, repoDir, "commit", "-m", "add temporary.txt")
+		oldRef := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+		runGit(t, repoDir, "rm", "temporary.txt")
+		runGit(t, repoDir, "commit", "-m", "delete temporary.txt")
+
+		// File should be found at the old commit
+		content, _, _, err := wt.GetFileContentAtRef(ctx, "temporary.txt", oldRef)
+		if err != nil {
+			t.Fatalf("expected content at old ref, got error: %v", err)
+		}
+		if content != "I will be deleted\n" {
+			t.Errorf("unexpected content: %q", content)
+		}
+
+		// File should NOT be found at HEAD
+		_, _, _, err = wt.GetFileContentAtRef(ctx, "temporary.txt", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for deleted file at HEAD, got nil")
+		}
+		if !strings.Contains(err.Error(), "file not found at ref") {
+			t.Errorf("expected 'file not found at ref' error, got: %v", err)
+		}
+	})
+}
+
 func TestEmitFileChanges(t *testing.T) {
 	t.Run("zero changes sends refresh", func(t *testing.T) {
 		_, wt := setupTestDir(t)

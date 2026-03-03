@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
@@ -151,6 +152,12 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 	// Request file content at ref from agentctl
 	response, err := client.RequestFileContentAtRef(ctx, req.Path, req.Ref)
 	if err != nil {
+		// "File not found at ref" is expected for new files - log as debug, not error
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "file not found at ref") {
+			h.logger.Debug("file not found at ref (expected for new files)", zap.String("session_id", req.SessionID), zap.String("path", req.Path), zap.String("ref", req.Ref))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errMsg, nil)
+		}
 		h.logger.Error("failed to get file content at ref", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path), zap.String("ref", req.Ref))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content at ref: %v", err), nil)
 	}

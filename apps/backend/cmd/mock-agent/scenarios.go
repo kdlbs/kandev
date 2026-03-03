@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -26,8 +28,10 @@ func emitPredefinedScenario(enc *json.Encoder, scanner *bufio.Scanner, name stri
 		scenarioAllTools(enc, scanner)
 	case "multi-turn":
 		scenarioMultiTurn(enc)
+	case "diff-expansion-setup":
+		scenarioDiffExpansionSetup(enc)
 	default:
-		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn", "")
+		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup", "")
 	}
 }
 
@@ -345,4 +349,85 @@ func scenarioAllToolsEditBash(enc *json.Encoder, scanner *bufio.Scanner, editFil
 func scenarioMultiTurn(enc *json.Encoder) {
 	fixedDelay(50)
 	emitTextBlock(enc, "Multi-turn response ready. Send another message to continue.", "")
+}
+
+// scenarioDiffExpansionSetup: creates a committed file and then modifies it,
+// leaving an uncommitted diff that the UI can display with expansion enabled.
+//
+// Uses 200 lines with hunks at lines 50 (mid-top) and 150 (mid-bottom), so the
+// diff viewer collapses ~90 lines between hunks and ~45 lines at each end.
+// This gives three separate expand handles for the e2e test to interact with.
+func scenarioDiffExpansionSetup(enc *json.Encoder) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: getwd failed: "+err.Error(), "")
+		return
+	}
+
+	// Build a 200-line file with distinct content per line so assertions can
+	// target specific line text after expanding collapsed regions.
+	const totalLines = 200
+	originalLines := make([]string, totalLines)
+	for i := 0; i < totalLines; i++ {
+		originalLines[i] = fmt.Sprintf("func original_%03d() { /* line %d */ }", i+1, i+1)
+	}
+	original := strings.Join(originalLines, "\n") + "\n"
+
+	filePath := "expansion_test.go"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: write failed: "+err.Error(), "")
+		return
+	}
+
+	gitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=Mock Agent",
+		"GIT_AUTHOR_EMAIL=mock@test.local",
+		"GIT_COMMITTER_NAME=Mock Agent",
+		"GIT_COMMITTER_EMAIL=mock@test.local",
+	)
+
+	runGitCmd := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{
+			"-c", "commit.gpgsign=false",
+			"-c", "tag.gpgsign=false",
+		}, args...)...)
+		cmd.Dir = wd
+		cmd.Env = gitEnv
+		out, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			fmt.Fprintf(os.Stderr, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		}
+		return cmdErr
+	}
+
+	if err := runGitCmd("add", filePath); err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: git add failed", "")
+		return
+	}
+	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: git commit failed", "")
+		return
+	}
+
+	// Modify line 50 (mid-top, index 49) and line 150 (mid-bottom, index 149).
+	// With 3 lines of context per hunk, the diff collapses:
+	//   - lines 1-46   (~46 lines) above the first hunk
+	//   - lines 54-146 (~93 lines) between the two hunks
+	//   - lines 154-200 (~47 lines) below the second hunk
+	// Each collapsed region gets its own expand handle in the diff viewer.
+	modifiedLines := make([]string, totalLines)
+	copy(modifiedLines, originalLines)
+	modifiedLines[49] = "func modified_mid_top() { /* HUNK_TOP - modified line 50 */ }"
+	modifiedLines[149] = "func modified_mid_bottom() { /* HUNK_BOTTOM - modified line 150 */ }"
+	modified := strings.Join(modifiedLines, "\n") + "\n"
+
+	if err := os.WriteFile(filePath, []byte(modified), 0o644); err != nil {
+		emitTextBlock(enc, "diff-expansion-setup: write modified failed: "+err.Error(), "")
+		return
+	}
+
+	fixedDelay(100)
+	emitTextBlock(enc, "diff-expansion-setup complete: expansion_test.go has two-hunk uncommitted diff (lines 50 and 150 of 200).", "")
 }
