@@ -5,31 +5,6 @@ import type { SeedData } from "../fixtures/test-base";
 import type { Page } from "@playwright/test";
 
 /**
- * Set the diff-viewer provider in localStorage before any navigation.
- * Must be called before goto() so the zustand persist store picks it up.
- */
-async function setDiffViewerProvider(testPage: Page, provider: "monaco" | "pierre-diffs") {
-  await testPage.addInitScript(
-    (prov: string) => {
-      const store = {
-        state: {
-          providers: {
-            "code-editor": "monaco",
-            "diff-viewer": prov,
-            "chat-code-block": "shiki",
-            "chat-diff": "pierre-diffs",
-            "plan-editor": "tiptap",
-          },
-        },
-        version: 3,
-      };
-      localStorage.setItem("kandev-editor-providers", JSON.stringify(store));
-    },
-    provider,
-  );
-}
-
-/**
  * Seed a task using the diff-expansion-setup mock scenario and navigate to
  * its session page, waiting for the agent turn to complete.
  *
@@ -87,10 +62,6 @@ async function openExpansionFileDiff(testPage: Page) {
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
-
-  test.beforeEach(async ({ testPage }) => {
-    await setDiffViewerProvider(testPage, "pierre-diffs");
-  });
 
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
@@ -173,16 +144,8 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       timeout: 10_000,
     });
   });
-});
 
-test.describe("Diff expansion — Monaco provider", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
-
-  test.beforeEach(async ({ testPage }) => {
-    await setDiffViewerProvider(testPage, "monaco");
-  });
-
-  test("renders Monaco diff viewer and shows both hunks", async ({
+  test("expand-all button reveals all collapsed lines at once", async ({
     testPage,
     apiClient,
     seedData,
@@ -191,13 +154,31 @@ test.describe("Diff expansion — Monaco provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    // Monaco renders with the .monaco-diff-viewer wrapper
-    await expect(testPage.locator(".monaco-diff-viewer")).toBeVisible({ timeout: 15_000 });
-    // Should NOT have a Pierre Diffs container
-    await expect(testPage.locator("diffs-container")).toHaveCount(0);
+    // Wait for both hunks and the separator to be present
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(testPage.getByText(/\d+ unmodified lines/).first()).toBeVisible({
+      timeout: 20_000,
+    });
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
+    // The "Expand all lines" button is in the Pierre Diffs header toolbar.
+    // It contains a tabler-icon-fold-down SVG icon.
+    const expandAllBtn = testPage.locator("button:has(svg.tabler-icon-fold-down)");
+    await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
+    await expandAllBtn.click();
+
+    // After expanding, all original lines should be visible — pick a line
+    // from the middle of the previously collapsed region.
+    await expect(testPage.getByText("original_025", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(testPage.getByText("original_040", { exact: false })).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // The "unmodified lines" separators should be gone
+    await expect(testPage.getByText(/\d+ unmodified lines/)).toHaveCount(0, {
       timeout: 5_000,
     });
   });
