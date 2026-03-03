@@ -249,6 +249,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar({
         baseBranch={baseBranch}
         isGitLoading={isGitLoading}
         taskTitle={taskTitle}
+        firstCommitMessage={commits[0]?.commit_message}
         onCreatePR={handleCreatePR}
       />
     </header>

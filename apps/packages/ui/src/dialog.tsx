@@ -8,6 +8,20 @@ import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  const openRef = React.useRef(props.open);
+  openRef.current = props.open;
+
+  React.useEffect(() => {
+    return () => {
+      // Safety cleanup: Radix Dialog sets pointer-events: none on body when
+      // modal. If the dialog unmounts while open (e.g. page navigation),
+      // Radix never cleans up, leaving the page unclickable.
+      if (openRef.current) {
+        document.body.style.removeProperty("pointer-events");
+      }
+    };
+  }, []);
+
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 

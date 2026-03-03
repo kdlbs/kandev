@@ -131,7 +131,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         KANDEV_DATA_DIR: dataDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
-        KANDEV_MOCK_AGENT: "true",
+        KANDEV_MOCK_AGENT: "only",
         KANDEV_MOCK_GITHUB: "true",
         KANDEV_DOCKER_ENABLED: "false",
         KANDEV_WORKTREE_ENABLED: "false",

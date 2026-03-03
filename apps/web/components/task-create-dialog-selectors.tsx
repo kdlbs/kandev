@@ -300,8 +300,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         rows={2}
         className={
           isSessionMode
-            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto"
-            : "min-h-[96px] max-h-[240px] resize-y overflow-auto"
+            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+            : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
         }
         required={isSessionMode}
         disabled={disabled}

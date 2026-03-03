@@ -8,6 +8,7 @@ import {
   IconGitCherryPick,
   IconGitMerge,
   IconArrowRight,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
@@ -60,14 +61,19 @@ function BranchHoverCard({
 function PullDropdown({
   behindCount,
   isLoading,
+  loadingOperation,
   onPull,
   onRebase,
 }: {
   behindCount: number;
   isLoading: boolean;
+  loadingOperation: string | null;
   onPull: () => void;
   onRebase: () => void;
 }) {
+  const isPulling = loadingOperation === "pull";
+  const isRebasing = loadingOperation === "rebase";
+  const isPullRelated = isPulling || isRebasing;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -77,10 +83,18 @@ function PullDropdown({
           className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
           disabled={isLoading}
         >
-          <IconCloudDownload className="h-3 w-3" />
-          Pull
-          {behindCount > 0 && <span className="text-yellow-500 text-[10px]">{behindCount}</span>}
-          <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />
+          {isPullRelated ? (
+            <IconLoader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <IconCloudDownload className="h-3 w-3" />
+          )}
+          {isPulling && "Pulling…"}
+          {!isPulling && isRebasing && "Rebasing…"}
+          {!isPulling && !isRebasing && "Pull"}
+          {behindCount > 0 && !isPullRelated && (
+            <span className="text-yellow-500 text-[10px]">{behindCount}</span>
+          )}
+          {!isPullRelated && <IconChevronDown className="h-2.5 w-2.5 text-muted-foreground" />}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
@@ -111,6 +125,7 @@ export function ChangesPanelHeader({
   baseBranchDisplay,
   behindCount,
   isLoading,
+  loadingOperation,
   onOpenDiffAll,
   onOpenReview,
   onPull,
@@ -123,6 +138,7 @@ export function ChangesPanelHeader({
   baseBranchDisplay: string;
   behindCount: number;
   isLoading: boolean;
+  loadingOperation: string | null;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onPull: () => void;
@@ -163,6 +179,7 @@ export function ChangesPanelHeader({
           <PullDropdown
             behindCount={behindCount}
             isLoading={isLoading}
+            loadingOperation={loadingOperation}
             onPull={onPull}
             onRebase={onRebase}
           />

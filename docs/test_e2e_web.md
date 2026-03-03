@@ -101,7 +101,7 @@ Each Playwright worker spawns an isolated `kandev` backend and a dedicated `next
    - `KANDEV_DATA_DIR` — temp data directory
    - `KANDEV_SERVER_PORT` — unique port per worker (`18080 + workerIndex`)
    - `KANDEV_DATABASE_PATH` — temp SQLite path
-   - `KANDEV_MOCK_AGENT=true` — only loads mock agent, skips agent discovery
+   - `KANDEV_MOCK_AGENT=only` — only loads mock agent, skips agent discovery (use `"true"` in dev mode to enable mock alongside all agents)
    - `KANDEV_MOCK_GITHUB=true` — uses in-memory MockClient instead of real GitHub API
    - `KANDEV_DOCKER_ENABLED=false` — no Docker
    - `KANDEV_WORKTREE_ENABLED=false` — no worktrees

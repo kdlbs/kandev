@@ -216,6 +216,7 @@ function useChangesPRHandlers(
   toast: Toast,
   taskTitle: string | undefined,
   baseBranch: string | undefined,
+  firstCommitMessage: string | undefined,
 ) {
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prTitle, setPrTitle] = useState("");
@@ -223,10 +224,10 @@ function useChangesPRHandlers(
   const [prDraft, setPrDraft] = useState(true);
 
   const handleOpenPRDialog = useCallback(() => {
-    setPrTitle(taskTitle || "");
+    setPrTitle(firstCommitMessage || taskTitle || "");
     setPrBody("");
     setPrDialogOpen(true);
-  }, [taskTitle]);
+  }, [firstCommitMessage, taskTitle]);
   const handleCreatePR = useCallback(async () => {
     if (!prTitle.trim()) return;
     setPrDialogOpen(false);
@@ -275,11 +276,11 @@ export function useChangesDialogHandlers(
   gitOps: GitOps,
   toast: Toast,
   handleGitOperation: GitOperationFn,
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
+  prDefaults: { taskTitle?: string; baseBranch?: string; firstCommitMessage?: string },
 ) {
+  const { taskTitle, baseBranch, firstCommitMessage } = prDefaults;
   const discardCommit = useChangesDiscardCommitHandlers(gitOps, toast, handleGitOperation);
   const reset = useChangesResetHandlers(gitOps, handleGitOperation);
-  const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch);
+  const pr = useChangesPRHandlers(gitOps, toast, taskTitle, baseBranch, firstCommitMessage);
   return { ...discardCommit, ...reset, ...pr };
 }

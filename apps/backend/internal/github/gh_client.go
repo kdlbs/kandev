@@ -240,7 +240,7 @@ type ghReview struct {
 	} `json:"user"`
 	State       string    `json:"state"`
 	Body        string    `json:"body"`
-	SubmittedAt time.Time `json:"submittedAt"`
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 func (c *GHClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error) {

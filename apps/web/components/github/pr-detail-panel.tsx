@@ -9,13 +9,13 @@ import {
   IconAlertTriangle,
   IconGitMerge,
   IconCheck,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Spinner } from "@kandev/ui/spinner";
 import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
@@ -165,7 +165,8 @@ function ApproveButton({
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
 
-  if (taskPR.state !== "open") return null;
+  const liveState = feedback?.pr.state ?? taskPR.state;
+  if (liveState !== "open") return null;
 
   const alreadyApproved = feedback?.reviews.some(
     (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
@@ -206,6 +207,38 @@ function ApproveButton({
 function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
+  const setTaskPR = useAppStore((s) => s.setTaskPR);
+
+  // Sync live feedback data back to the store so topbar/other consumers stay up to date.
+  // Use primitive deps to avoid re-render loops from object reference changes.
+  const prState = taskPR.state;
+  const prMergedAt = taskPR.merged_at ?? null;
+  const prClosedAt = taskPR.closed_at ?? null;
+  const prAdditions = taskPR.additions;
+  const prDeletions = taskPR.deletions;
+  const prTaskId = taskPR.task_id;
+  useEffect(() => {
+    if (!feedback) return;
+    const livePR = feedback.pr;
+    if (
+      livePR.state !== prState ||
+      (livePR.merged_at ?? null) !== prMergedAt ||
+      (livePR.closed_at ?? null) !== prClosedAt ||
+      livePR.additions !== prAdditions ||
+      livePR.deletions !== prDeletions
+    ) {
+      setTaskPR(prTaskId, {
+        ...taskPR,
+        state: livePR.state,
+        additions: livePR.additions,
+        deletions: livePR.deletions,
+        merged_at: livePR.merged_at,
+        closed_at: livePR.closed_at,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedback, prState, prMergedAt, prClosedAt, prAdditions, prDeletions, prTaskId, setTaskPR]);
+
   const metrics = derivePanelMetrics(taskPR, feedback);
 
   return (
@@ -222,7 +255,7 @@ function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: str
         <div className="p-3 space-y-1">
           {loading && !feedback && (
             <div className="flex items-center justify-center py-8">
-              <Spinner className="h-6 w-6" />
+              <IconLoader2 className="h-6 w-6 text-blue-500 animate-spin" />
             </div>
           )}
           {feedback && (
@@ -385,9 +418,10 @@ function PRHeader({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
-  const showWarnings = isDraft || (!isMergeable && taskPR.state === "open");
+  const showWarnings = isDraft || (!isMergeable && liveState === "open");
 
   return (
     <div className="p-3 space-y-2">
@@ -398,7 +432,7 @@ function PRHeader({
         <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
-        <StateBadge state={taskPR.state} />
+        <StateBadge state={liveState} />
         <span className="text-xs text-muted-foreground">#{taskPR.pr_number}</span>
         <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
           {taskPR.head_branch}
@@ -418,7 +452,7 @@ function PRHeader({
               Draft
             </Badge>
           )}
-          {!isMergeable && taskPR.state === "open" && (
+          {!isMergeable && liveState === "open" && (
             <span className="flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400">
               <IconAlertTriangle className="h-3 w-3" />
               Not mergeable

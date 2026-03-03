@@ -5,6 +5,7 @@ import {
   IconGitPullRequest,
   IconCloudUpload,
   IconChevronDown,
+  IconLoader2,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -141,6 +142,7 @@ type ActionButtonsSectionProps = {
   onPush: () => void;
   onForcePush: () => void;
   isLoading: boolean;
+  loadingOperation: string | null;
   aheadCount: number;
   canPush: boolean;
   canCreatePR: boolean;
@@ -152,14 +154,17 @@ export function ActionButtonsSection({
   onPush,
   onForcePush,
   isLoading,
+  loadingOperation,
   aheadCount,
   canPush,
   canCreatePR,
   existingPrUrl,
 }: ActionButtonsSectionProps) {
   const prExists = !!existingPrUrl;
-  const createPrDisabled = !canCreatePR || prExists;
+  const createPrDisabled = !canCreatePR || prExists || isLoading;
   const pushDisabled = !canPush || isLoading;
+  const isPushing = loadingOperation === "push";
+  const isCreatingPR = loadingOperation === "create_pr";
   let pushTooltip: string | null = null;
   if (isLoading) pushTooltip = "A git operation is in progress";
   else if (!canPush) pushTooltip = "No commits ahead of remote";
@@ -176,7 +181,11 @@ export function ActionButtonsSection({
                 onClick={onOpenPRDialog}
                 disabled={createPrDisabled}
               >
-                <IconGitPullRequest className="h-3 w-3" />
+                {isCreatingPR ? (
+                  <IconLoader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <IconGitPullRequest className="h-3 w-3" />
+                )}
                 Create PR
               </Button>
             </span>
@@ -193,9 +202,13 @@ export function ActionButtonsSection({
                 onClick={onPush}
                 disabled={pushDisabled}
               >
-                <IconCloudUpload className="h-3 w-3" />
+                {isPushing ? (
+                  <IconLoader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <IconCloudUpload className="h-3 w-3" />
+                )}
                 Push
-                {aheadCount > 0 && (
+                {aheadCount > 0 && !isPushing && (
                   <span className="text-muted-foreground">{aheadCount} ahead</span>
                 )}
               </Button>
@@ -234,7 +247,11 @@ type FileListSectionProps = {
   pendingStageFiles: Set<string>;
   isLast: boolean;
   actionLabel: string;
+  isActionLoading?: boolean;
   onAction: () => void;
+  secondaryActionLabel?: string;
+  isSecondaryActionLoading?: boolean;
+  onSecondaryAction?: () => void;
   onOpenDiff: (path: string) => void;
   onEditFile: (path: string) => void;
   onStage: (path: string) => void;
@@ -248,7 +265,11 @@ export function FileListSection({
   pendingStageFiles,
   isLast,
   actionLabel,
+  isActionLoading,
   onAction,
+  secondaryActionLabel,
+  isSecondaryActionLoading,
+  onSecondaryAction,
   onOpenDiff,
   onEditFile,
   onStage,
@@ -277,15 +298,29 @@ export function FileListSection({
         </ul>
       )}
       {files.length > 0 && (
-        <div className="mt-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5">
           <Button
             size="sm"
             variant="outline"
             className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
             onClick={onAction}
+            disabled={isActionLoading}
           >
+            {isActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
             {actionLabel}
           </Button>
+          {onSecondaryAction && secondaryActionLabel && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+              onClick={onSecondaryAction}
+              disabled={isSecondaryActionLoading}
+            >
+              {isSecondaryActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
+              {secondaryActionLabel}
+            </Button>
+          )}
         </div>
       )}
     </TimelineSection>
