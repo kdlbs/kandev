@@ -25,6 +25,7 @@ import {
   formStateFromEditor,
   getCustomEditorSummary,
 } from "@/components/settings/editor-form";
+import { EditorProviderSection } from "@/components/settings/editor-provider-section";
 import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
 import type { EditorOption } from "@/lib/types/http";
 import type { RequestStatus } from "@/lib/http/use-request";
@@ -571,6 +572,8 @@ export function EditorsSettings() {
             updateLspConfigString={updateLspConfigString}
           />
         </div>
+        <Separator />
+        <EditorProviderSection />
         <Separator />
         <EditorsSection
           defaultOptions={defaultOptions}
