@@ -90,12 +90,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Bool("force", force),
 		zap.String("runtime", execution.RuntimeName))
 
-	// Try to gracefully stop via agentctl first
-	if execution.agentctl != nil && !force {
-		if err := execution.agentctl.Stop(ctx); err != nil {
-			m.logger.Warn("failed to stop agent via agentctl",
-				zap.String("execution_id", executionID),
-				zap.Error(err))
+	// Try to gracefully stop via agentctl first, then always close connections
+	if execution.agentctl != nil {
+		if !force {
+			if err := execution.agentctl.Stop(ctx); err != nil {
+				m.logger.Warn("failed to stop agent via agentctl",
+					zap.String("execution_id", executionID),
+					zap.Error(err))
+			}
 		}
 		execution.agentctl.Close()
 	}
