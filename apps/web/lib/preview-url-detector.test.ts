@@ -224,8 +224,7 @@ Ready!
 
 describe("rewritePreviewUrlForProxy", () => {
   const SESSION_ID = "test-session-123";
-  const proxyPath = (port: number, path: string) =>
-    `/port-proxy/${SESSION_ID}/${port}${path}`;
+  const proxyPath = (port: number, path: string) => `/port-proxy/${SESSION_ID}/${port}${path}`;
 
   it("returns URL unchanged for local executors", () => {
     expect(rewritePreviewUrlForProxy(LOCALHOST_3000_URL, SESSION_ID, false)).toBe(
@@ -246,9 +245,9 @@ describe("rewritePreviewUrlForProxy", () => {
   });
 
   it("preserves hash fragment", () => {
-    expect(
-      rewritePreviewUrlForProxy("http://localhost:3000/app#/route", SESSION_ID, true),
-    ).toBe(proxyPath(3000, "/app#/route"));
+    expect(rewritePreviewUrlForProxy("http://localhost:3000/app#/route", SESSION_ID, true)).toBe(
+      proxyPath(3000, "/app#/route"),
+    );
   });
 
   it("handles 127.0.0.1 URLs", () => {
