@@ -392,7 +392,7 @@ func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.M
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check session PR", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"found": found})
 }

@@ -412,14 +412,17 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Get the session's branch from the worktree
+	// Get the session's branch from the first worktree with a non-empty branch
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false, nil
 	}
 	branch := ""
-	if len(session.Worktrees) > 0 {
-		branch = session.Worktrees[0].WorktreeBranch
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeBranch != "" {
+			branch = wt.WorktreeBranch
+			break
+		}
 	}
 	if branch == "" {
 		return false, nil

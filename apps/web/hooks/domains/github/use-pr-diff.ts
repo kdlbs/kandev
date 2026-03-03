@@ -50,18 +50,30 @@ export function usePRDiff(owner: string | null, repo: string | null, prNumber: n
   const [state, setState] = useState<PRDiffState>(INITIAL_STATE);
   const hasParams = !!owner && !!repo && !!prNumber;
   const paramsKeyRef = useRef<string>("");
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
     if (!owner || !repo || !prNumber) return;
-    void fetchPRFiles(owner, repo, prNumber, setState);
+    const requestId = ++requestIdRef.current;
+    void fetchPRFiles(owner, repo, prNumber, (next) => {
+      if (requestId !== requestIdRef.current) return;
+      setState(next);
+    });
   }, [owner, repo, prNumber]);
 
   useEffect(() => {
     const key = hasParams ? `${owner}/${repo}/${prNumber}` : "";
     if (key === paramsKeyRef.current) return;
     paramsKeyRef.current = key;
-    if (!owner || !repo || !prNumber) return;
-    void fetchPRFiles(owner, repo, prNumber, setState);
+    if (!owner || !repo || !prNumber) {
+      requestIdRef.current++; // invalidate in-flight responses
+      return;
+    }
+    const requestId = ++requestIdRef.current;
+    void fetchPRFiles(owner, repo, prNumber, (next) => {
+      if (requestId !== requestIdRef.current) return;
+      setState(next);
+    });
   }, [owner, repo, prNumber, hasParams]);
 
   // Return initial state when params are null to clear stale data

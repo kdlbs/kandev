@@ -494,7 +494,11 @@ const ChangesPanel = memo(function ChangesPanel({
   const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
 
   // Periodically check for a PR when the session has a branch but no PR yet
-  useTaskPRDetection(activeTaskId ?? null, activeSessionId ?? null, git.branch ?? null);
+  useTaskPRDetection(
+    isArchived ? null : (activeTaskId ?? null),
+    isArchived ? null : (activeSessionId ?? null),
+    isArchived ? null : (git.branch ?? null),
+  );
 
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
