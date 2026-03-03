@@ -179,8 +179,6 @@ function CommitFileList({
     );
   }
 
-  console.log("[CommitFileList] Rendering", fileEntries.length, "files");
-
   return (
     <>
       {fileEntries.map(([path, file]) => (

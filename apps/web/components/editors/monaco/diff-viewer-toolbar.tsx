@@ -18,8 +18,6 @@ interface DiffViewerToolbarProps {
   data: FileDiffData;
   foldUnchanged: boolean;
   setFoldUnchanged: (v: boolean) => void;
-  /** Hide the fold toggle button (e.g., when enableExpansion overrides folding) */
-  hideFoldToggle?: boolean;
   wordWrap: boolean;
   setWordWrap: (v: boolean) => void;
   globalViewMode: ViewMode;
@@ -36,7 +34,6 @@ type DiffViewerActionsProps = Omit<DiffViewerToolbarProps, "data"> & { filePath:
 function DiffViewerToggleButtons({
   foldUnchanged,
   setFoldUnchanged,
-  hideFoldToggle,
   wordWrap,
   setWordWrap,
   globalViewMode,
@@ -45,7 +42,6 @@ function DiffViewerToggleButtons({
   DiffViewerActionsProps,
   | "foldUnchanged"
   | "setFoldUnchanged"
-  | "hideFoldToggle"
   | "wordWrap"
   | "setWordWrap"
   | "globalViewMode"
@@ -53,27 +49,23 @@ function DiffViewerToggleButtons({
 >) {
   return (
     <>
-      {!hideFoldToggle && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(iconBtn, foldUnchanged && "opacity-100 bg-muted")}
-              onClick={() => setFoldUnchanged(!foldUnchanged)}
-            >
-              {foldUnchanged ? (
-                <IconFoldDown className="h-3.5 w-3.5" />
-              ) : (
-                <IconFold className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {foldUnchanged ? "Show all lines" : "Fold unchanged lines"}
-          </TooltipContent>
-        </Tooltip>
-      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(iconBtn, foldUnchanged && "opacity-100 bg-muted")}
+            onClick={() => setFoldUnchanged(!foldUnchanged)}
+          >
+            {foldUnchanged ? (
+              <IconFoldDown className="h-3.5 w-3.5" />
+            ) : (
+              <IconFold className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{foldUnchanged ? "Show all lines" : "Fold unchanged lines"}</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -114,7 +106,6 @@ function DiffViewerActions({
   filePath,
   foldUnchanged,
   setFoldUnchanged,
-  hideFoldToggle,
   wordWrap,
   setWordWrap,
   globalViewMode,
@@ -136,7 +127,6 @@ function DiffViewerActions({
       <DiffViewerToggleButtons
         foldUnchanged={foldUnchanged}
         setFoldUnchanged={setFoldUnchanged}
-        hideFoldToggle={hideFoldToggle}
         wordWrap={wordWrap}
         setWordWrap={setWordWrap}
         globalViewMode={globalViewMode}
@@ -180,7 +170,6 @@ export function DiffViewerToolbar({
   data,
   foldUnchanged,
   setFoldUnchanged,
-  hideFoldToggle,
   wordWrap,
   setWordWrap,
   globalViewMode,
@@ -196,7 +185,6 @@ export function DiffViewerToolbar({
         filePath={data.filePath}
         foldUnchanged={foldUnchanged}
         setFoldUnchanged={setFoldUnchanged}
-        hideFoldToggle={hideFoldToggle}
         wordWrap={wordWrap}
         setWordWrap={setWordWrap}
         globalViewMode={globalViewMode}
