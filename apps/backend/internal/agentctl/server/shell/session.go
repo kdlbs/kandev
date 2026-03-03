@@ -379,10 +379,12 @@ func (s *Session) respawn() error {
 		return nil
 	}
 
-	// Close old PTY to prevent file descriptor leak
+	// Close old PTY to prevent file descriptor leak.
+	// Don't nil out s.pty — readOutput() may still be reading from it
+	// concurrently without the mutex. Closing is sufficient: any in-flight
+	// Read() will return an error and the goroutine will exit.
 	if s.pty != nil {
 		_ = s.pty.Close()
-		s.pty = nil
 	}
 
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
