@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, memo, useEffect } from "react";
+import { useState, useRef, useCallback, memo, useEffect } from "react";
 import { FileDiff } from "@pierre/diffs/react";
 import { cn } from "@kandev/ui/lib/utils";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
@@ -112,6 +112,8 @@ export const DiffViewer = memo(function DiffViewer({
 }: DiffViewerProps) {
   const [wordWrapLocal, setWordWrap] = useState(false);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
+  const [expandUnchanged, setExpandUnchanged] = useState(false);
+  const toggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const state = useDiffViewerState({
@@ -161,6 +163,8 @@ export const DiffViewer = memo(function DiffViewer({
     onOpenFile,
     onRevert,
     enableExpansion: canUseExpansion,
+    expandUnchanged,
+    onToggleExpandUnchanged: canUseExpansion ? toggleExpandUnchanged : undefined,
   });
 
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;

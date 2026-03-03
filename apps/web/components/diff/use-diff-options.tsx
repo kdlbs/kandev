@@ -72,6 +72,10 @@ type UseDiffOptionsArgs = {
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
   expansionLineCount?: number;
+  /** When true, show all lines (no separators) */
+  expandUnchanged?: boolean;
+  /** Toggle callback for expand-all button */
+  onToggleExpandUnchanged?: () => void;
 };
 
 type UseDiffOptionsResult = {
@@ -96,6 +100,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onRevert,
     enableExpansion = false,
     expansionLineCount = 20,
+    expandUnchanged,
+    onToggleExpandUnchanged,
   } = args;
 
   const { resolvedTheme } = useTheme();
@@ -117,6 +123,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onToggleViewMode: toggleViewMode,
     onOpenFile,
     onRevert,
+    expandUnchanged,
+    onToggleExpandUnchanged,
   });
 
   const renderHoverUtility = useCallback((): ReactNode => {
@@ -148,6 +156,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       overflow: wordWrap ? "wrap" : "scroll",
       unsafeCSS: DIFF_UNSAFE_CSS,
       expansionLineCount,
+      expandUnchanged,
     };
   },
     [
@@ -161,6 +170,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       onLineLeave,
       enableExpansion,
       expansionLineCount,
+      expandUnchanged,
     ],
   );
 
