@@ -5,13 +5,37 @@ import type { SeedData } from "../fixtures/test-base";
 import type { Page } from "@playwright/test";
 
 /**
+ * Set the diff-viewer provider in localStorage before any navigation.
+ * Must be called before goto() so the zustand persist store picks it up.
+ */
+async function setDiffViewerProvider(testPage: Page, provider: "monaco" | "pierre-diffs") {
+  await testPage.addInitScript(
+    (prov: string) => {
+      const store = {
+        state: {
+          providers: {
+            "code-editor": "monaco",
+            "diff-viewer": prov,
+            "chat-code-block": "shiki",
+            "chat-diff": "pierre-diffs",
+            "plan-editor": "tiptap",
+          },
+        },
+        version: 3,
+      };
+      localStorage.setItem("kandev-editor-providers", JSON.stringify(store));
+    },
+    provider,
+  );
+}
+
+/**
  * Seed a task using the diff-expansion-setup mock scenario and navigate to
  * its session page, waiting for the agent turn to complete.
  *
  * The scenario writes a 50-line file, commits it, then modifies two lines far
  * apart (line 3 and line 48).  The diff viewer will show two separate hunks
- * with ~44 collapsed lines between them — that gap is what the expand button
- * reveals, which is the core of the feature under test.
+ * with ~44 collapsed lines between them.
  */
 async function seedExpansionTask(
   testPage: Page,
@@ -37,7 +61,6 @@ async function seedExpansionTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  // Wait for the mock agent to finish — it emits this text on success.
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 30_000 });
@@ -45,7 +68,7 @@ async function seedExpansionTask(
   return session;
 }
 
-/** Click the Changes dockview tab and return a locator scoped to its content. */
+/** Click the Changes dockview tab. */
 async function openChangesTab(testPage: Page) {
   const changesTab = testPage.locator(".dv-default-tab", { hasText: "Changes" });
   await expect(changesTab).toBeVisible({ timeout: 10_000 });
@@ -54,7 +77,6 @@ async function openChangesTab(testPage: Page) {
 
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
-  // The file name appears in the changes timeline as a clickable row.
   const fileRow = testPage
     .locator("button, [role='button'], [class*='file']")
     .filter({ hasText: "expansion_test.go" })
@@ -63,10 +85,14 @@ async function openExpansionFileDiff(testPage: Page) {
   await fileRow.click();
 }
 
-test.describe("Diff expansion in code review", () => {
+test.describe("Diff expansion — Pierre Diffs provider", () => {
   test.describe.configure({ retries: 1 });
 
-  test("Changes tab shows two-hunk uncommitted diff", async ({
+  test.beforeEach(async ({ testPage }) => {
+    await setDiffViewerProvider(testPage, "pierre-diffs");
+  });
+
+  test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
     apiClient,
     seedData,
@@ -74,36 +100,25 @@ test.describe("Diff expansion in code review", () => {
     await seedExpansionTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
 
-    // Both modified markers should appear in the diff output.
-    await expect(
-      testPage.getByText("HUNK_TOP", { exact: false }),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      testPage.getByText("HUNK_BOTTOM", { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
+    // Pierre Diffs renders a diffs-container custom element
+    await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
-  test("diff viewer loads expansion content and shows expand controls between hunks", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("shows expand controls between hunks", async ({ testPage, apiClient, seedData }) => {
     await seedExpansionTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    // Both hunk markers confirm the diff rendered.
     await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
-      timeout: 5_000,
-    });
 
-    // The ~44 lines between the hunks are collapsed. The @pierre/diffs library
-    // renders an expand button in that gap once useExpandableDiff has fetched
-    // the full file content from the backend (via workspace.file.get_at_ref).
-    // We wait for it — its appearance confirms the WebSocket round-trip worked.
+    // Pierre Diffs renders expand buttons inside shadow DOM
     const expandBtn = testPage
       .locator(
         [
@@ -118,7 +133,7 @@ test.describe("Diff expansion in code review", () => {
     await expect(expandBtn).toBeVisible({ timeout: 20_000 });
   });
 
-  test("clicking expand between hunks reveals the collapsed middle lines", async ({
+  test("clicking expand reveals the collapsed middle lines", async ({
     testPage,
     apiClient,
     seedData,
@@ -127,12 +142,10 @@ test.describe("Diff expansion in code review", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    // Wait for both hunks to render.
     await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
 
-    // Wait for the expand button between the two hunks.
     const expandBtn = testPage
       .locator(
         [
@@ -147,11 +160,82 @@ test.describe("Diff expansion in code review", () => {
     await expect(expandBtn).toBeVisible({ timeout: 20_000 });
     await expandBtn.click();
 
-    // After expanding, a previously collapsed line from the middle of the file
-    // should appear.  Line 25 sits right in the middle of the gap (lines 6–45)
-    // and uses the original content written by the mock scenario.
-    await expect(
-      testPage.getByText("original_25", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    // Line 25 sits in the middle of the collapsed gap (lines 6–45).
+    await expect(testPage.getByText("original_25", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});
+
+test.describe("Diff expansion — Monaco provider", () => {
+  test.describe.configure({ retries: 1 });
+
+  test.beforeEach(async ({ testPage }) => {
+    await setDiffViewerProvider(testPage, "monaco");
+  });
+
+  test("renders Monaco diff viewer and shows both hunks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    // Monaco renders with the .monaco-diff-viewer wrapper
+    await expect(testPage.locator(".monaco-diff-viewer")).toBeVisible({ timeout: 15_000 });
+    // Should NOT have a Pierre Diffs container
+    await expect(testPage.locator("diffs-container")).toHaveCount(0);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
+  test("shows hidden unchanged region widget between hunks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Monaco's hideUnchangedRegions renders a .diff-hidden-lines-widget
+    // with a "Show Unchanged Region" link in the center.
+    const hiddenWidget = testPage.locator(".diff-hidden-lines-widget").first();
+    await expect(hiddenWidget).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("clicking the top reveal area expands collapsed lines", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Click "Show Unchanged Region" to reveal all hidden lines
+    const showRegionLink = testPage
+      .locator('.diff-hidden-lines a[title="Show Unchanged Region"]')
+      .first();
+    await expect(showRegionLink).toBeVisible({ timeout: 20_000 });
+    await showRegionLink.click();
+
+    // Line 25 from the middle of the file should now be visible
+    await expect(testPage.getByText("original_25", { exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });
