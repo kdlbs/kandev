@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -95,67 +94,6 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 // changed returns true if the workspace state has changed.
 func (s workspaceState) changed(other workspaceState) bool {
 	return s.indexMtime != other.indexMtime || s.diffFilesID != other.diffFilesID
-}
-
-// detectFileChanges compares old and new git status output to find specific changes.
-// Returns a list of file change notifications for modified, added, or deleted files.
-func (wt *WorkspaceTracker) detectFileChanges(oldStatus, newStatus string) []types.FileChangeNotification {
-	oldFiles := parseGitStatusFiles(oldStatus)
-	newFiles := parseGitStatusFiles(newStatus)
-
-	var changes []types.FileChangeNotification
-	now := time.Now()
-
-	// Find new or modified files
-	for path, newState := range newFiles {
-		oldState, existed := oldFiles[path]
-		if !existed {
-			changes = append(changes, types.FileChangeNotification{
-				Timestamp: now,
-				Path:      path,
-				Operation: types.FileOpCreate,
-			})
-		} else if oldState != newState {
-			changes = append(changes, types.FileChangeNotification{
-				Timestamp: now,
-				Path:      path,
-				Operation: types.FileOpWrite,
-			})
-		}
-	}
-
-	// Find deleted files
-	for path := range oldFiles {
-		if _, exists := newFiles[path]; !exists {
-			changes = append(changes, types.FileChangeNotification{
-				Timestamp: now,
-				Path:      path,
-				Operation: types.FileOpRemove,
-			})
-		}
-	}
-
-	return changes
-}
-
-// parseGitStatusFiles parses git status --porcelain output into a map of file paths to status codes.
-func parseGitStatusFiles(status string) map[string]string {
-	files := make(map[string]string)
-	for _, line := range strings.Split(status, "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		// Git status --porcelain format: XY filename
-		// where XY is a two-character status code
-		statusCode := line[:2]
-		path := strings.TrimSpace(line[3:])
-		// Handle renamed files: "R  old -> new"
-		if idx := strings.Index(path, " -> "); idx >= 0 {
-			path = path[idx+4:]
-		}
-		files[path] = statusCode
-	}
-	return files
 }
 
 // emitFileChanges sends accumulated file changes to subscribers.

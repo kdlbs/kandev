@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,7 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 }
 
 // resolveGitDir returns the git directory path, handling worktrees.
+// Returns empty string if the path cannot be resolved or validated.
 func resolveGitDir(workDir string) string {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
@@ -82,6 +84,13 @@ func resolveGitDir(workDir string) string {
 	gitDir := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Join(workDir, gitDir)
+	}
+	// Clean and validate the path to prevent path traversal
+	gitDir = filepath.Clean(gitDir)
+	// Verify the path exists and is a directory
+	info, err := os.Stat(gitDir)
+	if err != nil || !info.IsDir() {
+		return ""
 	}
 	return gitDir
 }
