@@ -594,9 +594,10 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   return (
     <div
-      ref={terminalRef}
       className="h-full w-full overflow-hidden p-2 bg-background"
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
-    />
+    >
+      <div ref={terminalRef} className="h-full w-full" />
+    </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useState } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { IconLoader2, IconGitMerge } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { TaskItemMenu } from "./task-item-menu";
@@ -34,6 +35,7 @@ type TaskItemProps = {
   isDeleting?: boolean;
   taskId?: string;
   primarySessionId?: string | null;
+  prState?: "open" | "closed" | "merged" | null;
 };
 
 // Helper to format relative time
@@ -57,6 +59,37 @@ function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?:
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
   onClick?.();
+}
+
+function TaskItemTitle({
+  title,
+  description,
+  prState,
+}: {
+  title: string;
+  description?: string;
+  prState?: "open" | "closed" | "merged" | null;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <span className="flex items-center gap-1 line-clamp-1 min-w-0 text-[13px] font-medium text-foreground">
+        {prState === "merged" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span aria-label="PR merged" className="inline-flex shrink-0">
+                <IconGitMerge className="h-3.5 w-3.5 text-purple-500" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>PR merged</TooltipContent>
+          </Tooltip>
+        )}
+        {title}
+      </span>
+      {description && (
+        <span className="text-[11px] text-muted-foreground/60 truncate">{description}</span>
+      )}
+    </div>
+  );
 }
 
 function TaskItemMeta({
@@ -129,6 +162,7 @@ export const TaskItem = memo(function TaskItem({
   isDeleting,
   taskId,
   primarySessionId,
+  prState,
 }: TaskItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -162,14 +196,7 @@ export const TaskItem = memo(function TaskItem({
       />
 
       {/* Content */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="line-clamp-1 min-w-0 text-[13px] font-medium text-foreground">
-          {title}
-        </span>
-        {description && (
-          <span className="text-[11px] text-muted-foreground/60 truncate">{description}</span>
-        )}
-      </div>
+      <TaskItemTitle title={title} description={description} prState={prState} />
 
       {/* Right side: step name + meta, or action buttons on hover */}
       <div className="relative flex items-center shrink-0">

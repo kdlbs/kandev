@@ -43,6 +43,7 @@ interface UseGitOperationsReturn {
 
   // State
   isLoading: boolean;
+  loadingOperation: string | null;
   error: string | null;
   lastResult: GitOperationResult | null;
 }
@@ -128,6 +129,7 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
 
 export function useGitOperations(sessionId: string | null): UseGitOperationsReturn {
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingOperation, setLoadingOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<GitOperationResult | null>(null);
 
@@ -141,6 +143,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
       if (!client) throw new Error("WebSocket not connected");
 
       setIsLoading(true);
+      setLoadingOperation(action.replace("worktree.", ""));
       setError(null);
 
       const timeout = action === "worktree.create_pr" ? 120000 : 60000;
@@ -159,6 +162,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
         throw e;
       } finally {
         setIsLoading(false);
+        setLoadingOperation(null);
       }
     },
     [sessionId],
@@ -169,6 +173,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
   return {
     ...ops,
     isLoading,
+    loadingOperation,
     error,
     lastResult,
   };

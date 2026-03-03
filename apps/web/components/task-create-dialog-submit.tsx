@@ -167,10 +167,9 @@ export function useTaskSubmitHandlers({
       const response = await launchSession(request);
 
       const newSessionId = response?.session_id;
+      onOpenChange(false);
       if (newSessionId) {
         router.push(linkToSession(newSessionId));
-      } else {
-        onOpenChange(false);
       }
     } catch (error) {
       toast({
@@ -299,8 +298,8 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      onOpenChange(false);
       if (planMode && newSessionId) {
-        onOpenChange(false);
         activatePlanMode({
           sessionId: newSessionId,
           taskId: taskResponse.id,
@@ -310,8 +309,6 @@ export function useTaskSubmitHandlers({
         });
       } else if (isPassthroughProfile && newSessionId) {
         router.push(linkToSession(newSessionId));
-      } else {
-        onOpenChange(false);
       }
     },
     [
@@ -348,6 +345,7 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      onOpenChange(false);
       if (newSessionId) {
         activatePlanMode({
           sessionId: newSessionId,
@@ -356,8 +354,6 @@ export function useTaskSubmitHandlers({
           setPlanMode,
           router,
         });
-      } else {
-        onOpenChange(false);
       }
     },
     [

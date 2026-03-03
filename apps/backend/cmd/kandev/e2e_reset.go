@@ -13,9 +13,10 @@ import (
 )
 
 // registerE2EResetRoutes registers the E2E data-reset endpoint.
-// The endpoint is only available when KANDEV_MOCK_AGENT=true (i.e., during E2E tests).
+// The endpoint is available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
 func registerE2EResetRoutes(router *gin.Engine, repo *sqliterepo.Repository, log *logger.Logger) {
-	if os.Getenv("KANDEV_MOCK_AGENT") != "true" {
+	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
+	if mockMode != "true" && mockMode != "only" {
 		return
 	}
 

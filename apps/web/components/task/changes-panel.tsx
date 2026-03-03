@@ -214,6 +214,7 @@ type ChangesPanelBodyProps = {
   totalFileCount: number;
   aheadCount: number;
   isLoading: boolean;
+  loadingOperation: string | null;
   dialogs: ReturnType<typeof useChangesDialogHandlers>;
   onOpenDiffFile: (path: string) => void;
   onEditFile: (path: string) => void;
@@ -221,6 +222,7 @@ type ChangesPanelBodyProps = {
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string) => void;
   onStageAll: () => void;
+  onUnstageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
   onPush: () => void;
@@ -325,12 +327,14 @@ type TimelineProps = Pick<
   | "pendingStageFiles"
   | "aheadCount"
   | "isLoading"
+  | "loadingOperation"
   | "dialogs"
   | "onOpenDiffFile"
   | "onEditFile"
   | "onOpenCommitDetail"
   | "onRevertCommit"
   | "onStageAll"
+  | "onUnstageAll"
   | "onStage"
   | "onUnstage"
   | "onPush"
@@ -340,6 +344,9 @@ type TimelineProps = Pick<
 function TimelineLocalChanges(props: TimelineProps) {
   const showStaged = props.hasUnstaged || props.hasStaged;
   const showCommits = props.hasStaged || props.hasCommits;
+  // Only show bulk-action spinners when no individual files are pending
+  // (per-file ops set pendingStageFiles; bulk ops don't)
+  const isBulkOp = props.pendingStageFiles.size === 0;
 
   return (
     <>
@@ -350,6 +357,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           pendingStageFiles={props.pendingStageFiles}
           isLast={!showStaged}
           actionLabel="Stage all"
+          isActionLoading={isBulkOp && props.loadingOperation === "stage"}
           onAction={props.onStageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
@@ -365,7 +373,11 @@ function TimelineLocalChanges(props: TimelineProps) {
           pendingStageFiles={props.pendingStageFiles}
           isLast={!showCommits}
           actionLabel="Commit"
+          isActionLoading={props.loadingOperation === "commit"}
           onAction={props.dialogs.handleOpenCommitDialog}
+          secondaryActionLabel="Unstage all"
+          isSecondaryActionLoading={isBulkOp && props.loadingOperation === "unstage"}
+          onSecondaryAction={props.onUnstageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
           onStage={props.onStage}
@@ -388,6 +400,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           onOpenPRDialog={props.dialogs.handleOpenPRDialog}
           onPush={props.onPush}
           isLoading={props.isLoading}
+          loadingOperation={props.loadingOperation}
           aheadCount={props.aheadCount}
           canPush={props.canPush}
           canCreatePR={props.canCreatePR}
@@ -511,13 +524,12 @@ const ChangesPanel = memo(function ChangesPanel({
   const staged = useMemo(() => computeStagedStats(git.stagedFiles), [git.stagedFiles]);
 
   const gitHandlers = useChangesGitHandlers(git, toast, baseBranch);
-  const dialogs = useChangesDialogHandlers(
-    git,
-    toast,
-    gitHandlers.handleGitOperation,
+  const firstCommitMessage = git.commits?.[0]?.commit_message;
+  const dialogs = useChangesDialogHandlers(git, toast, gitHandlers.handleGitOperation, {
     taskTitle,
     baseBranch,
-  );
+    firstCommitMessage,
+  });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -531,6 +543,7 @@ const ChangesPanel = memo(function ChangesPanel({
         baseBranchDisplay={baseBranchDisplay}
         behindCount={git.behind}
         isLoading={git.isLoading}
+        loadingOperation={git.loadingOperation}
         onOpenDiffAll={onOpenDiffAll}
         onOpenReview={onOpenReview}
         onPull={gitHandlers.handlePull}
@@ -556,6 +569,7 @@ const ChangesPanel = memo(function ChangesPanel({
         totalFileCount={totalFileCount}
         aheadCount={git.ahead}
         isLoading={git.isLoading}
+        loadingOperation={git.loadingOperation}
         dialogs={dialogs}
         onOpenDiffFile={onOpenDiffFile}
         onEditFile={onEditFile}
@@ -563,8 +577,9 @@ const ChangesPanel = memo(function ChangesPanel({
         onRevertCommit={gitHandlers.handleRevertCommit}
         onOpenReview={onOpenReview}
         onStageAll={git.stageAll}
-        onStage={(path) => git.stage([path]).then(() => undefined)}
-        onUnstage={(path) => git.unstage([path]).then(() => undefined)}
+        onUnstageAll={git.unstageAll}
+        onStage={(path) => git.stageFile([path]).then(() => undefined)}
+        onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}
         stagedFileCount={staged.stagedFileCount}

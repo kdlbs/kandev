@@ -36,6 +36,7 @@ type TaskSwitcherItem = {
   updatedAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
+  prState?: "open" | "closed" | "merged" | null;
 };
 
 type TaskSwitcherProps = {
@@ -149,6 +150,7 @@ function TaskSwitcherSection({
             taskId={task.id}
             primarySessionId={task.primarySessionId ?? null}
             updatedAt={task.updatedAt}
+            prState={task.prState}
             onClick={() => onSelectTask(task.id)}
             onRename={onRenameTask ? () => onRenameTask(task.id, task.title) : undefined}
             onArchive={onArchiveTask ? () => onArchiveTask(task.id) : undefined}
@@ -192,16 +194,6 @@ export const TaskSwitcher = memo(function TaskSwitcher({
       else if (bucket === "in_progress") inProgress.push(task);
       else backlog.push(task);
     }
-
-    const byRecent = (a: TaskSwitcherItem, b: TaskSwitcherItem) => {
-      const ta = a.updatedAt ?? "";
-      const tb = b.updatedAt ?? "";
-      if (ta !== tb) return tb.localeCompare(ta);
-      return a.title.localeCompare(b.title);
-    };
-    review.sort(byRecent);
-    inProgress.sort(byRecent);
-    backlog.sort(byRecent);
 
     return [
       { label: "Review", tasks: review },

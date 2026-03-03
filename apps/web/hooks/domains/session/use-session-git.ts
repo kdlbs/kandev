@@ -44,6 +44,7 @@ export type SessionGit = {
 
   // Operation state
   isLoading: boolean;
+  loadingOperation: string | null;
   pendingStageFiles: Set<string>;
 
   // Actions
@@ -54,8 +55,11 @@ export type SessionGit = {
   abort: (operation: "merge" | "rebase") => Promise<GitOperationResult>;
   commit: (message: string, stageAll?: boolean, amend?: boolean) => Promise<GitOperationResult>;
   stage: (paths?: string[]) => Promise<GitOperationResult>;
+  stageFile: (paths: string[]) => Promise<GitOperationResult>;
   stageAll: () => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
+  unstageFile: (paths: string[]) => Promise<GitOperationResult>;
+  unstageAll: () => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
   renameBranch: (newName: string) => Promise<GitOperationResult>;
@@ -96,6 +100,41 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   const hasCommits = commits.length > 0;
 
   const stageAll = useCallback(async () => gitOps.stage(), [gitOps]);
+  const unstageAll = useCallback(async () => gitOps.unstage(), [gitOps]);
+
+  const stageFile = useCallback(
+    async (paths: string[]) => {
+      for (const p of paths) setPendingStageFiles((prev) => new Set(prev).add(p));
+      try {
+        return await gitOps.stage(paths);
+      } catch (err) {
+        setPendingStageFiles((prev) => {
+          const next = new Set(prev);
+          for (const p of paths) next.delete(p);
+          return next;
+        });
+        throw err;
+      }
+    },
+    [gitOps],
+  );
+
+  const unstageFile = useCallback(
+    async (paths: string[]) => {
+      for (const p of paths) setPendingStageFiles((prev) => new Set(prev).add(p));
+      try {
+        return await gitOps.unstage(paths);
+      } catch (err) {
+        setPendingStageFiles((prev) => {
+          const next = new Set(prev);
+          for (const p of paths) next.delete(p);
+          return next;
+        });
+        throw err;
+      }
+    },
+    [gitOps],
+  );
 
   return {
     branch: gitStatus?.branch ?? null,
@@ -122,6 +161,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     canCreatePR: hasCommits,
 
     isLoading: gitOps.isLoading,
+    loadingOperation: gitOps.loadingOperation,
     pendingStageFiles,
 
     pull: gitOps.pull,
@@ -131,8 +171,11 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     abort: gitOps.abort,
     commit: gitOps.commit,
     stage: gitOps.stage,
+    stageFile,
     stageAll,
     unstage: gitOps.unstage,
+    unstageFile,
+    unstageAll,
     discard: gitOps.discard,
     revertCommit: gitOps.revertCommit,
     renameBranch: gitOps.renameBranch,

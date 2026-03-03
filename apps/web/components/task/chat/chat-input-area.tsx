@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconBrain } from "@tabler/icons-react";
+import { IconBrain, IconGitMerge, IconX } from "@tabler/icons-react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -19,6 +19,8 @@ import {
   formatPlanCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { setChatDraftContent } from "@/lib/local-storage";
+import { useTaskActions } from "@/hooks/use-task-actions";
+import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
@@ -246,6 +248,48 @@ After completing the implementation, provide a summary of what was done.
   }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
 }
 
+function PRMergedBanner({ taskId }: { taskId: string }) {
+  const taskPR = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const [dismissed, setDismissed] = useState(false);
+  const { archiveTaskById } = useTaskActions();
+  const { toast } = useToast();
+
+  const handleArchive = useCallback(async () => {
+    try {
+      await archiveTaskById(taskId);
+      toast({ description: "Task archived" });
+    } catch {
+      toast({ description: "Failed to archive task", variant: "error" });
+    }
+  }, [taskId, archiveTaskById, toast]);
+
+  if (taskPR?.state !== "merged" || dismissed) return null;
+
+  return (
+    <div className="flex items-center gap-2 mx-1 mb-1 px-3 py-1.5 text-xs rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
+      <IconGitMerge className="h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1">
+        PR #{taskPR.pr_number} has been merged. You can archive this task.
+      </span>
+      <button
+        type="button"
+        onClick={handleArchive}
+        className="underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        Archive
+      </button>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={() => setDismissed(true)}
+        className="p-0.5 hover:bg-purple-500/10 rounded cursor-pointer"
+      >
+        <IconX className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
   clarificationKey: number;
@@ -321,6 +365,7 @@ export function ChatInputArea({
           <span className="capitalize">{agentMode} mode</span>
         </div>
       )}
+      {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       <ChatInputContainer
         ref={chatInputRef}
         key={clarificationKey}

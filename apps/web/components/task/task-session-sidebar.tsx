@@ -99,6 +99,7 @@ function useSidebarData(workspaceId: string | null) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -148,6 +149,7 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: task.primarySessionId ?? null,
         updatedAt: sessionInfo.updatedAt ?? task.updatedAt,
         isArchived: false as boolean,
+        prState: (taskPRsByTaskId[task.id]?.state as "open" | "closed" | "merged") ?? null,
       };
     });
     if (
@@ -170,6 +172,9 @@ function useSidebarData(workspaceId: string | null) {
         primarySessionId: null,
         updatedAt: archivedState.archivedTaskUpdatedAt,
         isArchived: true,
+        prState:
+          (taskPRsByTaskId[archivedState.archivedTaskId]?.state as "open" | "closed" | "merged") ??
+          null,
       });
     }
     return items;
@@ -179,6 +184,7 @@ function useSidebarData(workspaceId: string | null) {
     workspaceId,
     sessionsByTaskId,
     gitStatusBySessionId,
+    taskPRsByTaskId,
     archivedState,
   ]);
 
