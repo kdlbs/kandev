@@ -13,7 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/worktree"
 )
 
 // StartAgentProcess configures and starts the agent subprocess for an execution.
@@ -187,53 +186,6 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 	}
 
 	return env
-}
-
-// getOrCreateWorktree creates a new worktree or reuses an existing one for session resumption.
-// If worktree_id is in metadata, it tries to reuse that specific worktree.
-// Otherwise, creates a new worktree with a unique random suffix.
-func (m *Manager) getOrCreateWorktree(ctx context.Context, req *LaunchRequest) (*worktree.Worktree, error) {
-	// Check if we have a worktree_id in metadata for session resumption
-	var worktreeID string
-	if req.Metadata != nil {
-		if id, ok := req.Metadata["worktree_id"].(string); ok && id != "" {
-			worktreeID = id
-		}
-	}
-
-	// Create request with optional WorktreeID for resumption
-	createReq := worktree.CreateRequest{
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskTitle:            req.TaskTitle,
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		BaseBranch:           req.BaseBranch,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
-		WorktreeID:           worktreeID, // If set, will try to reuse this worktree
-	}
-
-	wt, err := m.worktreeMgr.Create(ctx, createReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create worktree: %w", err)
-	}
-
-	if worktreeID != "" && wt.ID == worktreeID {
-		m.logger.Debug("reusing existing worktree for session resumption",
-			zap.String("task_id", req.TaskID),
-			zap.String("worktree_id", wt.ID),
-			zap.String("worktree_path", wt.Path),
-			zap.String("branch", wt.Branch))
-	} else {
-		m.logger.Info("created new worktree for task",
-			zap.String("task_id", req.TaskID),
-			zap.String("worktree_id", wt.ID),
-			zap.String("worktree_path", wt.Path),
-			zap.String("branch", wt.Branch))
-	}
-
-	return wt, nil
 }
 
 // waitForAgentctlReady waits for the agentctl HTTP server to be ready.

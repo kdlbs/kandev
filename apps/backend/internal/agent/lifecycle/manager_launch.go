@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,27 +102,17 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	}
 }
 
-// launchResolveWorkspacePath resolves the effective workspace path, handling worktree
-// creation if requested. Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
-func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+// launchResolveWorkspacePath resolves the effective workspace path for non-worktree executors.
+// For worktree executors, workspace resolution is handled by the WorktreePreparer.
+// Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
+func (m *Manager) launchResolveWorkspacePath(_ context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	if req.UseWorktree {
+		// Worktree executors: preparer handles worktree creation.
+		// Return empty path; it will be populated from preparer results.
+		return "", "", "", ""
+	}
 	workspacePath = req.WorkspacePath
-	if req.UseWorktree && m.worktreeMgr != nil && req.RepositoryPath != "" {
-		wt, err := m.getOrCreateWorktree(ctx, req)
-		if err != nil {
-			m.logger.Warn("failed to create worktree, falling back to direct mount",
-				zap.String("task_id", req.TaskID),
-				zap.Error(err))
-			// Fall back to direct mount if worktree creation fails
-			workspacePath = req.RepositoryPath
-		} else {
-			workspacePath = wt.Path
-			worktreeID = wt.ID
-			worktreeBranch = wt.Branch
-			// Git worktrees reference the main repo's .git directory via a .git file.
-			// We need to mount the entire .git directory for git commands to work.
-			mainRepoGitDir = filepath.Join(req.RepositoryPath, ".git")
-		}
-	} else if req.RepositoryPath != "" && workspacePath == "" {
+	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
 	return
@@ -158,6 +147,22 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 		}
 	}
 	return reqWithWorktree, executionID
+}
+
+// newProgressCallback builds a PrepareProgressCallback that publishes progress events for a task/session.
+func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressCallback {
+	return func(step PrepareStep, stepIndex int, totalSteps int) {
+		m.eventPublisher.PublishPrepareProgress(sessionID, &PrepareProgressEventPayload{
+			TaskID:     taskID,
+			SessionID:  sessionID,
+			StepName:   step.Name,
+			StepIndex:  stepIndex,
+			TotalSteps: totalSteps,
+			Status:     string(step.Status),
+			Output:     step.Output,
+			Error:      step.Error,
+		})
+	}
 }
 
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
@@ -200,18 +205,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AgentConfig:         agentConfig,
 		McpServers:          mcpServers,
 		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
-		OnProgress: func(step PrepareStep, stepIndex int, totalSteps int) {
-			m.eventPublisher.PublishPrepareProgress(reqWithWorktree.SessionID, &PrepareProgressEventPayload{
-				TaskID:     reqWithWorktree.TaskID,
-				SessionID:  reqWithWorktree.SessionID,
-				StepName:   step.Name,
-				StepIndex:  stepIndex,
-				TotalSteps: totalSteps,
-				Status:     string(step.Status),
-				Output:     step.Output,
-				Error:      step.Error,
-			})
-		},
+		OnProgress:          m.newProgressCallback(reqWithWorktree.TaskID, reqWithWorktree.SessionID),
 	}
 
 	if resumer, ok := rt.(RemoteSessionResumer); ok {
@@ -228,73 +222,98 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 }
 
 // runEnvironmentPreparer runs the environment preparer for the executor type, if one is registered.
-// Preparation failures are non-fatal and logged as warnings.
+// Returns the prepare result (nil if no preparer ran). Does NOT publish PrepareCompleted;
+// the caller is responsible for publishing based on the returned result.
 func (m *Manager) runEnvironmentPreparer(
 	ctx context.Context,
 	req *LaunchRequest,
 	workspacePath string,
-	worktreeID string,
-	worktreeBranch string,
-) {
+) *EnvPrepareResult {
 	if m.preparerRegistry == nil {
-		return
+		return nil
 	}
-	execName := executor.ExecutorTypeToBackend(models.ExecutorType(req.ExecutorType))
+	// Look up preparer by the raw executor type first (e.g. "worktree"),
+	// then fall back to the backend name (e.g. "standalone").
+	// This allows executor types that share a backend (local and worktree
+	// both map to standalone) to have distinct preparation logic.
+	execName := executor.Name(req.ExecutorType)
 	preparer := m.preparerRegistry.Get(execName)
 	if preparer == nil {
-		return
+		execName = executor.ExecutorTypeToBackend(models.ExecutorType(req.ExecutorType))
+		preparer = m.preparerRegistry.Get(execName)
+	}
+	if preparer == nil {
+		return nil
 	}
 
 	prepReq := &EnvPrepareRequest{
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		ExecutorType:   execName,
-		WorkspacePath:  workspacePath,
-		RepositoryPath: req.RepositoryPath,
-		UseWorktree:    req.UseWorktree,
-		SetupScript:    req.SetupScript,
-		BaseBranch:     req.BaseBranch,
-		WorktreeID:     worktreeID,
-		WorktreeBranch: worktreeBranch,
-		Env:            req.Env,
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		TaskTitle:            req.TaskTitle,
+		ExecutorType:         execName,
+		WorkspacePath:        workspacePath,
+		RepositoryPath:       req.RepositoryPath,
+		RepositoryID:         req.RepositoryID,
+		UseWorktree:          req.UseWorktree,
+		SetupScript:          req.SetupScript,
+		BaseBranch:           req.BaseBranch,
+		CheckoutBranch:       req.CheckoutBranch,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
+		Env:                  req.Env,
 	}
 
-	onProgress := func(step PrepareStep, stepIndex int, totalSteps int) {
-		m.eventPublisher.PublishPrepareProgress(req.SessionID, &PrepareProgressEventPayload{
-			TaskID:     req.TaskID,
-			SessionID:  req.SessionID,
-			StepName:   step.Name,
-			StepIndex:  stepIndex,
-			TotalSteps: totalSteps,
-			Status:     string(step.Status),
-			Output:     step.Output,
-			Error:      step.Error,
-		})
-	}
-
-	result, err := preparer.Prepare(ctx, prepReq, onProgress)
+	result, err := preparer.Prepare(ctx, prepReq, m.newProgressCallback(req.TaskID, req.SessionID))
 	if err != nil {
 		m.logger.Warn("environment preparation failed",
 			zap.String("task_id", req.TaskID),
 			zap.String("preparer", preparer.Name()),
 			zap.Error(err))
+		return &EnvPrepareResult{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}
+	}
+
+	return result
+}
+
+// launchApplyPrepareResult applies workspace metadata from the preparer result and publishes completion.
+// Returns an error if the preparer failed.
+func (m *Manager) launchApplyPrepareResult(
+	req *LaunchRequest,
+	result *EnvPrepareResult,
+	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch *string,
+) error {
+	if !result.Success {
 		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
 			TaskID:       req.TaskID,
 			SessionID:    req.SessionID,
 			Success:      false,
-			ErrorMessage: err.Error(),
+			ErrorMessage: result.ErrorMessage,
 		})
-		return
+		return fmt.Errorf("environment preparation failed: %s", result.ErrorMessage)
 	}
-
+	if result.WorkspacePath != "" {
+		*workspacePath = result.WorkspacePath
+	}
+	if result.MainRepoGitDir != "" {
+		*mainRepoGitDir = result.MainRepoGitDir
+	}
+	if result.WorktreeID != "" {
+		*worktreeID = result.WorktreeID
+	}
+	if result.WorktreeBranch != "" {
+		*worktreeBranch = result.WorktreeBranch
+	}
 	m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
 		TaskID:        req.TaskID,
 		SessionID:     req.SessionID,
-		Success:       result.Success,
-		ErrorMessage:  result.ErrorMessage,
+		Success:       true,
 		DurationMs:    result.Duration.Milliseconds(),
 		WorkspacePath: result.WorkspacePath,
 	})
+	return nil
 }
 
 // Launch launches a new agent for a task
@@ -326,11 +345,17 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 	}
 
-	// 4. Resolve workspace path (with optional worktree creation)
+	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
 
-	// 4b. Run environment preparation (if preparer registered for this executor type)
-	m.runEnvironmentPreparer(ctx, req, workspacePath, worktreeID, worktreeBranch)
+	// 4b. Run environment preparation (if preparer registered for this executor type).
+	// For worktree executors, the preparer creates the worktree and returns workspace metadata.
+	prepResult := m.runEnvironmentPreparer(ctx, req, workspacePath)
+	if prepResult != nil {
+		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
+			return nil, err
+		}
+	}
 
 	// 5 & 6. Prepare the request copy with metadata and profile env
 	reqWithWorktree, executionID := m.launchPrepareRequest(req, profileInfo, workspacePath)
@@ -346,12 +371,16 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		})
 		return nil, err
 	}
-	m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
-		TaskID:     req.TaskID,
-		SessionID:  req.SessionID,
-		Success:    true,
-		DurationMs: 0,
-	})
+	// Publish PrepareCompleted for CreateInstance only if no preparer ran
+	// (preparers publish their own completion above).
+	if prepResult == nil {
+		m.eventPublisher.PublishPrepareCompleted(req.SessionID, &PrepareCompletedEventPayload{
+			TaskID:     req.TaskID,
+			SessionID:  req.SessionID,
+			Success:    true,
+			DurationMs: 0,
+		})
+	}
 
 	// Convert to AgentExecution and set the runtime name
 	execution := execInstance.ToAgentExecution(execReq)

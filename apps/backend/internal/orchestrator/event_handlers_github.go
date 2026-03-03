@@ -50,8 +50,9 @@ type ReviewTaskRequest struct {
 
 // ReviewTaskRepository associates a repository with a review task.
 type ReviewTaskRepository struct {
-	RepositoryID string
-	BaseBranch   string
+	RepositoryID   string
+	BaseBranch     string
+	CheckoutBranch string
 }
 
 // SetGitHubService sets the GitHub service for PR auto-detection.
@@ -252,9 +253,9 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 		zap.String("repo", repoSlug),
 		zap.String("repo_id", repoID),
 		zap.String("base_branch", baseBranch))
-	// Use the PR's head branch so the worktree checks out the PR code, not the merge target.
-	// The actual base branch is preserved in the TaskPR record for reference.
-	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: pr.HeadBranch}}
+	// BaseBranch = repo default branch (e.g. "main") for worktree creation.
+	// CheckoutBranch = PR head branch to fetch and checkout after worktree is created.
+	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch}}
 }
 
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on

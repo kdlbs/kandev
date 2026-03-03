@@ -239,6 +239,17 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 // createWorktree performs the actual git worktree creation.
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
+	// If a checkout branch is specified (e.g. a PR's head branch), fetch it
+	// first and use it as the base so the new worktree branch is created on
+	// top of the PR branch rather than on top of the default branch.
+	if req.CheckoutBranch != "" {
+		fetchedRef, err := m.fetchBranchRef(ctx, req.RepositoryPath, req.CheckoutBranch)
+		if err != nil {
+			return nil, err
+		}
+		baseRef = fetchedRef
+	}
+
 	worktreeDirName, branchName := m.buildWorktreeNames(req)
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -265,15 +276,34 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("path", worktreePath),
-		zap.String("branch", branchName))
+		zap.String("branch", wt.Branch))
 
 	return wt, nil
 }
 
+// fetchBranchRef fetches a branch from origin in the given repository and returns
+// the FETCH_HEAD ref that can be used as the base for a new worktree branch.
+// This is used for PR reviews so the new worktree branch is created on top of
+// the PR's head branch.
+func (m *Manager) fetchBranchRef(ctx context.Context, repoPath, branch string) (string, error) {
+	m.logger.Info("fetching branch for worktree base",
+		zap.String("branch", branch),
+		zap.String("repo_path", repoPath))
+
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelFetch()
+
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to fetch branch %q: %s", branch, string(output))
+	}
+
+	return "FETCH_HEAD", nil
+}
+
 // buildWorktreeNames derives the filesystem directory name and git branch name for a new worktree.
 func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName string) {
-	worktreeID := uuid.New().String()
-	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
+	dirSuffix := uuid.New().String()[:8] // Use first 8 chars of UUID for worktree dir uniqueness
 	branchSuffix := SmallSuffix(3)
 	prefix := NormalizeBranchPrefix(req.WorktreeBranchPrefix)
 

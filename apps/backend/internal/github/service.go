@@ -43,6 +43,11 @@ func (s *Service) Client() Client {
 	return s.client
 }
 
+// TestStore returns the store for test/mock use only.
+func (s *Service) TestStore() *Store {
+	return s.store
+}
+
 // IsAuthenticated returns whether the service has a working GitHub client.
 func (s *Service) IsAuthenticated() bool {
 	return s.client != nil

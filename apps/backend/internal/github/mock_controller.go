@@ -2,6 +2,7 @@ package github
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,12 +11,13 @@ import (
 
 // MockController handles HTTP endpoints for controlling the MockClient in E2E tests.
 type MockController struct {
-	mock *MockClient
+	mock  *MockClient
+	store *Store
 }
 
 // NewMockController creates a new MockController.
-func NewMockController(mock *MockClient, _ *logger.Logger) *MockController {
-	return &MockController{mock: mock}
+func NewMockController(mock *MockClient, store *Store, _ *logger.Logger) *MockController {
+	return &MockController{mock: mock, store: store}
 }
 
 // RegisterRoutes registers all mock control HTTP routes.
@@ -30,6 +32,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/checks", c.addCheckRuns)
 	api.POST("/files", c.addPRFiles)
 	api.POST("/commits", c.addPRCommits)
+	api.POST("/task-prs", c.associateTaskPR)
 	api.DELETE("/reset", c.reset)
 }
 
@@ -157,6 +160,52 @@ func (c *MockController) addPRCommits(ctx *gin.Context) {
 	}
 	c.mock.AddPRCommits(req.Owner, req.Repo, req.Number, req.Commits)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Commits)})
+}
+
+// associateTaskPR directly creates a github_task_prs record for E2E testing.
+func (c *MockController) associateTaskPR(ctx *gin.Context) {
+	var req struct {
+		TaskID      string `json:"task_id"`
+		Owner       string `json:"owner"`
+		Repo        string `json:"repo"`
+		PRNumber    int    `json:"pr_number"`
+		PRURL       string `json:"pr_url"`
+		PRTitle     string `json:"pr_title"`
+		HeadBranch  string `json:"head_branch"`
+		BaseBranch  string `json:"base_branch"`
+		AuthorLogin string `json:"author_login"`
+		State       string `json:"state"`
+		Additions   int    `json:"additions"`
+		Deletions   int    `json:"deletions"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.State == "" {
+		req.State = "open"
+	}
+	now := time.Now().UTC()
+	tp := &TaskPR{
+		TaskID:      req.TaskID,
+		Owner:       req.Owner,
+		Repo:        req.Repo,
+		PRNumber:    req.PRNumber,
+		PRURL:       req.PRURL,
+		PRTitle:     req.PRTitle,
+		HeadBranch:  req.HeadBranch,
+		BaseBranch:  req.BaseBranch,
+		AuthorLogin: req.AuthorLogin,
+		State:       req.State,
+		Additions:   req.Additions,
+		Deletions:   req.Deletions,
+		CreatedAt:   now,
+	}
+	if err := c.store.CreateTaskPR(ctx.Request.Context(), tp); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusCreated, tp)
 }
 
 func (c *MockController) reset(ctx *gin.Context) {

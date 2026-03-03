@@ -413,18 +413,22 @@ function ChangesPanelTimeline(props: TimelineProps) {
   return (
     <div className="flex flex-col">
       {props.hasPRFiles && (
-        <PRFilesSection
-          files={props.prFiles}
-          isLast={!props.hasPRCommits && !hasLocalChanges}
-          onOpenDiff={props.onOpenDiffFile}
-        />
+        <div data-testid="pr-files-section">
+          <PRFilesSection
+            files={props.prFiles}
+            isLast={!props.hasPRCommits && !hasLocalChanges}
+            onOpenDiff={props.onOpenDiffFile}
+          />
+        </div>
       )}
       {props.hasPRCommits && (
-        <PRCommitsSection
-          commits={props.prCommits}
-          isLast={!hasLocalChanges}
-          onOpenCommitDetail={props.onOpenCommitDetail}
-        />
+        <div data-testid="pr-commits-section">
+          <PRCommitsSection
+            commits={props.prCommits}
+            isLast={!hasLocalChanges}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+          />
+        </div>
       )}
       <TimelineLocalChanges {...props} />
     </div>
@@ -522,7 +526,7 @@ const ChangesPanel = memo(function ChangesPanel({
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="changes-panel">
       <ChangesPanelHeader
         hasChanges={git.hasChanges}
         hasCommits={git.hasCommits}

@@ -161,19 +161,13 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 		safePath = filepath.Join(wt.workDir, cleanReqPath)
 	}
 
-	// Resolve symlinks to prevent bypassing validation
+	// Resolve symlinks to prevent bypassing validation.
+	// When the path (or its parents) don't exist yet, walk up until we find
+	// an existing ancestor so symlinks (e.g. /tmp -> /private/tmp on macOS)
+	// are resolved consistently with realWorkDir below.
 	realPath, err := filepath.EvalSymlinks(safePath)
 	if err != nil {
-		// If EvalSymlinks fails, the path might not exist yet (e.g., creating new file)
-		// In that case, resolve the parent directory
-		parentDir := filepath.Dir(safePath)
-		realParent, parentErr := filepath.EvalSymlinks(parentDir)
-		if parentErr != nil {
-			// Parent doesn't exist either, use the cleaned full path
-			realPath = safePath
-		} else {
-			realPath = filepath.Join(realParent, filepath.Base(safePath))
-		}
+		realPath = resolveNonExistentPath(safePath)
 	}
 
 	// Resolve workspace directory symlinks for consistent comparison
@@ -197,6 +191,30 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	// validated relative path. This ensures the returned path is provably
 	// inside the workspace, satisfying static-analysis taint checks.
 	return filepath.Join(realWorkDir, relPath), nil
+}
+
+// resolveNonExistentPath walks up from path until it finds an existing
+// ancestor, resolves its symlinks, then reattaches the non-existent tail.
+// This ensures paths under symlinked directories (e.g. /tmp on macOS)
+// resolve consistently even when the target doesn't exist yet.
+func resolveNonExistentPath(path string) string {
+	current := path
+	var tail []string
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		tail = append(tail, filepath.Base(current))
+		current = parent
+	}
 }
 
 // GetFileContent returns the content of a file.

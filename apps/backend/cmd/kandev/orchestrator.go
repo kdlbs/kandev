@@ -176,8 +176,9 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 	var repos []taskservice.TaskRepositoryInput
 	for _, r := range req.Repositories {
 		repos = append(repos, taskservice.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
 		})
 	}
 	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{

@@ -272,6 +272,62 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubAddPRFiles(
+    owner: string,
+    repo: string,
+    number: number,
+    files: Array<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch?: string;
+    }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/files", {
+      owner,
+      repo,
+      number,
+      files,
+    });
+  }
+
+  async mockGitHubAddPRCommits(
+    owner: string,
+    repo: string,
+    number: number,
+    commits: Array<{
+      sha: string;
+      message: string;
+      author_login: string;
+      author_date: string;
+    }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commits", {
+      owner,
+      repo,
+      number,
+      commits,
+    });
+  }
+
+  async mockGitHubAssociateTaskPR(data: {
+    task_id: string;
+    owner: string;
+    repo: string;
+    pr_number: number;
+    pr_url: string;
+    pr_title: string;
+    head_branch: string;
+    base_branch: string;
+    author_login: string;
+    state?: string;
+    additions?: number;
+    deletions?: number;
+  }): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/task-prs", data);
+  }
+
   async mockGitHubGetStatus(): Promise<{
     authenticated: boolean;
     username: string;

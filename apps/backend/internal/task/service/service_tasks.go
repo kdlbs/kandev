@@ -114,11 +114,12 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			return fmt.Errorf("repository_id is required")
 		}
 		taskRepo := &models.TaskRepository{
-			TaskID:       taskID,
-			RepositoryID: repositoryID,
-			BaseBranch:   baseBranch,
-			Position:     i,
-			Metadata:     make(map[string]interface{}),
+			TaskID:         taskID,
+			RepositoryID:   repositoryID,
+			BaseBranch:     baseBranch,
+			CheckoutBranch: repoInput.CheckoutBranch,
+			Position:       i,
+			Metadata:       make(map[string]interface{}),
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))

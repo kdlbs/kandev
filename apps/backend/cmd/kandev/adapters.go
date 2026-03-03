@@ -87,6 +87,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepositoryID:         req.RepositoryID,
 		RepositoryPath:       req.RepositoryPath,
 		BaseBranch:           req.BaseBranch,
+		CheckoutBranch:       req.CheckoutBranch,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 	}

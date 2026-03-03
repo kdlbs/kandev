@@ -130,6 +130,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	// Add metadata column to executors_running (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	// Add checkout_branch column to task_repositories (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
 	return nil
 }
 
