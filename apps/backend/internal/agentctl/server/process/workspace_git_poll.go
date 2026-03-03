@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -40,6 +41,180 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 			wt.checkGitChanges(ctx)
 		}
 	}
+}
+
+// syncExistingCommits detects commits on the current branch that are ahead of the base branch
+// and emits them as commit notifications. This is called once at startup to populate the
+// session's commit view with existing branch commits.
+func (wt *WorkspaceTracker) syncExistingCommits(ctx context.Context) {
+	baseRef := wt.getBaseBranchRef(ctx)
+	if baseRef == "" {
+		wt.logger.Debug("no base branch found, skipping existing commits sync")
+		return
+	}
+
+	// Get the base commit SHA
+	baseCmd := exec.CommandContext(ctx, "git", "rev-parse", baseRef)
+	baseCmd.Dir = wt.workDir
+	baseOut, err := baseCmd.Output()
+	if err != nil {
+		wt.logger.Debug("failed to get base commit SHA",
+			zap.String("base_ref", baseRef),
+			zap.Error(err))
+		return
+	}
+	baseCommit := strings.TrimSpace(string(baseOut))
+
+	// Get commits since the base branch
+	commits := wt.getCommitsSince(ctx, baseCommit)
+	if len(commits) == 0 {
+		wt.logger.Debug("no existing commits ahead of base branch",
+			zap.String("base_ref", baseRef))
+		return
+	}
+
+	// Filter to only local commits (not already on remote)
+	localCommits := wt.filterLocalCommits(ctx, commits)
+	if len(localCommits) == 0 {
+		wt.logger.Debug("all commits are already on remote, skipping sync")
+		return
+	}
+
+	wt.logger.Info("syncing existing branch commits",
+		zap.String("base_ref", baseRef),
+		zap.Int("count", len(localCommits)))
+
+	// Emit commits in chronological order (oldest first) so they appear in the right order
+	// The commits slice is in reverse chronological order (newest first), so reverse it
+	for i := len(localCommits) - 1; i >= 0; i-- {
+		wt.notifyWorkspaceStreamGitCommit(localCommits[i])
+	}
+}
+
+// getBaseBranchRef returns the base branch ref for commit comparison.
+// It detects the base branch using git by:
+// 1. Checking if the current branch has an upstream tracking branch
+// 2. Finding the remote branch with the closest merge-base to HEAD
+// 3. Falling back to origin/main or origin/master
+func (wt *WorkspaceTracker) getBaseBranchRef(ctx context.Context) string {
+	// Try to get the upstream tracking branch first
+	upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "@{upstream}")
+	upstreamCmd.Dir = wt.workDir
+	if upstreamOut, err := upstreamCmd.Output(); err == nil {
+		upstream := strings.TrimSpace(string(upstreamOut))
+		if upstream != "" && wt.verifyRef(ctx, upstream) {
+			wt.logger.Debug("using upstream tracking branch as base",
+				zap.String("upstream", upstream))
+			return upstream
+		}
+	}
+
+	// Get list of candidate remote branches to check
+	candidates := wt.getRemoteBranchCandidates(ctx)
+	if len(candidates) == 0 {
+		wt.logger.Debug("no remote branch candidates found")
+		return ""
+	}
+
+	// Find the candidate with the closest merge-base (fewest commits between merge-base and HEAD)
+	bestCandidate := wt.findClosestBranch(ctx, candidates)
+	if bestCandidate != "" {
+		wt.logger.Debug("detected base branch via merge-base",
+			zap.String("base_branch", bestCandidate))
+		return bestCandidate
+	}
+
+	return ""
+}
+
+// getRemoteBranchCandidates returns a list of remote branches to consider as base.
+// Prioritizes common base branches, then includes other remote branches.
+func (wt *WorkspaceTracker) getRemoteBranchCandidates(ctx context.Context) []string {
+	// Start with common base branch names
+	commonBases := []string{"origin/main", "origin/master", "origin/develop", "origin/dev"}
+	var candidates []string
+
+	// Add common bases that exist
+	for _, base := range commonBases {
+		if wt.verifyRef(ctx, base) {
+			candidates = append(candidates, base)
+		}
+	}
+
+	// Get all remote branches and add any not already in candidates
+	listCmd := exec.CommandContext(ctx, "git", "branch", "-r", "--format=%(refname:short)")
+	listCmd.Dir = wt.workDir
+	if listOut, err := listCmd.Output(); err == nil {
+		existingSet := make(map[string]bool)
+		for _, c := range candidates {
+			existingSet[c] = true
+		}
+		for _, line := range strings.Split(string(listOut), "\n") {
+			branch := strings.TrimSpace(line)
+			if branch != "" && !existingSet[branch] && !strings.Contains(branch, "HEAD") {
+				candidates = append(candidates, branch)
+			}
+		}
+	}
+
+	return candidates
+}
+
+// findClosestBranch finds the branch with the most recent common ancestor with HEAD.
+// Returns the branch that requires the fewest commits to reach from HEAD.
+func (wt *WorkspaceTracker) findClosestBranch(ctx context.Context, candidates []string) string {
+	// Get current branch name to exclude from candidates
+	currentBranchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranchCmd.Dir = wt.workDir
+	var currentBranch string
+	if out, err := currentBranchCmd.Output(); err == nil {
+		currentBranch = "origin/" + strings.TrimSpace(string(out))
+	}
+
+	var bestBranch string
+	bestCount := -1
+
+	for _, candidate := range candidates {
+		// Skip current branch's remote tracking
+		if candidate == currentBranch {
+			continue
+		}
+
+		// Get the merge-base between HEAD and this candidate
+		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", "HEAD", candidate)
+		mergeBaseCmd.Dir = wt.workDir
+		mergeBaseOut, err := mergeBaseCmd.Output()
+		if err != nil {
+			continue
+		}
+		mergeBase := strings.TrimSpace(string(mergeBaseOut))
+
+		// Count commits from merge-base to HEAD
+		countCmd := exec.CommandContext(ctx, "git", "rev-list", "--count", mergeBase+"..HEAD")
+		countCmd.Dir = wt.workDir
+		countOut, err := countCmd.Output()
+		if err != nil {
+			continue
+		}
+		count := 0
+		fmt.Sscanf(strings.TrimSpace(string(countOut)), "%d", &count)
+
+		// The branch with the fewest commits since merge-base is likely the base
+		// (i.e., the merge-base is closest to HEAD)
+		if bestCount == -1 || count < bestCount {
+			bestCount = count
+			bestBranch = candidate
+		}
+	}
+
+	return bestBranch
+}
+
+// verifyRef checks if a git ref exists.
+func (wt *WorkspaceTracker) verifyRef(ctx context.Context, ref string) bool {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref)
+	cmd.Dir = wt.workDir
+	return cmd.Run() == nil
 }
 
 // getHeadSHA returns the current HEAD commit SHA

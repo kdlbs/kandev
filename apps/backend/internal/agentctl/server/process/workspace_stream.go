@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -15,6 +16,7 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 	wt.workspaceSubMu.Lock()
 	wt.workspaceStreamSubscribers[sub] = struct{}{}
 	count := len(wt.workspaceStreamSubscribers)
+	isFirstSubscriber := count == 1
 	wt.workspaceSubMu.Unlock()
 	wt.logger.Info("workspace stream subscriber added", zap.Int("subscribers", count))
 
@@ -31,6 +33,20 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 	select {
 	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
 	default:
+	}
+
+	// On first subscriber, sync existing commits ahead of origin/main.
+	// This ensures sessions starting on existing branches show prior commits.
+	if isFirstSubscriber {
+		wt.existingCommitsMu.Lock()
+		shouldSync := !wt.existingCommitsSynced
+		wt.existingCommitsSynced = true
+		wt.existingCommitsMu.Unlock()
+
+		if shouldSync {
+			// Run in goroutine to not block the subscribe call
+			go wt.syncExistingCommits(context.Background())
+		}
 	}
 
 	return sub

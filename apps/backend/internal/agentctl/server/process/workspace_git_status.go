@@ -107,25 +107,14 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	return nil
 }
 
-// getAheadBehindCounts populates the Ahead/Behind fields relative to the tracking or
-// origin branch. Falls back to origin/main then origin/master when no upstream is set.
+// getAheadBehindCounts populates the Ahead/Behind fields relative to the base branch.
+// Uses git-based detection to find the base branch.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate) {
-	// Use remote branch if available, otherwise fall back to origin/main or origin/master
-	// This handles worktree branches that don't have an upstream tracking branch set
+	// Use remote tracking branch if available, otherwise detect via git
 	compareRef := update.RemoteBranch
 	if compareRef == "" {
-		// Try origin/main first, then origin/master
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/main")
-		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
-			compareRef = "origin/main"
-		} else {
-			checkCmd2 := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "origin/master")
-			checkCmd2.Dir = wt.workDir
-			if err := checkCmd2.Run(); err == nil {
-				compareRef = "origin/master"
-			}
-		}
+		// Use the same git-based detection as syncExistingCommits
+		compareRef = wt.getBaseBranchRef(ctx)
 	}
 	if compareRef == "" {
 		return

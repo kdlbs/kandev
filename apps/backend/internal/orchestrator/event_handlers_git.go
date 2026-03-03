@@ -411,6 +411,18 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 	// Persist commit record to database asynchronously
 	go func() {
 		bgCtx := context.Background()
+
+		// Check if commit already exists for this session (avoid duplicates during sync)
+		existing, _ := s.repo.GetSessionCommits(bgCtx, sessionID)
+		for _, c := range existing {
+			if c.CommitSHA == commitSHA {
+				s.logger.Debug("commit already exists, skipping",
+					zap.String("session_id", sessionID),
+					zap.String("commit_sha", commitSHA))
+				return
+			}
+		}
+
 		if err := s.repo.CreateSessionCommit(bgCtx, commit); err != nil {
 			s.logger.Error("failed to create session commit record",
 				zap.String("task_id", taskID),

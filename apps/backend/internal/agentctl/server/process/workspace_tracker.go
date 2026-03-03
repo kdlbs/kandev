@@ -52,6 +52,10 @@ type WorkspaceTracker struct {
 	// Git polling interval
 	gitPollInterval time.Duration
 
+	// Track whether existing commits have been synced (on first subscriber)
+	existingCommitsSynced bool
+	existingCommitsMu     sync.Mutex
+
 	// Control
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
