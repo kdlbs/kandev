@@ -60,6 +60,9 @@ export const FileDiffViewer = memo(function FileDiffViewer({
 }: FileDiffViewerProps) {
   const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
+  // Debug: confirm component renders
+  console.log('[FileDiffViewer] Rendering:', { filePath, enableExpansion, baseRef });
+
   return (
     <DiffViewer
       data={data}

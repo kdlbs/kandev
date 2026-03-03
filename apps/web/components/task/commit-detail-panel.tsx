@@ -178,6 +178,9 @@ function CommitFileList({
       <div className="text-sm text-muted-foreground text-center py-8">No files in this commit</div>
     );
   }
+
+  console.log('[CommitFileList] Rendering', fileEntries.length, 'files');
+
   return (
     <>
       {fileEntries.map(([path, file]) => (
@@ -188,6 +191,8 @@ function CommitFileList({
               diff={file.diff}
               status={file.status}
               onOpenFile={onOpenFile}
+              enableExpansion={true}
+              baseRef="HEAD~1"
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">

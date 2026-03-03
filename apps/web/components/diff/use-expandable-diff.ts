@@ -59,6 +59,7 @@ export function useExpandableDiff({
       return;
     }
 
+    console.log('[useExpandableDiff] Loading content for:', { filePath, baseRef, sessionId });
     setIsLoading(true);
     setError(null);
 
@@ -84,22 +85,51 @@ export function useExpandableDiff({
             filePath,
             baseRef,
           );
-          if (!oldContentResponse.error && !oldContentResponse.is_binary) {
+          if (oldContentResponse.error) {
+            // Check if it's a "not found" error (expected for new files)
+            if (oldContentResponse.error.includes("file not found at ref")) {
+              oldContent = ""; // New file - no old content
+            } else if (oldContentResponse.is_binary) {
+              throw new Error("Cannot expand binary files");
+            } else {
+              throw new Error(oldContentResponse.error);
+            }
+          } else if (!oldContentResponse.is_binary) {
             oldContent = oldContentResponse.content;
+          } else {
+            throw new Error("Cannot expand binary files");
           }
-          // If old content fails (file is new), use empty string
-        } catch {
+        } catch (err) {
           // File doesn't exist at base ref - this is fine for new files
-          oldContent = "";
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes("file not found at ref") || errMsg.includes("not found")) {
+            oldContent = ""; // New file - no old content
+          } else {
+            // Real error - propagate it
+            throw err;
+          }
         }
       }
 
-      setLoadedContent({
-        oldLines: oldContent.split("\n"),
-        newLines: newContentResponse.content.split("\n"),
+      // Validate that we have meaningful content for expansion
+      const oldLines = oldContent.split("\n");
+      const newLines = newContentResponse.content.split("\n");
+
+      // Pierre Diffs requires both old and new lines for expansion to work
+      if (newLines.length === 0) {
+        throw new Error("New file content is empty");
+      }
+
+      console.log('[useExpandableDiff] Content loaded successfully:', {
+        filePath,
+        oldLineCount: oldLines.length,
+        newLineCount: newLines.length,
       });
+      setLoadedContent({ oldLines, newLines });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load file content");
+      const errMsg = err instanceof Error ? err.message : "Failed to load file content";
+      console.error('[useExpandableDiff] Failed to load content:', { filePath, error: errMsg });
+      setError(errMsg);
     } finally {
       setIsLoading(false);
     }
@@ -121,7 +151,8 @@ export function useExpandableDiff({
   }, [fileDiffMetadata, loadedContent]);
 
   const isContentLoaded = loadedContent !== null;
-  const canExpand = enableExpansion && (isContentLoaded || (!!sessionId && !error));
+  // Only allow expansion if content is loaded AND no errors occurred
+  const canExpand = enableExpansion && isContentLoaded && !error;
 
   return {
     metadata,

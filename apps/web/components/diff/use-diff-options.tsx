@@ -131,8 +131,17 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     );
   }, [enableComments]);
 
-  const options = useMemo<FileDiffOptions<AnnotationMetadata>>(
-    () => ({
+  const options = useMemo<FileDiffOptions<AnnotationMetadata>>(() => {
+    // Debug log to catch timing issues
+    if (enableExpansion) {
+      console.log('[useDiffOptions] Creating options with:', {
+        filePath,
+        enableExpansion,
+        willExpandUnchanged: enableExpansion,
+      });
+    }
+
+    return {
       diffStyle: globalViewMode,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
@@ -148,7 +157,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       // Expansion options - requires oldLines/newLines in metadata to work
       expandUnchanged: enableExpansion,
       expansionLineCount,
-    }),
+    };
+  },
     [
       globalViewMode,
       resolvedTheme,

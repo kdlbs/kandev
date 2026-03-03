@@ -336,6 +336,8 @@ function FileDiffSection({
               sessionId={sessionId}
               hideHeader
               wordWrap={wordWrap}
+              enableExpansion={true}
+              baseRef="HEAD"
             />
           </div>
         ) : (
