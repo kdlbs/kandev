@@ -262,7 +262,37 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
+//
+// When a StreamingBuffer is configured, content is accumulated in memory and
+// flushed to the database periodically (every ~500ms) instead of per-chunk.
+// The WS event is always published immediately from the in-memory state.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {
+	if s.streamBuf != nil {
+		return s.appendMessageContentBuffered(ctx, messageID, additionalContent)
+	}
+	return s.appendMessageContentDirect(ctx, messageID, additionalContent)
+}
+
+func (s *Service) appendMessageContentBuffered(ctx context.Context, messageID, additionalContent string) error {
+	message, err := s.streamBuf.Append(ctx, messageID, additionalContent)
+	if err != nil {
+		s.logger.Warn("message not found for buffered append",
+			zap.String("message_id", messageID),
+			zap.Error(err))
+		return err
+	}
+
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+
+	s.logger.Debug("message content appended (buffered)",
+		zap.String("message_id", messageID),
+		zap.Int("appended_length", len(additionalContent)),
+		zap.Int("total_length", len(message.Content)))
+
+	return nil
+}
+
+func (s *Service) appendMessageContentDirect(ctx context.Context, messageID, additionalContent string) error {
 	message, err := s.messages.GetMessage(ctx, messageID)
 	if err != nil {
 		s.logger.Warn("message not found for append",
@@ -271,7 +301,6 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 		return err
 	}
 
-	// Append the new content
 	message.Content += additionalContent
 
 	if err := s.messages.UpdateMessage(ctx, message); err != nil {
@@ -281,7 +310,6 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 		return err
 	}
 
-	// Publish message.updated event for real-time streaming
 	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
 	s.logger.Debug("message content appended",
@@ -294,7 +322,35 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 
 // AppendThinkingContent appends additional thinking content to an existing thinking message.
 // This updates the metadata.thinking field for streaming agent reasoning.
+//
+// When a StreamingBuffer is configured, thinking content is accumulated in
+// memory and flushed periodically instead of per-chunk.
 func (s *Service) AppendThinkingContent(ctx context.Context, messageID, additionalContent string) error {
+	if s.streamBuf != nil {
+		return s.appendThinkingContentBuffered(ctx, messageID, additionalContent)
+	}
+	return s.appendThinkingContentDirect(ctx, messageID, additionalContent)
+}
+
+func (s *Service) appendThinkingContentBuffered(ctx context.Context, messageID, additionalContent string) error {
+	message, err := s.streamBuf.AppendThinking(ctx, messageID, additionalContent)
+	if err != nil {
+		s.logger.Warn("thinking message not found for buffered append",
+			zap.String("message_id", messageID),
+			zap.Error(err))
+		return err
+	}
+
+	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+
+	s.logger.Debug("thinking content appended (buffered)",
+		zap.String("message_id", messageID),
+		zap.Int("appended_length", len(additionalContent)))
+
+	return nil
+}
+
+func (s *Service) appendThinkingContentDirect(ctx context.Context, messageID, additionalContent string) error {
 	message, err := s.messages.GetMessage(ctx, messageID)
 	if err != nil {
 		s.logger.Warn("thinking message not found for append",
@@ -303,12 +359,10 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 		return err
 	}
 
-	// Initialize metadata if nil
 	if message.Metadata == nil {
 		message.Metadata = make(map[string]interface{})
 	}
 
-	// Get existing thinking content and append
 	existingThinking := ""
 	if existing, ok := message.Metadata["thinking"].(string); ok {
 		existingThinking = existing
@@ -322,7 +376,6 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 		return err
 	}
 
-	// Publish message.updated event for real-time streaming
 	s.publishMessageEvent(ctx, events.MessageUpdated, message)
 
 	s.logger.Debug("thinking content appended",
@@ -626,4 +679,40 @@ func (s *Service) UpdateClarificationMessage(ctx context.Context, sessionID, pen
 		zap.String("status", status))
 
 	return nil
+}
+
+// FinalizeStreamingMessages force-flushes all buffered streaming messages
+// for a given session. Call this on turn complete to ensure all content is
+// persisted before the turn is marked complete.
+func (s *Service) FinalizeStreamingMessages(ctx context.Context, sessionID string) {
+	if s.streamBuf != nil {
+		s.streamBuf.FinalizeAll(ctx, sessionID)
+	}
+}
+
+// CreateLogMessage creates a log message via the batcher (if configured) or
+// falls back to the normal CreateMessage path. The WS event is published
+// immediately regardless of whether the DB write is batched.
+func (s *Service) CreateLogMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
+	if s.logBatcher == nil {
+		return s.CreateMessage(ctx, req)
+	}
+
+	session, err := s.sessions.GetTaskSession(ctx, req.TaskSessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	message := s.buildMessage(ctx, uuid.New().String(), req, session)
+
+	s.logBatcher.Add(message)
+
+	// Publish WS event immediately so the frontend shows the log in real-time
+	s.publishMessageEvent(ctx, events.MessageAdded, message)
+
+	s.logger.Debug("log message batched",
+		zap.String("message_id", message.ID),
+		zap.String("session_id", message.TaskSessionID))
+
+	return message, nil
 }

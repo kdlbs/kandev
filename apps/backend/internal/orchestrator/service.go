@@ -79,6 +79,9 @@ type MessageCreator interface {
 	CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendThinkingMessage appends additional content to an existing streaming thinking message
 	AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error
+	// FinalizeStreamingMessages flushes all buffered streaming content for a session.
+	// Call on turn complete to ensure content is persisted before the turn ends.
+	FinalizeStreamingMessages(ctx context.Context, sessionID string)
 }
 
 // TurnService is an interface for managing session turns
@@ -366,6 +369,12 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 
 // completeTurnForSession completes the active turn for the session.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	// Flush any buffered streaming content before completing the turn
+	// so all message data is persisted before the turn is marked done.
+	if s.messageCreator != nil {
+		s.messageCreator.FinalizeStreamingMessages(ctx, sessionID)
+	}
+
 	if s.turnService == nil {
 		return
 	}

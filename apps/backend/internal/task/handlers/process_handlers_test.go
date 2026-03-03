@@ -123,6 +123,9 @@ func (m *mockRepository) ListWorkflows(ctx context.Context, workspaceID string) 
 func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }
+func (m *mockRepository) CreateMessages(ctx context.Context, messages []*models.Message) error {
+	return nil
+}
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
 }
@@ -136,6 +139,9 @@ func (m *mockRepository) FindMessageByPendingID(ctx context.Context, pendingID s
 	return nil, nil
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
+	return nil
+}
+func (m *mockRepository) AppendContent(ctx context.Context, messageID, additionalContent string) error {
 	return nil
 }
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
