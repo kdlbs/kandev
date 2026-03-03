@@ -154,11 +154,19 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
 
+	// Resolve workspace directory symlinks first so that all constructed
+	// paths share the same canonical prefix (e.g. /private/var on macOS
+	// where /var is a symlink).
+	realWorkDir, err := filepath.EvalSymlinks(cleanWorkDir)
+	if err != nil {
+		realWorkDir = cleanWorkDir
+	}
+
 	var safePath string
 	if filepath.IsAbs(cleanReqPath) {
 		safePath = cleanReqPath
 	} else {
-		safePath = filepath.Join(wt.workDir, cleanReqPath)
+		safePath = filepath.Join(realWorkDir, cleanReqPath)
 	}
 
 	// Resolve symlinks to prevent bypassing validation
@@ -174,12 +182,6 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 		} else {
 			realPath = filepath.Join(realParent, filepath.Base(safePath))
 		}
-	}
-
-	// Resolve workspace directory symlinks for consistent comparison
-	realWorkDir, err := filepath.EvalSymlinks(cleanWorkDir)
-	if err != nil {
-		realWorkDir = cleanWorkDir
 	}
 
 	// Check that the real path is within the workspace
