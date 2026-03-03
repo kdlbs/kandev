@@ -68,6 +68,32 @@ export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
 }
 
 /**
+ * Rewrites a detected localhost URL to route through the port proxy for remote executors.
+ * For local executors, returns the URL unchanged.
+ *
+ * @param detectedUrl - The detected localhost URL (e.g., http://localhost:3000/path)
+ * @param sessionId - The session ID to include in the proxy path
+ * @param isRemote - Whether the session runs on a remote executor
+ * @returns The proxy URL (e.g., /port-proxy/{sessionId}/3000/path) or the original URL
+ */
+export function rewritePreviewUrlForProxy(
+  detectedUrl: string,
+  sessionId: string,
+  isRemote: boolean,
+): string | null {
+  if (!isRemote) return detectedUrl;
+
+  try {
+    const parsed = new URL(detectedUrl);
+    if (!parsed.port) return null;
+    const path = parsed.pathname + parsed.search + parsed.hash;
+    return `/port-proxy/${sessionId}/${parsed.port}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Scans process output for dev server URLs.
  * Returns the last valid URL found.
  *

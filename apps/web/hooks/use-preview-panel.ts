@@ -8,7 +8,7 @@ import type { ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/store";
 import type { PreviewStage, PreviewViewMode } from "@/lib/state/slices";
 import { getLocalStorage } from "@/lib/local-storage";
-import { detectPreviewUrlFromOutput } from "@/lib/preview-url-detector";
+import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 
 type UsePreviewPanelParams = {
   sessionId: string | null;
@@ -222,6 +222,18 @@ function usePreviewStateRestore({
   ]);
 }
 
+function useIsRemoteExecutor(): boolean {
+  return useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return false;
+    for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+      const task = snapshot.tasks.find((t) => t.id === taskId);
+      if (task) return task.isRemoteExecutor ?? false;
+    }
+    return false;
+  });
+}
+
 function usePreviewPanelStore(sessionId: string | null) {
   const processState = useAppStore((state) => state.processes);
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
@@ -233,13 +245,21 @@ function usePreviewPanelStore(sessionId: string | null) {
     sessionId ? state.columnsBySessionId[sessionId] : null,
   );
   const previewStore = usePreviewStore(sessionId);
+  const isRemote = useIsRemoteExecutor();
   const devProcessId = useMemo(
     () => (sessionId ? processState.devProcessBySessionId[sessionId] : undefined),
     [processState.devProcessBySessionId, sessionId],
   );
   const devProcess = devProcessId ? (processState.processesById[devProcessId] ?? null) : null;
   const devOutput = devProcessId ? (processState.outputsByProcessId[devProcessId] ?? "") : "";
-  const detectedUrl = useMemo(() => detectPreviewUrlFromOutput(devOutput), [devOutput]);
+  const rawDetectedUrl = useMemo(() => detectPreviewUrlFromOutput(devOutput), [devOutput]);
+  const detectedUrl = useMemo(
+    () =>
+      rawDetectedUrl && sessionId
+        ? rewritePreviewUrlForProxy(rawDetectedUrl, sessionId, isRemote)
+        : null,
+    [rawDetectedUrl, sessionId, isRemote],
+  );
   return {
     ...previewStore,
     processState,
@@ -253,6 +273,7 @@ function usePreviewPanelStore(sessionId: string | null) {
     devProcess,
     devOutput,
     detectedUrl,
+    isRemote,
   };
 }
 
@@ -319,6 +340,7 @@ export function usePreviewPanel({ sessionId, hasDevScript = false }: UsePreviewP
     detectedUrl: s.detectedUrl,
     isRunning,
     isStopping,
+    isRemote: s.isRemote,
     handleStop,
   };
 }

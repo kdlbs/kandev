@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectPreviewUrl, detectPreviewUrlFromOutput } from "./preview-url-detector";
+import {
+  detectPreviewUrl,
+  detectPreviewUrlFromOutput,
+  rewritePreviewUrlForProxy,
+} from "./preview-url-detector";
 
 const LOCALHOST_3000_URL = "http://localhost:3000/";
 
@@ -215,5 +219,55 @@ Starting on localhost:3000
 Ready!
     `;
     expect(detectPreviewUrlFromOutput(output)).toBe("http://localhost:3000");
+  });
+});
+
+describe("rewritePreviewUrlForProxy", () => {
+  const SESSION_ID = "test-session-123";
+  const proxyPath = (port: number, path: string) =>
+    `/port-proxy/${SESSION_ID}/${port}${path}`;
+
+  it("returns URL unchanged for local executors", () => {
+    expect(rewritePreviewUrlForProxy(LOCALHOST_3000_URL, SESSION_ID, false)).toBe(
+      LOCALHOST_3000_URL,
+    );
+  });
+
+  it("rewrites localhost URL for remote executors", () => {
+    expect(rewritePreviewUrlForProxy(LOCALHOST_3000_URL, SESSION_ID, true)).toBe(
+      proxyPath(3000, "/"),
+    );
+  });
+
+  it("preserves path and query string", () => {
+    expect(
+      rewritePreviewUrlForProxy("http://localhost:8080/api/test?debug=true", SESSION_ID, true),
+    ).toBe(proxyPath(8080, "/api/test?debug=true"));
+  });
+
+  it("preserves hash fragment", () => {
+    expect(
+      rewritePreviewUrlForProxy("http://localhost:3000/app#/route", SESSION_ID, true),
+    ).toBe(proxyPath(3000, "/app#/route"));
+  });
+
+  it("handles 127.0.0.1 URLs", () => {
+    expect(rewritePreviewUrlForProxy("http://127.0.0.1:5000/", SESSION_ID, true)).toBe(
+      proxyPath(5000, "/"),
+    );
+  });
+
+  it("handles 0.0.0.0 URLs", () => {
+    expect(rewritePreviewUrlForProxy("http://0.0.0.0:4000/", SESSION_ID, true)).toBe(
+      proxyPath(4000, "/"),
+    );
+  });
+
+  it("returns null for URLs without port on remote", () => {
+    expect(rewritePreviewUrlForProxy("http://localhost/", SESSION_ID, true)).toBeNull();
+  });
+
+  it("returns null for invalid URLs on remote", () => {
+    expect(rewritePreviewUrlForProxy("not-a-url", SESSION_ID, true)).toBeNull();
   });
 });
