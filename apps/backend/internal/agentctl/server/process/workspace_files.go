@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,12 +164,19 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	}
 
 	// Resolve symlinks to prevent bypassing validation.
-	// When the path (or its parents) don't exist yet, walk up until we find
-	// an existing ancestor so symlinks (e.g. /tmp -> /private/tmp on macOS)
-	// are resolved consistently with realWorkDir below.
+	// When the path doesn't exist yet, walk up until we find an existing
+	// ancestor so symlinks (e.g. /tmp -> /private/tmp on macOS) are resolved
+	// consistently with realWorkDir below. Only fall back for not-found errors;
+	// propagate permission denied, symlink loops, etc.
 	realPath, err := filepath.EvalSymlinks(safePath)
 	if err != nil {
-		realPath = resolveNonExistentPath(safePath)
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("failed to resolve path: %w", err)
+		}
+		realPath, err = resolveNonExistentPath(safePath)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// Resolve workspace directory symlinks for consistent comparison
@@ -197,7 +206,9 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 // ancestor, resolves its symlinks, then reattaches the non-existent tail.
 // This ensures paths under symlinked directories (e.g. /tmp on macOS)
 // resolve consistently even when the target doesn't exist yet.
-func resolveNonExistentPath(path string) string {
+// Returns an error if an ancestor fails with something other than ErrNotExist
+// (e.g. permission denied, symlink loop).
+func resolveNonExistentPath(path string) (string, error) {
 	current := path
 	var tail []string
 	for {
@@ -206,11 +217,14 @@ func resolveNonExistentPath(path string) string {
 			for i := len(tail) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, tail[i])
 			}
-			return resolved
+			return resolved, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("failed to resolve ancestor %q: %w", current, err)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return path
+			return "", fmt.Errorf("no existing ancestor for %q: %w", path, err)
 		}
 		tail = append(tail, filepath.Base(current))
 		current = parent

@@ -144,9 +144,7 @@ func TestBuildExecutorRunning(t *testing.T) {
 
 		running := buildExecutorRunning(session, "task-1", resp, cfg, nil)
 
-		if running == nil {
-			t.Fatal("expected non-nil result")
-		}
+		// buildExecutorRunning always returns non-nil; verify resume fields are empty
 		if running.ResumeToken != "" {
 			t.Errorf("ResumeToken = %q, want empty", running.ResumeToken)
 		}

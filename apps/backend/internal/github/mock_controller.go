@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const defaultPRState = "open"
+
 // MockController handles HTTP endpoints for controlling the MockClient in E2E tests.
 type MockController struct {
 	mock  *MockClient
@@ -183,7 +185,7 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 		return
 	}
 	if req.State == "" {
-		req.State = "open"
+		req.State = defaultPRState
 	}
 	now := time.Now().UTC()
 	tp := &TaskPR{
