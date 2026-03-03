@@ -65,6 +65,23 @@ function areCommentsEqual(
   return prev.every((c, i) => c.id === next[i].id && c.text === next[i].text);
 }
 
+/** Auto-load expansion content and return whether expansion can be used. */
+function useAutoLoadExpansion(
+  enableExpansion: boolean,
+  state: ReturnType<typeof useDiffViewerState>,
+): boolean {
+  const { isExpansionContentLoaded, isExpansionLoading, loadExpansionContent } = state;
+  useEffect(() => {
+    if (enableExpansion && !isExpansionContentLoaded && !isExpansionLoading) {
+      loadExpansionContent();
+    }
+  }, [enableExpansion, isExpansionContentLoaded, isExpansionLoading, loadExpansionContent]);
+  const hasValidData = !!(
+    state.fileDiffMetadata?.oldLines?.length && state.fileDiffMetadata?.newLines?.length
+  );
+  return enableExpansion && isExpansionContentLoaded && hasValidData;
+}
+
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {
   for (const key of DATA_KEYS) {
     if (prevProps.data[key] !== nextProps.data[key]) return false;
@@ -129,40 +146,7 @@ export const DiffViewer = memo(function DiffViewer({
   });
 
   const showHeader = !hideHeader && !compact;
-
-  // Auto-load expansion content when expansion is enabled
-  const { isExpansionContentLoaded, isExpansionLoading, loadExpansionContent, expansionError } = state;
-  useEffect(() => {
-    if (enableExpansion && !isExpansionContentLoaded && !isExpansionLoading) {
-      loadExpansionContent();
-    }
-  }, [enableExpansion, isExpansionContentLoaded, isExpansionLoading, loadExpansionContent]);
-
-  // Only enable expansion in options when content is loaded AND metadata has lines
-  const hasValidExpansionData = !!(
-    state.fileDiffMetadata?.oldLines?.length &&
-    state.fileDiffMetadata?.newLines?.length
-  );
-  const canUseExpansion = enableExpansion && isExpansionContentLoaded && hasValidExpansionData;
-
-  // Debug logging
-  useEffect(() => {
-    if (enableExpansion) {
-      console.log('[DiffViewer] Expansion state:', {
-        filePath: data.filePath,
-        enableExpansion,
-        isExpansionContentLoaded,
-        isExpansionLoading,
-        hasValidExpansionData,
-        canUseExpansion,
-        expansionError,
-        hasOldLines: !!state.fileDiffMetadata?.oldLines,
-        hasNewLines: !!state.fileDiffMetadata?.newLines,
-        oldLineCount: state.fileDiffMetadata?.oldLines?.length,
-        newLineCount: state.fileDiffMetadata?.newLines?.length,
-      });
-    }
-  }, [enableExpansion, isExpansionContentLoaded, canUseExpansion, data.filePath, state.fileDiffMetadata, expansionError, isExpansionLoading, hasValidExpansionData]);
+  const canUseExpansion = useAutoLoadExpansion(enableExpansion, state);
 
   const { options, renderHeaderMetadata, renderHoverUtility } = useDiffOptions({
     filePath: data.filePath,

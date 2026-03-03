@@ -132,20 +132,13 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
   }, [enableComments]);
 
   const options = useMemo<FileDiffOptions<AnnotationMetadata>>(() => {
-    // Debug log to catch timing issues
-    if (enableExpansion) {
-      console.log('[useDiffOptions] Creating options with:', {
-        filePath,
-        enableExpansion,
-        willExpandUnchanged: enableExpansion,
-      });
-    }
-
     return {
       diffStyle: globalViewMode,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
-      hunkSeparators: "simple",
+      // "line-info" shows expand buttons when oldLines/newLines are on metadata;
+      // "simple" is a plain divider without expand controls.
+      hunkSeparators: enableExpansion ? "line-info" : "simple",
       enableHoverUtility: enableComments,
       diffIndicators: "none",
       onLineSelectionEnd: handleLineSelectionEnd,
@@ -154,8 +147,6 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       disableFileHeader: !showHeader,
       overflow: wordWrap ? "wrap" : "scroll",
       unsafeCSS: DIFF_UNSAFE_CSS,
-      // Expansion options - requires oldLines/newLines in metadata to work
-      expandUnchanged: enableExpansion,
       expansionLineCount,
     };
   },
