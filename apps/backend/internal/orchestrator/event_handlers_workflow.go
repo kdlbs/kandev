@@ -735,9 +735,15 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		"workflow_step_id": stepID,
 		"new_state":        string(models.TaskSessionStateWaitingForInput),
 	}
-	// Include session metadata (e.g. plan_mode) so the frontend can react.
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && len(session.Metadata) > 0 {
-		eventData["session_metadata"] = session.Metadata
+	// Include agent_profile_id and session metadata so the frontend can
+	// identify the agent (e.g. MCP support) without waiting for SSR hydration.
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
+		if session.AgentProfileID != "" {
+			eventData["agent_profile_id"] = session.AgentProfileID
+		}
+		if len(session.Metadata) > 0 {
+			eventData["session_metadata"] = session.Metadata
+		}
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
