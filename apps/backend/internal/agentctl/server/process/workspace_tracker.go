@@ -27,9 +27,9 @@ const (
 // It uses git status polling instead of fsnotify to avoid file descriptor exhaustion
 // on macOS (where kqueue opens a file descriptor for every watched file).
 type WorkspaceTracker struct {
-	workDir string
-	gitDir  string // Cached git dir path (works with worktrees)
-	logger  *logger.Logger
+	workDir      string
+	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
+	logger       *logger.Logger
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -59,12 +59,12 @@ type WorkspaceTracker struct {
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	resolvedWorkDir := resolveExistingWorkDir(workDir, log.WithFields(zap.String("component", "workspace-tracker")))
 
-	// Cache git dir path (works with worktrees where .git is a file)
-	gitDir := resolveGitDir(resolvedWorkDir)
+	// Cache validated git index path (works with worktrees where .git is a file)
+	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
 
 	return &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
-		gitDir:                     gitDir,
+		gitIndexPath:               gitIndexPath,
 		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		gitPollInterval:            DefaultGitPollInterval,
@@ -72,9 +72,10 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	}
 }
 
-// resolveGitDir returns the git directory path, handling worktrees.
+// resolveGitIndexPath returns the validated path to the git index file.
 // Returns empty string if the path cannot be resolved or validated.
-func resolveGitDir(workDir string) string {
+// This handles worktrees where .git is a file pointing elsewhere.
+func resolveGitIndexPath(workDir string) string {
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
@@ -85,14 +86,15 @@ func resolveGitDir(workDir string) string {
 	if !filepath.IsAbs(gitDir) {
 		gitDir = filepath.Join(workDir, gitDir)
 	}
-	// Clean and validate the path to prevent path traversal
+	// Clean and construct the index path
 	gitDir = filepath.Clean(gitDir)
-	// Verify the path exists and is a directory
-	info, err := os.Stat(gitDir)
-	if err != nil || !info.IsDir() {
+	indexPath := filepath.Join(gitDir, "index")
+	// Validate the index file exists (this proves gitDir is a valid git directory)
+	info, err := os.Stat(indexPath)
+	if err != nil || info.IsDir() {
 		return ""
 	}
-	return gitDir
+	return indexPath
 }
 
 // Start begins monitoring the workspace using polling (no fsnotify).

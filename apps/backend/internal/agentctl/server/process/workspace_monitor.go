@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -69,10 +68,9 @@ type workspaceState struct {
 func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceState {
 	var state workspaceState
 
-	// Check index mtime (gitDir is cached, works with worktrees)
-	if wt.gitDir != "" {
-		indexPath := filepath.Join(wt.gitDir, "index")
-		if info, err := os.Stat(indexPath); err == nil {
+	// Check index mtime (gitIndexPath is pre-validated at startup)
+	if wt.gitIndexPath != "" {
+		if info, err := os.Stat(wt.gitIndexPath); err == nil {
 			state.indexMtime = info.ModTime()
 		}
 	}
