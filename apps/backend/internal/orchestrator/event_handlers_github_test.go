@@ -1,10 +1,46 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// mockGitHubService implements GitHubService for testing CheckSessionPR.
+type mockGitHubService struct {
+	client           github.Client
+	taskPR           *github.TaskPR
+	taskPRErr        error
+	ensureWatchCalls int
+	createWatchCalls int
+	associateCalls   int
+}
+
+func (m *mockGitHubService) Client() github.Client { return m.client }
+func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
+	return m.taskPR, m.taskPRErr
+}
+func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _ string) (*github.PRWatch, error) {
+	m.ensureWatchCalls++
+	return &github.PRWatch{}, nil
+}
+func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
+	return nil, nil
+}
+func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, _, _ string, _ int, _ string) (*github.PRWatch, error) {
+	m.createWatchCalls++
+	return &github.PRWatch{}, nil
+}
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _ string, _ *github.PR) (*github.TaskPR, error) {
+	m.associateCalls++
+	return &github.TaskPR{}, nil
+}
+func (m *mockGitHubService) RecordReviewPRTask(context.Context, string, string, string, int, string, string) error {
+	return nil
+}
 
 func TestInterpolateReviewPrompt(t *testing.T) {
 	pr := &github.PR{
@@ -53,4 +89,181 @@ func TestInterpolateReviewPrompt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckSessionPR(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	testPR := &github.PR{
+		Number:      10,
+		Title:       "Test PR",
+		HTMLURL:     "https://github.com/myorg/myrepo/pull/10",
+		AuthorLogin: "alice",
+		RepoOwner:   "myorg",
+		RepoName:    "myrepo",
+		HeadBranch:  "feature-branch",
+		BaseBranch:  "main",
+	}
+
+	// seedWithRepo creates task + session + repository + task-repository + worktree
+	// so that resolveTaskRepo and GetTaskSession succeed.
+	seedWithRepo := func(t *testing.T, branch string) *Service {
+		t.Helper()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Create a GitHub-backed repository record
+		repoObj := &models.Repository{
+			ID:            "repo1",
+			WorkspaceID:   "ws1",
+			Name:          "myrepo",
+			SourceType:    "provider",
+			Provider:      "github",
+			ProviderOwner: "myorg",
+			ProviderName:  "myrepo",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		if err := repo.CreateRepository(ctx, repoObj); err != nil {
+			t.Fatalf("failed to create repository: %v", err)
+		}
+
+		// Link task to repository
+		taskRepo := &models.TaskRepository{
+			ID:           "tr1",
+			TaskID:       "t1",
+			RepositoryID: "repo1",
+			Position:     0,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		if err := repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+			t.Fatalf("failed to create task repository: %v", err)
+		}
+
+		// Add worktree with branch to the session
+		wt := &models.TaskSessionWorktree{
+			ID:             "wt1",
+			SessionID:      "s1",
+			WorktreeID:     "wtree1",
+			RepositoryID:   "repo1",
+			WorktreeBranch: branch,
+			CreatedAt:      now,
+		}
+		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+			t.Fatalf("failed to create worktree: %v", err)
+		}
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		return svc
+	}
+
+	t.Run("returns false when github service is nil", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// githubService is nil by default
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found {
+			t.Error("expected found=false when githubService is nil")
+		}
+	})
+
+	t.Run("returns true when PR already associated", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		ghSvc := &mockGitHubService{
+			taskPR: &github.TaskPR{ID: "tpr1", TaskID: "t1", PRNumber: 10},
+		}
+		svc.SetGitHubService(ghSvc)
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found {
+			t.Error("expected found=true when PR already exists")
+		}
+		if ghSvc.ensureWatchCalls != 0 {
+			t.Errorf("expected no EnsurePRWatch calls, got %d", ghSvc.ensureWatchCalls)
+		}
+	})
+
+	t.Run("returns false when task has no repository", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		ghSvc := &mockGitHubService{taskPRErr: nil, taskPR: nil}
+		svc.SetGitHubService(ghSvc)
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found {
+			t.Error("expected found=false when task has no repository")
+		}
+	})
+
+	t.Run("returns false when session has no worktree branch", func(t *testing.T) {
+		svc := seedWithRepo(t, "") // empty branch
+		ghSvc := &mockGitHubService{taskPRErr: nil, taskPR: nil}
+		svc.SetGitHubService(ghSvc)
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found {
+			t.Error("expected found=false when no branch on worktree")
+		}
+	})
+
+	t.Run("returns false when no PR exists on branch", func(t *testing.T) {
+		svc := seedWithRepo(t, "feature-branch")
+		mockClient := github.NewMockClient()
+		// No PR added to mock client
+		ghSvc := &mockGitHubService{client: mockClient}
+		svc.SetGitHubService(ghSvc)
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found {
+			t.Error("expected found=false when no PR on branch")
+		}
+		if ghSvc.ensureWatchCalls != 1 {
+			t.Errorf("expected 1 EnsurePRWatch call, got %d", ghSvc.ensureWatchCalls)
+		}
+	})
+
+	t.Run("finds PR and associates it", func(t *testing.T) {
+		svc := seedWithRepo(t, "feature-branch")
+		mockClient := github.NewMockClient()
+		mockClient.AddPR(testPR)
+		ghSvc := &mockGitHubService{client: mockClient}
+		svc.SetGitHubService(ghSvc)
+
+		found, err := svc.CheckSessionPR(ctx, "t1", "s1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found {
+			t.Error("expected found=true when PR exists on branch")
+		}
+		if ghSvc.ensureWatchCalls != 1 {
+			t.Errorf("expected 1 EnsurePRWatch call, got %d", ghSvc.ensureWatchCalls)
+		}
+		if ghSvc.createWatchCalls != 1 {
+			t.Errorf("expected 1 CreatePRWatch call (from associatePRFromPush), got %d", ghSvc.createWatchCalls)
+		}
+		if ghSvc.associateCalls != 1 {
+			t.Errorf("expected 1 AssociatePRWithTask call, got %d", ghSvc.associateCalls)
+		}
+	})
 }

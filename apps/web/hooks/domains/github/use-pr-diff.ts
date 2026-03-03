@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { PRDiffFile } from "@/lib/types/github";
 
@@ -48,6 +48,8 @@ async function fetchPRFiles(
  */
 export function usePRDiff(owner: string | null, repo: string | null, prNumber: number | null) {
   const [state, setState] = useState<PRDiffState>(INITIAL_STATE);
+  const hasParams = !!owner && !!repo && !!prNumber;
+  const paramsKeyRef = useRef<string>("");
 
   const refresh = useCallback(() => {
     if (!owner || !repo || !prNumber) return;
@@ -55,9 +57,14 @@ export function usePRDiff(owner: string | null, repo: string | null, prNumber: n
   }, [owner, repo, prNumber]);
 
   useEffect(() => {
+    const key = hasParams ? `${owner}/${repo}/${prNumber}` : "";
+    if (key === paramsKeyRef.current) return;
+    paramsKeyRef.current = key;
     if (!owner || !repo || !prNumber) return;
     void fetchPRFiles(owner, repo, prNumber, setState);
-  }, [owner, repo, prNumber]);
+  }, [owner, repo, prNumber, hasParams]);
 
+  // Return initial state when params are null to clear stale data
+  if (!hasParams) return { ...INITIAL_STATE, refresh };
   return { ...state, refresh };
 }

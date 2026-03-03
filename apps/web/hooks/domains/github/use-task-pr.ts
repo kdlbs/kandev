@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { listTaskPRs, getTaskPR } from "@/lib/api/domains/github-api";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -61,4 +62,61 @@ export function useActiveTaskPR(): TaskPR | null {
     const taskId = s.tasks.activeTaskId;
     return taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null;
   });
+}
+
+const PR_DETECTION_INTERVAL = 30_000; // 30 seconds
+
+/**
+ * Periodically checks for a PR on the session's branch when no PR is
+ * associated with the task yet. Triggers a backend check that ensures
+ * a PR watch exists and tries to find the PR immediately.
+ */
+export function useTaskPRDetection(
+  taskId: string | null,
+  sessionId: string | null,
+  branch: string | null,
+) {
+  const pr = useAppStore((s) => (taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null));
+  const setTaskPR = useAppStore((s) => s.setTaskPR);
+  const checkingRef = useRef(false);
+
+  useEffect(() => {
+    if (!taskId || !sessionId || !branch || pr) return;
+
+    const check = () => {
+      if (checkingRef.current) return;
+      checkingRef.current = true;
+
+      const client = getWebSocketClient();
+      if (!client) {
+        checkingRef.current = false;
+        return;
+      }
+
+      client
+        .request<{ found?: boolean }>("github.check_session_pr", {
+          task_id: taskId,
+          session_id: sessionId,
+        })
+        .then((resp) => {
+          if (resp?.found) {
+            // PR was found and associated — fetch the full TaskPR record
+            getTaskPR(taskId, { cache: "no-store" })
+              .then((taskPr) => {
+                if (taskPr) setTaskPR(taskId, taskPr);
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          checkingRef.current = false;
+        });
+    };
+
+    // Check immediately, then on interval
+    check();
+    const interval = setInterval(check, PR_DETECTION_INTERVAL);
+    return () => clearInterval(interval);
+  }, [taskId, sessionId, branch, pr, setTaskPR]);
 }

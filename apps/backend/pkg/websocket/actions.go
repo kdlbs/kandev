@@ -306,6 +306,7 @@ const (
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
 	ActionGitHubStats             = "github.stats"
+	ActionGitHubCheckSessionPR    = "github.check_session_pr"
 )
 
 // Error codes

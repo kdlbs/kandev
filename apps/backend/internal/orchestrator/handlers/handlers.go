@@ -40,6 +40,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskSessionPrepare, h.wsPrepareTaskSession)
 	d.RegisterFunc(ws.ActionAgentCancel, h.wsCancelAgent)
 	d.RegisterFunc(ws.ActionSessionLaunch, h.wsLaunchSession)
+	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 }
 
 // WS handlers
@@ -369,6 +370,31 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 		PendingID: req.PendingID,
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+type wsCheckSessionPRRequest struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+}
+
+func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsCheckSessionPRRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+
+	found, err := h.service.CheckSessionPR(ctx, req.TaskID, req.SessionID)
+	if err != nil {
+		h.logger.Error("failed to check session PR",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"found": found})
 }
 
 type wsGetTaskSessionStatusRequest struct {
