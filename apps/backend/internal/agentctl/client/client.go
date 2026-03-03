@@ -532,10 +532,11 @@ type (
 	ProcessStatusUpdate    = types.ProcessStatusUpdate
 )
 
-// Close closes all connections
+// Close closes all connections and releases resources
 func (c *Client) Close() {
 	c.CloseUpdatesStream()
 	c.CloseWorkspaceStream()
+	c.httpClient.CloseIdleConnections()
 }
 
 // readResponseBody reads and returns the response body

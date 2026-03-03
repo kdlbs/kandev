@@ -412,10 +412,13 @@ func (m *Manager) startProcessPipes() error {
 	}
 	m.stdout, err = m.cmd.StdoutPipe()
 	if err != nil {
+		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	m.stderr, err = m.cmd.StderrPipe()
 	if err != nil {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 	return nil

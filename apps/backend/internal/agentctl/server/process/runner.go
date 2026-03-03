@@ -245,6 +245,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdout.Close()
 		return nil, fmt.Errorf("failed to attach stderr: %w", err)
 	}
 

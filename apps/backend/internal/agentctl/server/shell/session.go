@@ -379,6 +379,12 @@ func (s *Session) respawn() error {
 		return nil
 	}
 
+	// Close old PTY to prevent file descriptor leak
+	if s.pty != nil {
+		_ = s.pty.Close()
+		s.pty = nil
+	}
+
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = s.workDir
 	s.cmd.Env = buildShellEnv(s.workDir)
