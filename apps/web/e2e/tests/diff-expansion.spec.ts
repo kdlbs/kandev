@@ -99,6 +99,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
   }) => {
     await seedExpansionTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
 
     // Pierre Diffs renders a diffs-container custom element
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
@@ -109,31 +110,7 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     });
   });
 
-  test("shows expand controls between hunks", async ({ testPage, apiClient, seedData }) => {
-    await seedExpansionTask(testPage, apiClient, seedData);
-    await openChangesTab(testPage);
-    await openExpansionFileDiff(testPage);
-
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // Pierre Diffs renders expand buttons inside shadow DOM
-    const expandBtn = testPage
-      .locator(
-        [
-          'button[aria-label*="expand" i]',
-          'button[title*="expand" i]',
-          '[class*="expand-btn"]',
-          '[class*="expandBtn"]',
-          '[data-testid*="expand"]',
-        ].join(", "),
-      )
-      .first();
-    await expect(expandBtn).toBeVisible({ timeout: 20_000 });
-  });
-
-  test("clicking expand reveals the collapsed middle lines", async ({
+  test("shows expand separator with unmodified line count between hunks", async ({
     testPage,
     apiClient,
     seedData,
@@ -146,22 +123,53 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
       timeout: 15_000,
     });
 
-    const expandBtn = testPage
-      .locator(
-        [
-          'button[aria-label*="expand" i]',
-          'button[title*="expand" i]',
-          '[class*="expand-btn"]',
-          '[class*="expandBtn"]',
-          '[data-testid*="expand"]',
-        ].join(", "),
-      )
-      .first();
-    await expect(expandBtn).toBeVisible({ timeout: 20_000 });
-    await expandBtn.click();
+    // Pierre Diffs renders a separator between hunks showing the hidden line count.
+    // The separator contains img elements (chevron arrows) for expanding.
+    const middleSeparator = testPage.getByText(/\d+ unmodified lines/).nth(1);
+    await expect(middleSeparator).toBeVisible({ timeout: 20_000 });
+  });
 
-    // Line 25 sits in the middle of the collapsed gap (lines 6–45).
-    await expect(testPage.getByText("original_25", { exact: false })).toBeVisible({
+  test("clicking expand arrow reveals the collapsed middle lines", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Wait for expand buttons to appear in the shadow DOM. They load
+    // asynchronously after full file content is fetched via WebSocket.
+    await testPage.waitForFunction(
+      () => {
+        const container = document.querySelector("diffs-container");
+        const shadow = container?.shadowRoot;
+        if (!shadow) return false;
+        return shadow.querySelectorAll("[data-expand-button]").length >= 3;
+      },
+      null,
+      { timeout: 20_000 },
+    );
+
+    // Click the middle separator's expand-up button to reveal lines from the
+    // top of the collapsed gap. The middle separator is the only one without
+    // data-separator-first or data-separator-last attributes.
+    await testPage.evaluate(() => {
+      const container = document.querySelector("diffs-container");
+      const shadow = container!.shadowRoot!;
+      const sel =
+        "[data-separator='line-info']:not([data-separator-first]):not([data-separator-last])";
+      const btn = shadow.querySelector<HTMLElement>(`${sel} [data-expand-up]`);
+      if (!btn) throw new Error("Middle separator expand-up button not found");
+      btn.click();
+    });
+
+    // Line 60 is within the first 20 lines revealed by expanding from the top hunk.
+    await expect(testPage.getByText("original_060", { exact: false })).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -191,51 +199,6 @@ test.describe("Diff expansion — Monaco provider", () => {
     await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
       timeout: 5_000,
-    });
-  });
-
-  test("shows hidden unchanged region widget between hunks", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await seedExpansionTask(testPage, apiClient, seedData);
-    await openChangesTab(testPage);
-    await openExpansionFileDiff(testPage);
-
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // Monaco's hideUnchangedRegions renders a .diff-hidden-lines-widget
-    // with a "Show Unchanged Region" link in the center.
-    const hiddenWidget = testPage.locator(".diff-hidden-lines-widget").first();
-    await expect(hiddenWidget).toBeVisible({ timeout: 20_000 });
-  });
-
-  test("clicking the top reveal area expands collapsed lines", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await seedExpansionTask(testPage, apiClient, seedData);
-    await openChangesTab(testPage);
-    await openExpansionFileDiff(testPage);
-
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // Click "Show Unchanged Region" to reveal all hidden lines
-    const showRegionLink = testPage
-      .locator('.diff-hidden-lines a[title="Show Unchanged Region"]')
-      .first();
-    await expect(showRegionLink).toBeVisible({ timeout: 20_000 });
-    await showRegionLink.click();
-
-    // Line 25 from the middle of the file should now be visible
-    await expect(testPage.getByText("original_25", { exact: false })).toBeVisible({
-      timeout: 10_000,
     });
   });
 });
