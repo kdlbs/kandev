@@ -108,6 +108,7 @@ export type TaskEventPayload = {
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
   updated_at?: string;
+  is_ephemeral?: boolean;
 };
 
 export type AgentUpdatePayload = {

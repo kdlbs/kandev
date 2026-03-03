@@ -57,6 +57,12 @@ export type SystemHealthState = {
   loading: boolean;
 };
 
+export type QuickChatState = {
+  isOpen: boolean;
+  sessionId: string | null;
+  workspaceId: string | null;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -67,6 +73,7 @@ export type UISliceState = {
   chatInput: ChatInputState;
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
+  quickChat: QuickChatState;
 };
 
 export type UISliceActions = {
@@ -88,6 +95,9 @@ export type UISliceActions = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  openQuickChat: (sessionId: string, workspaceId: string) => void;
+  closeQuickChat: () => void;
+  clearQuickChatSession: () => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

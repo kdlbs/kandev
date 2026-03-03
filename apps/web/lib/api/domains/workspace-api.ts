@@ -50,3 +50,31 @@ export async function listRepositoryScripts(repositoryId: string, options?: ApiR
     options,
   );
 }
+
+// Quick Chat operations
+export type StartQuickChatRequest = {
+  repository_id?: string;
+  agent_profile_id?: string;
+  executor_id?: string;
+  prompt?: string;
+  local_path?: string;
+  repository_name?: string;
+  default_branch?: string;
+  base_branch?: string;
+};
+
+export type StartQuickChatResponse = {
+  task_id: string;
+  session_id: string;
+};
+
+export async function startQuickChat(
+  workspaceId: string,
+  payload: StartQuickChatRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<StartQuickChatResponse>(`/api/v1/workspaces/${workspaceId}/quick-chat`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}

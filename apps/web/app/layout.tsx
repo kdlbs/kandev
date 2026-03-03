@@ -9,6 +9,7 @@ import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
+import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 
 export const metadata: Metadata = {
   title: "KanDev - AI Kanban",
@@ -77,7 +78,9 @@ export default function RootLayout({
                     <WebSocketConnector />
                     <GlobalCommands />
                     <CommandPanel />
-                    {children}
+                    <QuickChatProvider>
+                      {children}
+                    </QuickChatProvider>
                   </CommandRegistryProvider>
                 </ToastProvider>
               </TooltipProvider>

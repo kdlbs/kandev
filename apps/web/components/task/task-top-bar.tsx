@@ -9,6 +9,7 @@ import {
   IconCheck,
   IconHome,
   IconSettings,
+  IconMessageCircle,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -31,6 +32,7 @@ import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { useAppStore } from "@/components/state-provider";
 import { DEBUG_UI } from "@/lib/config";
 
 type TaskTopBarProps = {
@@ -51,6 +53,7 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  workspaceId?: string | null;
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
   remoteExecutorName?: string | null;
@@ -75,6 +78,7 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  workspaceId,
   isArchived,
   isRemoteExecutor,
   remoteExecutorName,
@@ -121,6 +125,7 @@ const TaskTopBar = memo(function TaskTopBar({
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
+        workspaceId={workspaceId}
       />
     </header>
   );
@@ -365,6 +370,35 @@ function GitAheadBehindBadges({
   );
 }
 
+/** Quick Chat button that opens the quick chat modal */
+function QuickChatButton({ workspaceId }: { workspaceId?: string | null }) {
+  const quickChatSessionId = useAppStore((state) => state.quickChat.sessionId);
+  const openQuickChat = useAppStore((state) => state.openQuickChat);
+
+  // Only show if we have an active quick chat session to resume
+  if (!quickChatSessionId || !workspaceId) return null;
+
+  const handleClick = () => {
+    openQuickChat(quickChatSessionId, workspaceId);
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="cursor-pointer px-2"
+          onClick={handleClick}
+        >
+          <IconMessageCircle className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Open Quick Chat</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Right section: git badges, debug toggle, document controls, editors, VCS, settings */
 function TopBarRight({
   activeSessionId,
@@ -373,6 +407,7 @@ function TopBarRight({
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
+  workspaceId,
 }: {
   activeSessionId?: string | null;
   baseBranch?: string;
@@ -380,6 +415,7 @@ function TopBarRight({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
+  workspaceId?: string | null;
 }) {
   return (
     <div className="flex items-center gap-2 justify-end">
@@ -410,6 +446,7 @@ function TopBarRight({
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
+      <QuickChatButton workspaceId={workspaceId} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>

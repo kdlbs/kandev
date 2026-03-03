@@ -581,3 +581,110 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
+
+// httpStartQuickChatRequest is the request body for starting a quick chat session.
+type httpStartQuickChatRequest struct {
+	RepositoryID      string `json:"repository_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	LocalPath         string `json:"local_path,omitempty"`
+	RepositoryName    string `json:"repository_name,omitempty"`
+	DefaultBranch     string `json:"default_branch,omitempty"`
+	BaseBranch        string `json:"base_branch,omitempty"`
+	LaunchImmediately bool   `json:"launch_immediately,omitempty"`
+}
+
+// httpStartQuickChatResponse is returned when a quick chat session is created.
+type httpStartQuickChatResponse struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+}
+
+// httpStartQuickChat creates an ephemeral task and prepares a session for quick chat.
+func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
+	workspaceID := c.Param("id")
+	var body httpStartQuickChatRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Get workspace to use defaults
+	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not found")
+		return
+	}
+
+	// Get default workflow for the workspace
+	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
+	if err != nil || len(workflows) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
+		return
+	}
+	workflowID := workflows[0].ID
+
+	// Build repository input if provided
+	var repos []service.TaskRepositoryInput
+	if body.RepositoryID != "" || body.LocalPath != "" {
+		repos = append(repos, service.TaskRepositoryInput{
+			RepositoryID:  body.RepositoryID,
+			LocalPath:     body.LocalPath,
+			Name:          body.RepositoryName,
+			DefaultBranch: body.DefaultBranch,
+			BaseBranch:    body.BaseBranch,
+		})
+	}
+
+	// Create ephemeral task
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  workspaceID,
+		WorkflowID:   workflowID,
+		Title:        "Quick Chat",
+		Description:  body.Prompt,
+		Repositories: repos,
+		IsEphemeral:  true,
+	})
+	if err != nil {
+		h.logger.Error("failed to create ephemeral task", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
+		return
+	}
+
+	// Resolve agent and executor from request or workspace defaults
+	agentProfileID := body.AgentProfileID
+	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
+		agentProfileID = *workspace.DefaultAgentProfileID
+	}
+	executorID := body.ExecutorID
+	if executorID == "" && workspace.DefaultExecutorID != nil {
+		executorID = *workspace.DefaultExecutorID
+	}
+
+	// Prepare session
+	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:          task.ID,
+		Intent:          orchestrator.IntentPrepare,
+		AgentProfileID:  agentProfileID,
+		ExecutorID:      executorID,
+		LaunchWorkspace: true,
+	})
+	if err != nil {
+		h.logger.Error("failed to prepare quick chat session", zap.Error(err), zap.String("task_id", task.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare session"})
+		return
+	}
+
+	h.logger.Info("quick chat session created",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", resp.SessionID),
+		zap.String("workspace_id", workspaceID))
+
+	c.JSON(http.StatusOK, httpStartQuickChatResponse{
+		TaskID:    task.ID,
+		SessionID: resp.SessionID,
+	})
+}

@@ -107,6 +107,8 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
+      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+      if (message.payload.is_ephemeral) return;
       store.setState((state) =>
         upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
       );
