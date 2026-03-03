@@ -9,6 +9,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
+  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.workflow_step_id !== undefined) update.workflow_step_id = payload.workflow_step_id;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
