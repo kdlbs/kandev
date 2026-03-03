@@ -60,14 +60,15 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID           string                 `json:"id"`
-	TaskID       string                 `json:"task_id"`
-	RepositoryID string                 `json:"repository_id"`
-	BaseBranch   string                 `json:"base_branch"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"task_id"`
+	RepositoryID   string                 `json:"repository_id"`
+	BaseBranch     string                 `json:"base_branch"`
+	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
+	Position       int                    `json:"position"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // MessageAuthorType represents who authored a message

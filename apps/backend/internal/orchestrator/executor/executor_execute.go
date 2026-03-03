@@ -370,7 +370,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	now := time.Now().UTC()
 	// On initial launch there is no existing ExecutorRunning record to carry forward.
 	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now, execCfg, nil)
-	e.persistWorktreeAssociation(ctx, task.ID, session.ID, repoInfo.RepositoryID, resp)
+	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
@@ -441,6 +441,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {

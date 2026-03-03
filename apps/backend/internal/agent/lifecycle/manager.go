@@ -164,6 +164,12 @@ func NewManager(
 // If not set, agents will work directly in the repository's main working directory.
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
+	// Register the worktree preparer so that executor type "worktree" gets
+	// worktree-specific preparation (create git worktree, checkout PR branch)
+	// instead of the generic local preparer.
+	if m.preparerRegistry != nil {
+		m.preparerRegistry.Register(executor.Name("worktree"), NewWorktreePreparer(worktreeMgr, m.logger))
+	}
 }
 
 // SetMCPHandler sets the MCP request handler for dispatching MCP tool calls.

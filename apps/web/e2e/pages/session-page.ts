@@ -5,6 +5,7 @@ export class SessionPage {
   readonly sidebar: Locator;
   readonly terminal: Locator;
   readonly files: Locator;
+  readonly changes: Locator;
   readonly planPanel: Locator;
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
@@ -14,6 +15,7 @@ export class SessionPage {
     this.sidebar = page.getByTestId("task-sidebar");
     this.terminal = page.getByTestId("terminal-panel");
     this.files = page.getByTestId("files-panel");
+    this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
@@ -155,6 +157,27 @@ export class SessionPage {
 
   stepperStep(name: string): Locator {
     return this.page.getByTestId(`workflow-step-${name}`);
+  }
+
+  /** PR button in the topbar (visible only when a PR is associated). */
+  prTopbarButton(): Locator {
+    return this.page.getByTestId("pr-topbar-button");
+  }
+
+  /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
+  async clickTab(label: string): Promise<void> {
+    const tab = this.page.locator(`.dv-default-tab:has-text('${label}')`);
+    await tab.click();
+  }
+
+  /** PR files section within the changes panel. */
+  prFilesSection(): Locator {
+    return this.changes.getByTestId("pr-files-section");
+  }
+
+  /** PR commits section within the changes panel. */
+  prCommitsSection(): Locator {
+    return this.changes.getByTestId("pr-commits-section");
   }
 
   /**

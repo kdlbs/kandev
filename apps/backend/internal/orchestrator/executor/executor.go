@@ -186,6 +186,7 @@ type LaunchAgentRequest struct {
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }

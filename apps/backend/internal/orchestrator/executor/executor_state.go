@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"time"
 
@@ -121,8 +122,18 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 		metadata = make(map[string]interface{})
 	}
 
+	// When no executor ID is resolved, check if the metadata carries an
+	// executor profile. The profile references a specific executor, so we
+	// can derive the full config from it (critical for review-watch tasks
+	// where the executor comes solely from the profile).
 	if resolved == "" {
-		return executorConfig{Metadata: metadata}
+		profileID, _ := metadata["executor_profile_id"].(string)
+		if profileID == "" {
+			return executorConfig{Metadata: metadata}
+		}
+		cfg := executorConfig{Metadata: metadata}
+		e.applyProfile(ctx, profileID, &cfg, metadata)
+		return cfg
 	}
 
 	metadata["executor_id"] = resolved
@@ -165,6 +176,23 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 	if profile == nil {
 		return
 	}
+
+	// The profile is tied to a specific executor. If it differs from the
+	// currently resolved executor (e.g. the workspace default), override the
+	// config so the correct executor type is used. This is critical for
+	// worktree executors selected via review watches or executor profiles.
+	if profile.ExecutorID != "" && profile.ExecutorID != cfg.ExecutorID {
+		exec, execErr := e.repo.GetExecutor(ctx, profile.ExecutorID)
+		if execErr == nil && exec != nil {
+			cfg.ExecutorID = profile.ExecutorID
+			cfg.ExecutorType = string(exec.Type)
+			cfg.ExecutorCfg = exec.Config
+			cfg.Resumable = exec.Resumable
+			cfg.RuntimeName = string(exec.Type)
+			metadata["executor_id"] = profile.ExecutorID
+		}
+	}
+
 	cfg.SetupScript = profile.PrepareScript
 	cfg.CleanupScript = profile.CleanupScript
 	cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
@@ -230,8 +258,6 @@ func cloneMetadata(src map[string]interface{}) map[string]interface{} {
 		return nil
 	}
 	out := make(map[string]interface{}, len(src))
-	for key, value := range src {
-		out[key] = value
-	}
+	maps.Copy(out, src)
 	return out
 }

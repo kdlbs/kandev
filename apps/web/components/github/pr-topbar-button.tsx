@@ -49,6 +49,7 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          data-testid="pr-topbar-button"
           size="sm"
           variant="outline"
           className="cursor-pointer gap-1.5 px-2"
