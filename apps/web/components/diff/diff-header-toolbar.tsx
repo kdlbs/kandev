@@ -19,6 +19,29 @@ import type { ViewMode } from "@/hooks/use-global-view-mode";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
+function ToolbarBtn({
+  onClick,
+  tooltip,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  tooltip: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="sm" className={cn(iconBtn, className)} onClick={onClick}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 interface DiffHeaderToolbarOptions {
   filePath: string;
   diff?: string;
@@ -51,74 +74,53 @@ function DiffHeaderToolbarButtons({
 }: ToolbarButtonsProps) {
   return (
     <div className="flex items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className={iconBtn} onClick={onCopyDiff}>
-            <IconCopy className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Copy diff</TooltipContent>
-      </Tooltip>
+      <ToolbarBtn onClick={onCopyDiff} tooltip="Copy diff">
+        <IconCopy className="h-3.5 w-3.5" />
+      </ToolbarBtn>
 
       {onRevert && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onRevert(resolvedPath)}>
-              <IconArrowBackUp className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Revert changes</TooltipContent>
-        </Tooltip>
+        <ToolbarBtn onClick={() => onRevert(resolvedPath)} tooltip="Revert changes">
+          <IconArrowBackUp className="h-3.5 w-3.5" />
+        </ToolbarBtn>
       )}
 
       {onToggleExpandUnchanged && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(iconBtn, expandUnchanged && "opacity-100 bg-muted")}
-              onClick={onToggleExpandUnchanged}
-            >
-              {expandUnchanged ? <IconFold className="h-3.5 w-3.5" /> : <IconFoldDown className="h-3.5 w-3.5" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{expandUnchanged ? "Collapse unchanged lines" : "Expand all lines"}</TooltipContent>
-        </Tooltip>
+        <ToolbarBtn
+          onClick={onToggleExpandUnchanged}
+          tooltip={expandUnchanged ? "Collapse unchanged lines" : "Expand all lines"}
+          className={expandUnchanged ? "opacity-100 bg-muted" : undefined}
+        >
+          {expandUnchanged ? (
+            <IconFold className="h-3.5 w-3.5" />
+          ) : (
+            <IconFoldDown className="h-3.5 w-3.5" />
+          )}
+        </ToolbarBtn>
       )}
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(iconBtn, wordWrap && "opacity-100 bg-muted")}
-            onClick={onToggleWordWrap}
-          >
-            <IconTextWrap className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Toggle word wrap</TooltipContent>
-      </Tooltip>
+      <ToolbarBtn
+        onClick={onToggleWordWrap}
+        tooltip="Toggle word wrap"
+        className={wordWrap ? "opacity-100 bg-muted" : undefined}
+      >
+        <IconTextWrap className="h-3.5 w-3.5" />
+      </ToolbarBtn>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="sm" className={iconBtn} onClick={onToggleViewMode}>
-            {viewMode === "split" ? <IconLayoutRows className="h-3.5 w-3.5" /> : <IconLayoutColumns className="h-3.5 w-3.5" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{viewMode === "split" ? "Switch to unified view" : "Switch to split view"}</TooltipContent>
-      </Tooltip>
+      <ToolbarBtn
+        onClick={onToggleViewMode}
+        tooltip={viewMode === "split" ? "Switch to unified view" : "Switch to split view"}
+      >
+        {viewMode === "split" ? (
+          <IconLayoutRows className="h-3.5 w-3.5" />
+        ) : (
+          <IconLayoutColumns className="h-3.5 w-3.5" />
+        )}
+      </ToolbarBtn>
 
       {onOpenFile && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className={iconBtn} onClick={() => onOpenFile(resolvedPath)}>
-              <IconPencil className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Edit</TooltipContent>
-        </Tooltip>
+        <ToolbarBtn onClick={() => onOpenFile(resolvedPath)} tooltip="Edit">
+          <IconPencil className="h-3.5 w-3.5" />
+        </ToolbarBtn>
       )}
     </div>
   );
@@ -126,8 +128,16 @@ function DiffHeaderToolbarButtons({
 
 export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
   const {
-    filePath, diff, wordWrap, onToggleWordWrap, viewMode, onToggleViewMode,
-    onOpenFile, onRevert, expandUnchanged, onToggleExpandUnchanged,
+    filePath,
+    diff,
+    wordWrap,
+    onToggleWordWrap,
+    viewMode,
+    onToggleViewMode,
+    onOpenFile,
+    onRevert,
+    expandUnchanged,
+    onToggleExpandUnchanged,
   } = opts;
 
   return useCallback(
@@ -148,7 +158,17 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
         />
       );
     },
-    [filePath, diff, wordWrap, onToggleWordWrap, viewMode, onToggleViewMode,
-      onOpenFile, onRevert, expandUnchanged, onToggleExpandUnchanged],
+    [
+      filePath,
+      diff,
+      wordWrap,
+      onToggleWordWrap,
+      viewMode,
+      onToggleViewMode,
+      onOpenFile,
+      onRevert,
+      expandUnchanged,
+      onToggleExpandUnchanged,
+    ],
   );
 }

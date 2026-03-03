@@ -53,10 +53,9 @@ async function seed() {
     name: "Debug WF",
     workflow_template_id: "simple",
   });
-  const { steps } = await api<{ steps: Array<{ id: string; is_start_step: boolean; position: number }> }>(
-    "GET",
-    `/api/v1/workflows/${wf.id}/workflow/steps`,
-  );
+  const { steps } = await api<{
+    steps: Array<{ id: string; is_start_step: boolean; position: number }>;
+  }>("GET", `/api/v1/workflows/${wf.id}/workflow/steps`);
   const sorted = steps.sort((a, b) => a.position - b.position);
   const startStep = sorted.find((s) => s.is_start_step) ?? sorted[0];
 
@@ -107,7 +106,11 @@ async function run() {
   page.on("console", (msg) => {
     const text = `[${msg.type()}] ${msg.text()}`;
     logs.push(text);
-    if (msg.text().includes("Expansion") || msg.text().includes("expandable") || msg.text().includes("expandUnchanged")) {
+    if (
+      msg.text().includes("Expansion") ||
+      msg.text().includes("expandable") ||
+      msg.text().includes("expandUnchanged")
+    ) {
       console.log("  CONSOLE:", text);
     }
   });
@@ -156,7 +159,9 @@ async function run() {
 
   // Click the Changes tab
   console.log("Looking for Changes tab...");
-  const changesTab = page.locator('[data-title="Changes"], [title="Changes"], text="Changes"').first();
+  const changesTab = page
+    .locator('[data-title="Changes"], [title="Changes"], text="Changes"')
+    .first();
   try {
     await changesTab.waitFor({ timeout: 5000 });
     await changesTab.click();
@@ -190,7 +195,11 @@ async function run() {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(SCREENSHOTS, "09-after-wait.png") });
 
-  const expandBtns = await page.locator('[aria-label*="xpand" i], [title*="xpand" i], [class*="expand"], button:has-text("↕"), button:has-text("expand")').all();
+  const expandBtns = await page
+    .locator(
+      '[aria-label*="xpand" i], [title*="xpand" i], [class*="expand"], button:has-text("↕"), button:has-text("expand")',
+    )
+    .all();
   console.log(`  Found ${expandBtns.length} potential expand button(s)`);
 
   // Dump all interactive elements near the diff
@@ -201,7 +210,9 @@ async function run() {
     const ariaLabel = await btn.getAttribute("aria-label").catch(() => "");
     const cls = await btn.getAttribute("class").catch(() => "");
     if (text || ariaLabel) {
-      console.log(`    button: text="${text?.trim()}" aria-label="${ariaLabel}" class="${cls?.slice(0, 60)}"`);
+      console.log(
+        `    button: text="${text?.trim()}" aria-label="${ariaLabel}" class="${cls?.slice(0, 60)}"`,
+      );
     }
   }
 
@@ -209,8 +220,12 @@ async function run() {
   console.log("  Screenshot: 10-final.png (full page)");
 
   // Print relevant console logs
-  const expansionLogs = logs.filter((l) =>
-    l.includes("Expansion") || l.includes("expandable") || l.includes("expand") || l.includes("FileDiff"),
+  const expansionLogs = logs.filter(
+    (l) =>
+      l.includes("Expansion") ||
+      l.includes("expandable") ||
+      l.includes("expand") ||
+      l.includes("FileDiff"),
   );
   if (expansionLogs.length > 0) {
     console.log("\nExpansion-related console logs:");

@@ -74,12 +74,11 @@ export function useExpandableDiff({
       const newRes = await requestFileContent(client, sessionId, filePath);
       if (newRes.is_binary) throw new Error("Cannot expand binary files");
       // "file not found" / "no such file" is expected for deleted files
-      const newContent = newRes.error && /not found|no such file/i.test(newRes.error) ? "" : newRes.content;
+      const newContent =
+        newRes.error && /not found|no such file/i.test(newRes.error) ? "" : newRes.content;
       if (newRes.error && newContent !== "") throw new Error(newRes.error);
 
-      const oldContent = baseRef
-        ? await fetchOldContent(client, sessionId, filePath, baseRef)
-        : "";
+      const oldContent = baseRef ? await fetchOldContent(client, sessionId, filePath, baseRef) : "";
 
       const oldLines = oldContent.split(SPLIT_WITH_NEWLINES);
       const newLines = newContent.split(SPLIT_WITH_NEWLINES);
@@ -97,7 +96,11 @@ export function useExpandableDiff({
   const metadata = useMemo<FileDiffMetadata | null>(() => {
     if (!fileDiffMetadata) return null;
     if (!loadedContent) return fileDiffMetadata;
-    return { ...fileDiffMetadata, oldLines: loadedContent.oldLines, newLines: loadedContent.newLines };
+    return {
+      ...fileDiffMetadata,
+      oldLines: loadedContent.oldLines,
+      newLines: loadedContent.newLines,
+    };
   }, [fileDiffMetadata, loadedContent]);
 
   const isContentLoaded = loadedContent !== null;

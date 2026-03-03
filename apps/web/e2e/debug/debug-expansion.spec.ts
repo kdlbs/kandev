@@ -30,24 +30,35 @@ async function seedTask() {
 
   const gitEnv = {
     ...process.env,
-    GIT_AUTHOR_NAME: "Debug", GIT_AUTHOR_EMAIL: "debug@test.local",
-    GIT_COMMITTER_NAME: "Debug", GIT_COMMITTER_EMAIL: "debug@test.local",
+    GIT_AUTHOR_NAME: "Debug",
+    GIT_AUTHOR_EMAIL: "debug@test.local",
+    GIT_COMMITTER_NAME: "Debug",
+    GIT_COMMITTER_EMAIL: "debug@test.local",
   };
   execSync("git init -b main", { cwd: repoDir, env: gitEnv });
   execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
 
   const ws = await api<{ id: string }>("POST", "/api/v1/workspaces", { name: "Debug WS" });
   const wf = await api<{ id: string }>("POST", "/api/v1/workflows", {
-    workspace_id: ws.id, name: "Debug WF", workflow_template_id: "simple",
+    workspace_id: ws.id,
+    name: "Debug WF",
+    workflow_template_id: "simple",
   });
-  const { steps } = await api<{ steps: Array<{ id: string; is_start_step: boolean; position: number }> }>(
-    "GET", `/api/v1/workflows/${wf.id}/workflow/steps`,
-  );
-  const startStep = steps.sort((a, b) => a.position - b.position).find((s) => s.is_start_step) ?? steps[0];
+  const { steps } = await api<{
+    steps: Array<{ id: string; is_start_step: boolean; position: number }>;
+  }>("GET", `/api/v1/workflows/${wf.id}/workflow/steps`);
+  const startStep =
+    steps.sort((a, b) => a.position - b.position).find((s) => s.is_start_step) ?? steps[0];
   const repo = await api<{ id: string }>("POST", `/api/v1/workspaces/${ws.id}/repositories`, {
-    name: "Debug Repo", source_type: "local", local_path: repoDir, default_branch: "main",
+    name: "Debug Repo",
+    source_type: "local",
+    local_path: repoDir,
+    default_branch: "main",
   });
-  const { agents } = await api<{ agents: Array<{ profiles: Array<{ id: string }> }> }>("GET", "/api/v1/agents");
+  const { agents } = await api<{ agents: Array<{ profiles: Array<{ id: string }> }> }>(
+    "GET",
+    "/api/v1/agents",
+  );
   const agentProfileId = agents[0]?.profiles[0]?.id;
   if (!agentProfileId) throw new Error("No mock agent profile found");
 
@@ -56,8 +67,10 @@ async function seedTask() {
     title: "Debug expansion",
     // Pass the scenario as description so the mock agent runs it on start
     description: "/e2e:diff-expansion-setup",
-    workflow_id: wf.id, workflow_step_id: startStep.id,
-    start_agent: true, agent_profile_id: agentProfileId,
+    workflow_id: wf.id,
+    workflow_step_id: startStep.id,
+    start_agent: true,
+    agent_profile_id: agentProfileId,
     repositories: [{ repository_id: repo.id }],
   });
   if (!task.session_id) throw new Error(`Task has no session_id: ${JSON.stringify(task)}`);
@@ -69,7 +82,14 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
   const expansionLogs: string[] = [];
   page.on("console", (msg) => {
     const text = msg.text();
-    if (text.includes("expansion") || text.includes("Expansion") || text.includes("expandable") || text.includes("FileDiff") || text.includes("expand") || text.includes("DiffViewer")) {
+    if (
+      text.includes("expansion") ||
+      text.includes("Expansion") ||
+      text.includes("expandable") ||
+      text.includes("FileDiff") ||
+      text.includes("expand") ||
+      text.includes("DiffViewer")
+    ) {
       expansionLogs.push(`[${msg.type()}] ${text}`);
     }
   });
@@ -90,9 +110,9 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
   // 2. Wait for agent to complete its initial turn (description = "/e2e:diff-expansion-setup")
   const chat = page.getByTestId("session-chat");
   await chat.waitFor({ timeout: 15000 });
-  await expect(
-    chat.getByText("diff-expansion-setup complete", { exact: false })
-  ).toBeVisible({ timeout: 30000 });
+  await expect(chat.getByText("diff-expansion-setup complete", { exact: false })).toBeVisible({
+    timeout: 30000,
+  });
   await page.screenshot({ path: `${SCREENSHOTS}/02-agent-complete.png` });
   console.log("Agent completed. Expansion logs so far:", expansionLogs);
 
@@ -104,7 +124,8 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
   await page.screenshot({ path: `${SCREENSHOTS}/03-changes-tab.png` });
 
   // 4. Find expansion_test.go and open its diff
-  const fileRow = page.locator("button, [role='button'], [class*='file']")
+  const fileRow = page
+    .locator("button, [role='button'], [class*='file']")
     .filter({ hasText: "expansion_test.go" })
     .first();
   await fileRow.waitFor({ timeout: 10000 });
@@ -114,15 +135,19 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
   await page.screenshot({ path: `${SCREENSHOTS}/05-diff-opened.png` });
 
   // 5. Check which diff viewer is being used (Monaco vs Pierre)
-  const monacoEditors = await page.locator('.monaco-diff-editor, .monaco-editor').count();
-  const pierreViewer = await page.locator('.diff-viewer, [class*="pierre"], [data-testid*="diff"]').count();
+  const monacoEditors = await page.locator(".monaco-diff-editor, .monaco-editor").count();
+  const pierreViewer = await page
+    .locator('.diff-viewer, [class*="pierre"], [data-testid*="diff"]')
+    .count();
   console.log(`  Monaco editors: ${monacoEditors}, Pierre-like elements: ${pierreViewer}`);
 
   // 6. Check editor provider setting via localStorage/window
   const diffViewerProvider = await page.evaluate(() => {
-    return (window as unknown as Record<string, unknown>).__KANDEV_EDITOR_PROVIDERS
-      ?? localStorage.getItem("kandev.editor.diff-viewer")
-      ?? "unknown";
+    return (
+      (window as unknown as Record<string, unknown>).__KANDEV_EDITOR_PROVIDERS ??
+      localStorage.getItem("kandev.editor.diff-viewer") ??
+      "unknown"
+    );
   });
   console.log(`  Diff viewer provider setting: ${diffViewerProvider}`);
 
@@ -130,7 +155,7 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
   console.log("Expansion logs after opening diff:", expansionLogs);
 
   // 8. Inspect diff DOM
-  const diffEl = page.locator('.diff-viewer').first();
+  const diffEl = page.locator(".diff-viewer").first();
   const diffHtml = await diffEl.innerHTML().catch(() => "(not found)");
   fs.writeFileSync(`${SCREENSHOTS}/diff-html.txt`, diffHtml.slice(0, 100000));
   console.log("Diff HTML length:", diffHtml.length);
@@ -154,7 +179,9 @@ test("debug: diff expansion flow with screenshots", async ({ page }) => {
       expandBtns += shadow.querySelectorAll("[data-expand-button]").length;
       separators += shadow.querySelectorAll("[data-separator]").length;
       lineInfoSeparators += shadow.querySelectorAll("[data-separator='line-info']").length;
-      simpleSeparators += shadow.querySelectorAll("[data-separator='']:not([data-separator='line-info']):not([data-separator='metadata']):not([data-separator='custom'])").length;
+      simpleSeparators += shadow.querySelectorAll(
+        "[data-separator='']:not([data-separator='line-info']):not([data-separator='metadata']):not([data-separator='custom'])",
+      ).length;
       for (const sep of shadow.querySelectorAll("[data-expand-index]")) {
         expandIndexes.push(sep.getAttribute("data-expand-index") ?? "?");
       }

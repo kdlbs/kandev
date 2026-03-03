@@ -61,15 +61,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
 
-  const {
-    diffEditorRef,
-    modifiedEditor,
-    originalEditor,
-    contextMenu,
-    setContextMenu,
-    copyAllChangedLines,
-    handleDiffEditorMount,
-  } = useDiffViewerComments({
+  const comments = useDiffViewerComments({
     data,
     sessionId,
     compact,
@@ -81,9 +73,15 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
 
   useCaptureKeydown(wrapperRef, { metaOrCtrl: true, key: "k" }, () => setCommandPanelOpen(true));
   useLayoutEffect(() => {
-    const ref = diffEditorRef;
-    return () => { try { ref.current?.setModel(null); } catch { /* disposed */ } };
-  }, [diffEditorRef]);
+    const ref = comments.diffEditorRef;
+    return () => {
+      try {
+        ref.current?.setModel(null);
+      } catch {
+        /* disposed */
+      }
+    };
+  }, [comments.diffEditorRef]);
 
   const { oldContent, newContent, diff, filePath } = data;
   const language = getMonacoLanguage(filePath);
@@ -91,32 +89,32 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     () => resolveDiffContent({ oldContent, newContent, diff }),
     [oldContent, newContent, diff],
   );
-  const lineHeight = compact ? 16 : 18;
+  const editorConfig = useMemo(() => {
+    const lineHeight = compact ? 16 : 18;
+    const modifiedReadOnly = compact || (!editable && !onRevert);
+    return { lineHeight, modifiedReadOnly };
+  }, [compact, editable, onRevert]);
   const editorHeight = useDiffEditorHeight({
-    modifiedEditor,
-    originalEditor,
+    modifiedEditor: comments.modifiedEditor,
+    originalEditor: comments.originalEditor,
     compact,
-    lineHeight,
+    lineHeight: editorConfig.lineHeight,
     originalContent: original,
     modifiedContent: modified,
   });
-  const modifiedReadOnly = compact || (!editable && !onRevert);
-  const monacoTheme = getMonacoTheme(resolvedTheme);
   const hasDiff = !!(oldContent || newContent || diff);
   const effectiveFoldUnchanged = enableExpansion || foldUnchanged;
-
   const options = buildDiffEditorOptions({
     compact,
     wordWrap,
-    modifiedReadOnly,
+    modifiedReadOnly: editorConfig.modifiedReadOnly,
     onRevert,
     globalViewMode,
     foldUnchanged: effectiveFoldUnchanged,
-    lineHeight,
+    lineHeight: editorConfig.lineHeight,
   });
 
   return {
-    resolvedTheme,
     globalViewMode,
     setGlobalViewMode,
     foldUnchanged,
@@ -124,19 +122,16 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
     wordWrap,
     setWordWrap,
     wrapperRef,
-    contextMenu,
-    setContextMenu,
-    copyAllChangedLines,
-    handleDiffEditorMount,
+    ...comments,
     diff,
     filePath,
     language,
     original,
     modified,
-    lineHeight,
+    lineHeight: editorConfig.lineHeight,
     editorHeight,
     hasDiff,
-    monacoTheme,
+    monacoTheme: getMonacoTheme(resolvedTheme),
     options,
     enableExpansion,
   };

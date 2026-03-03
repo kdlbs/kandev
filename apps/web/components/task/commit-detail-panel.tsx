@@ -179,7 +179,7 @@ function CommitFileList({
     );
   }
 
-  console.log('[CommitFileList] Rendering', fileEntries.length, 'files');
+  console.log("[CommitFileList] Rendering", fileEntries.length, "files");
 
   return (
     <>

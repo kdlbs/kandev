@@ -158,21 +158,19 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       expansionLineCount,
       expandUnchanged,
     };
-  },
-    [
-      globalViewMode,
-      resolvedTheme,
-      enableComments,
-      showHeader,
-      handleLineSelectionEnd,
-      wordWrap,
-      onLineEnter,
-      onLineLeave,
-      enableExpansion,
-      expansionLineCount,
-      expandUnchanged,
-    ],
-  );
+  }, [
+    globalViewMode,
+    resolvedTheme,
+    enableComments,
+    showHeader,
+    handleLineSelectionEnd,
+    wordWrap,
+    onLineEnter,
+    onLineLeave,
+    enableExpansion,
+    expansionLineCount,
+    expandUnchanged,
+  ]);
 
   return {
     globalViewMode,
