@@ -23,6 +23,7 @@ type GitHubService interface {
 	EnsurePRWatch(ctx context.Context, sessionID, taskID, owner, repo, branch string) (*github.PRWatch, error)
 	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
 	AssociatePRWithTask(ctx context.Context, taskID string, pr *github.PR) (*github.TaskPR, error)
+	GetTaskPR(ctx context.Context, taskID string) (*github.TaskPR, error)
 	RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error
 }
 
@@ -389,6 +390,64 @@ func (s *Service) associatePRFromPush(
 		zap.String("session_id", sessionID),
 		zap.Int("pr_number", pr.Number),
 		zap.String("branch", branch))
+}
+
+// CheckSessionPR checks if a PR exists for a session's branch and associates it
+// if found. This provides an on-demand alternative to the background poller,
+// allowing the frontend to trigger immediate PR detection.
+func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if s.githubService == nil {
+		return false, nil
+	}
+
+	// Check if a PR is already associated with this task
+	existing, err := s.githubService.GetTaskPR(ctx, taskID)
+	if err == nil && existing != nil {
+		return true, nil
+	}
+
+	// Resolve the GitHub owner/repo from the task's repository
+	owner, repoName := s.resolveTaskRepo(ctx, taskID)
+	if owner == "" || repoName == "" {
+		return false, nil
+	}
+
+	// Get the session's branch from the first worktree with a non-empty branch
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false, nil
+	}
+	branch := ""
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeBranch != "" {
+			branch = wt.WorktreeBranch
+			break
+		}
+	}
+	if branch == "" {
+		return false, nil
+	}
+
+	// Ensure a PR watch exists so the background poller will keep checking
+	if _, watchErr := s.githubService.EnsurePRWatch(ctx, sessionID, taskID, owner, repoName, branch); watchErr != nil {
+		s.logger.Warn("failed to ensure PR watch during check",
+			zap.String("session_id", sessionID),
+			zap.Error(watchErr))
+	}
+
+	// Try to find the PR immediately
+	client := s.githubService.Client()
+	if client == nil {
+		return false, nil
+	}
+	pr, findErr := client.FindPRByBranch(ctx, owner, repoName, branch)
+	if findErr != nil || pr == nil {
+		return false, nil
+	}
+
+	// Found a PR — associate it with the task
+	s.associatePRFromPush(ctx, sessionID, taskID, owner, repoName, branch, pr)
+	return true, nil
 }
 
 // subscribeGitHubEvents subscribes to GitHub-related events on the event bus.

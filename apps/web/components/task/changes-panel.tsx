@@ -27,7 +27,7 @@ import {
 } from "./changes-panel-timeline";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useActiveTaskPR, useTaskPRDetection } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -177,6 +177,7 @@ function getBaseBranchDisplay(baseBranch: string | undefined): string {
 }
 
 function useChangesPanelStoreData() {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const taskTitle = useAppStore((state) => {
     if (!state.tasks.activeTaskId) return undefined;
@@ -190,7 +191,7 @@ function useChangesPanelStoreData() {
     if (!taskId) return undefined;
     return state.taskPRs.byTaskId[taskId]?.pr_url ?? undefined;
   });
-  return { activeSessionId, taskTitle, baseBranch, existingPrUrl };
+  return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
 
 type ChangesPanelBodyProps = {
@@ -484,12 +485,20 @@ const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
 }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { activeSessionId, taskTitle, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl } =
+    useChangesPanelStoreData();
 
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
+
+  // Periodically check for a PR when the session has a branch but no PR yet
+  useTaskPRDetection(
+    isArchived ? null : (activeTaskId ?? null),
+    isArchived ? null : (activeSessionId ?? null),
+    isArchived ? null : (git.branch ?? null),
+  );
 
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
