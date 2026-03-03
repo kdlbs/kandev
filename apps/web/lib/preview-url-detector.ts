@@ -85,6 +85,7 @@ export function rewritePreviewUrlForProxy(
 
   try {
     const parsed = new URL(detectedUrl);
+    if (!LOCALHOST_HOSTS.has(parsed.hostname)) return null;
     if (!parsed.port) return null;
     const path = parsed.pathname + parsed.search + parsed.hash;
     return `/port-proxy/${sessionId}/${parsed.port}${path}`;

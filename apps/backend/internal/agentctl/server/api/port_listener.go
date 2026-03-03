@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -101,7 +103,9 @@ func parseHexIP(hexIP string) string {
 
 // detectFromLsof uses lsof as a fallback for non-Linux systems.
 func detectFromLsof() ([]ListeningPort, error) {
-	out, err := exec.Command("lsof", "-iTCP", "-sTCP:LISTEN", "-nP", "-F", "n").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "lsof", "-iTCP", "-sTCP:LISTEN", "-nP", "-F", "n").Output()
 	if err != nil {
 		return nil, fmt.Errorf("lsof failed: %w", err)
 	}

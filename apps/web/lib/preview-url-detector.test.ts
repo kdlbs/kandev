@@ -266,6 +266,10 @@ describe("rewritePreviewUrlForProxy", () => {
     expect(rewritePreviewUrlForProxy("http://localhost/", SESSION_ID, true)).toBeNull();
   });
 
+  it("returns null for non-localhost URLs on remote", () => {
+    expect(rewritePreviewUrlForProxy("https://example.com:443/", SESSION_ID, true)).toBeNull();
+  });
+
   it("returns null for invalid URLs on remote", () => {
     expect(rewritePreviewUrlForProxy("not-a-url", SESSION_ID, true)).toBeNull();
   });
