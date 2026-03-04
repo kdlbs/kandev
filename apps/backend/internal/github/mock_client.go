@@ -40,6 +40,12 @@ type submittedReview struct {
 	Body   string `json:"body"`
 }
 
+// repoKey is a composite key for per-repo lookups by owner/repo.
+type repoKey struct {
+	Owner string
+	Repo  string
+}
+
 // MockClient implements Client with in-memory configurable data for E2E testing.
 // All data is protected by a sync.RWMutex for thread safety.
 type MockClient struct {
@@ -49,6 +55,7 @@ type MockClient struct {
 	prsByBranch      map[branchKey]*PR
 	orgs             []GitHubOrg
 	repos            map[string][]GitHubRepo
+	branches         map[repoKey][]RepoBranch
 	reviews          map[prKey][]PRReview
 	comments         map[prKey][]PRComment
 	checks           map[checkKey][]CheckRun
@@ -64,6 +71,7 @@ func NewMockClient() *MockClient {
 		prs:         make(map[prKey]*PR),
 		prsByBranch: make(map[branchKey]*PR),
 		repos:       make(map[string][]GitHubRepo),
+		branches:    make(map[repoKey][]RepoBranch),
 		reviews:     make(map[prKey][]PRReview),
 		comments:    make(map[prKey][]PRComment),
 		checks:      make(map[checkKey][]CheckRun),
@@ -194,6 +202,12 @@ func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number
 	return m.commits[prKey{owner, repo, number}], nil
 }
 
+func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]RepoBranch, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.branches[repoKey{owner, repo}], nil
+}
+
 func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number int, event, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -227,6 +241,13 @@ func (m *MockClient) AddOrgs(orgs []GitHubOrg) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.orgs = append(m.orgs, orgs...)
+}
+
+// AddBranches sets branches for a repository.
+func (m *MockClient) AddBranches(owner, repo string, branches []RepoBranch) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.branches[repoKey{owner, repo}] = branches
 }
 
 // AddRepos appends repositories for an organization.
@@ -285,6 +306,7 @@ func (m *MockClient) Reset() {
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil
 	m.repos = make(map[string][]GitHubRepo)
+	m.branches = make(map[repoKey][]RepoBranch)
 	m.reviews = make(map[prKey][]PRReview)
 	m.comments = make(map[prKey][]PRComment)
 	m.checks = make(map[checkKey][]CheckRun)

@@ -46,6 +46,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
+	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 
 	api.GET("/stats", c.httpGetStats)
 }
@@ -258,6 +259,17 @@ func (c *Controller) httpSearchRepos(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"repos": repos})
+}
+
+func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	branches, err := c.service.ListRepoBranches(ctx.Request.Context(), owner, repo)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
 }
 
 func (c *Controller) httpGetStats(ctx *gin.Context) {

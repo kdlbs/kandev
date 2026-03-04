@@ -391,6 +391,25 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/branches", owner, repo),
+		"-X", "GET",
+		"-f", "per_page=100",
+		"--jq", ".[].name")
+	if err != nil {
+		return nil, fmt.Errorf("list repo branches: %w", err)
+	}
+	var branches []RepoBranch
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			branches = append(branches, RepoBranch{Name: name})
+		}
+	}
+	return branches, nil
+}
+
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {

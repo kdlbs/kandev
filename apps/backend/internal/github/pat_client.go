@@ -252,6 +252,21 @@ func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, numbe
 	return convertRawPRCommits(raw), nil
 }
 
+func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	var raw []struct {
+		Name string `json:"name"`
+	}
+	endpoint := fmt.Sprintf("/repos/%s/%s/branches?per_page=100", owner, repo)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("list repo branches: %w", err)
+	}
+	branches := make([]RepoBranch, len(raw))
+	for i, b := range raw {
+		branches[i] = RepoBranch{Name: b.Name}
+	}
+	return branches, nil
+}
+
 func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number)
 	payload := map[string]string{"event": event}
