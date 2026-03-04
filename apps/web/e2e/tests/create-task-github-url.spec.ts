@@ -3,7 +3,17 @@ import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
 test.describe("Task creation from GitHub URL", () => {
-  test("can create a task using a GitHub URL", async ({ testPage, apiClient, seedData, backend }) => {
+  // Allow one retry for transient backend port-allocation issues on cold start.
+  test.describe.configure({ retries: 1 });
+
+  test("can create a task using a GitHub URL with workspace interaction", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
     // Pre-seed a repository with GitHub provider info pointing to the real local git repo.
     // This lets FindOrCreateRepository find the repo (with its local_path) when the
     // GitHub URL is submitted, avoiding an actual clone.
@@ -69,6 +79,23 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Session transitions to idle
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+
+    // ── Workspace interaction: terminal ──
+    // Verify the terminal panel is visible and functional
+    await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+
+    // Create a file via the terminal
+    const testFileName = "e2e_github_url_test_file";
+    await session.typeInTerminal(`touch ${testFileName}`);
+    await session.expectTerminalHasText(testFileName);
+
+    // ── Workspace interaction: changes panel ──
+    // Switch to the Changes tab and verify the new file appears
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+
+    // The untracked file should appear in the changes panel
+    await expect(session.changes.getByText(testFileName)).toBeVisible({ timeout: 15_000 });
   });
 
   test("can create a GitHub URL task with worktree executor", async ({
