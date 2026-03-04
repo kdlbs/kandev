@@ -133,7 +133,7 @@ function RepoSourceInput({
 >) {
   if (useGitHubUrl) {
     return (
-      <div className="flex flex-col">
+      <div className="relative flex flex-col">
         <input
           type="text"
           value={githubUrl}
@@ -141,12 +141,12 @@ function RepoSourceInput({
           placeholder="https://github.com/owner/repo"
           data-testid="github-url-input"
           size={Math.max((githubUrl || "").length, 30)}
-          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
+          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 min-h-9 rounded-md px-3 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
           disabled={isTaskStarted}
           autoFocus
         />
         {githubUrlError && (
-          <span className="text-[11px] text-destructive px-1.5" data-testid="github-url-error">
+          <span className="absolute top-full left-0 text-[11px] text-destructive px-3 whitespace-nowrap" data-testid="github-url-error">
             {githubUrlError}
           </span>
         )}
@@ -192,7 +192,7 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
             <button
               type="button"
               onClick={onToggleGitHubUrl}
-              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer self-start px-1.5 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer self-start pl-3 transition-colors"
               data-testid="toggle-github-url"
             >
               {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
@@ -395,6 +395,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositoryId: fs.repositoryId,
     selectedLocalRepo: fs.selectedLocalRepo,
+    useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     branch: fs.branch,
     agentProfileId: fs.agentProfileId,

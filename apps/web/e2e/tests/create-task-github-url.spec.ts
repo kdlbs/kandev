@@ -252,6 +252,86 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
   });
 
+  test("uses correct repository when creating tasks from different GitHub URLs", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    // Seed two distinct GitHub-backed repositories
+    const repoDirA = `${backend.tmpDir}/repos/e2e-repo`;
+    await apiClient.createRepository(seedData.workspaceId, repoDirA, "main", {
+      name: "owner-a/repo-a",
+      provider: "github",
+      provider_owner: "owner-a",
+      provider_name: "repo-a",
+    });
+    await apiClient.mockGitHubAddBranches("owner-a", "repo-a", [{ name: "main" }]);
+
+    const repoDirB = `${backend.tmpDir}/repos/e2e-repo-b`;
+    const { execSync } = await import("child_process");
+    const fs = await import("fs");
+    fs.mkdirSync(repoDirB, { recursive: true });
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    };
+    execSync("git init -b main", { cwd: repoDirB, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoDirB, env: gitEnv });
+    await apiClient.createRepository(seedData.workspaceId, repoDirB, "main", {
+      name: "owner-b/repo-b",
+      provider: "github",
+      provider_owner: "owner-b",
+      provider_name: "repo-b",
+    });
+    await apiClient.mockGitHubAddBranches("owner-b", "repo-b", [{ name: "main" }]);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // ── First task from repo-a ──
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await testPage.getByTestId("toggle-github-url").click();
+    await testPage.getByTestId("github-url-input").fill("https://github.com/owner-a/repo-a");
+    await testPage.getByTestId("task-title-input").fill("Task A");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+    await expect(kanban.taskCardByTitle("Task A")).toBeVisible({ timeout: 10_000 });
+
+    // ── Second task from repo-b (different URL) ──
+    await kanban.createTaskButton.first().click();
+    await expect(dialog).toBeVisible();
+    await testPage.getByTestId("toggle-github-url").click();
+    await testPage.getByTestId("github-url-input").fill("https://github.com/owner-b/repo-b");
+    await testPage.getByTestId("task-title-input").fill("Task B");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Both cards visible — second task created successfully on its own repo
+    await expect(kanban.taskCardByTitle("Task B")).toBeVisible({ timeout: 10_000 });
+
+    // Navigate to Task B session and verify agent completes
+    await kanban.taskCardByTitle("Task B").click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+  });
+
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

@@ -49,9 +49,9 @@ export function useRepositoryAutoSelectEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const { repositoryId, selectedLocalRepo, setRepositoryId } = fs;
+  const { repositoryId, selectedLocalRepo, useGitHubUrl, setRepositoryId } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || repositoryId || selectedLocalRepo) return;
+    if (!open || !workspaceId || repositoryId || selectedLocalRepo || useGitHubUrl) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
     if (lastUsedRepoId && repositories.some((r: Repository) => r.id === lastUsedRepoId)) {
       void Promise.resolve().then(() => setRepositoryId(lastUsedRepoId));
@@ -59,7 +59,7 @@ export function useRepositoryAutoSelectEffect(
     }
     if (repositories.length === 1)
       void Promise.resolve().then(() => setRepositoryId(repositories[0].id));
-  }, [open, repositories, repositoryId, selectedLocalRepo, workspaceId, setRepositoryId]);
+  }, [open, repositories, repositoryId, selectedLocalRepo, useGitHubUrl, workspaceId, setRepositoryId]);
 }
 
 export function useDiscoverReposEffect(
@@ -240,7 +240,6 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
 export function useGitHubUrlBranchesEffect(
   fs: DialogFormState,
   open: boolean,
-  toast: ReturnType<typeof useToast>["toast"],
 ) {
   const {
     useGitHubUrl,
@@ -272,15 +271,9 @@ export function useGitHubUrlBranchesEffect(
         setGitHubBranches(res.branches.map((b) => ({ name: b.name, type: "remote" as const })));
         setGitHubUrlError(null);
       })
-      .catch((e) => {
+      .catch(() => {
         if (cancelled) return;
-        const message = e instanceof Error ? e.message : "Could not fetch branches from GitHub";
         setGitHubUrlError(`Repository not found or not accessible`);
-        toast({
-          title: "Failed to load branches",
-          description: message,
-          variant: "error",
-        });
         setGitHubBranches([]);
       })
       .finally(() => {
@@ -296,7 +289,6 @@ export function useGitHubUrlBranchesEffect(
     setGitHubBranches,
     setGitHubBranchesLoading,
     setGitHubUrlError,
-    toast,
   ]);
 }
 
@@ -309,5 +301,5 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useBranchAutoSelectEffect(fs, branches);
   useLocalBranchesEffect(fs, open, workspaceId, toast);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults });
-  useGitHubUrlBranchesEffect(fs, open, toast);
+  useGitHubUrlBranchesEffect(fs, open);
 }
