@@ -53,6 +53,11 @@ type AgentExecution struct {
 	// Passthrough mode info (CLI passthrough without ACP)
 	PassthroughProcessID string // Process ID in the interactive runner (empty if not in passthrough mode)
 
+	// isResumedSession is true when this execution was created as part of a session resume
+	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
+	// to ResumePassthroughSession instead of startPassthroughSession.
+	isResumedSession bool
+
 	// Buffers for accumulating agent response during a prompt
 	messageBuffer  strings.Builder
 	thinkingBuffer strings.Builder

@@ -389,6 +389,9 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}
+	if req.PreviousExecutionID != "" {
+		execution.isResumedSession = true
+	}
 	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_

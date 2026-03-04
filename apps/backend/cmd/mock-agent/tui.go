@@ -11,10 +11,16 @@ import (
 // runTUI starts a simple terminal UI mode for passthrough/PTY testing.
 // It renders a prompt, processes input, shows a response, and waits for more input.
 // The idle timeout in InteractiveRunner triggers turn completion when output stops.
-func runTUI(model, initialPrompt string) {
+// When resumed is true (--resume or -c flag was passed), the header shows "(RESUMED)".
+func runTUI(model, initialPrompt string, resumed bool) {
 	// Print header
-	fmt.Print("\033[1;36m╭─ Mock Agent ─╮\033[0m\r\n")
-	fmt.Print("\033[1;36m╰──────────────╯\033[0m\r\n\r\n")
+	if resumed {
+		fmt.Print("\033[1;36m╭─ Mock Agent (RESUMED) ─╮\033[0m\r\n")
+		fmt.Print("\033[1;36m╰────────────────────────╯\033[0m\r\n\r\n")
+	} else {
+		fmt.Print("\033[1;36m╭─ Mock Agent ─╮\033[0m\r\n")
+		fmt.Print("\033[1;36m╰──────────────╯\033[0m\r\n\r\n")
+	}
 
 	// Process initial prompt if provided via --prompt flag
 	if initialPrompt != "" {

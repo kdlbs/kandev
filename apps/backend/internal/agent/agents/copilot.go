@@ -31,14 +31,15 @@ func NewCopilot() *Copilot {
 		StandardPassthrough: StandardPassthrough{
 			PermSettings: copilotPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:      true,
-				Label:          "CLI Passthrough",
-				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", "@github/copilot"),
-				ModelFlag:      NewParam("--model", "{model}"),
-				IdleTimeout:    3 * time.Second,
-				BufferMaxBytes: DefaultBufferMaxBytes,
-				ResumeFlag:     NewParam("--resume"),
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand("npx", "-y", "@github/copilot"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
+				ResumeFlag:        NewParam("--continue"),
+				SessionResumeFlag: NewParam("--resume"),
 			},
 		},
 	}

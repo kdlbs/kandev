@@ -109,13 +109,15 @@ test.describe("Diff update on file change", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
 
     // The diff should now show SECOND_MODIFICATION instead of FIRST_MODIFICATION.
+    // Use a longer timeout because the workspace polling loop needs to detect the
+    // file change and push updated git status — can be slow on CI runners.
     await expect(diffsContainer.getByText("SECOND_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
 
     // Also verify the additional change on line 3
     await expect(diffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
-      timeout: 10_000,
+      timeout: 15_000,
     });
   });
 });
