@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -266,7 +267,17 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 	repo := ctx.Param("repo")
 	branches, err := c.service.ListRepoBranches(ctx.Request.Context(), owner, repo)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized, http.StatusForbidden:
+				status = http.StatusUnauthorized
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"branches": branches})

@@ -207,7 +207,11 @@ func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]
 	defer m.mu.RUnlock()
 	branches, ok := m.branches[repoKey{owner, repo}]
 	if !ok {
-		return nil, fmt.Errorf("mock: repository %s/%s not found", owner, repo)
+		return nil, &GitHubAPIError{
+			StatusCode: 404,
+			Endpoint:   fmt.Sprintf("/repos/%s/%s/branches", owner, repo),
+			Body:       fmt.Sprintf("repository %s/%s not found", owner, repo),
+		}
 	}
 	return branches, nil
 }

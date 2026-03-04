@@ -14,6 +14,17 @@ import (
 
 const githubAPIBase = "https://api.github.com"
 
+// GitHubAPIError represents an error response from the GitHub API with a status code.
+type GitHubAPIError struct {
+	StatusCode int
+	Endpoint   string
+	Body       string
+}
+
+func (e *GitHubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+}
+
 // PATClient implements Client using a GitHub Personal Access Token.
 type PATClient struct {
 	token      string
@@ -322,7 +333,7 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("GitHub API %s returned %d: %s", endpoint, resp.StatusCode, string(body))
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }
