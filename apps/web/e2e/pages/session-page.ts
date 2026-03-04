@@ -289,4 +289,14 @@ export class SessionPage {
     await expect(this.files).toBeVisible({ timeout: 10_000 });
     await expect(this.sidebar).toBeVisible();
   }
+
+  /** Locator for the VS Code dockview tab. */
+  vscodeTab(): Locator {
+    return this.page.locator(".dv-default-tab:has-text('VS Code')");
+  }
+
+  /** Locator for the VS Code code-server iframe. */
+  vscodeIframe(): Locator {
+    return this.page.locator('iframe[title="VS Code"]');
+  }
 }

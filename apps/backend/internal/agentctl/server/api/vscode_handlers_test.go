@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -128,7 +131,12 @@ func TestHandleVscodeOpenFile_InvalidBody(t *testing.T) {
 	}
 }
 
-func TestHandleVscodeOpenFile_NotRunning(t *testing.T) {
+func TestHandleVscodeOpenFile_NotRunning_AutoStartAttempted(t *testing.T) {
+	// Use isolated TMPDIR so the IPC socket search finds no sockets.
+	t.Setenv("TMPDIR", t.TempDir())
+	// Isolate HOME so ResolveBinary won't find a real code-server install.
+	t.Setenv("HOME", t.TempDir())
+
 	s := newTestServer(t)
 
 	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 10, Col: 5})
@@ -138,9 +146,21 @@ func TestHandleVscodeOpenFile_NotRunning(t *testing.T) {
 
 	s.router.ServeHTTP(w, req)
 
-	// Code-server is not running, should get 500
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", w.Code)
+	// Auto-start is attempted but fails (no code-server binary in isolated HOME).
+	// The key assertion is that auto-start was attempted: status != stopped.
+	info := s.procMgr.VscodeInfo()
+	if info.Status == "stopped" {
+		t.Error("expected vscode status to change from stopped (auto-start should have been attempted)")
+	}
+
+	var resp types.VscodeOpenFileResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// The error should NOT be the old "is not running" message.
+	if !resp.Success && strings.Contains(resp.Error, "is not running") {
+		t.Errorf("expected auto-start to be attempted, not 'is not running'; got: %s", resp.Error)
 	}
 }
 
@@ -166,5 +186,56 @@ func TestHandleVscodeStatus_AfterStart(t *testing.T) {
 	// Status should be installing or error (since code-server binary won't exist in tests)
 	if resp.Status != "installing" && resp.Status != "error" && resp.Status != "starting" {
 		t.Errorf("expected installing/error/starting, got %q", resp.Status)
+	}
+}
+
+// TestVscodeOpenFile_WaitsForRunning_E2E verifies the end-to-end flow where
+// open-file is called while vscode is still starting up. The handler should
+// wait for vscode to become ready before attempting to open the file.
+// This uses the real HTTP handler chain: HTTP request → Gin handler →
+// procMgr.VscodeOpenFile (auto-start + WaitForRunning) → VscodeManager.OpenFile.
+func TestVscodeOpenFile_WaitsForRunning_E2E(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.router)
+	defer ts.Close()
+
+	// Inject a VscodeManager that transitions from "installing" to "running" after 200ms.
+	s.procMgr.SetVscodeTransitionForTest(process.VscodeStatusInstalling, 0, 200*time.Millisecond)
+
+	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 1})
+
+	// open-file should block waiting for vscode to become running.
+	// It will reach "running" status, but then OpenFile will fail because
+	// there's no real code-server binary/IPC socket. That's expected —
+	// the important assertion is that WaitForRunning succeeded (no "not running" error).
+	resp, err := http.Post(ts.URL+"/api/v1/vscode/open-file", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	var result types.VscodeOpenFileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// The request should fail because there's no real code-server binary,
+	// but the error should be about the binary/IPC socket, NOT about
+	// "code-server is not running" — proving WaitForRunning worked.
+	if result.Success {
+		t.Error("expected success=false (no real code-server binary)")
+	}
+	if result.Error == "" {
+		t.Error("expected an error message")
+	}
+
+	// Crucially, the error must NOT be the old "code-server is not running" message.
+	if strings.Contains(result.Error, "is not running") {
+		t.Errorf("expected error about binary/socket, not 'is not running'; got: %s", result.Error)
+	}
+	// The error should be about the binary path or IPC socket not being found.
+	if !strings.Contains(result.Error, "binary") && !strings.Contains(result.Error, "remote CLI") &&
+		!strings.Contains(result.Error, "IPC") && !strings.Contains(result.Error, "not resolved") {
+		t.Logf("unexpected error (test may need updating): %s", result.Error)
 	}
 }

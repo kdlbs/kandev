@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,19 +81,23 @@ func TestFindVscodeIPCSocket_NoSockets(t *testing.T) {
 }
 
 func TestFindVscodeIPCSocket_ReturnsMostRecent(t *testing.T) {
-	tmpDir := t.TempDir()
+	// Use /tmp directly to avoid macOS Unix socket path length limits.
+	tmpDir, err := os.MkdirTemp("/tmp", "vscode-ipc-test-")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
 	t.Setenv("TMPDIR", tmpDir)
 
-	// Create two sock files with different mod times
+	// Create a stale socket file (no listener — should be skipped)
 	sock1 := filepath.Join(tmpDir, "vscode-ipc-old.sock")
-	sock2 := filepath.Join(tmpDir, "vscode-ipc-new.sock")
-
 	require.NoError(t, os.WriteFile(sock1, nil, 0o600))
-	// Set old mod time
 	oldTime := time.Now().Add(-1 * time.Hour)
 	require.NoError(t, os.Chtimes(sock1, oldTime, oldTime))
 
-	require.NoError(t, os.WriteFile(sock2, nil, 0o600))
+	// Create a live socket with a real Unix listener
+	sock2 := filepath.Join(tmpDir, "vscode-ipc-new.sock")
+	ln, err := net.Listen("unix", sock2)
+	require.NoError(t, err)
+	defer ln.Close() //nolint:errcheck
 
 	result, err := findVscodeIPCSocket()
 	require.NoError(t, err)
@@ -110,6 +115,48 @@ func TestFindVscodeIPCSocket_IgnoresNonSockFiles(t *testing.T) {
 	_, err := findVscodeIPCSocket()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no vscode-ipc-")
+}
+
+func TestWaitForVscodeIPCSocket_SocketAppearsAfterDelay(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("/tmp", "vscode-ipc-test-")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck
+	t.Setenv("TMPDIR", tmpDir)
+
+	// Create the socket after a short delay, simulating code-server startup.
+	sockPath := filepath.Join(tmpDir, "vscode-ipc-delayed.sock")
+	lnCh := make(chan net.Listener, 1)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		ln, listenErr := net.Listen("unix", sockPath)
+		if listenErr != nil {
+			return
+		}
+		lnCh <- ln
+	}()
+	t.Cleanup(func() {
+		select {
+		case ln := <-lnCh:
+			ln.Close() //nolint:errcheck
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := waitForVscodeIPCSocket(ctx, 5*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, sockPath, result)
+}
+
+func TestWaitForVscodeIPCSocket_Timeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpDir)
+
+	ctx := context.Background()
+	_, err := waitForVscodeIPCSocket(ctx, 2*time.Second)
+	assert.Error(t, err)
 }
 
 func TestWriteThemeSettings_DarkTheme(t *testing.T) {
@@ -278,4 +325,78 @@ func TestVscodeInfo_JSON_OmitsEmpty(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &raw))
 	assert.NotContains(t, raw, "error")
 	assert.NotContains(t, raw, "message")
+}
+
+func TestVscodeManager_WaitForRunning_AlreadyRunning(t *testing.T) {
+	log := newTestLogger(t)
+	v := NewVscodeManager("code-server", "/workspace", "dark", nil, log)
+
+	v.mu.Lock()
+	v.status = VscodeStatusRunning
+	v.mu.Unlock()
+
+	err := v.WaitForRunning(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestVscodeManager_WaitForRunning_ErrorStatus(t *testing.T) {
+	log := newTestLogger(t)
+	v := NewVscodeManager("code-server", "/workspace", "dark", nil, log)
+
+	v.mu.Lock()
+	v.status = VscodeStatusError
+	v.err = "install failed"
+	v.mu.Unlock()
+
+	err := v.WaitForRunning(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "install failed")
+}
+
+func TestVscodeManager_WaitForRunning_StoppedStatus(t *testing.T) {
+	log := newTestLogger(t)
+	v := NewVscodeManager("code-server", "/workspace", "dark", nil, log)
+
+	err := v.WaitForRunning(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped")
+}
+
+func TestVscodeManager_WaitForRunning_ContextCancelled(t *testing.T) {
+	log := newTestLogger(t)
+	v := NewVscodeManager("code-server", "/workspace", "dark", nil, log)
+
+	v.mu.Lock()
+	v.status = VscodeStatusInstalling
+	v.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := v.WaitForRunning(ctx)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestVscodeManager_WaitForRunning_TransitionsToRunning(t *testing.T) {
+	log := newTestLogger(t)
+	v := NewVscodeManager("code-server", "/workspace", "dark", nil, log)
+
+	v.mu.Lock()
+	v.status = VscodeStatusInstalling
+	v.mu.Unlock()
+
+	// Simulate async startup completing after a short delay
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		v.mu.Lock()
+		v.status = VscodeStatusRunning
+		v.mu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := v.WaitForRunning(ctx)
+	assert.NoError(t, err)
 }
