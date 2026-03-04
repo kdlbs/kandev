@@ -237,26 +237,43 @@ export function useGitHubUrlBranchesEffect(
   open: boolean,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
-  const { useGitHubUrl, githubUrl, setGitHubBranches, setGitHubBranchesLoading } = fs;
+  const {
+    useGitHubUrl,
+    githubUrl,
+    setGitHubBranches,
+    setGitHubBranchesLoading,
+    setGitHubUrlError,
+  } = fs;
   useEffect(() => {
     if (!open || !useGitHubUrl) return;
+    const trimmed = githubUrl.trim();
+    if (!trimmed) {
+      setGitHubBranches([]);
+      setGitHubUrlError(null);
+      return;
+    }
     const parsed = parseGitHubUrl(githubUrl);
     if (!parsed) {
       setGitHubBranches([]);
+      setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo");
       return;
     }
     let cancelled = false;
+    setGitHubUrlError(null);
     setGitHubBranchesLoading(true);
     fetchRepoBranches(parsed.owner, parsed.repo)
       .then((res) => {
         if (cancelled) return;
         setGitHubBranches(res.branches.map((b) => ({ name: b.name, type: "remote" as const })));
+        setGitHubUrlError(null);
       })
       .catch((e) => {
         if (cancelled) return;
+        const message = e instanceof Error ? e.message : "Could not fetch branches from GitHub";
+        setGitHubUrlError(`Repository not found or not accessible`);
         toast({
           title: "Failed to load branches",
-          description: e instanceof Error ? e.message : "Could not fetch branches from GitHub",
+          description: message,
           variant: "error",
         });
         setGitHubBranches([]);
@@ -267,7 +284,15 @@ export function useGitHubUrlBranchesEffect(
     return () => {
       cancelled = true;
     };
-  }, [open, useGitHubUrl, githubUrl, setGitHubBranches, setGitHubBranchesLoading, toast]);
+  }, [
+    open,
+    useGitHubUrl,
+    githubUrl,
+    setGitHubBranches,
+    setGitHubBranchesLoading,
+    setGitHubUrlError,
+    toast,
+  ]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {

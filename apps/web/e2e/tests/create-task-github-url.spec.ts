@@ -171,6 +171,90 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
 
+  test("shows error for invalid GitHub URL format", async ({ testPage }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+
+    // Toggle to GitHub URL mode
+    await testPage.getByTestId("toggle-github-url").click();
+    const urlInput = testPage.getByTestId("github-url-input");
+    const errorEl = testPage.getByTestId("github-url-error");
+
+    // Type an invalid URL — error should appear
+    await urlInput.fill("not-a-github-url");
+    await expect(errorEl).toBeVisible({ timeout: 5_000 });
+    await expect(errorEl).toContainText("Invalid GitHub URL");
+
+    // Clear the input — error should disappear
+    await urlInput.fill("");
+    await expect(errorEl).not.toBeVisible({ timeout: 5_000 });
+
+    // Type another invalid URL (missing repo)
+    await urlInput.fill("https://github.com/owner-only");
+    await expect(errorEl).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("shows error for nonexistent repository", async ({ testPage }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+
+    // Toggle to GitHub URL mode and enter a repo that isn't seeded in mock data
+    await testPage.getByTestId("toggle-github-url").click();
+    await testPage.getByTestId("github-url-input").fill("https://github.com/no-such-owner/no-such-repo");
+
+    // The error should appear after the branch fetch fails
+    const errorEl = testPage.getByTestId("github-url-error");
+    await expect(errorEl).toBeVisible({ timeout: 10_000 });
+    await expect(errorEl).toContainText("not found or not accessible");
+  });
+
+  test("clears error when valid repository URL is entered", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    // Pre-seed a valid repo
+    const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "test-owner/test-repo",
+      provider: "github",
+      provider_owner: "test-owner",
+      provider_name: "test-repo",
+    });
+    await apiClient.mockGitHubAddBranches("test-owner", "test-repo", [{ name: "main" }]);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+
+    await testPage.getByTestId("toggle-github-url").click();
+    const urlInput = testPage.getByTestId("github-url-input");
+    const errorEl = testPage.getByTestId("github-url-error");
+
+    // Start with an invalid URL — error appears
+    await urlInput.fill("bad-url");
+    await expect(errorEl).toBeVisible({ timeout: 5_000 });
+
+    // Replace with a valid, seeded URL — error clears, branches load
+    await urlInput.fill("https://github.com/test-owner/test-repo");
+    await expect(errorEl).not.toBeVisible({ timeout: 10_000 });
+
+    // Branches should load and start button should become enabled
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await testPage.getByTestId("task-title-input").fill("Validation Test");
+    await testPage.getByTestId("task-description-input").fill("test");
+    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+  });
+
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

@@ -98,6 +98,7 @@ type DialogHeaderContentProps = {
   onTaskNameChange: (v: string) => void;
   useGitHubUrl: boolean;
   githubUrl: string;
+  githubUrlError: string | null;
   onToggleGitHubUrl: () => void;
   onGitHubUrlChange: (v: string) => void;
 };
@@ -105,6 +106,7 @@ type DialogHeaderContentProps = {
 function RepoSourceInput({
   useGitHubUrl,
   githubUrl,
+  githubUrlError,
   onGitHubUrlChange,
   isTaskStarted,
   headerRepositoryOptions,
@@ -118,6 +120,7 @@ function RepoSourceInput({
   DialogHeaderContentProps,
   | "useGitHubUrl"
   | "githubUrl"
+  | "githubUrlError"
   | "onGitHubUrlChange"
   | "isTaskStarted"
   | "headerRepositoryOptions"
@@ -130,17 +133,24 @@ function RepoSourceInput({
 >) {
   if (useGitHubUrl) {
     return (
-      <input
-        type="text"
-        value={githubUrl}
-        onChange={(e) => onGitHubUrlChange(e.target.value)}
-        placeholder="https://github.com/owner/repo"
-        data-testid="github-url-input"
-        size={Math.max((githubUrl || "").length, 30)}
-        className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 hover:bg-muted focus:bg-muted transition-colors"
-        disabled={isTaskStarted}
-        autoFocus
-      />
+      <div className="flex flex-col">
+        <input
+          type="text"
+          value={githubUrl}
+          onChange={(e) => onGitHubUrlChange(e.target.value)}
+          placeholder="https://github.com/owner/repo"
+          data-testid="github-url-input"
+          size={Math.max((githubUrl || "").length, 30)}
+          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
+          disabled={isTaskStarted}
+          autoFocus
+        />
+        {githubUrlError && (
+          <span className="text-[11px] text-destructive px-1.5" data-testid="github-url-error">
+            {githubUrlError}
+          </span>
+        )}
+      </div>
     );
   }
   return (
@@ -462,6 +472,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             onTaskNameChange={handlers.handleTaskNameChange}
             useGitHubUrl={fs.useGitHubUrl}
             githubUrl={fs.githubUrl}
+            githubUrlError={fs.githubUrlError}
             onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
             onGitHubUrlChange={handlers.handleGitHubUrlChange}
           />

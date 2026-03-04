@@ -205,7 +205,11 @@ func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number
 func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]RepoBranch, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.branches[repoKey{owner, repo}], nil
+	branches, ok := m.branches[repoKey{owner, repo}]
+	if !ok {
+		return nil, fmt.Errorf("mock: repository %s/%s not found", owner, repo)
+	}
+	return branches, nil
 }
 
 func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number int, event, body string) error {
