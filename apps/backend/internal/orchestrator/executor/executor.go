@@ -284,6 +284,20 @@ type Executor struct {
 	// This prevents race conditions when the backend restarts and multiple resume requests
 	// arrive simultaneously (e.g., from frontend auto-resume).
 	sessionLocks sync.Map // map[string]*sync.Mutex
+
+	// Optional cloner for provider-backed repos without a local path.
+	repoCloner  RepoCloner
+	repoUpdater RepoUpdater
+}
+
+// RepoCloner clones remote repositories to local disk.
+type RepoCloner interface {
+	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
+}
+
+// RepoUpdater updates repository records in the database.
+type RepoUpdater interface {
+	UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -322,4 +336,10 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // which updates the DB and publishes WebSocket events to the frontend.
 func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 	e.onSessionStateChange = fn
+}
+
+// SetRepoCloner sets the cloner used to clone provider-backed repositories on launch.
+func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
+	e.repoCloner = cloner
+	e.repoUpdater = updater
 }

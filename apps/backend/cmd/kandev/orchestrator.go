@@ -84,6 +84,9 @@ func provideOrchestrator(
 			taskSvc:  taskSvc,
 			logger:   log,
 		})
+
+		// Wire repo cloner into executor for provider-backed repos with no local path
+		orchestratorSvc.SetRepoCloner(repoCloner, &repoLocalPathUpdater{svc: taskSvc})
 	}
 
 	return orchestratorSvc, msgCreator, nil
@@ -190,6 +193,18 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+}
+
+// repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.
+type repoLocalPathUpdater struct {
+	svc *taskservice.Service
+}
+
+func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error {
+	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
+		LocalPath: &localPath,
+	})
+	return err
 }
 
 // repositoryResolverAdapter resolves GitHub repos by cloning + finding/creating DB records.

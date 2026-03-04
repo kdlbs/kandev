@@ -16,6 +16,7 @@ type TaskRepositoryInput struct {
 	LocalPath      string `json:"local_path,omitempty"`
 	Name           string `json:"name,omitempty"`
 	DefaultBranch  string `json:"default_branch,omitempty"`
+	GitHubURL      string `json:"github_url,omitempty"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

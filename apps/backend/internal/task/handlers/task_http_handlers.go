@@ -289,6 +289,7 @@ type httpTaskRepositoryInput struct {
 	LocalPath     string `json:"local_path"`
 	Name          string `json:"name"`
 	DefaultBranch string `json:"default_branch"`
+	GitHubURL     string `json:"github_url"`
 }
 
 type httpCreateTaskRequest struct {
@@ -371,8 +372,8 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryInput) ([]dto.TaskRepositoryInput, bool) {
 	var repos []dto.TaskRepositoryInput
 	for _, r := range inputs {
-		if r.RepositoryID == "" && r.LocalPath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id or local_path is required"})
+		if r.RepositoryID == "" && r.LocalPath == "" && r.GitHubURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or github_url is required"})
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
@@ -381,6 +382,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			LocalPath:     r.LocalPath,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,
+			GitHubURL:     r.GitHubURL,
 		})
 	}
 	return repos, true

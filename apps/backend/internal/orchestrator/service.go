@@ -305,6 +305,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
+// cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
+// for local/worktree execution and have no local path yet.
+func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.RepoUpdater) {
+	s.executor.SetRepoCloner(cloner, updater)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
