@@ -2,6 +2,21 @@
 
 All notable changes to Kandev.
 
+## 0.12 - 2026-03-04
+
+### Features
+
+- tui agents with workflows and code quality improvements ([#360](https://github.com/kdlbs/kandev/pull/360))
+- improve closing resources (PTYs, connections) ([#355](https://github.com/kdlbs/kandev/pull/355))
+- improve git operations (branch rename, amend commit, file rename, reset) ([#337](https://github.com/kdlbs/kandev/pull/337))
+
+### Bug Fixes
+
+- resolve stale PR data on task switch and deduplicate lifecycle code ([#361](https://github.com/kdlbs/kandev/pull/361))
+- ui improvements for pr panel, git operations, and task sidebar ([#359](https://github.com/kdlbs/kandev/pull/359))
+- clear stale PR data on task switch and add on-demand PR detection ([#357](https://github.com/kdlbs/kandev/pull/357))
+- replace fsnotify with git polling to prevent fd exhaustion ([#356](https://github.com/kdlbs/kandev/pull/356))
+
 ## 0.11 - 2026-03-03
 
 ### Bug Fixes
