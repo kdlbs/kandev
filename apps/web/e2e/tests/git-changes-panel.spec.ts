@@ -940,9 +940,14 @@ test.describe("Git Changes Panel", () => {
     // Wait for commits to appear
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
 
-    // Click on "All Changes" or cumulative diff view if available
-    // Look for the cumulative diff file in the changes list
-    const allChangesItem = testPage.getByText("cumulative-file.txt");
-    await expect(allChangesItem).toBeVisible({ timeout: 10_000 });
+    // Wait for both commits to be visible
+    await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 10_000 });
+    await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 10_000 });
+
+    // Click the "Diff" button in the header to open the cumulative diff view
+    await session.changes.getByRole("button", { name: "Diff" }).click();
+
+    // The cumulative diff view should show the file
+    await expect(testPage.getByText("cumulative-file.txt")).toBeVisible({ timeout: 10_000 });
   });
 });
