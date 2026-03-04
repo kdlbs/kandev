@@ -214,7 +214,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	containerName := fmt.Sprintf("kandev-agent-%s", config.InstanceID[:8])
 
-	return docker.ContainerConfig{
+	containerCfg := docker.ContainerConfig{
 		Name:        containerName,
 		Image:       imageName,
 		Cmd:         cmd.Args(),
@@ -231,7 +231,13 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 			"kandev.session_id":  config.SessionID,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
-	}, nil
+	}
+
+	if config.ProfileInfo != nil && config.ProfileInfo.ProfileID != "" {
+		containerCfg.Labels["kandev.profile_id"] = config.ProfileInfo.ProfileID
+	}
+
+	return containerCfg, nil
 }
 
 // expandMounts expands mount templates with actual paths

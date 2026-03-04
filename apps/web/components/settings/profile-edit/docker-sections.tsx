@@ -17,6 +17,9 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 
+const DEFAULT_IMAGE_TAG = "kandev/agent:latest";
+const DEFAULT_DOCKERFILE = "FROM ubuntu:24.04\n";
+
 type BuildStatus = "idle" | "building" | "success" | "failed";
 
 function BuildStatusBadge({ status }: { status: BuildStatus }) {
@@ -47,6 +50,12 @@ function useBuildStream() {
     setBuildLog("");
     try {
       const response = await buildDockerImage({ dockerfile, tag });
+      if (!response.ok) {
+        const text = await response.text();
+        setBuildStatus("failed");
+        setBuildLog(`Build failed (${response.status}): ${text}`);
+        return;
+      }
       const reader = response.body?.getReader();
       if (!reader) {
         setBuildStatus("failed");
@@ -97,11 +106,32 @@ export function DockerfileBuildCard({
     if (dockerfile.trim() && imageTag.trim()) void runBuild(dockerfile, imageTag);
   };
 
+  const canFillDefaults = !dockerfile.trim() || !imageTag.trim();
+
+  const fillDefaults = () => {
+    if (!imageTag.trim()) onImageTagChange(DEFAULT_IMAGE_TAG);
+    if (!dockerfile.trim()) onDockerfileChange(DEFAULT_DOCKERFILE);
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Dockerfile</CardTitle>
-        <CardDescription>Define the Docker image. Build and test it here.</CardDescription>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <CardTitle>Dockerfile</CardTitle>
+            <CardDescription>Define the Docker image. Build and test it here.</CardDescription>
+          </div>
+          {canFillDefaults && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fillDefaults}
+              className="cursor-pointer text-xs text-muted-foreground"
+            >
+              Use defaults
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
@@ -110,7 +140,7 @@ export function DockerfileBuildCard({
             id="image-tag"
             value={imageTag}
             onChange={(e) => onImageTagChange(e.target.value)}
-            placeholder="kandev/custom:latest"
+            placeholder={DEFAULT_IMAGE_TAG}
             className="font-mono text-sm"
           />
         </div>
