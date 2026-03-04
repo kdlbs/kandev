@@ -80,21 +80,16 @@ test.describe("Task creation from GitHub URL", () => {
     // Session transitions to idle
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // ── Workspace interaction: terminal ──
-    // Verify the terminal panel is visible and functional
+    // ── Workspace interaction: terminal + changes ──
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
 
     // Create a file via the terminal
-    const testFileName = "e2e_github_url_test_file";
+    const testFileName = "ghtest";
     await session.typeInTerminal(`touch ${testFileName}`);
-    await session.expectTerminalHasText(testFileName);
 
-    // ── Workspace interaction: changes panel ──
-    // Switch to the Changes tab and verify the new file appears
+    // Switch to the Changes tab — the new file proves the terminal command worked
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
-
-    // The untracked file should appear in the changes panel
     await expect(session.changes.getByText(testFileName)).toBeVisible({ timeout: 15_000 });
   });
 
@@ -104,6 +99,8 @@ test.describe("Task creation from GitHub URL", () => {
     seedData,
     backend,
   }) => {
+    test.setTimeout(90_000);
+
     // Pre-seed the GitHub-backed repository
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {

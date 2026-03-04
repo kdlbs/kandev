@@ -216,7 +216,12 @@ export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[
   }, [branch, localBranches, repositoryId, setBranch]);
   useEffect(() => {
     if (!useGitHubUrl || githubBranches.length === 0 || branch) return;
-    autoSelectBranch(githubBranches, setBranch);
+    // GitHub URL branches are referenced by name only (no remote prefix).
+    // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
+    const preferred = githubBranches.find((b) => b.name === "main")
+      ?? githubBranches.find((b) => b.name === "master")
+      ?? githubBranches[0];
+    if (preferred) setBranch(preferred.name);
   }, [branch, githubBranches, useGitHubUrl, setBranch]);
 }
 
