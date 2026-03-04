@@ -590,12 +590,7 @@ test.describe("Git Changes Panel", () => {
    * This was a critical bug where commits would disappear after refresh
    * because the backend was using the wrong WebSocket handler.
    */
-  test("commits persist after page refresh", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-  }) => {
+  test("commits persist after page refresh", async ({ testPage, apiClient, seedData, backend }) => {
     const profile = await createStandardProfile(apiClient, "Git Refresh Profile");
 
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Refresh Test", profile.id, {
@@ -950,6 +945,4 @@ test.describe("Git Changes Panel", () => {
     const allChangesItem = testPage.getByText("cumulative-file.txt");
     await expect(allChangesItem).toBeVisible({ timeout: 10_000 });
   });
-
 });
-

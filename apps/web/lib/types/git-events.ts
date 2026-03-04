@@ -63,7 +63,4 @@ export type GitCommitsResetEvent = GitEventBase & {
 };
 
 // Discriminated union
-export type GitEventPayload =
-  | GitStatusUpdateEvent
-  | GitCommitCreatedEvent
-  | GitCommitsResetEvent;
+export type GitEventPayload = GitStatusUpdateEvent | GitCommitCreatedEvent | GitCommitsResetEvent;

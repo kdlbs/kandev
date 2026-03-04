@@ -92,64 +92,89 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 // Falls back to DB snapshot if no execution exists (for archived sessions).
 func appendLiveGitStatusMessage(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, sessionID string, session *models.TaskSession, result []*ws.Message, log *logger.Logger) []*ws.Message {
 	// Try to get live git status from agentctl
-	if lifecycleMgr != nil {
-		execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
-		if !ok {
-			log.Debug("no execution found for session, will fall back to DB snapshot",
-				zap.String("session_id", sessionID))
-		} else if agentClient := execution.GetAgentCtlClient(); agentClient == nil {
-			log.Debug("no agentctl client available for session, will fall back to DB snapshot",
-				zap.String("session_id", sessionID))
-		} else {
-			status, err := agentClient.GetGitStatus(ctx)
-			if err != nil {
-				log.Debug("failed to get live git status, will fall back to DB snapshot",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			} else if status.Success {
-				log.Debug("got live git status from agentctl",
-					zap.String("session_id", sessionID),
-					zap.String("branch", status.Branch),
-					zap.Int("files_count", len(status.Files)))
-				// Send as session.git.event with type: status_update to match the regular
-				// git status update format that the frontend expects
-				gitEventData := map[string]interface{}{
-					"type":       "status_update",
-					"session_id": sessionID,
-					"timestamp":  status.Timestamp,
-					"status": map[string]interface{}{
-						"branch":        status.Branch,
-						"remote_branch": status.RemoteBranch,
-						"ahead":         status.Ahead,
-						"behind":        status.Behind,
-						"files":         status.Files,
-						"modified":      status.Modified,
-						"added":         status.Added,
-						"deleted":       status.Deleted,
-						"untracked":     status.Untracked,
-						"renamed":       status.Renamed,
-					},
-				}
-				notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
-				if err == nil {
-					result = append(result, notification)
-				}
-				return result
-			}
-		}
+	if msg := tryGetLiveGitStatus(ctx, lifecycleMgr, sessionID, log); msg != nil {
+		return append(result, msg)
 	}
 
 	// Fallback: try to load from DB snapshot (for archived sessions)
+	return appendDBSnapshotGitStatus(ctx, taskRepo, sessionID, result, log)
+}
+
+// tryGetLiveGitStatus attempts to get live git status from agentctl.
+// Returns a notification message if successful, nil otherwise.
+func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, sessionID string, log *logger.Logger) *ws.Message {
+	if lifecycleMgr == nil {
+		return nil
+	}
+
+	execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		log.Debug("no execution found for session, will fall back to DB snapshot",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		log.Debug("no agentctl client available for session, will fall back to DB snapshot",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+
+	status, err := agentClient.GetGitStatus(ctx)
+	if err != nil {
+		log.Debug("failed to get live git status, will fall back to DB snapshot",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil
+	}
+
+	if !status.Success {
+		return nil
+	}
+
+	log.Debug("got live git status from agentctl",
+		zap.String("session_id", sessionID),
+		zap.String("branch", status.Branch),
+		zap.Int("files_count", len(status.Files)))
+
+	gitEventData := map[string]interface{}{
+		"type":       "status_update",
+		"session_id": sessionID,
+		"timestamp":  status.Timestamp,
+		"status": map[string]interface{}{
+			"branch":        status.Branch,
+			"remote_branch": status.RemoteBranch,
+			"ahead":         status.Ahead,
+			"behind":        status.Behind,
+			"files":         status.Files,
+			"modified":      status.Modified,
+			"added":         status.Added,
+			"deleted":       status.Deleted,
+			"untracked":     status.Untracked,
+			"renamed":       status.Renamed,
+		},
+	}
+	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
+	if err != nil {
+		return nil
+	}
+	return notification
+}
+
+// appendDBSnapshotGitStatus appends a git status notification from DB snapshot.
+func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Repository, sessionID string, result []*ws.Message, log *logger.Logger) []*ws.Message {
 	log.Debug("falling back to DB snapshot for git status",
 		zap.String("session_id", sessionID))
+
 	latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
 	if err != nil || latestSnapshot == nil {
 		log.Debug("no DB snapshot found for session",
 			zap.String("session_id", sessionID))
 		return result
 	}
+
 	metadata := latestSnapshot.Metadata
-	// Send as session.git.event with type: status_update to match the regular format
 	gitEventData := map[string]interface{}{
 		"type":       "status_update",
 		"session_id": sessionID,

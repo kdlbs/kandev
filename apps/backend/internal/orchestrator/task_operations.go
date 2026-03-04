@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -1035,37 +1036,17 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 
 	// Capture commits from base_commit to HEAD
 	logResult, err := s.agentManager.GetGitLog(ctx, sessionID, baseCommit, 0) // 0 = no limit
-	if err != nil {
+	switch {
+	case err != nil:
 		s.logger.Warn("failed to capture git log for archive",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-	} else if logResult == nil {
+	case logResult == nil:
 		s.logger.Debug("agent not running, skipping archive snapshot capture",
 			zap.String("session_id", sessionID))
 		return nil
-	} else if logResult.Success && len(logResult.Commits) > 0 {
-		for _, commit := range logResult.Commits {
-			if err := s.repo.CreateSessionCommit(ctx, &models.SessionCommit{
-				SessionID:     sessionID,
-				CommitSHA:     commit.CommitSHA,
-				ParentSHA:     commit.ParentSHA,
-				AuthorName:    commit.AuthorName,
-				AuthorEmail:   commit.AuthorEmail,
-				CommitMessage: commit.CommitMessage,
-				CommittedAt:   parseCommitTime(commit.CommittedAt),
-				FilesChanged:  commit.FilesChanged,
-				Insertions:    commit.Insertions,
-				Deletions:     commit.Deletions,
-			}); err != nil {
-				s.logger.Warn("failed to save commit for archive",
-					zap.String("session_id", sessionID),
-					zap.String("commit_sha", commit.CommitSHA),
-					zap.Error(err))
-			}
-		}
-		s.logger.Debug("saved archive commits",
-			zap.String("session_id", sessionID),
-			zap.Int("count", len(logResult.Commits)))
+	case logResult.Success && len(logResult.Commits) > 0:
+		s.saveArchiveCommits(ctx, sessionID, logResult.Commits)
 	}
 
 	// Capture cumulative diff from base_commit_sha to HEAD
@@ -1103,6 +1084,32 @@ func parseCommitTime(s string) time.Time {
 		return time.Now()
 	}
 	return t
+}
+
+// saveArchiveCommits persists commits to the database for archive purposes.
+func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, commits []*client.GitCommitInfo) {
+	for _, commit := range commits {
+		if err := s.repo.CreateSessionCommit(ctx, &models.SessionCommit{
+			SessionID:     sessionID,
+			CommitSHA:     commit.CommitSHA,
+			ParentSHA:     commit.ParentSHA,
+			AuthorName:    commit.AuthorName,
+			AuthorEmail:   commit.AuthorEmail,
+			CommitMessage: commit.CommitMessage,
+			CommittedAt:   parseCommitTime(commit.CommittedAt),
+			FilesChanged:  commit.FilesChanged,
+			Insertions:    commit.Insertions,
+			Deletions:     commit.Deletions,
+		}); err != nil {
+			s.logger.Warn("failed to save commit for archive",
+				zap.String("session_id", sessionID),
+				zap.String("commit_sha", commit.CommitSHA),
+				zap.Error(err))
+		}
+	}
+	s.logger.Debug("saved archive commits",
+		zap.String("session_id", sessionID),
+		zap.Int("count", len(commits)))
 }
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.
