@@ -209,13 +209,26 @@ export class ApiClient {
     workspaceId: string,
     localPath: string,
     defaultBranch = "main",
+    opts?: {
+      name?: string;
+      provider?: string;
+      provider_owner?: string;
+      provider_name?: string;
+    },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
-      name: "E2E Repo",
+      name: opts?.name ?? "E2E Repo",
       source_type: "local",
       local_path: localPath,
       default_branch: defaultBranch,
+      ...(opts?.provider ? { provider: opts.provider } : {}),
+      ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
+      ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
     });
+  }
+
+  async listExecutors(): Promise<{ executors: Array<{ id: string; name: string; type: string; profiles?: Array<{ id: string; name: string }> }> }> {
+    return this.request("GET", "/api/v1/executors");
   }
 
   async saveUserSettings(settings: {
