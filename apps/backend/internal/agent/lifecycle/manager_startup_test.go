@@ -92,12 +92,13 @@ func TestStartAgentProcess_Passthrough_Resumed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error (no interactive runner)")
 	}
-	// ResumePassthroughSession path also fails at the interactive runner,
-	// but the error message differs from startPassthroughSession.
-	// Both paths contain "interactive runner not available" — the key assertion
-	// is that the resumed path doesn't error with "no execution found" (which
-	// would happen if ResumePassthroughSession couldn't find the execution).
-	if strings.Contains(err.Error(), "no execution found") {
-		t.Errorf("ResumePassthroughSession should find the execution, got: %v", err)
+	// ResumePassthroughSession returns "interactive runner not available" (without
+	// "for passthrough mode"), while startPassthroughSession includes the suffix.
+	// Assert we hit the resume path specifically.
+	if !strings.Contains(err.Error(), "interactive runner not available") {
+		t.Errorf("expected 'interactive runner not available' error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "for passthrough mode") {
+		t.Errorf("expected ResumePassthroughSession path (no 'for passthrough mode' suffix), got: %v", err)
 	}
 }

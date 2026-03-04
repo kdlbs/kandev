@@ -108,6 +108,9 @@ function spawnBackendProcess(
   });
 
   const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
+  proc.once("exit", () => {
+    logFile?.end();
+  });
   proc.stderr?.on("data", (chunk: Buffer) => {
     if (debug) {
       process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
