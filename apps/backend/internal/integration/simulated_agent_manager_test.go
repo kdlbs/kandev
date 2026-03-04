@@ -405,6 +405,7 @@ func (s *SimulatedAgentManagerClient) RestartAgentProcess(ctx context.Context, a
 	return nil
 }
 
+func (s *SimulatedAgentManagerClient) WasSessionInitialized(_ string) bool { return false }
 func (s *SimulatedAgentManagerClient) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }

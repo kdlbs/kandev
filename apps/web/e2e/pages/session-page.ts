@@ -160,6 +160,31 @@ export class SessionPage {
     return this.page.getByTestId("clarification-deferred-notice");
   }
 
+  /** Reset context button in the chat input toolbar. */
+  resetContextButton(): Locator {
+    return this.page.getByTestId("reset-context-button");
+  }
+
+  /** Confirm button in the reset context alert dialog. */
+  resetContextConfirm(): Locator {
+    return this.page.getByTestId("reset-context-confirm");
+  }
+
+  /** "Resume session" button shown after agent crash. */
+  recoveryResumeButton(): Locator {
+    return this.page.getByTestId("recovery-resume-button");
+  }
+
+  /** "Start fresh session" button shown after agent crash. */
+  recoveryFreshButton(): Locator {
+    return this.page.getByTestId("recovery-fresh-button");
+  }
+
+  /** Context reset divider shown in chat after resetting agent context. */
+  contextResetDivider(): Locator {
+    return this.chat.getByText("Context reset");
+  }
+
   /**
    * Delete a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, and clicks "Delete".

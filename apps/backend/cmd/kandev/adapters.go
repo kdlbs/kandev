@@ -185,6 +185,10 @@ func (a *lifecycleAdapter) ListAgentTypes(ctx context.Context) ([]*v1.AgentType,
 	return result, nil
 }
 
+func (a *lifecycleAdapter) WasSessionInitialized(executionID string) bool {
+	return a.mgr.WasSessionInitialized(executionID)
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment) (*executor.PromptResult, error) {

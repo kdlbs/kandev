@@ -17,6 +17,7 @@ type UseChatInputContainerParams = {
   isSending: boolean;
   isStarting: boolean;
   isFailed: boolean;
+  needsRecovery: boolean;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
   placeholder: string | undefined;
@@ -73,6 +74,7 @@ function computeDerivedState(params: {
   isStarting: boolean;
   isSending: boolean;
   isFailed: boolean;
+  needsRecovery: boolean;
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
@@ -83,7 +85,8 @@ function computeDerivedState(params: {
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
 }) {
-  const isDisabled = params.isStarting || params.isSending || params.isFailed;
+  const isDisabled =
+    params.isStarting || params.isSending || params.isFailed || params.needsRecovery;
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
@@ -115,6 +118,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isSending,
     isStarting,
     isFailed,
+    needsRecovery,
     isAgentBusy,
     hasAgentCommands,
     placeholder,
@@ -184,6 +188,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     isStarting,
     isSending,
     isFailed,
+    needsRecovery,
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,

@@ -167,6 +167,7 @@ func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecution
 func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough
 }
@@ -1040,6 +1041,308 @@ func TestAutoStartPassthroughPrompt(t *testing.T) {
 		err := svc.autoStartPassthroughPrompt(ctx, "t1", session, "Analyze", "do analysis")
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestClearResumeToken(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clears existing resume token", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		task := &models.Task{ID: "t1", WorkflowID: "wf1", Title: "T", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateTask(ctx, task)
+		session := &models.TaskSession{ID: "s1", TaskID: "t1", State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now}
+		_ = repo.CreateTaskSession(ctx, session)
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "acp-session-123",
+			CreatedAt: now, UpdatedAt: now,
+		})
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.clearResumeToken(ctx, "s1")
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get executor running: %v", err)
+		}
+		if running.ResumeToken != "" {
+			t.Errorf("expected empty resume token, got %q", running.ResumeToken)
+		}
+	})
+
+	t.Run("no-op when no executor running record", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// Should not panic
+		svc.clearResumeToken(ctx, "nonexistent-session")
+	})
+
+	t.Run("no-op when token already empty", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		ws := &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkspace(ctx, ws)
+		wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateWorkflow(ctx, wf)
+		task := &models.Task{ID: "t1", WorkflowID: "wf1", Title: "T", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+		_ = repo.CreateTask(ctx, task)
+		session := &models.TaskSession{ID: "s1", TaskID: "t1", State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now}
+		_ = repo.CreateTaskSession(ctx, session)
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "",
+			CreatedAt: now, UpdatedAt: now,
+		})
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// Should not panic or error
+		svc.clearResumeToken(ctx, "s1")
+	})
+}
+
+func TestHandleRecoverableFailure(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sets session to WAITING_FOR_INPUT with error message", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent crashed unexpectedly",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
+		}
+		if session.ErrorMessage != "agent crashed unexpectedly" {
+			t.Errorf("expected error message %q, got %q", "agent crashed unexpectedly", session.ErrorMessage)
+		}
+	})
+
+	t.Run("sets task to REVIEW state", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent crashed",
+		})
+
+		if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+			t.Errorf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
+		}
+	})
+
+	t.Run("cleans up agent execution", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent crashed",
+		})
+
+		waitForStopCall(t, agentMgr)
+
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+		if len(agentMgr.stopAgentWithReasonArgs) == 0 {
+			t.Error("expected cleanup to call StopAgentWithReason")
+		}
+	})
+}
+
+func TestHandleResumeFailure(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clears resume token and sets WAITING_FOR_INPUT", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Add executor running with resume token
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "acp-session-old",
+			CreatedAt: now, UpdatedAt: now,
+		})
+
+		taskRepo := newMockTaskRepo()
+		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+		result := svc.handleResumeFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "resume failed: session expired",
+		})
+
+		if !result {
+			t.Error("expected handleResumeFailure to return true")
+		}
+
+		// Verify resume token was cleared
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get executor running: %v", err)
+		}
+		if running.ResumeToken != "" {
+			t.Errorf("expected empty resume token, got %q", running.ResumeToken)
+		}
+
+		// Verify session state
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
+		}
+
+		// Verify task moved to REVIEW
+		if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+			t.Errorf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
+		}
+	})
+}
+
+func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("routes to recoverable failure when session exists", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleAgentFailed(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "agent process exited",
+		})
+
+		// Should set session to WAITING_FOR_INPUT (recoverable), not FAILED
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected recoverable state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
+		}
+	})
+
+	t.Run("routes to resume failure when resume token exists and init not completed", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "acp-session-old",
+			CreatedAt: now, UpdatedAt: now,
+		})
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{} // WasSessionInitialized returns false by default
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleAgentFailed(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "resume failed",
+		})
+
+		// Resume token should be cleared
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get executor running: %v", err)
+		}
+		if running.ResumeToken != "" {
+			t.Errorf("expected resume token to be cleared, got %q", running.ResumeToken)
+		}
+
+		// Session should be WAITING_FOR_INPUT
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
+		}
+	})
+}
+
+func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("does not clobber WAITING_FOR_INPUT state", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Set session to WAITING_FOR_INPUT (recovery state)
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateWaitingForInput
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("expected state to remain %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+		}
+	})
+
+	t.Run("sets CANCELLED when session is not in recovery", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateCancelled {
+			t.Errorf("expected state %q, got %q", models.TaskSessionStateCancelled, updated.State)
 		}
 	})
 }

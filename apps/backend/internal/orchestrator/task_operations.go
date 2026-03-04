@@ -1264,6 +1264,47 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// ResetAgentContext resets the agent's conversation context for a session,
+// clearing conversation history while preserving the workspace environment.
+func (s *Service) ResetAgentContext(ctx context.Context, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		return fmt.Errorf("agent must be idle to reset context, current state: %s", session.State)
+	}
+	if session.AgentExecutionID == "" {
+		return fmt.Errorf("no active agent execution for session %s", sessionID)
+	}
+
+	// Set STARTING so frontend disables input and shows restarting state
+	s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateStarting, "", false, session)
+
+	if ok := s.resetAgentContext(ctx, session.TaskID, session, "user_request"); !ok {
+		// Restore WAITING_FOR_INPUT on failure
+		s.setSessionWaitingForInput(ctx, session.TaskID, sessionID)
+		return fmt.Errorf("failed to reset agent context for session %s", sessionID)
+	}
+
+	// Restore WAITING_FOR_INPUT — handleAgentReady ignores events during reset
+	s.setSessionWaitingForInput(ctx, session.TaskID, sessionID)
+
+	if s.messageCreator != nil {
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, session.TaskID,
+			"Context reset — new conversation started",
+			sessionID, string(v1.MessageTypeStatus),
+			s.getActiveTurnID(sessionID),
+			nil, false,
+		); err != nil {
+			s.logger.Warn("failed to create context reset message",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
 // GetQueuedTasks returns tasks in the queue
 func (s *Service) GetQueuedTasks() []*queue.QueuedTask {
 	return s.queue.List()

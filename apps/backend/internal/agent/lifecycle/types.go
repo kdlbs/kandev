@@ -76,6 +76,10 @@ type AgentExecution struct {
 	needsResumeContext    bool
 	resumeContextInjected bool
 
+	// sessionInitialized is set to true after InitializeAndPrompt completes successfully.
+	// Used to distinguish launch-phase failures from normal prompt failures.
+	sessionInitialized bool
+
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
 	availableCommandsMu sync.RWMutex

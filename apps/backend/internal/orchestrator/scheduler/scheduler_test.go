@@ -76,6 +76,7 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }

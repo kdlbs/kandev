@@ -201,6 +201,20 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	return resp, nil
 }
 
+// RecoverSession handles user-initiated recovery after an agent CLI failure.
+// action is "resume" (retry with existing ACP session) or "fresh_start" (clear token, start fresh).
+func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
+	if action == "fresh_start" {
+		s.clearResumeToken(ctx, sessionID)
+	}
+
+	return s.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Intent:    IntentResume,
+	})
+}
+
 // executionToLaunchResponse converts a TaskExecution to a LaunchSessionResponse.
 func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *LaunchSessionResponse {
 	resp := &LaunchSessionResponse{

@@ -98,6 +98,10 @@ type AgentManagerClient interface {
 	// clearing the agent's conversation context. The execution environment (container/agentctl) is preserved.
 	RestartAgentProcess(ctx context.Context, agentExecutionID string) error
 
+	// WasSessionInitialized reports whether the given execution completed session initialization.
+	// Used to distinguish launch-phase failures from normal prompt failures.
+	WasSessionInitialized(executionID string) bool
+
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
 
