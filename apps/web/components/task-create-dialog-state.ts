@@ -116,11 +116,16 @@ function useGitHubUrlState() {
   const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   return {
-    useGitHubUrl, setUseGitHubUrl,
-    githubUrl, setGitHubUrl,
-    githubBranches, setGitHubBranches,
-    githubBranchesLoading, setGitHubBranchesLoading,
-    githubUrlError, setGitHubUrlError,
+    useGitHubUrl,
+    setUseGitHubUrl,
+    githubUrl,
+    setGitHubUrl,
+    githubBranches,
+    setGitHubBranches,
+    githubBranchesLoading,
+    setGitHubBranchesLoading,
+    githubUrlError,
+    setGitHubUrlError,
   };
 }
 
@@ -355,7 +360,9 @@ export function useDialogComputed({
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
-  const hasRepositorySelection = Boolean(fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl));
+  const hasRepositorySelection = Boolean(
+    fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl),
+  );
   const effectiveBranches = (() => {
     if (fs.useGitHubUrl) return fs.githubBranches;
     if (fs.repositoryId) return branches;

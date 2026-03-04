@@ -203,7 +203,9 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Toggle to GitHub URL mode and enter a repo that isn't seeded in mock data
     await testPage.getByTestId("toggle-github-url").click();
-    await testPage.getByTestId("github-url-input").fill("https://github.com/no-such-owner/no-such-repo");
+    await testPage
+      .getByTestId("github-url-input")
+      .fill("https://github.com/no-such-owner/no-such-repo");
 
     // The error should appear after the branch fetch fails
     const errorEl = testPage.getByTestId("github-url-error");

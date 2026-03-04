@@ -59,7 +59,15 @@ export function useRepositoryAutoSelectEffect(
     }
     if (repositories.length === 1)
       void Promise.resolve().then(() => setRepositoryId(repositories[0].id));
-  }, [open, repositories, repositoryId, selectedLocalRepo, useGitHubUrl, workspaceId, setRepositoryId]);
+  }, [
+    open,
+    repositories,
+    repositoryId,
+    selectedLocalRepo,
+    useGitHubUrl,
+    workspaceId,
+    setRepositoryId,
+  ]);
 }
 
 export function useDiscoverReposEffect(
@@ -218,9 +226,10 @@ export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[
     if (!useGitHubUrl || githubBranches.length === 0 || branch) return;
     // GitHub URL branches are referenced by name only (no remote prefix).
     // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
-    const preferred = githubBranches.find((b) => b.name === "main")
-      ?? githubBranches.find((b) => b.name === "master")
-      ?? githubBranches[0];
+    const preferred =
+      githubBranches.find((b) => b.name === "main") ??
+      githubBranches.find((b) => b.name === "master") ??
+      githubBranches[0];
     if (preferred) setBranch(preferred.name);
   }, [branch, githubBranches, useGitHubUrl, setBranch]);
 }
@@ -237,10 +246,7 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
   return { owner: match[1], repo: match[2] };
 }
 
-export function useGitHubUrlBranchesEffect(
-  fs: DialogFormState,
-  open: boolean,
-) {
+export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   const {
     useGitHubUrl,
     githubUrl,

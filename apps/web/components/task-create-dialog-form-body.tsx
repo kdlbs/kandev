@@ -92,7 +92,10 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
   })();
 
   const branchDisabled =
-    !hasRepositorySelection || branchesLoading || localBranchesLoading || branchOptions.length === 0;
+    !hasRepositorySelection ||
+    branchesLoading ||
+    localBranchesLoading ||
+    branchOptions.length === 0;
 
   const agentPlaceholder = (() => {
     if (agentProfilesLoading) return "Loading agents...";

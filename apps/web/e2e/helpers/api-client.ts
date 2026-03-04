@@ -227,7 +227,14 @@ export class ApiClient {
     });
   }
 
-  async listExecutors(): Promise<{ executors: Array<{ id: string; name: string; type: string; profiles?: Array<{ id: string; name: string }> }> }> {
+  async listExecutors(): Promise<{
+    executors: Array<{
+      id: string;
+      name: string;
+      type: string;
+      profiles?: Array<{ id: string; name: string }>;
+    }>;
+  }> {
     return this.request("GET", "/api/v1/executors");
   }
 
