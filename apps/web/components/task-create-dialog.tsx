@@ -137,9 +137,9 @@ function RepoSourceInput({
         type="text"
         value={githubUrl}
         onChange={(e) => onGitHubUrlChange(e.target.value)}
-        placeholder="https://github.com/owner/repo"
+        placeholder="github.com/owner/repo"
         data-testid="github-url-input"
-        size={Math.max((githubUrl || "").length, 30)}
+        size={Math.max((githubUrl || "").length + 1, 20)}
         className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-9 rounded-md px-3 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
         disabled={isTaskStarted}
         autoFocus
