@@ -30,14 +30,16 @@ func NewMockAgent() *MockAgent {
 	return &MockAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
-				Supported:      true,
-				Label:          "TUI Passthrough",
-				Description:    "Terminal UI mode for testing",
-				PassthroughCmd: NewCommand("mock-agent", "--tui"),
-				ModelFlag:      NewParam("--model", "{model}"),
-				PromptFlag:     NewParam("--prompt", "{prompt}"),
-				IdleTimeout:    2 * time.Second,
-				BufferMaxBytes: DefaultBufferMaxBytes,
+				Supported:         true,
+				Label:             "TUI Passthrough",
+				Description:       "Terminal UI mode for testing",
+				PassthroughCmd:    NewCommand("mock-agent", "--tui"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				PromptFlag:        NewParam("--prompt", "{prompt}"),
+				SessionResumeFlag: NewParam("--resume"),
+				ResumeFlag:        NewParam("-c"),
+				IdleTimeout:       2 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
 			},
 		},
 		supportsMCP: true,
@@ -95,11 +97,12 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	}
 	return Cmd(binary).
 		Model(NewParam("--model", "{model}"), opts.Model).
+		Resume(NewParam("--resume"), opts.SessionID, false).
 		Build()
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
-	canRecover := false
+	canRecover := true
 	return &RuntimeConfig{
 		Cmd:            Cmd("mock-agent").Build(),
 		WorkingDir:     "{workspace}",
@@ -108,6 +111,7 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		Protocol:       agent.ProtocolClaudeCode,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{
+			ResumeFlag: NewParam("--resume"),
 			CanRecover: &canRecover,
 		},
 	}

@@ -21,6 +21,8 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Kill the backend process and respawn with the same config (DB, ports, tmpDir persist). */
+  restart: () => Promise<void>;
 };
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
@@ -91,6 +93,38 @@ function killProcessGroup(proc: ChildProcess): Promise<void> {
 }
 
 /**
+ * Spawn a backend process with the given environment. Returns the child process.
+ * The process is spawned with `detached: true` so it becomes a process group leader.
+ */
+function spawnBackendProcess(
+  env: Record<string, string>,
+  debug: boolean,
+  port: number,
+): ChildProcess {
+  const proc = spawn(KANDEV_BIN, [], {
+    env: env as unknown as NodeJS.ProcessEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+
+  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    if (debug) {
+      process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
+      logFile?.write(chunk);
+    }
+  });
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    if (debug) {
+      process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
+      logFile?.write(chunk);
+    }
+  });
+
+  return proc;
+}
+
+/**
  * Worker-scoped fixture that spawns an isolated backend process and
  * a dedicated Next.js frontend. Each Playwright worker gets its own
  * backend on a unique port with an isolated HOME, database, and data
@@ -147,29 +181,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       };
 
       const debug = !!process.env.E2E_DEBUG;
+      const baseUrl = `http://localhost:${backendPort}`;
 
       // --- Spawn backend ---
-      const backendProc: ChildProcess = spawn(KANDEV_BIN, [], {
-        env: backendEnv as unknown as NodeJS.ProcessEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true, // Own process group so we can kill backend + agentctl together
-      });
-
-      const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${backendPort}.log`) : null;
-      backendProc.stderr?.on("data", (chunk: Buffer) => {
-        if (debug) {
-          process.stderr.write(`[backend:${backendPort}] ${chunk.toString()}`);
-          logFile?.write(chunk);
-        }
-      });
-      backendProc.stdout?.on("data", (chunk: Buffer) => {
-        if (debug) {
-          process.stderr.write(`[backend-log:${backendPort}] ${chunk.toString()}`);
-          logFile?.write(chunk);
-        }
-      });
-
-      const baseUrl = `http://localhost:${backendPort}`;
+      let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
       await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
 
       // Ensure Next.js static assets are available to the standalone server.
@@ -204,8 +219,21 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const frontendUrl = `http://localhost:${frontendPort}`;
       await waitForHealth(frontendUrl, HEALTH_TIMEOUT_MS);
 
+      /**
+       * Kill the backend process group and respawn with the same config.
+       * SQLite DB, tmpDir, and all persisted data survive the restart.
+       * Only in-memory execution state (running agents, WS connections) is lost.
+       */
+      const restart = async () => {
+        await killProcessGroup(backendProc);
+        // Brief delay to ensure ports are fully released by the OS
+        await new Promise((r) => setTimeout(r, 500));
+        backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
+        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
+      };
+
       try {
-        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir });
+        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir, restart });
       } finally {
         // Shutdown frontend first (simple process), then backend (process group)
         await killProcess(frontendProc);

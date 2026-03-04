@@ -368,4 +368,12 @@ export class ApiClient {
   }> {
     return this.request("GET", "/api/v1/github/status");
   }
+
+  // --- Session ---
+
+  async listSessionMessages(
+    sessionId: string,
+  ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
+    return this.request("GET", `/api/v1/sessions/${sessionId}/messages`);
+  }
 }

@@ -28,6 +28,11 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
 		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 		if err == nil && profileInfo.CLIPassthrough {
+			// On resume (e.g., after backend restart), use the resume command path
+			// so the agent receives resume flags (-c / --resume).
+			if execution.isResumedSession {
+				return m.ResumePassthroughSession(ctx, execution.SessionID)
+			}
 			return m.startPassthroughSession(ctx, execution, profileInfo)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -28,9 +29,17 @@ var mcpServers map[string]mcpServerDef
 func main() {
 	model := parseModelFlag()
 
+	// Override sessionID when resuming a previous session.
+	resumeID := parseResumeFlag()
+	if resumeID != "" {
+		sessionID = resumeID
+		fmt.Fprintf(os.Stderr, "mock-agent[%d]: resuming session %s\n", os.Getpid(), resumeID)
+	}
+
 	// TUI mode: simple terminal UI for passthrough/PTY testing
 	if parseTUIFlag() {
-		runTUI(model, parsePromptFlag())
+		resumed := resumeID != "" || parseContinueFlag()
+		runTUI(model, parsePromptFlag(), resumed)
 		return
 	}
 
@@ -88,6 +97,30 @@ func parseModelFromArgs(args []string) string {
 		}
 	}
 	return "mock-default"
+}
+
+// parseResumeFlag extracts --resume value from command line args.
+func parseResumeFlag() string {
+	return parseResumeFromArgs(os.Args)
+}
+
+// parseResumeFromArgs extracts --resume value from the given args slice.
+func parseResumeFromArgs(args []string) string {
+	for i, arg := range args[1:] {
+		if arg == "--resume" && i+1 < len(args)-1 {
+			return args[i+2]
+		}
+		if v, ok := strings.CutPrefix(arg, "--resume="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// parseContinueFlag checks if -c is present in the command line args.
+// Used by TUI mode for generic "continue last session" resume.
+func parseContinueFlag() bool {
+	return slices.Contains(os.Args[1:], "-c")
 }
 
 // mcpConfigPayload is the JSON structure for --mcp-config.
