@@ -30,8 +30,12 @@ func emitPredefinedScenario(enc *json.Encoder, scanner *bufio.Scanner, name stri
 		scenarioMultiTurn(enc)
 	case "diff-expansion-setup":
 		scenarioDiffExpansionSetup(enc)
+	case "diff-update-setup":
+		scenarioDiffUpdateSetup(enc)
+	case "diff-update-modify":
+		scenarioDiffUpdateModify(enc)
 	default:
-		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup", "")
+		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify", "")
 	}
 }
 
@@ -442,4 +446,95 @@ func scenarioDiffExpansionSetup(enc *json.Encoder) {
 
 	fixedDelay(100)
 	emitTextBlock(enc, "diff-expansion-setup complete: expansion_test.go has two-hunk uncommitted diff (lines 50 and 150 of 200).", "")
+}
+
+// scenarioDiffUpdateSetup creates a simple file, commits it, then modifies it
+// to leave an uncommitted diff. This is the first step of the diff-update test.
+// The file content is simple so assertions can verify exact diff content.
+func scenarioDiffUpdateSetup(enc *json.Encoder) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		emitTextBlock(enc, "diff-update-setup: getwd failed: "+err.Error(), "")
+		return
+	}
+
+	filePath := "diff_update_test.txt"
+	originalContent := "line 1: original\nline 2: unchanged\nline 3: original\n"
+
+	// Write original content
+	if err := os.WriteFile(filePath, []byte(originalContent), 0o644); err != nil {
+		emitTextBlock(enc, "diff-update-setup: write failed: "+err.Error(), "")
+		return
+	}
+
+	gitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=Mock Agent",
+		"GIT_AUTHOR_EMAIL=mock@test.local",
+		"GIT_COMMITTER_NAME=Mock Agent",
+		"GIT_COMMITTER_EMAIL=mock@test.local",
+	)
+
+	runGitCmd := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{
+			"-c", "commit.gpgsign=false",
+			"-c", "tag.gpgsign=false",
+		}, args...)...)
+		cmd.Dir = wd
+		cmd.Env = gitEnv
+		out, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			fmt.Fprintf(os.Stderr, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		}
+		return cmdErr
+	}
+
+	// Clean up from any previous test run
+	_ = runGitCmd("rm", "--force", filePath)
+	_ = runGitCmd("commit", "-m", "cleanup diff_update_test.txt")
+
+	// Re-write and commit original content
+	if err := os.WriteFile(filePath, []byte(originalContent), 0o644); err != nil {
+		emitTextBlock(enc, "diff-update-setup: re-write failed: "+err.Error(), "")
+		return
+	}
+
+	if err := runGitCmd("add", filePath); err != nil {
+		emitTextBlock(enc, "diff-update-setup: git add failed", "")
+		return
+	}
+	if err := runGitCmd("commit", "-m", "add diff_update_test.txt"); err != nil {
+		emitTextBlock(enc, "diff-update-setup: git commit failed", "")
+		return
+	}
+
+	// Modify the file to create an uncommitted diff
+	modifiedContent := "line 1: FIRST_MODIFICATION\nline 2: unchanged\nline 3: original\n"
+	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
+		emitTextBlock(enc, "diff-update-setup: write modified failed: "+err.Error(), "")
+		return
+	}
+
+	fixedDelay(100)
+	emitTextBlock(enc, "diff-update-setup complete: diff_update_test.txt has FIRST_MODIFICATION", "")
+}
+
+// scenarioDiffUpdateModify modifies the diff_update_test.txt file again,
+// changing the diff content. This tests that the UI updates the diff display
+// when files change after the initial diff was shown.
+func scenarioDiffUpdateModify(enc *json.Encoder) {
+	fixedDelay(50)
+
+	filePath := "diff_update_test.txt"
+
+	// Modify the file again with different content
+	modifiedContent := "line 1: SECOND_MODIFICATION\nline 2: unchanged\nline 3: ALSO_CHANGED\n"
+	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
+		emitTextBlock(enc, "diff-update-modify: write failed: "+err.Error(), "")
+		return
+	}
+
+	fixedDelay(100)
+	emitTextBlock(enc, "diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION", "")
 }
