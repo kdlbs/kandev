@@ -95,31 +95,34 @@ function useBuildStream() {
     setBuildLog((prev) => prev + text);
   }, []);
 
-  const runBuild = useCallback(async (dockerfile: string, tag: string) => {
-    setBuildStatus("building");
-    setBuildLog("");
-    try {
-      const response = await buildDockerImage({ dockerfile, tag });
-      if (!response.ok) {
-        const text = await response.text();
+  const runBuild = useCallback(
+    async (dockerfile: string, tag: string) => {
+      setBuildStatus("building");
+      setBuildLog("");
+      try {
+        const response = await buildDockerImage({ dockerfile, tag });
+        if (!response.ok) {
+          const text = await response.text();
+          setBuildStatus("failed");
+          setBuildLog(`Build failed (${response.status}): ${text}`);
+          return;
+        }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          setBuildStatus("failed");
+          setBuildLog("No response body");
+          return;
+        }
+        const hasError = await readDockerStream(reader, appendLog);
+        setBuildStatus(hasError ? "failed" : "success");
+      } catch (err) {
         setBuildStatus("failed");
-        setBuildLog(`Build failed (${response.status}): ${text}`);
-        return;
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
       }
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setBuildStatus("failed");
-        setBuildLog("No response body");
-        return;
-      }
-      const hasError = await readDockerStream(reader, appendLog);
-      setBuildStatus(hasError ? "failed" : "success");
-    } catch (err) {
-      setBuildStatus("failed");
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
-    }
-  }, [appendLog]);
+    },
+    [appendLog],
+  );
 
   return { buildStatus, buildLog, runBuild };
 }
