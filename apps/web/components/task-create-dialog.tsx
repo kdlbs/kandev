@@ -140,6 +140,9 @@ function RepoSourceInput({
           onChange={(e) => onGitHubUrlChange(e.target.value)}
           placeholder="github.com/owner/repo"
           data-testid="github-url-input"
+          aria-label="GitHub repository URL"
+          aria-invalid={!!githubUrlError}
+          aria-errormessage={githubUrlError ? "github-url-error" : undefined}
           size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
           className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
           disabled={isTaskStarted}
@@ -147,6 +150,8 @@ function RepoSourceInput({
         />
         {githubUrlError && (
           <div
+            id="github-url-error"
+            role="alert"
             className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
             data-testid="github-url-error"
           >
@@ -493,7 +498,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialDescription={initialValues?.description ?? ""}
             hasDescription={fs.hasDescription}
             branchOptions={computed.branchOptions}
-            branchesLoading={branchesLoading || fs.githubBranchesLoading}
+            branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
             agentProfileOptions={computed.agentProfileOptions}
             executorProfileOptions={computed.executorProfileOptions}
             agentProfiles={agentProfiles}

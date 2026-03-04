@@ -50,6 +50,7 @@ var (
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
 	ErrRemoteDockerNoRepoURL   = errors.New("remote_docker executor requires a repository with provider owner and name set")
+	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
 )
 
 // PromptResult contains the result of a prompt operation

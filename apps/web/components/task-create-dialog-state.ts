@@ -361,7 +361,7 @@ export function useDialogComputed({
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
   const hasRepositorySelection = Boolean(
-    fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl),
+    fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl.trim()),
   );
   const effectiveBranches = (() => {
     if (fs.useGitHubUrl) return fs.githubBranches;

@@ -93,7 +93,7 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		// Fall back to HTTPS URL if BuildCloneURL fails
 		cloneURL = repositoryCloneURL(repo)
 		if cloneURL == "" {
-			return "", ErrRemoteDockerNoRepoURL
+			return "", ErrNoCloneURL
 		}
 	}
 

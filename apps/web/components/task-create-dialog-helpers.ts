@@ -125,6 +125,6 @@ export function validateCreateInputs(inputs: {
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
     inputs.agentProfileId &&
-    (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl),
+    (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
   );
 }

@@ -273,8 +273,10 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 			switch apiErr.StatusCode {
 			case http.StatusNotFound:
 				status = http.StatusNotFound
-			case http.StatusUnauthorized, http.StatusForbidden:
+			case http.StatusUnauthorized:
 				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
 			}
 		}
 		ctx.JSON(status, gin.H{"error": err.Error()})

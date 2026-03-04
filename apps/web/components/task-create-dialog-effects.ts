@@ -255,10 +255,14 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubUrlError,
   } = fs;
   useEffect(() => {
-    if (!open || !useGitHubUrl) return;
+    if (!open || !useGitHubUrl) {
+      setGitHubBranchesLoading(false);
+      return;
+    }
     const trimmed = githubUrl.trim();
     if (!trimmed) {
       setGitHubBranches([]);
+      setGitHubBranchesLoading(false);
       setGitHubUrlError(null);
       return;
     }

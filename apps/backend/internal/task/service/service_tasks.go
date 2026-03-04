@@ -145,12 +145,16 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		if parseErr != nil {
 			return "", "", parseErr
 		}
+		defaultBranch := repoInput.DefaultBranch
+		if defaultBranch == "" {
+			defaultBranch = repoInput.BaseBranch
+		}
 		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Provider:      "github",
 			ProviderOwner: owner,
 			ProviderName:  name,
-			DefaultBranch: repoInput.BaseBranch,
+			DefaultBranch: defaultBranch,
 		})
 		if createErr != nil {
 			return "", "", createErr
