@@ -28,13 +28,14 @@ function parseDockerLine(raw: string): string | null {
   if (!trimmed) return null;
   try {
     const obj = JSON.parse(trimmed) as Record<string, unknown>;
-    if (obj.error) return `ERROR: ${obj.error}`;
+    if (obj.error) return `ERROR: ${obj.error}\n`;
     if (typeof obj.stream === "string") return obj.stream;
     if (typeof obj.status === "string") {
       const id = obj.id ? ` ${obj.id}` : "";
       return `${obj.status}${id}\n`;
     }
-    return trimmed;
+    // Skip metadata-only messages (aux, progressDetail, etc.)
+    return null;
   } catch {
     return trimmed;
   }
