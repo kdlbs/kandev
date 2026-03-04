@@ -46,7 +46,8 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 				lastState = currentState
 				wt.logger.Debug("workspace state changed, updating")
 
-				// Update file list and notify subscribers
+				// Update git status (includes diff data) and file list, then notify subscribers
+				wt.updateGitStatus(ctx)
 				wt.updateFiles(ctx)
 				wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
 					Timestamp: time.Now(),
