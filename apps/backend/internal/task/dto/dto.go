@@ -152,6 +152,7 @@ type TaskSessionDTO struct {
 	EnvironmentID        string                  `json:"environment_id,omitempty"`
 	RepositoryID         string                  `json:"repository_id,omitempty"`
 	BaseBranch           string                  `json:"base_branch,omitempty"`
+	BaseCommitSHA        string                  `json:"base_commit_sha,omitempty"`
 	WorktreeID           string                  `json:"worktree_id,omitempty"`
 	WorktreePath         string                  `json:"worktree_path,omitempty"`
 	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
@@ -184,6 +185,7 @@ type TaskSessionSummaryDTO struct {
 	EnvironmentID    string                  `json:"environment_id,omitempty"`
 	RepositoryID     string                  `json:"repository_id,omitempty"`
 	BaseBranch       string                  `json:"base_branch,omitempty"`
+	BaseCommitSHA    string                  `json:"base_commit_sha,omitempty"`
 	WorktreeID       string                  `json:"worktree_id,omitempty"`
 	WorktreePath     string                  `json:"worktree_path,omitempty"`
 	WorktreeBranch   string                  `json:"worktree_branch,omitempty"`
@@ -519,6 +521,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		EnvironmentID:    session.EnvironmentID,
 		RepositoryID:     session.RepositoryID,
 		BaseBranch:       session.BaseBranch,
+		BaseCommitSHA:    session.BaseCommitSHA,
 		State:            session.State,
 		ErrorMessage:     session.ErrorMessage,
 		Metadata:         session.Metadata,
@@ -549,6 +552,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		EnvironmentID:        session.EnvironmentID,
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,
+		BaseCommitSHA:        session.BaseCommitSHA,
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,

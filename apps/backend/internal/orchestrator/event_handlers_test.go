@@ -13,6 +13,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -191,6 +192,22 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _
 	return nil
 }
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
+	return nil
+}
+func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return &client.GitStatusResult{
+		Success:    true,
+		Branch:     "main",
+		HeadCommit: "mock-commit",
+	}, nil
+}
+func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
 	return nil
 }
 

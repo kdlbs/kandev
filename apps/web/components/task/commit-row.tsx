@@ -169,6 +169,7 @@ export function CommitRow({
       <li
         role="button"
         tabIndex={0}
+        data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
         className="group relative flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
         onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
         onKeyDown={(e) => {

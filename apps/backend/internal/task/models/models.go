@@ -238,6 +238,7 @@ type TaskSession struct {
 	EnvironmentID        string                 `json:"environment_id"`
 	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
 	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
+	BaseCommitSHA        string                 `json:"base_commit_sha"`     // Git commit SHA at session start (for cumulative diff)
 	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
@@ -271,6 +272,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"environment_id":      s.EnvironmentID,
 		"repository_id":       s.RepositoryID,
 		"base_branch":         s.BaseBranch,
+		"base_commit_sha":     s.BaseCommitSHA,
 		"worktrees":           s.Worktrees,
 		"state":               string(s.State),
 		"started_at":          s.StartedAt,

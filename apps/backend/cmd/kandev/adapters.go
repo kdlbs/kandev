@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -287,6 +288,50 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		CLIPassthrough:             info.CLIPassthrough,
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
+}
+
+// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
+func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil // No execution, not an error
+	}
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GitLog(ctx, baseCommit, limit)
+}
+
+// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.
+func (a *lifecycleAdapter) GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil // No execution, not an error
+	}
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetCumulativeDiff(ctx, baseCommit)
+}
+
+// GetGitStatus retrieves the current git status for a session.
+func (a *lifecycleAdapter) GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil // No execution, not an error
+	}
+	agentClient := execution.GetAgentCtlClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatus(ctx)
+}
+
+// WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
+func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
+	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
 }
 
 // orchestratorWrapper wraps orchestrator.Service to implement taskhandlers.OrchestratorService.

@@ -132,6 +132,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	// Add checkout_branch column to task_repositories (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	// Add base_commit_sha column to task_sessions for tracking session start commit (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	return nil
 }
 

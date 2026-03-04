@@ -38,7 +38,7 @@ func IsValidBranchName(branch string) bool {
 func IsKnownSafeGitFlag(arg string) bool {
 	// Whitelist of git flags actually used by our codebase
 	safeFlags := []string{
-		"-m", "-M", "--set-upstream", "--all", "--porcelain", "--short",
+		"-m", "-M", "-n", "--set-upstream", "--all", "--porcelain", "--short",
 		"--abbrev-ref", "--symbolic-full-name", "--verify", "--no-patch",
 		"--format", "--format=", "--stat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",

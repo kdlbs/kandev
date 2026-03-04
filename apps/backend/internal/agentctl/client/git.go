@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // GitOperationResult represents the result of a git operation.
@@ -297,6 +298,154 @@ func (c *Client) GitShowCommit(ctx context.Context, commitSHA string) (*CommitDi
 
 	if resp.StatusCode >= 400 {
 		return &result, fmt.Errorf("git show commit failed with status %d: %s", resp.StatusCode, result.Error)
+	}
+
+	return &result, nil
+}
+
+// GitLogResult represents the result of a git log operation.
+type GitLogResult struct {
+	Success bool             `json:"success"`
+	Commits []*GitCommitInfo `json:"commits"`
+	Error   string           `json:"error,omitempty"`
+}
+
+// GitCommitInfo represents a single commit in the log.
+// Field names match GitCommitData and SessionCommit for frontend consistency.
+type GitCommitInfo struct {
+	CommitSHA     string `json:"commit_sha"`
+	ParentSHA     string `json:"parent_sha"`
+	CommitMessage string `json:"commit_message"`
+	AuthorName    string `json:"author_name"`
+	AuthorEmail   string `json:"author_email"`
+	CommittedAt   string `json:"committed_at"`
+	FilesChanged  int    `json:"files_changed"`
+	Insertions    int    `json:"insertions"`
+	Deletions     int    `json:"deletions"`
+}
+
+// GitLog gets the commit log from baseCommit to HEAD.
+// If baseCommit is empty, returns recent commits (limited by limit).
+func (c *Client) GitLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/git/log?since=%s&limit=%d", c.baseURL, url.QueryEscape(baseCommit), limit)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var result GitLogResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(respBody), err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("git log failed with status %d: %s", resp.StatusCode, result.Error)
+	}
+
+	return &result, nil
+}
+
+// CumulativeDiffResult represents the cumulative diff from base commit to HEAD.
+type CumulativeDiffResult struct {
+	Success      bool                   `json:"success"`
+	BaseCommit   string                 `json:"base_commit"`
+	HeadCommit   string                 `json:"head_commit"`
+	TotalCommits int                    `json:"total_commits"`
+	Files        map[string]interface{} `json:"files"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// GetCumulativeDiff gets the cumulative diff from baseCommit to HEAD.
+func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit string) (*CumulativeDiffResult, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/git/cumulative-diff?base=%s", c.baseURL, url.QueryEscape(baseCommit))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var result CumulativeDiffResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(respBody), err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("cumulative diff failed with status %d: %s", resp.StatusCode, result.Error)
+	}
+
+	return &result, nil
+}
+
+// GitStatusResult represents the result of a git status query.
+type GitStatusResult struct {
+	Success      bool                   `json:"success"`
+	Branch       string                 `json:"branch"`
+	RemoteBranch string                 `json:"remote_branch"`
+	HeadCommit   string                 `json:"head_commit"`
+	BaseCommit   string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead        int                    `json:"ahead"`
+	Behind       int                    `json:"behind"`
+	Modified     []string               `json:"modified"`
+	Added        []string               `json:"added"`
+	Deleted      []string               `json:"deleted"`
+	Untracked    []string               `json:"untracked"`
+	Renamed      []string               `json:"renamed"`
+	Files        map[string]interface{} `json:"files"`
+	Timestamp    string                 `json:"timestamp"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// GetGitStatus gets the current git status from the workspace.
+func (c *Client) GetGitStatus(ctx context.Context) (*GitStatusResult, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/git/status", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var result GitStatusResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(respBody), err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("git status failed with status %d: %s", resp.StatusCode, result.Error)
 	}
 
 	return &result, nil

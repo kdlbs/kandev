@@ -277,6 +277,7 @@ export type TaskSession = {
   environment_id?: string;
   repository_id?: string;
   base_branch?: string;
+  base_commit_sha?: string;
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;

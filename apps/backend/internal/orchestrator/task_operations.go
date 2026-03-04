@@ -998,6 +998,113 @@ func (s *Service) StopExecution(ctx context.Context, executionID string, reason 
 	return s.executor.StopExecution(ctx, executionID, reason, force)
 }
 
+// CaptureArchiveSnapshot captures git state (commits, cumulative diff) for a session before archiving.
+// This preserves the final git state for historical purposes.
+func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) error {
+	s.logger.Info("capturing archive snapshot", zap.String("session_id", sessionID))
+
+	// Get session to retrieve base commit SHA
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+
+	baseCommit := session.BaseCommitSHA
+
+	// Fallback: if base_commit_sha is not stored in session, try to get it from git status.
+	// This handles sessions created before the base commit capture feature was added.
+	if baseCommit == "" {
+		status, err := s.agentManager.GetGitStatus(ctx, sessionID)
+		if err != nil {
+			s.logger.Debug("failed to get git status for base commit fallback",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else if status != nil && status.BaseCommit != "" {
+			baseCommit = status.BaseCommit
+			s.logger.Debug("using git status base commit as fallback for archive",
+				zap.String("session_id", sessionID),
+				zap.String("base_commit", baseCommit))
+		}
+	}
+
+	if baseCommit == "" {
+		s.logger.Debug("no base_commit available, skipping archive snapshot capture",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+
+	// Capture commits from base_commit to HEAD
+	logResult, err := s.agentManager.GetGitLog(ctx, sessionID, baseCommit, 0) // 0 = no limit
+	if err != nil {
+		s.logger.Warn("failed to capture git log for archive",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if logResult == nil {
+		s.logger.Debug("agent not running, skipping archive snapshot capture",
+			zap.String("session_id", sessionID))
+		return nil
+	} else if logResult.Success && len(logResult.Commits) > 0 {
+		for _, commit := range logResult.Commits {
+			if err := s.repo.CreateSessionCommit(ctx, &models.SessionCommit{
+				SessionID:     sessionID,
+				CommitSHA:     commit.CommitSHA,
+				ParentSHA:     commit.ParentSHA,
+				AuthorName:    commit.AuthorName,
+				AuthorEmail:   commit.AuthorEmail,
+				CommitMessage: commit.CommitMessage,
+				CommittedAt:   parseCommitTime(commit.CommittedAt),
+				FilesChanged:  commit.FilesChanged,
+				Insertions:    commit.Insertions,
+				Deletions:     commit.Deletions,
+			}); err != nil {
+				s.logger.Warn("failed to save commit for archive",
+					zap.String("session_id", sessionID),
+					zap.String("commit_sha", commit.CommitSHA),
+					zap.Error(err))
+			}
+		}
+		s.logger.Debug("saved archive commits",
+			zap.String("session_id", sessionID),
+			zap.Int("count", len(logResult.Commits)))
+	}
+
+	// Capture cumulative diff from base_commit_sha to HEAD
+	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, session.BaseCommitSHA)
+	if err != nil {
+		s.logger.Warn("failed to capture cumulative diff for archive",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if diffResult != nil && diffResult.Success {
+		if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+			SessionID:    sessionID,
+			SnapshotType: models.SnapshotTypeArchive,
+			HeadCommit:   diffResult.HeadCommit,
+			BaseCommit:   diffResult.BaseCommit,
+			Files:        diffResult.Files,
+		}); err != nil {
+			s.logger.Warn("failed to save archive snapshot",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("saved archive snapshot",
+				zap.String("session_id", sessionID),
+				zap.String("head_commit", diffResult.HeadCommit),
+				zap.Int("total_commits", diffResult.TotalCommits))
+		}
+	}
+
+	return nil
+}
+
+// parseCommitTime parses a commit timestamp from git log output.
+func parseCommitTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Now()
+	}
+	return t
+}
+
 // PromptTask sends a follow-up prompt to a running agent for a task session.
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +27,7 @@ type executorStore interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -125,6 +127,22 @@ type AgentManagerClient interface {
 	// session so that workspace operations (file tree, terminals, git) are accessible.
 	// Used for restoring workspace access on terminal-state sessions.
 	EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error
+
+	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
+	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
+	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error)
+
+	// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.
+	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
+	GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
+
+	// GetGitStatus retrieves the current git status for a session.
+	// Returns nil, nil if no execution exists.
+	GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+
+	// WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
+	// This must be called before other agentctl operations (git status, shell, etc.).
+	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.

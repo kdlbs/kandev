@@ -17,19 +17,31 @@ import (
 // Parameters: ctx, sessionID, taskID, prURL, branch.
 type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch string)
 
+// SessionReader is a minimal interface for reading session metadata.
+// This is needed because git operations need to know the session's base commit SHA
+// to filter commits to only those made during the session.
+type SessionReader interface {
+	// GetSessionBaseCommit returns the base commit SHA for a session.
+	// Returns empty string if not set or on error.
+	GetSessionBaseCommit(ctx context.Context, sessionID string) string
+}
+
 // GitHandlers provides WebSocket handlers for git worktree operations.
 // Operations are executed via agentctl which runs in the worktree context.
 type GitHandlers struct {
-	lifecycleMgr *lifecycle.Manager
-	logger       *logger.Logger
-	onPRCreated  PRCreatedCallback
+	lifecycleMgr  *lifecycle.Manager
+	sessionReader SessionReader
+	logger        *logger.Logger
+	onPRCreated   PRCreatedCallback
 }
 
-// NewGitHandlers creates a new GitHandlers instance
-func NewGitHandlers(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *GitHandlers {
+// NewGitHandlers creates a new GitHandlers instance.
+// sessionReader is required to look up session metadata (e.g., base commit SHA).
+func NewGitHandlers(lifecycleMgr *lifecycle.Manager, sessionReader SessionReader, log *logger.Logger) *GitHandlers {
 	return &GitHandlers{
-		lifecycleMgr: lifecycleMgr,
-		logger:       log.WithFields(zap.String("component", "git_handlers")),
+		lifecycleMgr:  lifecycleMgr,
+		sessionReader: sessionReader,
+		logger:        log.WithFields(zap.String("component", "git_handlers")),
 	}
 }
 
@@ -54,6 +66,8 @@ func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreeRenameBranch, h.wsRenameBranch)
 	d.RegisterFunc(ws.ActionWorktreeReset, h.wsReset)
 	d.RegisterFunc(ws.ActionSessionCommitDiff, h.wsCommitDiff)
+	d.RegisterFunc(ws.ActionSessionGitCommits, h.wsGitCommits)
+	d.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsCumulativeDiff)
 }
 
 // GitPullRequest for worktree.pull action
@@ -550,4 +564,98 @@ func (h *GitHandlers) getAgentCtlClient(sessionID string) (*client.Client, error
 	}
 
 	return c, nil
+}
+
+// GitCommitsRequest for session.git.commits action
+type GitCommitsRequest struct {
+	SessionID string `json:"session_id"`
+	Limit     int    `json:"limit"` // Max commits to return
+}
+
+// wsGitCommits handles session.git.commits action
+// The base commit SHA is always looked up from the session metadata in the database.
+// This ensures commits are filtered to only those made during the session.
+func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req GitCommitsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	agentClient, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Look up base commit SHA from the session metadata
+	baseCommit := h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+
+	// Fallback: if base_commit_sha is not stored in session, use git merge-base
+	// from git status. This happens for sessions created before the base commit
+	// capture feature or if the capture failed.
+	if baseCommit == "" {
+		status, statusErr := agentClient.GetGitStatus(ctx)
+		if statusErr == nil && status != nil && status.BaseCommit != "" {
+			baseCommit = status.BaseCommit
+			h.logger.Debug("using git status base commit as fallback",
+				zap.String("session_id", req.SessionID),
+				zap.String("base_commit", baseCommit))
+		}
+	}
+
+	result, err := agentClient.GitLog(ctx, baseCommit, req.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("git log failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// CumulativeDiffRequest for session.cumulative_diff action
+type CumulativeDiffRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// wsCumulativeDiff handles session.cumulative_diff action
+// The base commit SHA is always looked up from the session metadata in the database.
+func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req CumulativeDiffRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	agentClient, err := h.getAgentCtlClient(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Look up base commit SHA from the session metadata
+	baseCommit := h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+
+	// Fallback: if base_commit_sha is not stored, use git merge-base from status
+	if baseCommit == "" {
+		status, statusErr := agentClient.GetGitStatus(ctx)
+		if statusErr == nil && status != nil && status.BaseCommit != "" {
+			baseCommit = status.BaseCommit
+			h.logger.Debug("using git status base commit as fallback for cumulative diff",
+				zap.String("session_id", req.SessionID),
+				zap.String("base_commit", baseCommit))
+		} else {
+			return nil, fmt.Errorf("no base commit available for cumulative diff")
+		}
+	}
+
+	result, err := agentClient.GetCumulativeDiff(ctx, baseCommit)
+	if err != nil {
+		return nil, fmt.Errorf("cumulative diff failed: %w", err)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }

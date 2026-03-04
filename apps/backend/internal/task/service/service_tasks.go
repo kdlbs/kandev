@@ -275,14 +275,26 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 2. Gather data needed for cleanup BEFORE archive
 	var stopTargets []taskStopTarget
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list active sessions for archive",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
 	if s.executionStopper != nil {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list active sessions for archive",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
 		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+	}
+
+	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
+	if s.gitArchiveCapture != nil && len(activeSessions) > 0 {
+		for _, sess := range activeSessions {
+			if err := s.gitArchiveCapture.CaptureArchiveSnapshot(ctx, sess.ID); err != nil {
+				s.logger.Warn("failed to capture git archive snapshot",
+					zap.String("task_id", id),
+					zap.String("session_id", sess.ID),
+					zap.Error(err))
+			}
+		}
 	}
 
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)

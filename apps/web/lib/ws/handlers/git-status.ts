@@ -6,7 +6,6 @@ import type {
   GitStatusUpdateEvent,
   GitCommitCreatedEvent,
   GitCommitsResetEvent,
-  GitSnapshotCreatedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 
@@ -15,7 +14,6 @@ type GitEventHandlers = {
   status_update: (store: StoreApi<AppState>, event: GitStatusUpdateEvent) => void;
   commit_created: (store: StoreApi<AppState>, event: GitCommitCreatedEvent) => void;
   commits_reset: (store: StoreApi<AppState>, event: GitCommitsResetEvent) => void;
-  snapshot_created: (store: StoreApi<AppState>, event: GitSnapshotCreatedEvent) => void;
 };
 
 const gitEventHandlers: GitEventHandlers = {
@@ -62,30 +60,6 @@ const gitEventHandlers: GitEventHandlers = {
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(event.session_id);
   },
-
-  snapshot_created: (store, event) => {
-    store.getState().addGitSnapshot(event.session_id, {
-      id: event.snapshot.id,
-      session_id: event.snapshot.session_id,
-      snapshot_type: event.snapshot.snapshot_type as
-        | "status_update"
-        | "pre_commit"
-        | "post_commit"
-        | "pre_stage"
-        | "post_stage",
-      branch: event.snapshot.branch,
-      remote_branch: event.snapshot.remote_branch,
-      head_commit: event.snapshot.head_commit,
-      base_commit: event.snapshot.base_commit,
-      ahead: event.snapshot.ahead,
-      behind: event.snapshot.behind,
-      files: event.snapshot.files,
-      triggered_by: event.snapshot.triggered_by,
-      created_at: event.snapshot.created_at,
-    });
-    // Invalidate cumulative diff cache when snapshot is created
-    invalidateCumulativeDiffCache(event.session_id);
-  },
 };
 
 export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -106,9 +80,6 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
           break;
         case "commits_reset":
           gitEventHandlers.commits_reset(store, payload);
-          break;
-        case "snapshot_created":
-          gitEventHandlers.snapshot_created(store, payload);
           break;
       }
     },

@@ -87,6 +87,17 @@ type GitResetRequest struct {
 	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
 }
 
+// GitLogRequest for GET /api/v1/git/log
+type GitLogRequest struct {
+	Since string `form:"since"` // Base commit SHA (exclusive)
+	Limit int    `form:"limit"` // Max commits to return
+}
+
+// GitCumulativeDiffRequest for GET /api/v1/git/cumulative-diff
+type GitCumulativeDiffRequest struct {
+	Base string `form:"base" binding:"required"` // Base commit SHA
+}
+
 // handleGitPull handles POST /api/v1/git/pull
 func (s *Server) handleGitPull(c *gin.Context) {
 	var req GitPullRequest
@@ -500,6 +511,120 @@ func (s *Server) handleGitReset(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// handleGitLog handles GET /api/v1/git/log
+func (s *Server) handleGitLog(c *gin.Context) {
+	var req GitLogRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitLogResult{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.GetLog(c.Request.Context(), req.Since, req.Limit)
+	if err != nil {
+		s.logger.Error("git log failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, process.GitLogResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff
+func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
+	var req GitCumulativeDiffRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.CumulativeDiffResult{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), req.Base)
+	if err != nil {
+		s.logger.Error("git cumulative diff failed", zap.String("base", req.Base), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, process.CumulativeDiffResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GitStatusResult represents the result of a git status query.
+type GitStatusResult struct {
+	Success      bool                   `json:"success"`
+	Branch       string                 `json:"branch"`
+	RemoteBranch string                 `json:"remote_branch"`
+	HeadCommit   string                 `json:"head_commit"`
+	BaseCommit   string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead        int                    `json:"ahead"`
+	Behind       int                    `json:"behind"`
+	Modified     []string               `json:"modified"`
+	Added        []string               `json:"added"`
+	Deleted      []string               `json:"deleted"`
+	Untracked    []string               `json:"untracked"`
+	Renamed      []string               `json:"renamed"`
+	Files        map[string]interface{} `json:"files"`
+	Timestamp    string                 `json:"timestamp"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// handleGitStatus handles GET /api/v1/git/status
+func (s *Server) handleGitStatus(c *gin.Context) {
+	wt := s.procMgr.GetWorkspaceTracker()
+	if wt == nil {
+		c.JSON(http.StatusInternalServerError, GitStatusResult{
+			Success: false,
+			Error:   "workspace tracker not available",
+		})
+		return
+	}
+
+	status, err := wt.GetCurrentGitStatus(c.Request.Context())
+	if err != nil {
+		s.logger.Error("git status failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, GitStatusResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	// Convert Files map to interface{} map for JSON serialization
+	filesMap := make(map[string]interface{}, len(status.Files))
+	for k, v := range status.Files {
+		filesMap[k] = v
+	}
+
+	c.JSON(http.StatusOK, GitStatusResult{
+		Success:      true,
+		Branch:       status.Branch,
+		RemoteBranch: status.RemoteBranch,
+		HeadCommit:   status.HeadCommit,
+		BaseCommit:   status.BaseCommit,
+		Ahead:        status.Ahead,
+		Behind:       status.Behind,
+		Modified:     status.Modified,
+		Added:        status.Added,
+		Deleted:      status.Deleted,
+		Untracked:    status.Untracked,
+		Renamed:      status.Renamed,
+		Files:        filesMap,
+		Timestamp:    status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+	})
 }
 
 // handleGitError handles errors from git operations.

@@ -54,6 +54,7 @@ function TimelineSection({
   action,
   isLast,
   children,
+  "data-testid": testId,
 }: {
   dotColor: string;
   label?: string;
@@ -61,9 +62,10 @@ function TimelineSection({
   action?: React.ReactNode;
   isLast?: boolean;
   children?: React.ReactNode;
+  "data-testid"?: string;
 }) {
   return (
-    <div className="relative flex gap-2.5">
+    <div className="relative flex gap-2.5" data-testid={testId}>
       {/* Vertical line + dot */}
       <div className="flex flex-col items-center">
         <TimelineDot color={dotColor} />
@@ -117,8 +119,9 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
+      data-testid="commits-section"
     >
-      <ul className="space-y-0.5">
+      <ul data-testid="commits-list" className="space-y-0.5">
         {commits.map((commit, index) => (
           <CommitRow
             key={`${commit.commit_sha}-${index}`}
@@ -280,9 +283,15 @@ export function FileListSection({
   const label = variant === "unstaged" ? "Unstaged" : "Staged";
 
   return (
-    <TimelineSection dotColor={dotColor} label={label} count={files.length} isLast={isLast}>
+    <TimelineSection
+      dotColor={dotColor}
+      label={label}
+      count={files.length}
+      isLast={isLast}
+      data-testid={`${variant}-files-section`}
+    >
       {files.length > 0 && (
-        <ul className="space-y-0.5">
+        <ul data-testid={`${variant}-file-list`} className="space-y-0.5">
           {files.map((file) => (
             <FileRow
               key={file.path}

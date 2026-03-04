@@ -1233,3 +1233,145 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 
 	return filesChanged, insertions, deletions
 }
+
+// GitLogResult represents the result of a git log operation.
+type GitLogResult struct {
+	Success bool             `json:"success"`
+	Commits []*GitCommitInfo `json:"commits"`
+	Error   string           `json:"error,omitempty"`
+}
+
+// GitCommitInfo represents a single commit in the log.
+// Field names match GitCommitData and SessionCommit for frontend consistency.
+type GitCommitInfo struct {
+	CommitSHA     string `json:"commit_sha"`
+	ParentSHA     string `json:"parent_sha"`
+	CommitMessage string `json:"commit_message"`
+	AuthorName    string `json:"author_name"`
+	AuthorEmail   string `json:"author_email"`
+	CommittedAt   string `json:"committed_at"`
+	FilesChanged  int    `json:"files_changed"`
+	Insertions    int    `json:"insertions"`
+	Deletions     int    `json:"deletions"`
+}
+
+// GetLog returns commits from baseCommit (exclusive) to HEAD (inclusive).
+// If baseCommit is empty, returns recent commits (limited by limit parameter).
+func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
+	result := &GitLogResult{
+		Commits: make([]*GitCommitInfo, 0),
+	}
+
+	// Build the git log command
+	args := []string{"log", "--format=%H|%P|%an|%ae|%s|%aI"}
+
+	if baseCommit != "" {
+		args = append(args, baseCommit+"..HEAD")
+	} else if limit > 0 {
+		args = append(args, fmt.Sprintf("-n%d", limit))
+	} else {
+		// Default to last 50 commits if no base and no limit
+		args = append(args, "-n50")
+	}
+
+	output, err := g.runGitCommand(ctx, args...)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get git log: %s", err.Error())
+		return result, nil
+	}
+
+	output = strings.TrimSpace(output)
+	if output == "" {
+		result.Success = true
+		return result, nil
+	}
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, "|", 6)
+		if len(parts) < 6 {
+			continue
+		}
+
+		sha := parts[0]
+		parentSHA := parts[1]
+		// Handle multiple parents (merge commits) - just take the first
+		if idx := strings.Index(parentSHA, " "); idx > 0 {
+			parentSHA = parentSHA[:idx]
+		}
+
+		// Get stats for this commit
+		filesChanged, insertions, deletions := g.getCommitStats(ctx, sha)
+
+		result.Commits = append(result.Commits, &GitCommitInfo{
+			CommitSHA:     sha,
+			ParentSHA:     parentSHA,
+			AuthorName:    parts[2],
+			AuthorEmail:   parts[3],
+			CommitMessage: parts[4],
+			CommittedAt:   parts[5],
+			FilesChanged:  filesChanged,
+			Insertions:    insertions,
+			Deletions:     deletions,
+		})
+	}
+
+	result.Success = true
+	return result, nil
+}
+
+// CumulativeDiffResult represents the cumulative diff from base commit to HEAD.
+type CumulativeDiffResult struct {
+	Success      bool                   `json:"success"`
+	BaseCommit   string                 `json:"base_commit"`
+	HeadCommit   string                 `json:"head_commit"`
+	TotalCommits int                    `json:"total_commits"`
+	Files        map[string]interface{} `json:"files"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// GetCumulativeDiff returns the cumulative diff from baseCommit to HEAD.
+func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) (*CumulativeDiffResult, error) {
+	result := &CumulativeDiffResult{
+		Files: make(map[string]interface{}),
+	}
+
+	if baseCommit == "" {
+		result.Error = "base_commit is required"
+		return result, nil
+	}
+
+	result.BaseCommit = baseCommit
+
+	// Get current HEAD
+	headOutput, err := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get HEAD: %s", err.Error())
+		return result, nil
+	}
+	result.HeadCommit = strings.TrimSpace(headOutput)
+
+	// Count commits between base and HEAD
+	countOutput, err := g.runGitCommand(ctx, "rev-list", "--count", baseCommit+"..HEAD")
+	if err == nil {
+		_, _ = fmt.Sscanf(strings.TrimSpace(countOutput), "%d", &result.TotalCommits)
+	}
+
+	// Get the cumulative diff
+	diffOutput, err := g.runGitCommand(ctx, "diff", baseCommit+"..HEAD")
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get diff: %s", err.Error())
+		return result, nil
+	}
+
+	// Parse the diff output into files (reuse parseCommitDiff logic)
+	result.Files = g.parseCommitDiff(diffOutput)
+
+	result.Success = true
+	return result, nil
+}

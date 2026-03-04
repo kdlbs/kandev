@@ -126,6 +126,9 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/rename-branch", s.handleGitRenameBranch)
 		api.POST("/git/reset", s.handleGitReset)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
+		api.GET("/git/log", s.handleGitLog)
+		api.GET("/git/cumulative-diff", s.handleGitCumulativeDiff)
+		api.GET("/git/status", s.handleGitStatus)
 	}
 
 	// Utility agent routes

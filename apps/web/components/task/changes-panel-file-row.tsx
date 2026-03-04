@@ -55,6 +55,7 @@ export function FileRow({
 
   return (
     <li
+      data-testid={`file-row-${file.path.replace(/[/\\]/g, "-")}`}
       className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
       onClick={() => onOpenDiff(file.path)}
     >

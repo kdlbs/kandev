@@ -62,38 +62,6 @@ func (h *TaskHandlers) wsGetSessionData(
 	})
 }
 
-func (h *TaskHandlers) wsGetSessionCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return h.wsGetSessionData(ctx, msg,
-		"failed to get session commits", "Failed to get session commits", "commits",
-		func(ctx context.Context, sessionID string) (any, error) {
-			return h.service.GetSessionCommits(ctx, sessionID)
-		})
-}
-
-type wsGetCumulativeDiffRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-func (h *TaskHandlers) wsGetCumulativeDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsGetCumulativeDiffRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.SessionID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-	}
-
-	diff, err := h.service.GetCumulativeDiff(ctx, req.SessionID)
-	if err != nil {
-		h.logger.Error("failed to get cumulative diff", zap.Error(err), zap.String("session_id", req.SessionID))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get cumulative diff", nil)
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"cumulative_diff": diff,
-	})
-}
-
 // Session File Review Handlers
 
 func (h *TaskHandlers) wsGetSessionFileReviews(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

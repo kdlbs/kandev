@@ -74,7 +74,6 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     devProcessBySessionId: {},
   },
   gitStatus: { bySessionId: {} },
-  gitSnapshots: { bySessionId: {}, latestBySessionId: {}, loading: {} },
   sessionCommits: { bySessionId: {}, loading: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
@@ -139,33 +138,6 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
   };
 }
 
-function buildGitSnapshotActions(set: ImmerSet) {
-  return {
-    setGitSnapshots: (
-      sessionId: string,
-      snapshots: Parameters<SessionRuntimeSlice["setGitSnapshots"]>[1],
-    ) =>
-      set((draft) => {
-        draft.gitSnapshots.bySessionId[sessionId] = snapshots;
-        draft.gitSnapshots.latestBySessionId[sessionId] =
-          snapshots.length > 0 ? snapshots[0] : null;
-      }),
-    setGitSnapshotsLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => {
-        draft.gitSnapshots.loading[sessionId] = loading;
-      }),
-    addGitSnapshot: (
-      sessionId: string,
-      snapshot: Parameters<SessionRuntimeSlice["addGitSnapshot"]>[1],
-    ) =>
-      set((draft) => {
-        const existing = draft.gitSnapshots.bySessionId[sessionId] || [];
-        draft.gitSnapshots.bySessionId[sessionId] = [snapshot, ...existing];
-        draft.gitSnapshots.latestBySessionId[sessionId] = snapshot;
-      }),
-  };
-}
-
 function buildUserShellActions(set: ImmerSet) {
   return {
     setUserShells: (
@@ -220,7 +192,6 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       draft.contextWindow.bySessionId[sessionId] = contextWindow;
     }),
-  ...buildGitSnapshotActions(set),
   setSessionCommits: (sessionId, commits) =>
     set((draft) => {
       draft.sessionCommits.bySessionId[sessionId] = commits;

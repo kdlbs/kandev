@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -112,6 +113,28 @@ func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID st
 	}, nil
 }
 
+func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error) {
+	return nil, nil
+}
+
+func (m *mockAgentManager) GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	// Return a mock git status with a head commit for base commit capture
+	return &client.GitStatusResult{
+		Success:    true,
+		Branch:     "main",
+		HeadCommit: "abc123def456",
+	}, nil
+}
+
+func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
+	// Mock returns immediately
+	return nil
+}
+
 // mockRepository implements executorStore for testing
 type mockRepository struct {
 	sessions         map[string]*models.TaskSession
@@ -181,6 +204,13 @@ func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID s
 	if session, ok := m.sessions[sessionID]; ok {
 		session.State = state
 		session.ErrorMessage = errorMessage
+	}
+	return nil
+}
+
+func (m *mockRepository) UpdateTaskSessionBaseCommit(ctx context.Context, sessionID string, baseCommitSHA string) error {
+	if session, ok := m.sessions[sessionID]; ok {
+		session.BaseCommitSHA = baseCommitSHA
 	}
 	return nil
 }

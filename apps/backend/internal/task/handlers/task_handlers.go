@@ -83,10 +83,8 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
-	// Git snapshot and commit handlers
+	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
-	dispatcher.RegisterFunc(ws.ActionSessionGitCommits, h.wsGetSessionCommits)
-	dispatcher.RegisterFunc(ws.ActionSessionCumulativeDiff, h.wsGetCumulativeDiff)
 	// Session file review handlers
 	dispatcher.RegisterFunc(ws.ActionSessionFileReviewGet, h.wsGetSessionFileReviews)
 	dispatcher.RegisterFunc(ws.ActionSessionFileReviewUpdate, h.wsUpdateSessionFileReview)

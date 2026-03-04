@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -425,5 +426,21 @@ func (s *SimulatedAgentManagerClient) CleanupStaleExecutionBySessionID(ctx conte
 	return nil
 }
 func (s *SimulatedAgentManagerClient) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	return nil
+}
+func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
+	return nil, nil
+}
+func (s *SimulatedAgentManagerClient) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+	return nil, nil
+}
+func (s *SimulatedAgentManagerClient) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return &client.GitStatusResult{
+		Success:    true,
+		Branch:     "main",
+		HeadCommit: "simulated-commit",
+	}, nil
+}
+func (s *SimulatedAgentManagerClient) WaitForAgentctlReady(_ context.Context, _ string) error {
 	return nil
 }

@@ -67,29 +67,6 @@ export type GitStatusState = {
 };
 
 // Git Snapshot types for historical tracking
-export type SnapshotType =
-  | "status_update"
-  | "pre_commit"
-  | "post_commit"
-  | "pre_stage"
-  | "post_stage";
-
-export type GitSnapshot = {
-  id: string;
-  session_id: string;
-  snapshot_type: SnapshotType;
-  branch: string;
-  remote_branch: string;
-  head_commit: string;
-  base_commit: string;
-  ahead: number;
-  behind: number;
-  files: Record<string, FileInfo>;
-  triggered_by: string;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-};
-
 export type SessionCommit = {
   id: string;
   session_id: string;
@@ -113,12 +90,6 @@ export type CumulativeDiff = {
   head_commit: string;
   total_commits: number;
   files: Record<string, FileInfo>;
-};
-
-export type GitSnapshotsState = {
-  bySessionId: Record<string, GitSnapshot[]>;
-  latestBySessionId: Record<string, GitSnapshot | null>;
-  loading: Record<string, boolean>;
 };
 
 export type SessionCommitsState = {
@@ -195,7 +166,6 @@ export type SessionRuntimeSliceState = {
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
-  gitSnapshots: GitSnapshotsState;
   sessionCommits: SessionCommitsState;
   contextWindow: ContextWindowState;
   agents: AgentState;
@@ -220,10 +190,6 @@ export type SessionRuntimeSliceActions = {
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
-  // Git snapshot actions
-  setGitSnapshots: (sessionId: string, snapshots: GitSnapshot[]) => void;
-  setGitSnapshotsLoading: (sessionId: string, loading: boolean) => void;
-  addGitSnapshot: (sessionId: string, snapshot: GitSnapshot) => void;
   // Session commit actions
   setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
