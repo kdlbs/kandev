@@ -396,6 +396,7 @@ func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]
 		fmt.Sprintf("repos/%s/%s/branches", owner, repo),
 		"-X", "GET",
 		"-f", "per_page=100",
+		"--paginate",
 		"--jq", ".[].name")
 	if err != nil {
 		return nil, fmt.Errorf("list repo branches: %w", err)
