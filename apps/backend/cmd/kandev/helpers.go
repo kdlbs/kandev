@@ -299,7 +299,9 @@ type routeParams struct {
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
 	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
-	clarificationStore := clarification.NewStore(10 * time.Minute)
+	clarificationStore := clarification.NewStore(2 * time.Hour)
+	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
+	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService)
@@ -358,7 +360,7 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.log)
+	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
 	if p.secretsSvc != nil {

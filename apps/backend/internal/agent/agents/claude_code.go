@@ -114,9 +114,11 @@ func (a *ClaudeCode) Runtime() *RuntimeConfig {
 			"--permission-prompt-tool=stdio", "--disallowedTools=AskUserQuestion",
 			"--setting-sources=user,project", "--verbose",
 			"--include-partial-messages", "--replay-user-messages").Build(),
-		WorkingDir:     "{workspace}",
-		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
-		Env:            map[string]string{},
+		WorkingDir:  "{workspace}",
+		RequiredEnv: []string{"ANTHROPIC_API_KEY"},
+		Env: map[string]string{
+			"MCP_TIMEOUT": "7200000", // 2 hours in ms — long wait for clarification responses
+		},
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolClaudeCode,
 		ModelFlag:      NewParam("--model", "{model}"),

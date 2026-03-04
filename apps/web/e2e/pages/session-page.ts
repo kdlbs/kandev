@@ -133,6 +133,33 @@ export class SessionPage {
     return this.chat.getByText("Plan mode", { exact: true });
   }
 
+  /** Clarification overlay (visible when a clarification request is pending). */
+  clarificationOverlay(): Locator {
+    return this.page.getByTestId("clarification-overlay");
+  }
+
+  /** A specific clarification option button by its text label. */
+  clarificationOption(text: string): Locator {
+    return this.clarificationOverlay()
+      .getByTestId("clarification-option")
+      .filter({ hasText: text });
+  }
+
+  /** Skip (X) button on the clarification overlay. */
+  clarificationSkip(): Locator {
+    return this.page.getByTestId("clarification-skip");
+  }
+
+  /** Custom text input on the clarification overlay. */
+  clarificationInput(): Locator {
+    return this.page.getByTestId("clarification-input");
+  }
+
+  /** Deferred notice shown when agent has disconnected from clarification. */
+  clarificationDeferredNotice(): Locator {
+    return this.page.getByTestId("clarification-deferred-notice");
+  }
+
   /**
    * Delete a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, and clicks "Delete".

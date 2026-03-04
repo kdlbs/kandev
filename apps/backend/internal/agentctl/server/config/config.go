@@ -151,6 +151,10 @@ type InstanceConfig struct {
 
 	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
 	VscodeCommand string
+
+	// DisableAskQuestion disables the ask_user_question MCP tool.
+	// Used for TUI/passthrough agents that don't need clarification tools.
+	DisableAskQuestion bool
 }
 
 // Load loads the configuration from environment variables.
@@ -248,19 +252,23 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.SessionID != "" {
 		cfg.SessionID = overrides.SessionID
 	}
+	if overrides.DisableAskQuestion {
+		cfg.DisableAskQuestion = true
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	Protocol       agent.Protocol
-	AgentCommand   string
-	WorkDir        string
-	AutoStart      *bool
-	Env            []string
-	ApprovalPolicy string
-	AgentType      string
-	McpServers     []McpServerConfig
-	SessionID      string
+	Protocol           agent.Protocol
+	AgentCommand       string
+	WorkDir            string
+	AutoStart          *bool
+	Env                []string
+	ApprovalPolicy     string
+	AgentType          string
+	McpServers         []McpServerConfig
+	SessionID          string
+	DisableAskQuestion bool
 }
 
 // ParseCommand splits a command string into arguments

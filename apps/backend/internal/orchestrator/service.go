@@ -182,6 +182,9 @@ type Service struct {
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
+	// Clarification canceller — cancels pending clarifications when agent's turn completes
+	clarificationCanceller ClarificationCanceller
+
 	// Push tracker: sessionID -> last known ahead count
 	pushTracker sync.Map
 
@@ -334,6 +337,16 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
+// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+type ClarificationCanceller interface {
+	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+}
+
+// SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
+func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
+	s.clarificationCanceller = c
+}
+
 // initWorkflowEngine creates the workflow engine with store and callbacks.
 // Called after the workflow step getter is set. Safe to call multiple times.
 func (s *Service) initWorkflowEngine() {
@@ -469,6 +482,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to clarification events (cancel-and-resume flow)
+	s.subscribeClarificationEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

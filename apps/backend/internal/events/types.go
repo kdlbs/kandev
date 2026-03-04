@@ -124,6 +124,11 @@ const (
 	PermissionRequestReceived = "permission_request.received" // Agent requested permission
 )
 
+// Event types for clarification
+const (
+	ClarificationAnswered = "clarification.answered" // User answered agent's clarification question
+)
+
 // Event types for workspace/git status
 const (
 	GitEvent           = "git.event"            // Internal git events (agentctl -> orchestrator)

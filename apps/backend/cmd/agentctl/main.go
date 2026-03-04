@@ -92,7 +92,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 		mcpBackendClient := mcpserver.NewChannelBackendClient()
 
 		// Create MCP server using the channel-based backend client
-		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.Port, instLog, cfg.McpLogFile)
+		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion)
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 

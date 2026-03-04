@@ -180,6 +180,17 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
 	env["TASK_DESCRIPTION"] = req.TaskDescription
 
+	// Add agent runtime default env vars (e.g., MCP_TIMEOUT for Claude Code)
+	if agentConfig != nil {
+		if rt := agentConfig.Runtime(); rt != nil {
+			for k, v := range rt.Env {
+				if _, exists := env[k]; !exists {
+					env[k] = v
+				}
+			}
+		}
+	}
+
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {
 		ctx := context.Background()

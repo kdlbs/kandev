@@ -449,6 +449,16 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.publishAgentPlanIfPresent(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
 
+	// Cancel any pending clarifications for this session so WaitForResponse
+	// unblocks and later user responses go through the event fallback path.
+	if s.clarificationCanceller != nil && payload.SessionID != "" {
+		if n := s.clarificationCanceller.CancelSessionAndNotify(ctx, payload.SessionID); n > 0 {
+			s.logger.Info("cancelled pending clarifications on turn complete",
+				zap.String("session_id", payload.SessionID),
+				zap.Int("count", n))
+		}
+	}
+
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if session != nil && session.State == models.TaskSessionStateRunning {

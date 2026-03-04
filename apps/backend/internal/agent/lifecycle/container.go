@@ -94,15 +94,18 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	if config.AgentConfig != nil {
 		agentType = config.AgentConfig.ID()
 	}
+	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
+
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "", // Agent command set via Configure endpoint later
-		AgentType:     agentType,
-		Env:           config.Credentials,
-		AutoStart:     false,
-		McpServers:    config.McpServers,
-		SessionID:     config.SessionID,
+		ID:                 config.InstanceID,
+		WorkspacePath:      "/workspace",
+		AgentCommand:       "", // Agent command set via Configure endpoint later
+		AgentType:          agentType,
+		Env:                config.Credentials,
+		AutoStart:          false,
+		McpServers:         config.McpServers,
+		SessionID:          config.SessionID,
+		DisableAskQuestion: disableAskQuestion,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

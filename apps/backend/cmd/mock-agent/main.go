@@ -186,6 +186,8 @@ func handleControlRequest(enc *json.Encoder, msg IncomingMessage) {
 						{Name: "e2e:subagent", Description: "E2E: subagent with child messages"},
 						{Name: "e2e:all-tools", Description: "E2E: one of each tool type"},
 						{Name: "e2e:multi-turn", Description: "E2E: minimal multi-turn response"},
+						{Name: "e2e:clarification", Description: "E2E: ask clarification question via MCP (happy path)"},
+						{Name: "e2e:clarification-timeout", Description: "E2E: ask clarification with 5s timeout (fallback path)"},
 						{Name: "e2e:*", Description: "E2E: scripted commands (e2e:message, e2e:mcp:*, etc.)"},
 					},
 					Agents: []string{"Bash", "Read", "Edit", "Grep", "Glob", "Task"},
