@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileContent, requestFileContentAtRef } from "@/lib/ws/workspace-files";
+import { requestFileContentAtRef } from "@/lib/ws/workspace-files";
 
 /** Must match @pierre/diffs SPLIT_WITH_NEWLINES — splits preserving trailing \n */
 const SPLIT_WITH_NEWLINES = /(?<=\n)/;
@@ -25,6 +25,11 @@ type UseExpandableDiffResult = {
 
 type WsClient = NonNullable<ReturnType<typeof getWebSocketClient>>;
 
+/** Check if an error indicates file not found (various formats from backend). */
+function isFileNotFoundError(error: string): boolean {
+  return /file not found|not found|no such file|does not exist/i.test(error);
+}
+
 /** Fetch old file content at a git ref. Returns empty string for new files. */
 async function fetchOldContent(
   client: WsClient,
@@ -32,20 +37,41 @@ async function fetchOldContent(
   filePath: string,
   baseRef: string,
 ): Promise<string> {
-  const res = await requestFileContentAtRef(client, sessionId, filePath, baseRef);
-  if (res.is_binary) throw new Error("Cannot expand binary files");
-  if (!res.error) return res.content;
-  if (res.error.includes("file not found at ref")) return "";
-  throw new Error(res.error);
+  try {
+    const res = await requestFileContentAtRef(client, sessionId, filePath, baseRef);
+    if (res.is_binary) throw new Error("Cannot expand binary files");
+    if (!res.error) return res.content;
+    // File not found at ref is expected for new files - return empty string
+    if (isFileNotFoundError(res.error)) return "";
+    throw new Error(res.error);
+  } catch (err) {
+    // WebSocket client throws errors for backend error responses
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isFileNotFoundError(msg)) return "";
+    throw err;
+  }
 }
 
-/** Fetch new file content. Returns empty string for deleted files. */
-async function fetchNewContent(client: WsClient, sessionId: string, filePath: string) {
-  const res = await requestFileContent(client, sessionId, filePath);
-  if (res.is_binary) throw new Error("Cannot expand binary files");
-  if (res.error && /not found|no such file/i.test(res.error)) return "";
-  if (res.error) throw new Error(res.error);
-  return res.content;
+/** Fetch new file content at HEAD. Returns empty string for deleted files. */
+async function fetchNewContent(
+  client: WsClient,
+  sessionId: string,
+  filePath: string,
+): Promise<string> {
+  try {
+    // Use get_at_ref with HEAD to ensure we get the committed version
+    const res = await requestFileContentAtRef(client, sessionId, filePath, "HEAD");
+    if (res.is_binary) throw new Error("Cannot expand binary files");
+    if (!res.error) return res.content;
+    // File not found at HEAD is expected for deleted files - return empty string
+    if (isFileNotFoundError(res.error)) return "";
+    throw new Error(res.error);
+  } catch (err) {
+    // WebSocket client throws errors for backend error responses
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isFileNotFoundError(msg)) return "";
+    throw err;
+  }
 }
 
 /** Fetch both old and new content, split into lines for @pierre/diffs expansion. */

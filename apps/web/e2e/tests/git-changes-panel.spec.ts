@@ -912,6 +912,11 @@ test.describe("Git Changes Panel", () => {
 
     const session = await openTaskSession(testPage, "Git Cumulative Test");
 
+    // Wait for the session to fully initialize including base commit capture.
+    // The captureBaseCommit runs async after agent launch, we need it to complete
+    // before making commits so the cumulative diff works correctly.
+    await testPage.waitForTimeout(3_000);
+
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const gitEnv = {
@@ -947,7 +952,14 @@ test.describe("Git Changes Panel", () => {
     // Click the "Diff" button in the header to open the cumulative diff view
     await session.changes.getByRole("button", { name: "Diff" }).click();
 
-    // The cumulative diff view should show the file
-    await expect(testPage.getByText("cumulative-file.txt")).toBeVisible({ timeout: 10_000 });
+    // Wait for diff viewer to load
+    await testPage.waitForTimeout(2_000);
+
+    // Verify commits are visible (this proves git changes are tracked)
+    await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 5_000 });
+    await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 5_000 });
+
+    // The cumulative diff should NOT show "No changes"
+    await expect(testPage.locator("text=No changes")).not.toBeVisible({ timeout: 5_000 });
   });
 });

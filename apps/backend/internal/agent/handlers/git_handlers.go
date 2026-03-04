@@ -657,5 +657,8 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 		return nil, fmt.Errorf("cumulative diff failed: %w", err)
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, result)
+	// Wrap in cumulative_diff key as expected by frontend
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"cumulative_diff": result,
+	})
 }

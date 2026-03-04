@@ -1071,5 +1071,3 @@ func (g *GitOperator) getCommitStats(ctx context.Context, commitSHA string) (fil
 
 	return filesChanged, insertions, deletions
 }
-
-

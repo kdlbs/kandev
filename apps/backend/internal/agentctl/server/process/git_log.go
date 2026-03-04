@@ -318,4 +318,3 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 
 	return files
 }
-
