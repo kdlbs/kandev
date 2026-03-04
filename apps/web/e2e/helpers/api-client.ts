@@ -344,6 +344,18 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubAddBranches(
+    owner: string,
+    repo: string,
+    branches: Array<{ name: string }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/branches", {
+      owner,
+      repo,
+      branches,
+    });
+  }
+
   async mockGitHubAssociateTaskPR(data: {
     task_id: string;
     owner: string;
