@@ -22,6 +22,24 @@ const DEFAULT_DOCKERFILE = "FROM ubuntu:24.04\n";
 
 type BuildStatus = "idle" | "building" | "success" | "failed";
 
+/** Parse a Docker JSON stream line into a human-readable string. */
+function parseDockerLine(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    if (obj.error) return `ERROR: ${obj.error}`;
+    if (typeof obj.stream === "string") return obj.stream;
+    if (typeof obj.status === "string") {
+      const id = obj.id ? ` ${obj.id}` : "";
+      return `${obj.status}${id}\n`;
+    }
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 function BuildStatusBadge({ status }: { status: BuildStatus }) {
   if (status === "idle") return null;
   if (status === "building") return <Badge variant="secondary">Building...</Badge>;
@@ -41,9 +59,40 @@ function BuildStatusBadge({ status }: { status: BuildStatus }) {
   );
 }
 
+async function readDockerStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  appendLog: (text: string) => void,
+): Promise<boolean> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let hasError = false;
+  let done = false;
+  while (!done) {
+    const result = await reader.read();
+    done = result.done;
+    if (!result.value) continue;
+    buffer += decoder.decode(result.value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const parsed = parseDockerLine(line);
+      if (!parsed) continue;
+      if (parsed.startsWith("ERROR:")) hasError = true;
+      appendLog(parsed);
+    }
+  }
+  const tail = parseDockerLine(buffer);
+  if (tail) appendLog(tail);
+  return hasError;
+}
+
 function useBuildStream() {
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
+
+  const appendLog = useCallback((text: string) => {
+    setBuildLog((prev) => prev + text);
+  }, []);
 
   const runBuild = useCallback(async (dockerfile: string, tag: string) => {
     setBuildStatus("building");
@@ -62,22 +111,14 @@ function useBuildStream() {
         setBuildLog("No response body");
         return;
       }
-      const decoder = new TextDecoder();
-      let done = false;
-      while (!done) {
-        const result = await reader.read();
-        done = result.done;
-        if (result.value) {
-          setBuildLog((prev) => prev + decoder.decode(result.value, { stream: true }));
-        }
-      }
-      setBuildStatus("success");
+      const hasError = await readDockerStream(reader, appendLog);
+      setBuildStatus(hasError ? "failed" : "success");
     } catch (err) {
       setBuildStatus("failed");
       const msg = err instanceof Error ? err.message : "Unknown error";
       setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
     }
-  }, []);
+  }, [appendLog]);
 
   return { buildStatus, buildLog, runBuild };
 }
