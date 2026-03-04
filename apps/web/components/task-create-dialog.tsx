@@ -130,27 +130,20 @@ function RepoSourceInput({
   | "workspaceId"
   | "repositoriesLoading"
   | "discoverReposLoading"
->) {
+>): React.ReactNode {
   if (useGitHubUrl) {
     return (
-      <div className="relative flex flex-col">
-        <input
-          type="text"
-          value={githubUrl}
-          onChange={(e) => onGitHubUrlChange(e.target.value)}
-          placeholder="https://github.com/owner/repo"
-          data-testid="github-url-input"
-          size={Math.max((githubUrl || "").length, 30)}
-          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 min-h-9 rounded-md px-3 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
-          disabled={isTaskStarted}
-          autoFocus
-        />
-        {githubUrlError && (
-          <span className="absolute top-full left-0 text-[11px] text-destructive px-3 whitespace-nowrap" data-testid="github-url-error">
-            {githubUrlError}
-          </span>
-        )}
-      </div>
+      <input
+        type="text"
+        value={githubUrl}
+        onChange={(e) => onGitHubUrlChange(e.target.value)}
+        placeholder="https://github.com/owner/repo"
+        data-testid="github-url-input"
+        size={Math.max((githubUrl || "").length, 30)}
+        className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-9 rounded-md px-3 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
+        disabled={isTaskStarted}
+        autoFocus
+      />
     );
   }
   return (
@@ -189,14 +182,21 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
             />
           </div>
           {!isTaskStarted && (
-            <button
-              type="button"
-              onClick={onToggleGitHubUrl}
-              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer self-start pl-3 transition-colors"
-              data-testid="toggle-github-url"
-            >
-              {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
-            </button>
+            <div className="flex items-center gap-2 pl-3">
+              <button
+                type="button"
+                onClick={onToggleGitHubUrl}
+                className="text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                data-testid="toggle-github-url"
+              >
+                {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
+              </button>
+              {props.githubUrlError && (
+                <span className="text-[11px] text-destructive" data-testid="github-url-error">
+                  {props.githubUrlError}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </DialogTitle>
