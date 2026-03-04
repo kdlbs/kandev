@@ -109,6 +109,21 @@ function useFormResetEffects(
   }, [open, workspaceId]);
 }
 
+function useGitHubUrlState() {
+  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
+  const [githubUrl, setGitHubUrl] = useState("");
+  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
+  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
+  const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
+  return {
+    useGitHubUrl, setUseGitHubUrl,
+    githubUrl, setGitHubUrl,
+    githubBranches, setGitHubBranches,
+    githubBranchesLoading, setGitHubBranchesLoading,
+    githubUrlError, setGitHubUrlError,
+  };
+}
+
 export function useDialogFormState(
   open: boolean,
   workspaceId: string | null,
@@ -135,11 +150,7 @@ export function useDialogFormState(
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
-  const [githubUrl, setGitHubUrl] = useState("");
-  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
-  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
-  const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
+  const ghUrl = useGitHubUrlState();
   useFormResetEffects(open, workspaceId, workflowId, initialValues, {
     setTaskName,
     setHasTitle,
@@ -156,10 +167,10 @@ export function useDialogFormState(
     setSelectedLocalRepo,
     setLocalBranches,
     setDiscoverReposLoaded,
-    setUseGitHubUrl,
-    setGitHubUrl,
-    setGitHubBranches,
-    setGitHubUrlError,
+    setUseGitHubUrl: ghUrl.setUseGitHubUrl,
+    setGitHubUrl: ghUrl.setGitHubUrl,
+    setGitHubBranches: ghUrl.setGitHubBranches,
+    setGitHubUrlError: ghUrl.setGitHubUrlError,
   });
   return {
     taskName,
@@ -201,16 +212,7 @@ export function useDialogFormState(
     setIsCreatingSession,
     isCreatingTask,
     setIsCreatingTask,
-    useGitHubUrl,
-    setUseGitHubUrl,
-    githubUrl,
-    setGitHubUrl,
-    githubBranches,
-    setGitHubBranches,
-    githubBranchesLoading,
-    setGitHubBranchesLoading,
-    githubUrlError,
-    setGitHubUrlError,
+    ...ghUrl,
   };
 }
 

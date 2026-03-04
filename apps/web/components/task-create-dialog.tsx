@@ -133,17 +133,27 @@ function RepoSourceInput({
 >): React.ReactNode {
   if (useGitHubUrl) {
     return (
-      <input
-        type="text"
-        value={githubUrl}
-        onChange={(e) => onGitHubUrlChange(e.target.value)}
-        placeholder="github.com/owner/repo"
-        data-testid="github-url-input"
-        size={Math.max((githubUrl || "").length + 1, 20)}
-        className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-9 rounded-md px-3 hover:bg-muted focus:bg-muted transition-colors ${githubUrlError ? "text-destructive" : ""}`}
-        disabled={isTaskStarted}
-        autoFocus
-      />
+      <div className="relative">
+        <input
+          type="text"
+          value={githubUrl}
+          onChange={(e) => onGitHubUrlChange(e.target.value)}
+          placeholder="github.com/owner/repo"
+          data-testid="github-url-input"
+          size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
+          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
+          disabled={isTaskStarted}
+          autoFocus
+        />
+        {githubUrlError && (
+          <div
+            className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
+            data-testid="github-url-error"
+          >
+            {githubUrlError}
+          </div>
+        )}
+      </div>
     );
   }
   return (
@@ -182,7 +192,7 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
             />
           </div>
           {!isTaskStarted && (
-            <div className="flex items-center gap-2 pl-3">
+            <div className="flex items-center gap-2 pl-2">
               <button
                 type="button"
                 onClick={onToggleGitHubUrl}
@@ -191,11 +201,6 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
               >
                 {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
               </button>
-              {props.githubUrlError && (
-                <span className="text-[11px] text-destructive" data-testid="github-url-error">
-                  {props.githubUrlError}
-                </span>
-              )}
             </div>
           )}
         </div>
