@@ -125,7 +125,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2">
+      <div className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2" data-testid="toast-container">
         {toasts.map((t) => {
           const variant = t.variant ?? "default";
           const styles = variantStyles[variant];
@@ -133,6 +133,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={t.id}
+              data-testid="toast-message"
               className={cn(
                 "flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm",
                 "animate-in slide-in-from-right-full duration-300",
