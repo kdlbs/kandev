@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.13 - 2026-03-04
+
+### Features
+
+- add diff expansion with expand-all in review panel ([#340](https://github.com/kdlbs/kandev/pull/340))
+
 ## 0.12 - 2026-03-04
 
 ### Features
