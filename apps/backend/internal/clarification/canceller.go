@@ -44,8 +44,8 @@ func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string
 
 	for _, id := range pendingIDs {
 		msg, err := c.repo.FindMessageByPendingID(ctx, id)
-		if err != nil {
-			c.logger.Debug("failed to find message for cancelled clarification",
+		if err != nil || msg == nil {
+			c.logger.Debug("message not found for cancelled clarification",
 				zap.String("pending_id", id),
 				zap.Error(err))
 			continue

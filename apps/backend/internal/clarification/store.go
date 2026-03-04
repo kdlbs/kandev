@@ -3,11 +3,18 @@ package clarification
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// Sentinel errors for Respond.
+var (
+	ErrNotFound         = errors.New("clarification request not found")
+	ErrAlreadyResponded = errors.New("response already submitted")
 )
 
 // Store manages pending clarification requests.
@@ -110,7 +117,7 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	s.mu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("clarification request not found: %s", pendingID)
+		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 
 	resp.PendingID = pendingID
@@ -121,7 +128,7 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	case pending.ResponseCh <- resp:
 		return nil
 	default:
-		return fmt.Errorf("response already submitted for: %s", pendingID)
+		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
 	}
 }
 

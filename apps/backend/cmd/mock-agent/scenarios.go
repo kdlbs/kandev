@@ -585,7 +585,11 @@ func scenarioClarificationTimeout(enc *json.Encoder) {
 	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question", clarificationQuestionArgs())
 	if err != nil {
 		fixedDelay(50)
-		emitTextBlock(enc, "Question timed out, continuing without answer.", "")
+		if ctx.Err() != nil {
+			emitTextBlock(enc, "Question timed out, continuing without answer.", "")
+		} else {
+			emitTextBlock(enc, fmt.Sprintf("Question failed: %s", err), "")
+		}
 		return
 	}
 

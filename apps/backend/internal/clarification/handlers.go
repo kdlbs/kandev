@@ -3,6 +3,7 @@ package clarification
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -216,6 +217,14 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
+	// Duplicate response — someone clicked twice quickly.
+	if errors.Is(err, ErrAlreadyResponded) {
+		h.logger.Warn("duplicate response attempt",
+			zap.String("pending_id", pendingID))
+		c.JSON(http.StatusConflict, gin.H{"error": "response already submitted"})
+		return
+	}
+
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
 	// Look up the original request context from the database message and
 	// publish an event so the orchestrator resumes the agent with a new turn.
@@ -231,6 +240,9 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 
 // updateClarificationMessage updates the message in the database with status and answer.
 func (h *Handlers) updateClarificationMessage(c *gin.Context, pendingID string, rejected bool, answer *Answer) {
+	if h.messageCreator == nil {
+		return
+	}
 	sessionID := h.lookupSessionForPending(c, pendingID)
 	status := "answered"
 	if rejected {

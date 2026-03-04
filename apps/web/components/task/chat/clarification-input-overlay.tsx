@@ -223,7 +223,7 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
         type="button"
         onClick={handleSkip}
         disabled={isSubmitting}
-        className="absolute top-2 right-3 text-muted-foreground hover:text-foreground z-10"
+        className="absolute top-2 right-3 text-muted-foreground hover:text-foreground z-10 cursor-pointer"
         data-testid="clarification-skip"
       >
         <IconX className="h-4 w-4" />

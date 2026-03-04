@@ -296,7 +296,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 			h.logger.Warn("failed to look up task for session",
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))
-		} else {
+		} else if session != nil {
 			taskID = session.TaskID
 		}
 	}
@@ -363,10 +363,26 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
-		h.logger.Warn("failed to update task state to IN_PROGRESS",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+	if taskID != "" {
+		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+			h.logger.Warn("failed to update task state to IN_PROGRESS",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
+
+	// Publish session state changed event
+	if h.eventBus != nil {
+		eventData := map[string]any{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"new_state":  string(models.TaskSessionStateRunning),
+		}
+		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"mcp-handlers",
+			eventData,
+		))
 	}
 }
 
@@ -380,10 +396,12 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 	}
 
 	// Update task state to REVIEW
-	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
-		h.logger.Warn("failed to update task state to REVIEW",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+	if taskID != "" {
+		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+			h.logger.Warn("failed to update task state to REVIEW",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 	}
 
 	// Publish session state changed event
