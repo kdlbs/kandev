@@ -293,6 +293,8 @@ type Executor struct {
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
 	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
+	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
+	BuildCloneURL(provider, owner, name string) (string, error)
 }
 
 // RepoUpdater updates repository records in the database.

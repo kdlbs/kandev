@@ -88,9 +88,13 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		return "", nil
 	}
 
-	cloneURL := repositoryCloneURL(repo)
-	if cloneURL == "" {
-		return "", ErrRemoteDockerNoRepoURL
+	cloneURL, urlErr := e.repoCloner.BuildCloneURL(repo.Provider, repo.ProviderOwner, repo.ProviderName)
+	if urlErr != nil || cloneURL == "" {
+		// Fall back to HTTPS URL if BuildCloneURL fails
+		cloneURL = repositoryCloneURL(repo)
+		if cloneURL == "" {
+			return "", ErrRemoteDockerNoRepoURL
+		}
 	}
 
 	e.logger.Info("cloning provider-backed repository for local execution",
