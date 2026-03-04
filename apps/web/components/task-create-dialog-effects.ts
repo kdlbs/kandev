@@ -12,6 +12,7 @@ import {
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { fetchRepoBranches } from "@/lib/api/domains/github-api";
 import type {
   DialogFormState,
   StoreSelections,
@@ -204,7 +205,7 @@ export function useDefaultSelectionsEffect(
 }
 
 export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[]) {
-  const { repositoryId, branch, localBranches, setBranch } = fs;
+  const { repositoryId, branch, localBranches, githubBranches, useGitHubUrl, setBranch } = fs;
   useEffect(() => {
     if (!repositoryId || branch) return;
     autoSelectBranch(branches, setBranch);
@@ -213,6 +214,60 @@ export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[
     if (repositoryId || localBranches.length === 0 || branch) return;
     autoSelectBranch(localBranches, setBranch);
   }, [branch, localBranches, repositoryId, setBranch]);
+  useEffect(() => {
+    if (!useGitHubUrl || githubBranches.length === 0 || branch) return;
+    autoSelectBranch(githubBranches, setBranch);
+  }, [branch, githubBranches, useGitHubUrl, setBranch]);
+}
+
+/** Parse a GitHub URL to extract owner and repo name. Returns null if invalid. */
+function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  // Match github.com/owner/repo with optional scheme, .git suffix, trailing slash
+  const match = trimmed.match(
+    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
+  );
+  if (!match) return null;
+  return { owner: match[1], repo: match[2] };
+}
+
+export function useGitHubUrlBranchesEffect(
+  fs: DialogFormState,
+  open: boolean,
+  toast: ReturnType<typeof useToast>["toast"],
+) {
+  const { useGitHubUrl, githubUrl, setGitHubBranches, setGitHubBranchesLoading } = fs;
+  useEffect(() => {
+    if (!open || !useGitHubUrl) return;
+    const parsed = parseGitHubUrl(githubUrl);
+    if (!parsed) {
+      setGitHubBranches([]);
+      return;
+    }
+    let cancelled = false;
+    setGitHubBranchesLoading(true);
+    fetchRepoBranches(parsed.owner, parsed.repo)
+      .then((res) => {
+        if (cancelled) return;
+        setGitHubBranches(res.branches.map((b) => ({ name: b.name, type: "remote" as const })));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        toast({
+          title: "Failed to load branches",
+          description: e instanceof Error ? e.message : "Could not fetch branches from GitHub",
+          variant: "error",
+        });
+        setGitHubBranches([]);
+      })
+      .finally(() => {
+        if (!cancelled) setGitHubBranchesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, useGitHubUrl, githubUrl, setGitHubBranches, setGitHubBranchesLoading, toast]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
@@ -224,4 +279,5 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useBranchAutoSelectEffect(fs, branches);
   useLocalBranchesEffect(fs, open, workspaceId, toast);
   useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults });
+  useGitHubUrlBranchesEffect(fs, open, toast);
 }

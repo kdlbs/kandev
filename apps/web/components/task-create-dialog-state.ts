@@ -55,6 +55,9 @@ type FormResetters = {
   setSelectedLocalRepo: (v: LocalRepository | null) => void;
   setLocalBranches: (v: Branch[]) => void;
   setDiscoverReposLoaded: (v: boolean) => void;
+  setUseGitHubUrl: (v: boolean) => void;
+  setGitHubUrl: (v: string) => void;
+  setGitHubBranches: (v: Branch[]) => void;
 };
 
 function useFormResetEffects(
@@ -96,6 +99,9 @@ function useFormResetEffects(
       resetters.setSelectedLocalRepo(null);
       resetters.setLocalBranches([]);
       resetters.setDiscoverReposLoaded(false);
+      resetters.setUseGitHubUrl(false);
+      resetters.setGitHubUrl("");
+      resetters.setGitHubBranches([]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
@@ -127,6 +133,10 @@ export function useDialogFormState(
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
+  const [githubUrl, setGitHubUrl] = useState("");
+  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
+  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   useFormResetEffects(open, workspaceId, workflowId, initialValues, {
     setTaskName,
     setHasTitle,
@@ -143,6 +153,9 @@ export function useDialogFormState(
     setSelectedLocalRepo,
     setLocalBranches,
     setDiscoverReposLoaded,
+    setUseGitHubUrl,
+    setGitHubUrl,
+    setGitHubBranches,
   });
   return {
     taskName,
@@ -184,6 +197,14 @@ export function useDialogFormState(
     setIsCreatingSession,
     isCreatingTask,
     setIsCreatingTask,
+    useGitHubUrl,
+    setUseGitHubUrl,
+    githubUrl,
+    setGitHubUrl,
+    githubBranches,
+    setGitHubBranches,
+    githubBranchesLoading,
+    setGitHubBranchesLoading,
   };
 }
 
@@ -216,6 +237,9 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
         fs.setSelectedLocalRepo(null);
         fs.setLocalBranches([]);
         fs.setBranch("");
+        fs.setUseGitHubUrl(false);
+        fs.setGitHubUrl("");
+        fs.setGitHubBranches([]);
         return;
       }
       handleSelectLocalRepository(value);
@@ -258,6 +282,30 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     [fs],
   );
 
+  const handleToggleGitHubUrl = useCallback(() => {
+    const next = !fs.useGitHubUrl;
+    fs.setUseGitHubUrl(next);
+    if (next) {
+      fs.setRepositoryId("");
+      fs.setDiscoveredRepoPath("");
+      fs.setSelectedLocalRepo(null);
+      fs.setLocalBranches([]);
+    } else {
+      fs.setGitHubUrl("");
+      fs.setGitHubBranches([]);
+    }
+    fs.setBranch("");
+  }, [fs]);
+
+  const handleGitHubUrlChange = useCallback(
+    (value: string) => {
+      fs.setGitHubUrl(value);
+      fs.setBranch("");
+      fs.setGitHubBranches([]);
+    },
+    [fs],
+  );
+
   return {
     handleRepositoryChange,
     handleAgentProfileChange,
@@ -265,6 +313,8 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
     handleTaskNameChange,
     handleBranchChange,
     handleWorkflowChange,
+    handleToggleGitHubUrl,
+    handleGitHubUrlChange,
   };
 }
 
@@ -295,8 +345,13 @@ export function useDialogComputed({
   const workspaceDefaults = workspaceId
     ? workspaces.find((ws: Workspace) => ws.id === workspaceId)
     : null;
-  const hasRepositorySelection = Boolean(fs.repositoryId || fs.selectedLocalRepo);
-  const branchOptions = useBranchOptions(fs.repositoryId ? branches : fs.localBranches);
+  const hasRepositorySelection = Boolean(fs.repositoryId || fs.selectedLocalRepo || (fs.useGitHubUrl && fs.githubUrl));
+  const effectiveBranches = (() => {
+    if (fs.useGitHubUrl) return fs.githubBranches;
+    if (fs.repositoryId) return branches;
+    return fs.localBranches;
+  })();
+  const branchOptions = useBranchOptions(effectiveBranches);
   const agentProfileOptions = useAgentProfileOptions(agentProfiles);
   const allExecutorProfiles = useMemo<ExecutorProfile[]>(() => {
     return executors.flatMap((executor) =>

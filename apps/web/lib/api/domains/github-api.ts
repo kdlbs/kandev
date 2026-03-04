@@ -141,6 +141,18 @@ export async function searchOrgRepos(org: string, query?: string, options?: ApiR
   );
 }
 
+// Remote repo branches
+export async function fetchRepoBranches(
+  owner: string,
+  repo: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ branches: { name: string }[] }>(
+    `/api/v1/github/repos/${owner}/${repo}/branches`,
+    options,
+  );
+}
+
 // Stats
 export async function fetchGitHubStats(
   params?: { workspace_id?: string; start_date?: string; end_date?: string },

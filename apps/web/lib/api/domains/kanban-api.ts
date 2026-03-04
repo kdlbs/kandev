@@ -36,6 +36,7 @@ export async function createTask(
       local_path?: string;
       name?: string;
       default_branch?: string;
+      github_url?: string;
     }>;
     state?: Task["state"];
     start_agent?: boolean;
