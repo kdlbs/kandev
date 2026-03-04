@@ -102,64 +102,75 @@ type DialogHeaderContentProps = {
   onGitHubUrlChange: (v: string) => void;
 };
 
-function DialogHeaderContent({
-  isCreateMode,
-  isEditMode,
+function RepoSourceInput({
+  useGitHubUrl,
+  githubUrl,
+  onGitHubUrlChange,
   isTaskStarted,
-  sessionRepoName,
-  initialTitle,
-  taskName,
+  headerRepositoryOptions,
   repositoryId,
   discoveredRepoPath,
+  onRepositoryChange,
   workspaceId,
   repositoriesLoading,
   discoverReposLoading,
-  headerRepositoryOptions,
-  onRepositoryChange,
-  onTaskNameChange,
-  useGitHubUrl,
-  githubUrl,
-  onToggleGitHubUrl,
-  onGitHubUrlChange,
-}: DialogHeaderContentProps) {
+}: Pick<
+  DialogHeaderContentProps,
+  | "useGitHubUrl"
+  | "githubUrl"
+  | "onGitHubUrlChange"
+  | "isTaskStarted"
+  | "headerRepositoryOptions"
+  | "repositoryId"
+  | "discoveredRepoPath"
+  | "onRepositoryChange"
+  | "workspaceId"
+  | "repositoriesLoading"
+  | "discoverReposLoading"
+>) {
+  if (useGitHubUrl) {
+    return (
+      <input
+        type="text"
+        value={githubUrl}
+        onChange={(e) => onGitHubUrlChange(e.target.value)}
+        placeholder="https://github.com/owner/repo"
+        data-testid="github-url-input"
+        size={Math.max((githubUrl || "").length, 30)}
+        className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 rounded-md px-1.5 py-0.5 hover:bg-muted focus:bg-muted transition-colors"
+        disabled={isTaskStarted}
+        autoFocus
+      />
+    );
+  }
+  return (
+    <RepositorySelector
+      options={headerRepositoryOptions}
+      value={repositoryId || discoveredRepoPath}
+      onValueChange={onRepositoryChange}
+      placeholder={getRepositoryPlaceholder(workspaceId, repositoriesLoading, discoverReposLoading)}
+      searchPlaceholder="Search repositories..."
+      emptyMessage={
+        repositoriesLoading || discoverReposLoading
+          ? "Loading repositories..."
+          : "No repositories found."
+      }
+      disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
+      triggerClassName="w-auto text-sm"
+    />
+  );
+}
+
+function DialogHeaderContent(props: DialogHeaderContentProps) {
+  const { isCreateMode, isEditMode, isTaskStarted, sessionRepoName, initialTitle } = props;
+  const { taskName, onTaskNameChange, useGitHubUrl, onToggleGitHubUrl } = props;
+
   if (isCreateMode || isEditMode) {
     return (
       <DialogTitle asChild>
         <div className="flex flex-col gap-1 min-w-0">
           <div className="flex items-center gap-1 text-sm font-medium">
-            {useGitHubUrl ? (
-              <input
-                type="text"
-                value={githubUrl}
-                onChange={(e) => onGitHubUrlChange(e.target.value)}
-                placeholder="https://github.com/owner/repo"
-                data-testid="github-url-input"
-                className="bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 w-[300px] rounded-md px-1.5 py-0.5 hover:bg-muted focus:bg-muted transition-colors"
-                disabled={isTaskStarted}
-                autoFocus
-              />
-            ) : (
-              <RepositorySelector
-                options={headerRepositoryOptions}
-                value={repositoryId || discoveredRepoPath}
-                onValueChange={onRepositoryChange}
-                placeholder={getRepositoryPlaceholder(
-                  workspaceId,
-                  repositoriesLoading,
-                  discoverReposLoading,
-                )}
-                searchPlaceholder="Search repositories..."
-                emptyMessage={
-                  repositoriesLoading || discoverReposLoading
-                    ? "Loading repositories..."
-                    : "No repositories found."
-                }
-                disabled={
-                  isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading
-                }
-                triggerClassName="w-auto text-sm"
-              />
-            )}
+            <RepoSourceInput {...props} />
             <span className="text-muted-foreground mr-2">/</span>
             <InlineTaskName
               value={taskName}
