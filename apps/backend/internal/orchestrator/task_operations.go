@@ -1050,7 +1050,7 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 	}
 
 	// Capture cumulative diff from base_commit_sha to HEAD
-	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, session.BaseCommitSHA)
+	diffResult, err := s.agentManager.GetCumulativeDiff(ctx, sessionID, baseCommit)
 	if err != nil {
 		s.logger.Warn("failed to capture cumulative diff for archive",
 			zap.String("session_id", sessionID),
@@ -1078,12 +1078,13 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 }
 
 // parseCommitTime parses a commit timestamp from git log output.
+// Returns UTC time to ensure consistent timestamps across environments.
 func parseCommitTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Now()
+		return time.Now().UTC()
 	}
-	return t
+	return t.UTC()
 }
 
 // saveArchiveCommits persists commits to the database for archive purposes.

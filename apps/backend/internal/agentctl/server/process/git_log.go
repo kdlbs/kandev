@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 // GitLogResult represents the result of a git log operation.
@@ -38,6 +37,13 @@ type CumulativeDiffResult struct {
 	Error        string                 `json:"error,omitempty"`
 }
 
+// Field and record separators for git log parsing.
+// Using non-printable ASCII separators to avoid collision with commit message content.
+const (
+	fieldSep  = "\x1f" // Unit Separator (ASCII 31)
+	recordSep = "\x1e" // Record Separator (ASCII 30)
+)
+
 // GetLog returns commits from baseCommit (exclusive) to HEAD (inclusive).
 // If baseCommit is empty, returns recent commits (limited by limit parameter).
 func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
@@ -45,8 +51,9 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		Commits: make([]*GitCommitInfo, 0),
 	}
 
-	// Build the git log command
-	args := []string{"log", "--format=%H|%P|%an|%ae|%s|%aI"}
+	// Build the git log command with non-printable separators
+	// %x1f = unit separator, %x1e = record separator
+	args := []string{"log", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%s%x1f%aI%x1e"}
 
 	switch {
 	case baseCommit != "":
@@ -70,14 +77,15 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		return result, nil
 	}
 
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	// Split by record separator and parse each record
+	records := strings.Split(strings.TrimSuffix(output, recordSep), recordSep)
+	for _, record := range records {
+		record = strings.TrimSpace(record)
+		if record == "" {
 			continue
 		}
 
-		parts := strings.SplitN(line, "|", 6)
+		parts := strings.Split(record, fieldSep)
 		if len(parts) < 6 {
 			continue
 		}
@@ -182,7 +190,7 @@ func validateCommitSHA(sha string) string {
 	}
 
 	for _, r := range sha {
-		if !isHexChar(r) && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+		if !isHexChar(r) {
 			return "commit SHA contains invalid characters"
 		}
 	}

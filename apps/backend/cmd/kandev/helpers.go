@@ -121,7 +121,10 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 		return nil
 	}
 
-	status, err := agentClient.GetGitStatus(ctx)
+	// Use bounded timeout to prevent blocking session hydration if agentctl is stuck.
+	rpcCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	status, err := agentClient.GetGitStatus(rpcCtx)
 	if err != nil {
 		log.Debug("failed to get live git status, will fall back to DB snapshot",
 			zap.String("session_id", sessionID),
@@ -168,7 +171,13 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		zap.String("session_id", sessionID))
 
 	latestSnapshot, err := taskRepo.GetLatestGitSnapshot(ctx, sessionID)
-	if err != nil || latestSnapshot == nil {
+	if err != nil {
+		log.Warn("failed to load DB snapshot for session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return result
+	}
+	if latestSnapshot == nil {
 		log.Debug("no DB snapshot found for session",
 			zap.String("session_id", sessionID))
 		return result

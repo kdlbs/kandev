@@ -347,7 +347,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
 	// This allows us to filter git log to only show commits made during the session.
 	// We do this async to avoid delaying session launch while waiting for agentctl to be ready.
-	go e.captureBaseCommit(context.Background(), sessionID)
+	// Use a bounded timeout context to prevent blocking indefinitely if agentctl never becomes ready.
+	go func(sid string) {
+		captureCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		e.captureBaseCommit(captureCtx, sid)
+	}(sessionID)
 
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, repoInfo, resp, startAgent, execCfg)
 }

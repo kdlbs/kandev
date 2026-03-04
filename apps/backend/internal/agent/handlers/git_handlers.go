@@ -591,7 +591,10 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 	}
 
 	// Look up base commit SHA from the session metadata
-	baseCommit := h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+	var baseCommit string
+	if h.sessionReader != nil {
+		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+	}
 
 	// Fallback: if base_commit_sha is not stored in session, use git merge-base
 	// from git status. This happens for sessions created before the base commit
@@ -637,7 +640,10 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	// Look up base commit SHA from the session metadata
-	baseCommit := h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+	var baseCommit string
+	if h.sessionReader != nil {
+		baseCommit = h.sessionReader.GetSessionBaseCommit(ctx, req.SessionID)
+	}
 
 	// Fallback: if base_commit_sha is not stored, use git merge-base from status
 	if baseCommit == "" {
