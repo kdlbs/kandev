@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,6 +138,7 @@ func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID s
 
 // mockRepository implements executorStore for testing
 type mockRepository struct {
+	mu               sync.Mutex
 	sessions         map[string]*models.TaskSession
 	taskRepositories map[string]*models.TaskRepository
 	repositories     map[string]*models.Repository
@@ -177,12 +179,16 @@ func (m *mockRepository) GetRepository(ctx context.Context, id string) (*models.
 }
 
 func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.createTaskSessionCalls = append(m.createTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return nil
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if session, ok := m.sessions[id]; ok {
 		return session, nil
 	}
@@ -190,17 +196,23 @@ func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models
 }
 
 func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return nil
 }
 
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.setSessionPrimaryCalls = append(m.setSessionPrimaryCalls, sessionID)
 	return nil
 }
 
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if session, ok := m.sessions[sessionID]; ok {
 		session.State = state
 		session.ErrorMessage = errorMessage
@@ -209,6 +221,8 @@ func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID s
 }
 
 func (m *mockRepository) UpdateTaskSessionBaseCommit(ctx context.Context, sessionID string, baseCommitSHA string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if session, ok := m.sessions[sessionID]; ok {
 		session.BaseCommitSHA = baseCommitSHA
 	}
