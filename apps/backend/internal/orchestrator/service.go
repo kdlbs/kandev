@@ -183,6 +183,9 @@ type Service struct {
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
+	// Clarification canceller — cancels pending clarifications when agent's turn completes
+	clarificationCanceller ClarificationCanceller
+
 	// Push tracker: sessionID -> last known ahead count
 	pushTracker sync.Map
 
@@ -303,6 +306,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
+// cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
+// for local/worktree execution and have no local path yet.
+func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.RepoUpdater) {
+	s.executor.SetRepoCloner(cloner, updater)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
@@ -333,6 +343,16 @@ func (s *Service) SetTurnService(turnService TurnService) {
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+type ClarificationCanceller interface {
+	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+}
+
+// SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
+func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
+	s.clarificationCanceller = c
 }
 
 // initWorkflowEngine creates the workflow engine with store and callbacks.
@@ -470,6 +490,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to clarification events (cancel-and-resume flow)
+	s.subscribeClarificationEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

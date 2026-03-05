@@ -28,6 +28,11 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
 		profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 		if err == nil && profileInfo.CLIPassthrough {
+			// On resume (e.g., after backend restart), use the resume command path
+			// so the agent receives resume flags (-c / --resume).
+			if execution.isResumedSession {
+				return m.ResumePassthroughSession(ctx, execution.SessionID)
+			}
 			return m.startPassthroughSession(ctx, execution, profileInfo)
 		}
 	}
@@ -174,6 +179,17 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 	env["KANDEV_SESSION_ID"] = req.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
 	env["TASK_DESCRIPTION"] = req.TaskDescription
+
+	// Add agent runtime default env vars (e.g., MCP_TIMEOUT for Claude Code)
+	if agentConfig != nil {
+		if rt := agentConfig.Runtime(); rt != nil {
+			for k, v := range rt.Env {
+				if _, exists := env[k]; !exists {
+					env[k] = v
+				}
+			}
+		}
+	}
 
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {

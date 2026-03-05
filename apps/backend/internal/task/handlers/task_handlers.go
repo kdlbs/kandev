@@ -106,6 +106,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 			LocalPath:     r.LocalPath,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,
+			GitHubURL:     r.GitHubURL,
 		}
 	}
 	return result

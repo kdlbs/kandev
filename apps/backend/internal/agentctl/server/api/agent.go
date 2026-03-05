@@ -361,7 +361,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
 
 	adapter := s.procMgr.GetAdapter()

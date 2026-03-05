@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -87,16 +88,19 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
+	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
+
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  "", // Agent command set via Configure endpoint
-		Protocol:      req.Protocol,
-		AgentType:     agentType,
-		Env:           env,
-		AutoStart:     false,
-		McpServers:    req.McpServers,
-		SessionID:     req.SessionID,
+		ID:                 req.InstanceID,
+		WorkspacePath:      req.WorkspacePath,
+		AgentCommand:       "", // Agent command set via Configure endpoint
+		Protocol:           req.Protocol,
+		AgentType:          agentType,
+		Env:                env,
+		AutoStart:          false,
+		McpServers:         req.McpServers,
+		SessionID:          req.SessionID,
+		DisableAskQuestion: disableAskQuestion,
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

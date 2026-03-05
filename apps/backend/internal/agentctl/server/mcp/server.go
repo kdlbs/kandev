@@ -26,25 +26,27 @@ type BackendClient interface {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend    BackendClient
-	sessionID  string
-	mcpServer  *server.MCPServer
-	sseServer  *server.SSEServer
-	httpServer *server.StreamableHTTPServer
-	logger     *logger.Logger
-	mcpLogger  *zap.Logger // optional file logger for MCP debug traces
-	mu         sync.Mutex
-	running    bool
+	backend            BackendClient
+	sessionID          string
+	disableAskQuestion bool
+	mcpServer          *server.MCPServer
+	sseServer          *server.SSEServer
+	httpServer         *server.StreamableHTTPServer
+	logger             *logger.Logger
+	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
+	mu                 sync.Mutex
+	running            bool
 }
 
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string) *Server {
+func New(backend BackendClient, sessionID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool) *Server {
 	s := &Server{
-		backend:   backend,
-		sessionID: sessionID,
-		logger:    log.WithFields(zap.String("component", "mcp-server")),
+		backend:            backend,
+		sessionID:          sessionID,
+		disableAskQuestion: disableAskQuestion,
+		logger:             log.WithFields(zap.String("component", "mcp-server")),
 	}
 
 	// Set up optional file logger for MCP debug traces
@@ -187,10 +189,18 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 
 // registerTools registers all MCP tools.
 func (s *Server) registerTools() {
+	count := 0
 	s.registerKanbanTools()
-	s.registerInteractionTools()
+	count += 6
+	if !s.disableAskQuestion {
+		s.registerInteractionTools()
+		count++
+	}
 	s.registerPlanTools()
-	s.logger.Info("registered MCP tools", zap.Int("count", 11))
+	count += 4
+	s.logger.Info("registered MCP tools",
+		zap.Int("count", count),
+		zap.Bool("disable_ask_question", s.disableAskQuestion))
 }
 
 func (s *Server) registerKanbanTools() {

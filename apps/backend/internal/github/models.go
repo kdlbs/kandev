@@ -188,6 +188,11 @@ type GitHubRepo struct {
 	Private  bool   `json:"private"`
 }
 
+// RepoBranch represents a branch in a GitHub repository.
+type RepoBranch struct {
+	Name string `json:"name"`
+}
+
 // GitHubStatus represents GitHub connection status.
 type GitHubStatus struct {
 	Authenticated bool             `json:"authenticated"`

@@ -3,12 +3,14 @@ package clarification
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wsmsg "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -34,29 +36,36 @@ type MessageCreator interface {
 	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, status string, answer *Answer) error
 }
 
+// EventBus interface for publishing events.
+type EventBus interface {
+	Publish(ctx context.Context, topic string, event *bus.Event) error
+}
+
 // Handlers provides HTTP handlers for clarification requests.
 type Handlers struct {
 	store          *Store
 	hub            Broadcaster
 	messageCreator MessageCreator
 	repo           messageStore
+	eventBus       EventBus
 	logger         *logger.Logger
 }
 
 // NewHandlers creates new clarification handlers.
-func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, log *logger.Logger) *Handlers {
+func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) *Handlers {
 	return &Handlers{
 		store:          store,
 		hub:            hub,
 		messageCreator: messageCreator,
 		repo:           repo,
+		eventBus:       eventBus,
 		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
 	}
 }
 
 // RegisterRoutes registers clarification HTTP routes.
-func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, log *logger.Logger) {
-	h := NewHandlers(store, hub, messageCreator, repo, log)
+func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) {
+	h := NewHandlers(store, hub, messageCreator, repo, eventBus, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
@@ -180,46 +189,63 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	// Get the pending request to find the session ID
-	pending, ok := h.store.GetRequest(pendingID)
-
-	// If request not found in store (likely timed out), mark the message as expired
-	var sessionID string
-	if !ok {
-		h.markRequestExpired(c, pendingID)
-		return
-	}
-
 	// Extract the single answer (first one if provided)
 	var answer *Answer
 	if len(body.Answers) > 0 {
 		answer = &body.Answers[0]
 	}
 
+	// Build the response object
 	resp := &Response{
 		PendingID:    pendingID,
 		Answer:       answer,
 		Rejected:     body.Rejected,
 		RejectReason: body.RejectReason,
-		RespondedAt:  time.Now(),
 	}
 
-	if err := h.store.Respond(pendingID, resp); err != nil {
-		h.logger.Warn("failed to respond to clarification",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-		c.JSON(http.StatusGone, gin.H{
-			"error":   "clarification request expired",
-			"code":    "CLARIFICATION_EXPIRED",
-			"message": "This question has timed out. The agent may have already moved on.",
-		})
+	// Try the primary path: deliver via channel to blocking WaitForResponse.
+	// If the agent is still waiting, this unblocks the MCP handler and the
+	// answer is returned within the same agent turn (no extra cost).
+	err := h.store.Respond(pendingID, resp)
+
+	if err == nil {
+		// Primary path succeeded — agent will receive the answer directly.
+		h.updateClarificationMessage(c, pendingID, body.Rejected, answer)
+		h.logger.Info("clarification answered via primary path (same turn)",
+			zap.String("pending_id", pendingID))
+		c.JSON(http.StatusOK, gin.H{"success": true})
 		return
 	}
 
-	sessionID = pending.SessionID
-	// Update the message in the database with status and answer
+	// Duplicate response — someone clicked twice quickly.
+	if errors.Is(err, ErrAlreadyResponded) {
+		h.logger.Warn("duplicate response attempt",
+			zap.String("pending_id", pendingID))
+		c.JSON(http.StatusConflict, gin.H{"error": "response already submitted"})
+		return
+	}
+
+	// Fallback path: entry not found (agent timed out, entry was cleaned up).
+	// Look up the original request context from the database message and
+	// publish an event so the orchestrator resumes the agent with a new turn.
+	h.logger.Info("clarification entry not found, using event fallback",
+		zap.String("pending_id", pendingID),
+		zap.String("error", err.Error()))
+
+	h.updateClarificationMessage(c, pendingID, body.Rejected, answer)
+	h.respondViaEventFallback(c, pendingID, answer, body.Rejected, body.RejectReason)
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// updateClarificationMessage updates the message in the database with status and answer.
+func (h *Handlers) updateClarificationMessage(c *gin.Context, pendingID string, rejected bool, answer *Answer) {
+	if h.messageCreator == nil {
+		return
+	}
+	sessionID := h.lookupSessionForPending(c, pendingID)
 	status := "answered"
-	if body.Rejected {
+	if rejected {
 		status = "rejected"
 	}
 	if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, status, answer); err != nil {
@@ -227,42 +253,95 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
 	}
-
-	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// markRequestExpired handles the case where a clarification request has expired (not found in store).
-// It attempts to find and update the message in the database to show it as expired.
-func (h *Handlers) markRequestExpired(c *gin.Context, pendingID string) {
-	h.logger.Warn("clarification request not found in store (likely timed out), marking message as expired",
-		zap.String("pending_id", pendingID))
-	message, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
-	if err != nil {
-		h.logger.Warn("failed to find clarification message for expired request",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-		c.JSON(http.StatusGone, gin.H{
-			"error":   "clarification request expired",
-			"code":    "CLARIFICATION_EXPIRED",
-			"message": "This question has timed out. The agent may have already moved on. Please refresh the page.",
-		})
+// respondViaEventFallback publishes a ClarificationAnswered event for the orchestrator
+// to resume the agent with a new turn. Used when the agent timed out.
+func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, answer *Answer, rejected bool, rejectReason string) {
+	if h.eventBus == nil {
 		return
 	}
-	if message.Metadata == nil {
-		message.Metadata = make(map[string]interface{})
-	}
-	message.Metadata["status"] = "expired"
-	if err := h.repo.UpdateMessage(c.Request.Context(), message); err != nil {
-		h.logger.Warn("failed to update expired clarification message",
+
+	// Look up session/task/question from the database message
+	msg, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
+	if err != nil {
+		h.logger.Error("failed to find message for event fallback",
 			zap.String("pending_id", pendingID),
-			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return
+	}
+
+	sessionID := msg.TaskSessionID
+	taskID := msg.TaskID
+	question := ""
+	if msg.Metadata != nil {
+		if qData, ok := msg.Metadata["question"].(map[string]interface{}); ok {
+			if q, ok := qData["prompt"].(string); ok {
+				question = q
+			}
+		}
+	}
+
+	answerText := buildAnswerText(answer, rejected, rejectReason)
+
+	eventData := map[string]any{
+		"session_id":    sessionID,
+		"task_id":       taskID,
+		"question":      question,
+		"answer_text":   answerText,
+		"rejected":      rejected,
+		"reject_reason": rejectReason,
+	}
+	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationAnswered, bus.NewEvent(
+		events.ClarificationAnswered,
+		"clarification-handlers",
+		eventData,
+	)); err != nil {
+		h.logger.Error("failed to publish clarification answered event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	c.JSON(http.StatusGone, gin.H{
-		"error":   "clarification request expired",
-		"code":    "CLARIFICATION_EXPIRED",
-		"message": "This question has timed out. The agent may have already moved on. The page will refresh automatically.",
-	})
+
+	h.logger.Info("clarification answered via event fallback (new turn)",
+		zap.String("pending_id", pendingID),
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID))
+}
+
+// lookupSessionForPending returns the session ID for a pending clarification.
+// Falls back to finding it from the database message.
+func (h *Handlers) lookupSessionForPending(c *gin.Context, pendingID string) string {
+	// Try the in-memory store first
+	if req, ok := h.store.GetRequest(pendingID); ok {
+		return req.SessionID
+	}
+	// Fall back to database
+	msg, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
+	if err != nil {
+		return ""
+	}
+	return msg.TaskSessionID
+}
+
+// buildAnswerText constructs a human-readable answer text from the response.
+func buildAnswerText(answer *Answer, rejected bool, rejectReason string) string {
+	if rejected {
+		if rejectReason != "" {
+			return fmt.Sprintf("User declined to answer. Reason: %s", rejectReason)
+		}
+		return "User declined to answer."
+	}
+	if answer == nil {
+		return "User provided no specific answer."
+	}
+	if answer.CustomText != "" {
+		return fmt.Sprintf("User answered: %s", answer.CustomText)
+	}
+	if len(answer.SelectedOptions) > 0 {
+		return fmt.Sprintf("User selected: %v", answer.SelectedOptions)
+	}
+	return "User provided no specific answer."
 }
 
 func generateOptionID(questionIndex, optionIndex int) string {

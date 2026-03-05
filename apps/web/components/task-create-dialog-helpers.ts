@@ -117,6 +117,7 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   repositoryId: string;
   selectedLocalRepo: LocalRepository | null;
+  githubUrl?: string;
   agentProfileId: string;
 }): boolean {
   return Boolean(
@@ -124,6 +125,6 @@ export function validateCreateInputs(inputs: {
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
     inputs.agentProfileId &&
-    (inputs.repositoryId || inputs.selectedLocalRepo),
+    (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
   );
 }

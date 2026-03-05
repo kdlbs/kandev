@@ -19,6 +19,7 @@ export const defaultUIState: UISliceState = {
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
+  sessionFailureNotification: null,
 };
 
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
@@ -108,5 +109,9 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   invalidateSystemHealth: () =>
     set((draft) => {
       draft.systemHealth.loaded = false;
+    }),
+  setSessionFailureNotification: (n) =>
+    set((draft) => {
+      draft.sessionFailureNotification = n;
     }),
 });

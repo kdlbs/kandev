@@ -106,6 +106,13 @@ export type StatusMetadata = {
   cancelled?: boolean;
 };
 
+export type RecoveryMetadata = StatusMetadata & {
+  recovery_actions: true;
+  session_id: string;
+  task_id: string;
+  has_resume_token: boolean;
+};
+
 export type TodoMetadata = { text: string; done?: boolean } | string;
 
 export type ContentBlock = {

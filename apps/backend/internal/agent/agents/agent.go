@@ -71,6 +71,13 @@ type PassthroughAgent interface {
 	BuildPassthroughCommand(opts PassthroughOptions) Command
 }
 
+// IsPassthroughOnly returns true if the agent only supports passthrough mode
+// and should not have interactive MCP tools (e.g. ask_user_question) registered.
+func IsPassthroughOnly(a Agent) bool {
+	_, ok := a.(*TUIAgent)
+	return ok
+}
+
 // LogoVariant selects light or dark logo.
 type LogoVariant int
 

@@ -125,36 +125,46 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2">
-        {toasts.map((t) => {
-          const variant = t.variant ?? "default";
-          const styles = variantStyles[variant];
-          const Icon = styles.IconComponent;
-          return (
-            <div
-              key={t.id}
-              className={cn(
-                "flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm",
-                "animate-in slide-in-from-right-full duration-300",
-                styles.container,
-              )}
-            >
-              <div className={cn("mt-0.5 flex-shrink-0", styles.icon)}>
-                <Icon className={cn("h-5 w-5", styles.spin && "animate-spin")} />
-              </div>
-              <div className="flex-1 space-y-1">
-                {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
-                {t.description && (
-                  <div className="text-xs leading-relaxed text-muted-foreground">
-                    {t.description}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ToastList toasts={toasts} />
     </ToastContext.Provider>
+  );
+}
+
+function ToastList({ toasts }: { toasts: Toast[] }) {
+  return (
+    <div
+      className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2"
+      data-testid="toast-container"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
+      {toasts.map((t) => {
+        const variant = t.variant ?? "default";
+        const styles = variantStyles[variant];
+        const Icon = styles.IconComponent;
+        return (
+          <div
+            key={t.id}
+            data-testid="toast-message"
+            className={cn(
+              "flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm",
+              "animate-in slide-in-from-right-full duration-300",
+              styles.container,
+            )}
+          >
+            <div className={cn("mt-0.5 flex-shrink-0", styles.icon)}>
+              <Icon className={cn("h-5 w-5", styles.spin && "animate-spin")} />
+            </div>
+            <div className="flex-1 space-y-1">
+              {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
+              {t.description && (
+                <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

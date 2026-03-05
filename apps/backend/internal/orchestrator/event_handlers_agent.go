@@ -334,48 +334,33 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
-	// Check if the agent was started with a resume token (--resume). If so, any failure
-	// means the previous session couldn't be restored. Clear the token and let the user
-	// start a fresh session — don't treat this as a hard failure.
-	if data.SessionID != "" && s.wasResumeAttempt(ctx, data.SessionID) {
+	// Check if the agent was started with a resume token AND session init hadn't completed.
+	// If init completed, this is a normal prompt failure (e.g. agent internal timeout),
+	// not a resume failure — skip the resume cleanup path.
+	if data.SessionID != "" && s.wasResumeAttempt(ctx, data.SessionID) &&
+		!s.agentManager.WasSessionInitialized(data.AgentExecutionID) {
 		if s.handleResumeFailure(ctx, data) {
 			return // Resume token cleared, session set to WAITING_FOR_INPUT
 		}
 		// Fall through to normal failure handling if cleanup failed
 	}
 
-	// Update session state to FAILED
+	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
-		s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateFailed, data.ErrorMessage, false)
+		s.handleRecoverableFailure(ctx, data)
+		return
 	}
 
-	// Trigger retry logic
+	// No session — fall back to scheduler retry + task to REVIEW.
 	s.scheduler.HandleTaskCompleted(data.TaskID, false)
-	if !s.scheduler.RetryTask(data.TaskID) {
-		s.logger.Error("task failed and retry limit exceeded",
-			zap.String("task_id", data.TaskID))
+	s.scheduler.RetryTask(data.TaskID)
 
-		// Move task to REVIEW state even on failure - user can decide to retry or close
-		// This maintains the review cycle: user reviews the failure and decides next steps
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW after failure",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		} else {
-			s.logger.Info("task moved to REVIEW state after failure (for user review)",
-				zap.String("task_id", data.TaskID))
-		}
-	} else {
-		// If retry is triggered, also move task to REVIEW state
-		// The retry will start a new agent when the task is re-launched
-		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
-			s.logger.Error("failed to update task state to REVIEW after failure (with retry pending)",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		}
+	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+		s.logger.Error("failed to update task state to REVIEW after failure",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
 	}
 
-	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
 
@@ -387,6 +372,22 @@ func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 		return false
 	}
 	return running.ResumeToken != ""
+}
+
+// clearResumeToken removes the resume token from the executor running record so
+// the next agent start won't use --resume. This is used by both automatic resume
+// failure handling and user-initiated fresh start recovery.
+func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil || running.ResumeToken == "" {
+		return
+	}
+	running.ResumeToken = ""
+	if upsertErr := s.repo.UpsertExecutorRunning(ctx, running); upsertErr != nil {
+		s.logger.Error("failed to clear resume token",
+			zap.String("session_id", sessionID),
+			zap.Error(upsertErr))
+	}
 }
 
 // handleResumeFailure handles the case where an agent failed while using a resume token.
@@ -404,15 +405,7 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 		zap.String("error", data.ErrorMessage))
 
 	// 1. Clear the resume token so the next attempt won't use --resume.
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, data.SessionID)
-	if err == nil && running != nil && running.ResumeToken != "" {
-		running.ResumeToken = ""
-		if upsertErr := s.repo.UpsertExecutorRunning(ctx, running); upsertErr != nil {
-			s.logger.Error("failed to clear resume token",
-				zap.String("session_id", data.SessionID),
-				zap.Error(upsertErr))
-		}
-	}
+	s.clearResumeToken(ctx, data.SessionID)
 
 	// 2. Send a status message about the failed resume.
 	if s.messageCreator != nil {
@@ -449,6 +442,58 @@ func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEve
 	return true
 }
 
+// handleRecoverableFailure handles agent failures by keeping the session recoverable.
+// Instead of marking the session FAILED (terminal), it sets WAITING_FOR_INPUT and
+// creates an error message with recovery action buttons so the user can choose to
+// resume the agent session or start fresh.
+func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
+	s.logger.Warn("handling recoverable agent failure",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("error", data.ErrorMessage))
+
+	// Complete the current turn.
+	s.completeTurnForSession(ctx, data.SessionID)
+
+	// Create a status message with recovery action metadata.
+	if s.messageCreator != nil {
+		statusMsg := fmt.Sprintf("Agent encountered an error: %s", data.ErrorMessage)
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx,
+			data.TaskID,
+			statusMsg,
+			data.SessionID,
+			string(v1.MessageTypeStatus),
+			s.getActiveTurnID(data.SessionID),
+			map[string]interface{}{
+				"variant":          "error",
+				"recovery_actions": true,
+				"session_id":       data.SessionID,
+				"task_id":          data.TaskID,
+				"has_resume_token": s.wasResumeAttempt(ctx, data.SessionID),
+			},
+			false,
+		); err != nil {
+			s.logger.Warn("failed to create recovery status message",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		}
+	}
+
+	// Set session to WAITING_FOR_INPUT so the user can interact via recovery buttons.
+	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, data.ErrorMessage, false)
+
+	// Ensure task is in REVIEW state.
+	if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
+		s.logger.Warn("failed to set task to REVIEW after recoverable failure",
+			zap.String("task_id", data.TaskID),
+			zap.Error(err))
+	}
+
+	// Clean up the agent execution.
+	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+}
+
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)
 func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent stopped",
@@ -458,6 +503,16 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)
+
+	// Don't override WAITING_FOR_INPUT — the recovery path sets this so the user
+	// can choose to resume or start fresh. The stopped event fires as a side-effect
+	// of cleanupAgentExecution and should not clobber the recovery state.
+	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil &&
+		session.State == models.TaskSessionStateWaitingForInput {
+		s.logger.Info("skipping CANCELLED transition, session is in recovery (WAITING_FOR_INPUT)",
+			zap.String("session_id", data.SessionID))
+		return
+	}
 
 	// Update session state to cancelled (already done by executor, but ensure consistency)
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateCancelled, "", false)

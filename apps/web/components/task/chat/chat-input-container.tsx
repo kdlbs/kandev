@@ -67,6 +67,7 @@ type ChatInputContainerProps = {
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;
   isFailed?: boolean;
+  needsRecovery?: boolean;
   contextItems?: ContextItem[];
   planContextEnabled?: boolean;
   contextFiles?: ContextFile[];
@@ -217,6 +218,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isSending,
       isStarting,
       isFailed: p.isFailed,
+      needsRecovery: props.needsRecovery ?? false,
       isAgentBusy,
       hasAgentCommands: p.hasAgentCommands,
       placeholder: props.placeholder,
@@ -271,6 +273,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         hasPendingComments={s.hasPendingComments}
         planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
+        needsRecovery={props.needsRecovery ?? false}
         contextAreaProps={buildContextAreaProps(s, p)}
         editorAreaProps={buildEditorAreaProps(
           s,

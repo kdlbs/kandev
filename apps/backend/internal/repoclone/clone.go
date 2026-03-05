@@ -60,6 +60,12 @@ func (c *Cloner) ExpandedBasePath() (string, error) {
 	return path, nil
 }
 
+// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
+// This ensures the clone URL matches the user's configured git protocol (SSH vs HTTPS).
+func (c *Cloner) BuildCloneURL(provider, owner, name string) (string, error) {
+	return CloneURL(provider, owner, name, c.protocol)
+}
+
 // RepoPath returns the full local path for a repository.
 func (c *Cloner) RepoPath(owner, name string) (string, error) {
 	basePath, err := c.ExpandedBasePath()

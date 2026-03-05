@@ -29,6 +29,8 @@ export type SubmitHandlersDeps = {
   effectiveDefaultStepId: string | null;
   repositoryId: string;
   selectedLocalRepo: LocalRepository | null;
+  useGitHubUrl: boolean;
+  githubUrl: string;
   branch: string;
   agentProfileId: string;
   executorId: string;
@@ -75,6 +77,8 @@ export function useTaskSubmitHandlers({
   effectiveDefaultStepId,
   repositoryId,
   selectedLocalRepo,
+  useGitHubUrl,
+  githubUrl,
   branch,
   agentProfileId,
   executorId,
@@ -127,6 +131,15 @@ export function useTaskSubmitHandlers({
   ]);
 
   const getRepositoriesPayload = useCallback(() => {
+    if (useGitHubUrl && githubUrl) {
+      return [
+        {
+          repository_id: "",
+          base_branch: branch || undefined,
+          github_url: githubUrl,
+        },
+      ];
+    }
     if (repositoryId) {
       return [{ repository_id: repositoryId, base_branch: branch || undefined }];
     }
@@ -141,7 +154,7 @@ export function useTaskSubmitHandlers({
       ];
     }
     return [];
-  }, [repositoryId, branch, selectedLocalRepo]);
+  }, [useGitHubUrl, repositoryId, branch, githubUrl, selectedLocalRepo]);
 
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? "";
@@ -421,6 +434,7 @@ export function useTaskSubmitHandlers({
             effectiveWorkflowId,
             repositoryId,
             selectedLocalRepo,
+            githubUrl,
             agentProfileId,
           })
         )
@@ -449,6 +463,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     getRepositoriesPayload,
     performCreateWithAgent,
@@ -468,6 +483,7 @@ export function useTaskSubmitHandlers({
         effectiveWorkflowId,
         repositoryId,
         selectedLocalRepo,
+        githubUrl,
         agentProfileId,
       })
     )
@@ -495,6 +511,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     isPassthroughProfile,
     getRepositoriesPayload,
@@ -516,6 +533,7 @@ export function useTaskSubmitHandlers({
         effectiveWorkflowId,
         repositoryId,
         selectedLocalRepo,
+        githubUrl,
         agentProfileId,
       })
     )
@@ -556,6 +574,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     effectiveDefaultStepId,
     executorId,

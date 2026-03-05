@@ -34,6 +34,7 @@ interface ComboboxProps {
   className?: string;
   triggerClassName?: string;
   showSearch?: boolean;
+  testId?: string;
 }
 
 export const Combobox = memo(function Combobox({
@@ -48,6 +49,7 @@ export const Combobox = memo(function Combobox({
   className,
   triggerClassName,
   showSearch = true,
+  testId,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   // Track the highlighted item. Defaults to the selected value so the current
@@ -71,6 +73,7 @@ export const Combobox = memo(function Combobox({
           aria-expanded={open}
           className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
           disabled={disabled}
+          data-testid={testId}
         >
           <div className="flex min-w-0 flex-1 items-center">
             {selectedOption?.renderLabel ? (

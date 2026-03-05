@@ -319,6 +319,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 		zap.String("session_id", result.SessionID))
 
 	execution.ACPSessionID = result.SessionID
+	execution.sessionInitialized = true
 
 	// Publish session created event
 	if sm.eventPublisher != nil {

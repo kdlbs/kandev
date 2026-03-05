@@ -2,6 +2,26 @@
 
 All notable changes to Kandev.
 
+## 0.15 - 2026-03-05
+
+### Features
+
+- start task from GitHub URL ([#365](https://github.com/kdlbs/kandev/pull/365))
+
+## 0.14 - 2026-03-05
+
+### Features
+
+- improve session recovery and context reset ([#369](https://github.com/kdlbs/kandev/pull/369))
+- improve TUI agents session resume on restart ([#367](https://github.com/kdlbs/kandev/pull/367))
+
+### Bug Fixes
+
+- auto-start code-server when opening file via VS Code ([#368](https://github.com/kdlbs/kandev/pull/368))
+- resolve clarification MCP timeout with cancel-and-resume flow ([#362](https://github.com/kdlbs/kandev/pull/362))
+- restore git status update in workspace polling loop ([#364](https://github.com/kdlbs/kandev/pull/364))
+- add docker executor default values, patch build/container bugs ([#363](https://github.com/kdlbs/kandev/pull/363))
+
 ## 0.13 - 2026-03-04
 
 ### Features

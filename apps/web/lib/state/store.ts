@@ -189,6 +189,7 @@ export type AppState = {
   chatInput: (typeof defaultUIState)["chatInput"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
+  sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -290,6 +291,9 @@ export type AppState = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  setSessionFailureNotification: (
+    n: import("./slices/ui/types").SessionFailureNotification | null,
+  ) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],

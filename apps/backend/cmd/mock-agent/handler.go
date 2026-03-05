@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"time"
 )
@@ -91,6 +92,9 @@ func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model s
 		if strings.TrimSpace(scenarioName) == "error" {
 			customResult = true
 		}
+	case strings.EqualFold(cmd, "/crash"):
+		emitCrash(enc, model)
+		return // process exits, no result needed
 	case strings.HasPrefix(cmd, "/todo"):
 		emitTodoSequence(enc, model)
 	case strings.EqualFold(cmd, "/mermaid"):
@@ -149,6 +153,16 @@ func emitError(enc *json.Encoder, model string) {
 	emitResult(enc, true, "Mock error: something went wrong during processing")
 	// Return without emitting the normal result (handler skips the final emitResult
 	// because we already emitted one). We handle this by making the caller check.
+}
+
+// emitCrash simulates an agent crash by exiting with code 1 after emitting
+// some output. Useful for testing recovery flows.
+func emitCrash(enc *json.Encoder, model string) {
+	randomDelay(model)
+	emitTextBlock(enc, "Processing your request...", "")
+	randomDelay(model)
+	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
+	os.Exit(1)
 }
 
 // emitSlowResponse generates a response with configurable total duration.

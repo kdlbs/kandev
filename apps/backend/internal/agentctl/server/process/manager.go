@@ -1146,13 +1146,36 @@ func (m *Manager) VscodeInfo() VscodeInfo {
 }
 
 // VscodeOpenFile opens a file in the running VS Code instance via the Remote CLI.
+// If code-server is not running, it auto-starts it and waits for readiness.
+//
+// Note: there is a benign race between the needsStart check and WaitForRunning —
+// another goroutine could stop vscode in between. WaitForRunning handles this
+// correctly by returning an error for stopped/error states.
 func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	m.vscodeMu.Lock()
+	needsStart := m.vscode == nil
+	if !needsStart {
+		info := m.vscode.Info()
+		needsStart = info.Status == VscodeStatusStopped || info.Status == VscodeStatusError
+	}
+	m.vscodeMu.Unlock()
+
+	if needsStart {
+		m.logger.Info("auto-starting code-server for open-file request")
+		m.StartVscode(ctx, "")
+	}
+
 	m.vscodeMu.Lock()
 	vscode := m.vscode
 	m.vscodeMu.Unlock()
 
 	if vscode == nil {
-		return fmt.Errorf("code-server is not running")
+		return fmt.Errorf("failed to initialize code-server")
 	}
+
+	if err := vscode.WaitForRunning(ctx); err != nil {
+		return fmt.Errorf("code-server not ready: %w", err)
+	}
+
 	return vscode.OpenFile(ctx, path, line, col)
 }

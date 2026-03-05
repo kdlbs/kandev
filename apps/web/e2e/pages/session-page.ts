@@ -133,6 +133,58 @@ export class SessionPage {
     return this.chat.getByText("Plan mode", { exact: true });
   }
 
+  /** Clarification overlay (visible when a clarification request is pending). */
+  clarificationOverlay(): Locator {
+    return this.page.getByTestId("clarification-overlay");
+  }
+
+  /** A specific clarification option button by its text label. */
+  clarificationOption(text: string): Locator {
+    return this.clarificationOverlay()
+      .getByTestId("clarification-option")
+      .filter({ hasText: text });
+  }
+
+  /** Skip (X) button on the clarification overlay. */
+  clarificationSkip(): Locator {
+    return this.page.getByTestId("clarification-skip");
+  }
+
+  /** Custom text input on the clarification overlay. */
+  clarificationInput(): Locator {
+    return this.page.getByTestId("clarification-input");
+  }
+
+  /** Deferred notice shown when agent has disconnected from clarification. */
+  clarificationDeferredNotice(): Locator {
+    return this.page.getByTestId("clarification-deferred-notice");
+  }
+
+  /** Reset context button in the chat input toolbar. */
+  resetContextButton(): Locator {
+    return this.page.getByTestId("reset-context-button");
+  }
+
+  /** Confirm button in the reset context alert dialog. */
+  resetContextConfirm(): Locator {
+    return this.page.getByTestId("reset-context-confirm");
+  }
+
+  /** "Resume session" button shown after agent crash. */
+  recoveryResumeButton(): Locator {
+    return this.page.getByTestId("recovery-resume-button");
+  }
+
+  /** "Start fresh session" button shown after agent crash. */
+  recoveryFreshButton(): Locator {
+    return this.page.getByTestId("recovery-fresh-button");
+  }
+
+  /** Context reset divider shown in chat after resetting agent context. */
+  contextResetDivider(): Locator {
+    return this.chat.getByText("Context reset");
+  }
+
   /**
    * Delete a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
@@ -261,5 +313,15 @@ export class SessionPage {
     await expect(this.terminal).toBeVisible({ timeout: 10_000 });
     await expect(this.files).toBeVisible({ timeout: 10_000 });
     await expect(this.sidebar).toBeVisible();
+  }
+
+  /** Locator for the VS Code dockview tab. */
+  vscodeTab(): Locator {
+    return this.page.locator(".dv-default-tab:has-text('VS Code')");
+  }
+
+  /** Locator for the VS Code code-server iframe. */
+  vscodeIframe(): Locator {
+    return this.page.locator('iframe[title="VS Code"]');
   }
 }

@@ -3,11 +3,18 @@ package clarification
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+)
+
+// Sentinel errors for Respond.
+var (
+	ErrNotFound         = errors.New("clarification request not found")
+	ErrAlreadyResponded = errors.New("response already submitted")
 )
 
 // Store manages pending clarification requests.
@@ -21,7 +28,7 @@ type Store struct {
 // NewStore creates a new clarification store.
 func NewStore(timeout time.Duration) *Store {
 	if timeout == 0 {
-		timeout = 10 * time.Minute // Default timeout
+		timeout = 2 * time.Hour // Default timeout — long enough for user to respond to clarification
 	}
 	return &Store{
 		pending: make(map[string]*PendingClarification),
@@ -43,6 +50,7 @@ func (s *Store) CreateRequest(req *Request) string {
 	s.pending[req.PendingID] = &PendingClarification{
 		Request:    req,
 		ResponseCh: make(chan *Response, 1),
+		CancelCh:   make(chan struct{}),
 		CreatedAt:  time.Now(),
 	}
 
@@ -83,6 +91,12 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		delete(s.pending, pendingID)
 		s.mu.Unlock()
 		return resp, nil
+	case <-pending.CancelCh:
+		// Agent's turn completed — cancel the blocking wait
+		s.mu.Lock()
+		delete(s.pending, pendingID)
+		s.mu.Unlock()
+		return nil, fmt.Errorf("clarification cancelled (agent moved on): %s", pendingID)
 	case <-timeoutCtx.Done():
 		// Clean up on timeout
 		s.mu.Lock()
@@ -103,7 +117,7 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	s.mu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("clarification request not found: %s", pendingID)
+		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 
 	resp.PendingID = pendingID
@@ -114,70 +128,24 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	case pending.ResponseCh <- resp:
 		return nil
 	default:
-		return fmt.Errorf("response already submitted for: %s", pendingID)
+		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
 	}
 }
 
-// Cancel cancels a pending clarification request.
-func (s *Store) Cancel(pendingID string) error {
+// CancelSession cancels all pending clarification requests for a given session.
+// It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
+// Returns the list of cancelled pending IDs.
+func (s *Store) CancelSession(sessionID string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	pending, ok := s.pending[pendingID]
-	if !ok {
-		return fmt.Errorf("clarification request not found: %s", pendingID)
-	}
-
-	// Send a cancelled response
-	select {
-	case pending.ResponseCh <- &Response{
-		PendingID:    pendingID,
-		Rejected:     true,
-		RejectReason: "cancelled",
-		RespondedAt:  time.Now(),
-	}:
-	default:
-	}
-
-	delete(s.pending, pendingID)
-	return nil
-}
-
-// CleanupExpired removes expired pending requests.
-// Returns the number of requests cleaned up.
-func (s *Store) CleanupExpired() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	count := 0
-	now := time.Now()
+	var cancelled []string
 	for id, pending := range s.pending {
-		if now.Sub(pending.CreatedAt) > s.timeout {
-			// Send timeout response
-			select {
-			case pending.ResponseCh <- &Response{
-				PendingID:    id,
-				Rejected:     true,
-				RejectReason: "expired",
-				RespondedAt:  now,
-			}:
-			default:
-			}
+		if pending.Request.SessionID == sessionID {
+			close(pending.CancelCh)
 			delete(s.pending, id)
-			count++
+			cancelled = append(cancelled, id)
 		}
 	}
-	return count
-}
-
-// ListPending returns all pending clarification requests.
-func (s *Store) ListPending() []*Request {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	requests := make([]*Request, 0, len(s.pending))
-	for _, pending := range s.pending {
-		requests = append(requests, pending.Request)
-	}
-	return requests
+	return cancelled
 }

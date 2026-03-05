@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
@@ -34,8 +36,12 @@ func emitPredefinedScenario(enc *json.Encoder, scanner *bufio.Scanner, name stri
 		scenarioDiffUpdateSetup(enc)
 	case "diff-update-modify":
 		scenarioDiffUpdateModify(enc)
+	case "clarification":
+		scenarioClarification(enc)
+	case "clarification-timeout":
+		scenarioClarificationTimeout(enc)
 	default:
-		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify", "")
+		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, clarification, clarification-timeout", "")
 	}
 }
 
@@ -537,4 +543,56 @@ func scenarioDiffUpdateModify(enc *json.Encoder) {
 
 	fixedDelay(100)
 	emitTextBlock(enc, "diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION", "")
+}
+
+// clarificationQuestionArgs returns the MCP arguments for the clarification question.
+func clarificationQuestionArgs() map[string]any {
+	return map[string]any{
+		"prompt": "Which database should we use for this project?",
+		"options": []map[string]any{
+			{"label": "PostgreSQL", "description": "Relational database with strong consistency"},
+			{"label": "MongoDB", "description": "Document database for flexible schemas"},
+			{"label": "SQLite", "description": "Embedded database for simplicity"},
+		},
+	}
+}
+
+// scenarioClarification: happy path — ask a question via MCP and wait for the answer.
+func scenarioClarification(enc *json.Encoder) {
+	fixedDelay(100)
+	emitTextBlock(enc, "Let me ask you a question about the project setup.", "")
+
+	result, err := callMCPTool("kandev", "ask_user_question", clarificationQuestionArgs())
+	if err != nil {
+		emitTextBlock(enc, fmt.Sprintf("Question failed: %s", err), "")
+		return
+	}
+
+	fixedDelay(50)
+	emitTextBlock(enc, fmt.Sprintf("You answered: %s", result), "")
+}
+
+// scenarioClarificationTimeout: ask a question with a short timeout, then continue.
+// The MCP call times out after 5s so the agent's turn completes. The user can still
+// answer later, which triggers the event fallback path (new turn).
+func scenarioClarificationTimeout(enc *json.Encoder) {
+	fixedDelay(100)
+	emitTextBlock(enc, "Let me ask you a question about the project setup.", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question", clarificationQuestionArgs())
+	if err != nil {
+		fixedDelay(50)
+		if ctx.Err() != nil {
+			emitTextBlock(enc, "Question timed out, continuing without answer.", "")
+		} else {
+			emitTextBlock(enc, fmt.Sprintf("Question failed: %s", err), "")
+		}
+		return
+	}
+
+	fixedDelay(50)
+	emitTextBlock(enc, fmt.Sprintf("You answered: %s", result), "")
 }

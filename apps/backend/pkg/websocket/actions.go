@@ -75,7 +75,9 @@ const (
 	ActionTaskSessionPrepare = "task.session.prepare"
 
 	// Unified session launch
-	ActionSessionLaunch = "session.launch"
+	ActionSessionLaunch       = "session.launch"
+	ActionSessionRecover      = "session.recover"
+	ActionSessionResetContext = "session.reset_context"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"

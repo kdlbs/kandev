@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -35,6 +36,7 @@ type MessageCreator interface {
 // SessionRepository interface for updating session state.
 type SessionRepository interface {
 	UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 }
 
 // TaskRepository interface for updating task state.
@@ -255,7 +257,9 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
-// handleAskUserQuestion creates a clarification request and waits for response.
+// handleAskUserQuestion creates a clarification request and blocks until the user responds.
+// The agent's MCP tool call stays open (same turn) while waiting. If the agent times out,
+// the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		SessionID string                 `json:"session_id"`
@@ -284,8 +288,18 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		}
 	}
 
-	// Use provided task ID (session -> task lookup is done by caller)
+	// Look up task ID from session if not provided
 	taskID := req.TaskID
+	if taskID == "" {
+		session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
+		if err != nil {
+			h.logger.Warn("failed to look up task for session",
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+		} else if session != nil {
+			taskID = session.TaskID
+		}
+	}
 
 	// Create the clarification request
 	clarificationReq := &clarification.Request{
@@ -298,15 +312,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 
 	// Create the message in the database (triggers WS event to frontend)
 	if h.messageCreator != nil {
-		_, err := h.messageCreator.CreateClarificationRequestMessage(
-			ctx,
-			taskID,
-			req.SessionID,
-			pendingID,
-			req.Question,
-			req.Context,
-		)
-		if err != nil {
+		if _, err := h.messageCreator.CreateClarificationRequestMessage(
+			ctx, taskID, req.SessionID, pendingID, req.Question, req.Context,
+		); err != nil {
 			h.logger.Error("failed to create clarification request message",
 				zap.String("pending_id", pendingID),
 				zap.String("session_id", req.SessionID),
@@ -317,42 +325,65 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Update session and task states to waiting for input
 	h.setSessionWaitingForInput(ctx, taskID, req.SessionID)
 
-	// Wait for user response
-	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
-	if err != nil {
-		h.logger.Error("failed waiting for clarification response",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-
-		// When clarification times out, keep session in WAITING_FOR_INPUT
-		// The expired clarification will be marked as expired when user tries to respond
-		// This allows the UI to stay responsive while clarification is pending
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get user response: "+err.Error(), nil)
-	}
-
-	// Don't update session state here. Let the agent's normal message flow handle it.
-	//
-	// Previously, we would set the session to RUNNING immediately after the user responded.
-	// However, this causes issues when:
-	// 1. The agent's MCP client has already timed out (agent stopped waiting)
-	// 2. The user responds anyway (UI still showing the clarification)
-	// 3. We set session to RUNNING, but agent won't process the response
-	// 4. Session gets stuck in RUNNING state with no agent activity
-	//
-	// By keeping the session in WAITING_FOR_INPUT, the user can:
-	// - Send new messages to continue the conversation
-	// - The agent will process those messages normally
-	// - Session state will be updated by the agent's actual activity
-	//
-	// If the agent successfully receives this response and continues, the agent's
-	// tool calls or messages will naturally update the session to RUNNING.
-
-	h.logger.Debug("user responded to clarification, returning response to agent without updating session state",
+	h.logger.Info("clarification request created, waiting for user response",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", taskID))
 
+	// Block until user responds or context is cancelled (agent MCP timeout).
+	// With MCP_TIMEOUT set to 2h for Claude Code, this will wait long enough.
+	// If the agent times out, the entry is cleaned up and the event-based
+	// fallback in the orchestrator handles resuming with a new turn.
+	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
+	if err != nil {
+		h.logger.Warn("clarification wait ended without response",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"Clarification request timed out or was cancelled", nil)
+	}
+
+	// User responded — set session back to running
+	h.setSessionRunning(ctx, taskID, req.SessionID)
+
+	h.logger.Info("clarification answered, returning to agent",
+		zap.String("pending_id", pendingID),
+		zap.String("session_id", req.SessionID),
+		zap.Bool("rejected", resp.Rejected))
+
+	// Return response in format expected by agentctl's extractQuestionAnswer
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// setSessionRunning restores the session state to running after a clarification is answered.
+func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID string) {
+	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateRunning, ""); err != nil {
+		h.logger.Warn("failed to update session state to RUNNING",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	if taskID != "" {
+		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+			h.logger.Warn("failed to update task state to IN_PROGRESS",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	}
+
+	// Publish session state changed event
+	if h.eventBus != nil {
+		eventData := map[string]any{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"new_state":  string(models.TaskSessionStateRunning),
+		}
+		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+			events.TaskSessionStateChanged,
+			"mcp-handlers",
+			eventData,
+		))
+	}
 }
 
 // setSessionWaitingForInput updates the session and task states to waiting for input
@@ -365,10 +396,12 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 	}
 
 	// Update task state to REVIEW
-	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
-		h.logger.Warn("failed to update task state to REVIEW",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+	if taskID != "" {
+		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
+			h.logger.Warn("failed to update task state to REVIEW",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
 	}
 
 	// Publish session state changed event
@@ -388,7 +421,7 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 
 // generateOptionID generates an option ID for a question.
 func generateOptionID(questionIndex, optionIndex int) string {
-	return "q" + string(rune('1'+questionIndex)) + "_opt" + string(rune('1'+optionIndex))
+	return fmt.Sprintf("q%d_opt%d", questionIndex+1, optionIndex+1)
 }
 
 // handleCreateTaskPlan creates a new task plan.

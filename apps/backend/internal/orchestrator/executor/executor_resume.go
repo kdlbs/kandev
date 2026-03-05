@@ -56,6 +56,16 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 			zap.Error(err))
 		return nil, err
 	}
+
+	// Clone provider-backed repos that have no local path yet
+	if repo.LocalPath == "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
+		if localPath, cloneErr := e.ensureRepoCloned(ctx, repo); cloneErr != nil {
+			return nil, cloneErr
+		} else if localPath != "" {
+			repo.LocalPath = localPath
+		}
+	}
+
 	info.Repository = repo
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
@@ -64,6 +74,54 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 		info.BaseBranch = repo.DefaultBranch
 	}
 	return info, nil
+}
+
+// ensureRepoCloned clones a provider-backed repository to local disk and updates its local path in the database.
+// Returns the local path on success, or empty string if no cloner is configured.
+func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	if e.repoCloner == nil {
+		e.logger.Warn("repository has no local path and no cloner configured",
+			zap.String("repository_id", repo.ID),
+			zap.String("provider", repo.Provider),
+			zap.String("owner", repo.ProviderOwner),
+			zap.String("name", repo.ProviderName))
+		return "", nil
+	}
+
+	cloneURL, urlErr := e.repoCloner.BuildCloneURL(repo.Provider, repo.ProviderOwner, repo.ProviderName)
+	if urlErr != nil || cloneURL == "" {
+		// Fall back to HTTPS URL if BuildCloneURL fails
+		cloneURL = repositoryCloneURL(repo)
+		if cloneURL == "" {
+			return "", ErrNoCloneURL
+		}
+	}
+
+	e.logger.Info("cloning provider-backed repository for local execution",
+		zap.String("repository_id", repo.ID),
+		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
+
+	localPath, err := e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
+	if err != nil {
+		e.logger.Error("failed to clone repository",
+			zap.String("repository_id", repo.ID),
+			zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName),
+			zap.Error(err))
+		return "", err
+	}
+
+	// Persist the local path so future launches skip cloning
+	if e.repoUpdater != nil && localPath != "" {
+		if updateErr := e.repoUpdater.UpdateRepositoryLocalPath(ctx, repo.ID, localPath); updateErr != nil {
+			e.logger.Warn("failed to update repository local path after clone",
+				zap.String("repository_id", repo.ID),
+				zap.String("local_path", localPath),
+				zap.Error(updateErr))
+			// Non-fatal: the clone succeeded, we can use the path
+		}
+	}
+
+	return localPath, nil
 }
 
 // buildExecutorRunning constructs an ExecutorRunning record from the launch/resume response,

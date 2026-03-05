@@ -250,6 +250,7 @@ type TaskRepositoryInput struct {
 	LocalPath     string
 	Name          string
 	DefaultBranch string
+	GitHubURL     string
 }
 
 type CreateTaskRequest struct {

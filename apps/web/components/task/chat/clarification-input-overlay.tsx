@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconX, IconMessageQuestion } from "@tabler/icons-react";
+import { IconX, IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
 import { getBackendConfig } from "@/lib/config";
@@ -66,6 +66,7 @@ function ClarificationOptions({
           type="button"
           onClick={() => onSelectOption(option.option_id)}
           disabled={isSubmitting}
+          data-testid="clarification-option"
           className={cn(
             "flex items-start gap-2 w-full text-left text-xs rounded px-1.5 py-0.5 -ml-1.5 transition-colors",
             "hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400",
@@ -105,6 +106,7 @@ function ClarificationCustomInput({
         value={customText}
         onChange={(e) => onChange(e.target.value)}
         disabled={isSubmitting}
+        data-testid="clarification-input"
         className="flex-1 text-sm bg-transparent placeholder:text-muted-foreground focus:outline-none"
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && customText.trim()) {
@@ -216,12 +218,13 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
   const question = metadata.question;
 
   return (
-    <div className="relative px-3 py-2">
+    <div className="relative px-3 py-2" data-testid="clarification-overlay">
       <button
         type="button"
         onClick={handleSkip}
         disabled={isSubmitting}
-        className="absolute top-2 right-3 text-muted-foreground hover:text-foreground z-10"
+        className="absolute top-2 right-3 text-muted-foreground hover:text-foreground z-10 cursor-pointer"
+        data-testid="clarification-skip"
       >
         <IconX className="h-4 w-4" />
       </button>
@@ -240,6 +243,15 @@ export function ClarificationInputOverlay({ message, onResolved }: Clarification
           isSubmitting={isSubmitting}
           onSelectOption={handleSubmitOption}
         />
+        {metadata.agent_disconnected && (
+          <div
+            data-testid="clarification-deferred-notice"
+            className="ml-6 mb-1 text-xs text-amber-500/80 flex items-center gap-1.5"
+          >
+            <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            The agent has moved on. Your response will be sent as a new message.
+          </div>
+        )}
         <ClarificationCustomInput
           customText={customText}
           isSubmitting={isSubmitting}

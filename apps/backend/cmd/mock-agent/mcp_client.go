@@ -57,6 +57,12 @@ func getMCPClient(serverName string) (*mcpclient.Client, error) {
 
 // callMCPTool calls a tool on the named MCP server and returns the result text.
 func callMCPTool(serverName, toolName string, args map[string]any) (string, error) {
+	return callMCPToolCtx(context.Background(), serverName, toolName, args)
+}
+
+// callMCPToolCtx calls a tool on the named MCP server with a caller-provided context.
+// Use this when the caller needs to impose a timeout on the MCP call.
+func callMCPToolCtx(ctx context.Context, serverName, toolName string, args map[string]any) (string, error) {
 	c, err := getMCPClient(serverName)
 	if err != nil {
 		return "", err
@@ -66,7 +72,7 @@ func callMCPTool(serverName, toolName string, args map[string]any) (string, erro
 	req.Params.Name = toolName
 	req.Params.Arguments = args
 
-	result, err := c.CallTool(context.Background(), req)
+	result, err := c.CallTool(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("call tool %s/%s: %w", serverName, toolName, err)
 	}

@@ -54,7 +54,9 @@ function resolveInputPlaceholder(
   activeDocumentType: string | undefined,
   planModeEnabled: boolean,
   hasClarification: boolean,
+  needsRecovery: boolean,
 ): string {
+  if (needsRecovery) return "Choose a recovery option above to continue...";
   if (hasClarification) return "Answer the question above to continue...";
   if (isAgentBusy) return "Queue instructions to the agent...";
   if (activeDocumentType === "file") return "Continue working on the file...";
@@ -326,6 +328,7 @@ export function ChatInputArea({
     isStarting,
     isAgentBusy,
     isFailed,
+    needsRecovery,
     planModeEnabled,
     activeDocument,
     handlePlanModeChange,
@@ -356,6 +359,7 @@ export function ChatInputArea({
     activeDocument?.type,
     planModeEnabled,
     hasClarification,
+    needsRecovery,
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
@@ -394,6 +398,7 @@ export function ChatInputArea({
         submitKey={chatSubmitKey}
         hasAgentCommands={!!(agentCommands && agentCommands.length > 0)}
         isFailed={isFailed}
+        needsRecovery={needsRecovery}
         contextItems={contextItems}
         planContextEnabled={planContextEnabled}
         contextFiles={contextFiles}

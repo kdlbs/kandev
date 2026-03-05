@@ -17,6 +17,16 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// WasSessionInitialized reports whether the execution completed ACP session setup.
+// Returns false if the execution is not found or init hasn't completed.
+func (m *Manager) WasSessionInitialized(executionID string) bool {
+	exec, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return false
+	}
+	return exec.sessionInitialized
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
@@ -161,6 +171,12 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
+	// Resolve agent config early — needed for both command rebuild and ACP session init
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config for restart: %w", err)
+	}
+
 	// 1. Close WebSocket streams (updates + workspace)
 	execution.agentctl.Close()
 
@@ -172,13 +188,17 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		// Continue — the process may already be stopped
 	}
 
-	// 3. Reset execution state for fresh context
+	// 3. Rebuild agent command without resume flags and reset execution state
+	freshCmd, freshContinueCmd := m.buildFreshAgentCommand(ctx, execution, agentConfig)
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = ""
 		exec.Status = v1.AgentStatusStarting
 		exec.ErrorMessage = ""
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
+		exec.sessionInitialized = false
+		exec.AgentCommand = freshCmd
+		exec.ContinueCommand = freshContinueCmd
 
 		exec.messageMu.Lock()
 		exec.messageBuffer.Reset()
@@ -214,12 +234,6 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		m.logger.Warn("agent process slow to initialize after restart, continuing",
 			zap.String("execution_id", executionID),
 			zap.Error(err))
-	}
-
-	// 7. Reconnect WebSocket streams and initialize new ACP session
-	agentConfig, err := m.getAgentConfigForExecution(execution)
-	if err != nil {
-		return fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
@@ -642,4 +656,40 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 	m.logger.Info("passthrough process stopped",
 		zap.String("execution_id", executionID),
 		zap.String("process_id", execution.PassthroughProcessID))
+}
+
+// buildFreshAgentCommand rebuilds the agent command without resume flags by going through
+// the standard BuildCommandString pipeline with an empty SessionID. This works for all
+// agent types because each agent's BuildCommand respects SessionID="" to skip resume flags.
+func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) (initial, continueCmd string) {
+	var profileInfo *AgentProfileInfo
+	if execution.AgentProfileID != "" && m.profileResolver != nil {
+		pi, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err == nil {
+			profileInfo = pi
+		}
+	}
+
+	model := ""
+	autoApprove := false
+	permissionValues := make(map[string]bool)
+	if profileInfo != nil {
+		model = profileInfo.Model
+		autoApprove = profileInfo.AutoApprove
+		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
+		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
+	}
+	if override, ok := execution.Metadata["model_override"].(string); ok && override != "" {
+		model = override
+	}
+
+	opts := agents.CommandOptions{
+		Model:            model,
+		SessionID:        "", // Fresh start — no resume flags
+		AutoApprove:      autoApprove,
+		PermissionValues: permissionValues,
+	}
+	return m.commandBuilder.BuildCommandString(agentConfig, opts),
+		m.commandBuilder.BuildContinueCommandString(agentConfig, opts)
 }
