@@ -115,6 +115,11 @@ test.describe("Diff update on file change", () => {
       updatedDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true }),
     ).toBeVisible({ timeout: 30_000 });
 
+    // Verify FIRST_MODIFICATION is no longer shown (replaced, not merged)
+    await expect(
+      updatedDiffsContainer.getByText("FIRST_MODIFICATION", { exact: true }),
+    ).toHaveCount(0);
+
     // Also verify the additional change on line 3
     await expect(updatedDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
       timeout: 15_000,

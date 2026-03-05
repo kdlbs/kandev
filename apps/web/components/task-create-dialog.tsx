@@ -142,7 +142,7 @@ function RepoSourceInput({
           data-testid="github-url-input"
           aria-label="GitHub repository URL"
           aria-invalid={!!githubUrlError}
-          aria-errormessage={githubUrlError ? "github-url-error" : undefined}
+          aria-describedby={githubUrlError ? "github-url-error" : undefined}
           size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
           className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
           disabled={isTaskStarted}

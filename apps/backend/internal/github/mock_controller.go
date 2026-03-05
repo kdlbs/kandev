@@ -175,6 +175,10 @@ func (c *MockController) addBranches(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	if req.Owner == "" || req.Repo == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner and repo are required"})
+		return
+	}
 	c.mock.AddBranches(req.Owner, req.Repo, req.Branches)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Branches)})
 }

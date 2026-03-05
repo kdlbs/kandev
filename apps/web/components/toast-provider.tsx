@@ -135,6 +135,8 @@ function ToastList({ toasts }: { toasts: Toast[] }) {
     <div
       className="fixed bottom-4 right-4 z-50 flex w-[360px] flex-col-reverse gap-2"
       data-testid="toast-container"
+      aria-live="polite"
+      aria-relevant="additions text"
     >
       {toasts.map((t) => {
         const variant = t.variant ?? "default";
