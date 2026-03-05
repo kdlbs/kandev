@@ -3,6 +3,7 @@ import type {
   GitHubStatusResponse,
   GitHubOrg,
   GitHubRepoInfo,
+  GitHubPR,
   TaskPRsResponse,
   TaskPR,
   PRFeedback,
@@ -137,6 +138,19 @@ export async function searchOrgRepos(org: string, query?: string, options?: ApiR
   if (query) params.set("q", query);
   return fetchJson<{ repos: GitHubRepoInfo[] }>(
     `/api/v1/github/repos/search?${params.toString()}`,
+    options,
+  );
+}
+
+// PR info (lightweight)
+export async function fetchPRInfo(
+  owner: string,
+  repo: string,
+  number: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<GitHubPR>(
+    `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
     options,
   );
 }

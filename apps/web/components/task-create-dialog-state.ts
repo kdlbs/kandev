@@ -59,6 +59,7 @@ type FormResetters = {
   setGitHubUrl: (v: string) => void;
   setGitHubBranches: (v: Branch[]) => void;
   setGitHubUrlError: (v: string | null) => void;
+  setGitHubPrHeadBranch: (v: string | null) => void;
 };
 
 function useFormResetEffects(
@@ -104,6 +105,7 @@ function useFormResetEffects(
       resetters.setGitHubUrl("");
       resetters.setGitHubBranches([]);
       resetters.setGitHubUrlError(null);
+      resetters.setGitHubPrHeadBranch(null);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workspaceId]);
@@ -115,6 +117,7 @@ function useGitHubUrlState() {
   const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
   const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
+  const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
   return {
     useGitHubUrl,
     setUseGitHubUrl,
@@ -126,6 +129,8 @@ function useGitHubUrlState() {
     setGitHubBranchesLoading,
     githubUrlError,
     setGitHubUrlError,
+    githubPrHeadBranch,
+    setGitHubPrHeadBranch,
   };
 }
 
@@ -176,6 +181,7 @@ export function useDialogFormState(
     setGitHubUrl: ghUrl.setGitHubUrl,
     setGitHubBranches: ghUrl.setGitHubBranches,
     setGitHubUrlError: ghUrl.setGitHubUrlError,
+    setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
   });
   return {
     taskName,
@@ -307,6 +313,7 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
       fs.setGitHubUrl("");
       fs.setGitHubBranches([]);
       fs.setGitHubUrlError(null);
+      fs.setGitHubPrHeadBranch(null);
     }
     fs.setBranch("");
   }, [fs]);
@@ -317,6 +324,7 @@ export function useDialogHandlers(fs: DialogFormState, repositories: Repository[
       fs.setBranch("");
       fs.setGitHubBranches([]);
       fs.setGitHubUrlError(null);
+      fs.setGitHubPrHeadBranch(null);
     },
     [fs],
   );

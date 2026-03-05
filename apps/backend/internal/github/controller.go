@@ -33,6 +33,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
+	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
@@ -105,6 +106,23 @@ func (c *Controller) httpGetPRFeedback(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, feedback)
+}
+
+func (c *Controller) httpGetPRInfo(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	numberStr := ctx.Param("number")
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	pr, err := c.service.GetPR(ctx.Request.Context(), owner, repo, number)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, pr)
 }
 
 func (c *Controller) httpSubmitReview(ctx *gin.Context) {
