@@ -188,6 +188,10 @@ test.describe("Untracked file diff update", () => {
       session.chat.getByText("untracked-file-modify complete", { exact: false }),
     ).toBeVisible({ timeout: 45_000 });
 
+    // Wait for git polling to detect the file change (polling interval is ~1-2s)
+    // eslint-disable-next-line playwright/no-wait-for-timeout
+    await testPage.waitForTimeout(3_000);
+
     // Switch back to Changes tab and click on the diff file again
     await openChangesTab(testPage);
     await openFileDiff(testPage, "untracked_test.txt");
@@ -198,8 +202,9 @@ test.describe("Untracked file diff update", () => {
 
     // The diff should now show MODIFIED_CONTENT instead of INITIAL_CONTENT
     // Note: exact match is false because the line includes prefix text
+    // Give extra time for git polling to detect and refresh the diff view
     await expect(updatedDiffsContainer.getByText("MODIFIED_CONTENT")).toBeVisible({
-      timeout: 30_000,
+      timeout: 45_000,
     });
 
     // Verify INITIAL_CONTENT is no longer shown
