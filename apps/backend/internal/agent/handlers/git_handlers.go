@@ -647,6 +647,12 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	agentClient, err := h.getAgentCtlClient(req.SessionID)
 	if err != nil {
+		if isSessionNotReadyError(err) {
+			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"commits": []any{},
+				"ready":   false,
+			})
+		}
 		return nil, err
 	}
 
@@ -696,6 +702,12 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 
 	agentClient, err := h.getAgentCtlClient(req.SessionID)
 	if err != nil {
+		if isSessionNotReadyError(err) {
+			return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"cumulative_diff": nil,
+				"ready":           false,
+			})
+		}
 		return nil, err
 	}
 

@@ -130,4 +130,6 @@ export type DialogFormState = {
   setGitHubBranchesLoading: (v: boolean) => void;
   githubUrlError: string | null;
   setGitHubUrlError: (v: string | null) => void;
+  githubPrHeadBranch: string | null;
+  setGitHubPrHeadBranch: (v: string | null) => void;
 };

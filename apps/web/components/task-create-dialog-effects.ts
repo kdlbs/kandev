@@ -12,7 +12,7 @@ import {
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { fetchRepoBranches } from "@/lib/api/domains/github-api";
+import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
 import type {
   DialogFormState,
   StoreSelections,
@@ -222,8 +222,17 @@ export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[
     if (repositoryId || localBranches.length === 0 || branch) return;
     autoSelectBranch(localBranches, setBranch);
   }, [branch, localBranches, repositoryId, setBranch]);
+  const { githubPrHeadBranch } = fs;
   useEffect(() => {
     if (!useGitHubUrl || githubBranches.length === 0 || branch) return;
+    // If a PR URL was detected, prefer the PR's head branch.
+    if (githubPrHeadBranch) {
+      const prBranch = githubBranches.find((b) => b.name === githubPrHeadBranch);
+      if (prBranch) {
+        setBranch(prBranch.name);
+        return;
+      }
+    }
     // GitHub URL branches are referenced by name only (no remote prefix).
     // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
     const preferred =
@@ -231,14 +240,21 @@ export function useBranchAutoSelectEffect(fs: DialogFormState, branches: Branch[
       githubBranches.find((b) => b.name === "master") ??
       githubBranches[0];
     if (preferred) setBranch(preferred.name);
-  }, [branch, githubBranches, useGitHubUrl, setBranch]);
+  }, [branch, githubBranches, useGitHubUrl, setBranch, githubPrHeadBranch]);
 }
 
-/** Parse a GitHub URL to extract owner and repo name. Returns null if invalid. */
-function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
+/** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
+function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: number } | null {
   const trimmed = url.trim();
   if (!trimmed) return null;
-  // Match github.com/owner/repo with optional scheme, .git suffix, trailing slash
+  // Try PR URL first: github.com/owner/repo/pull/123 (with optional trailing path/hash like /files#diff-...)
+  const prMatch = trimmed.match(
+    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
+  );
+  if (prMatch) {
+    return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
+  }
+  // Fall back to repo URL: github.com/owner/repo
   const match = trimmed.match(
     /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
   );
@@ -253,6 +269,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranches,
     setGitHubBranchesLoading,
     setGitHubUrlError,
+    setGitHubPrHeadBranch,
   } = fs;
   useEffect(() => {
     if (!open || !useGitHubUrl) {
@@ -269,21 +286,35 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     const parsed = parseGitHubUrl(githubUrl);
     if (!parsed) {
       setGitHubBranches([]);
-      setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo");
+      setGitHubPrHeadBranch(null);
+      setGitHubBranchesLoading(false);
+      setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }
     let cancelled = false;
     setGitHubUrlError(null);
     setGitHubBranchesLoading(true);
-    fetchRepoBranches(parsed.owner, parsed.repo)
-      .then((res) => {
+    setGitHubPrHeadBranch(null);
+
+    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo);
+    const prPromise = parsed.prNumber
+      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber).catch(() => null)
+      : Promise.resolve(null);
+
+    Promise.all([branchesPromise, prPromise])
+      .then(([branchesRes, prInfo]) => {
         if (cancelled) return;
-        setGitHubBranches(res.branches.map((b) => ({ name: b.name, type: "remote" as const })));
+        setGitHubBranches(
+          branchesRes.branches.map((b) => ({ name: b.name, type: "remote" as const })),
+        );
         setGitHubUrlError(null);
+        if (prInfo) {
+          setGitHubPrHeadBranch(prInfo.head_branch);
+        }
       })
       .catch(() => {
         if (cancelled) return;
-        setGitHubUrlError(`Repository not found or not accessible`);
+        setGitHubUrlError("Repository not found or not accessible");
         setGitHubBranches([]);
       })
       .finally(() => {
@@ -299,6 +330,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranches,
     setGitHubBranchesLoading,
     setGitHubUrlError,
+    setGitHubPrHeadBranch,
   ]);
 }
 

@@ -1,9 +1,33 @@
 package github
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestGetPR_NilClient(t *testing.T) {
+	svc := &Service{client: nil}
+	_, err := svc.GetPR(context.Background(), "owner", "repo", 1)
+	if err == nil {
+		t.Fatal("expected error when client is nil")
+	}
+	if !strings.Contains(err.Error(), "github client not available") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPRFeedback_NilClient(t *testing.T) {
+	svc := &Service{client: nil}
+	_, err := svc.GetPRFeedback(context.Background(), "owner", "repo", 1)
+	if err == nil {
+		t.Fatal("expected error when client is nil")
+	}
+	if !strings.Contains(err.Error(), "github client not available") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
 func TestParsePRURL(t *testing.T) {
 	tests := []struct {

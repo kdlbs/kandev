@@ -10,7 +10,7 @@ Read and address review comments on a pull request, then push fixes.
 ## Context
 
 - Current branch: !`git branch --show-current`
-- Current PR (if any): !`gh pr view --json number,url,title --jq '"\(.url) - \(.title)"' 2>/dev/null || echo "no PR found"`
+- Current PR (if any): !`gh pr view --json number,url,title`
 
 ## Steps
 

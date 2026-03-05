@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -329,5 +330,84 @@ func TestWsPush_NoExecution(t *testing.T) {
 	_, err := h.wsPush(context.Background(), msg)
 	if err == nil {
 		t.Error("expected error when no execution found")
+	}
+}
+
+func TestWsGitCommits_NotReady(t *testing.T) {
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{} // no executions → "no agent running" error
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	resp, err := h.wsGitCommits(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	commits, ok := payload["commits"].([]any)
+	if !ok {
+		t.Fatalf("expected commits array, got %T", payload["commits"])
+	}
+	if len(commits) != 0 {
+		t.Errorf("expected empty commits, got %d", len(commits))
+	}
+}
+
+func TestWsCumulativeDiff_NotReady(t *testing.T) {
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{} // no executions → "no agent running" error
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+
+	resp, err := h.wsCumulativeDiff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if payload["cumulative_diff"] != nil {
+		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])
+	}
+}
+
+func TestIsSessionNotReadyError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"no agent running", fmt.Errorf("no agent running for session abc"), true},
+		{"agent client not available", fmt.Errorf("agent client not available for session abc"), true},
+		{"unrelated error", fmt.Errorf("some other error"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSessionNotReadyError(tt.err); got != tt.want {
+				t.Errorf("isSessionNotReadyError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

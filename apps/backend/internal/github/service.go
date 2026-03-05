@@ -399,7 +399,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, feedback *PRFee
 	return nil
 }
 
-// --- PR feedback (live) ---
+// --- PR info and feedback (live) ---
+
+// GetPR fetches basic PR details from GitHub.
+func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.GetPR(ctx, owner, repo, number)
+}
 
 // GetPRFeedback fetches live PR feedback from GitHub.
 func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
