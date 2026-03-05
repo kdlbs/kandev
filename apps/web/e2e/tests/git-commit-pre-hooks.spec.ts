@@ -155,9 +155,9 @@ test.describe("Git commit pre-hooks", () => {
       await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
       // Verify the agent responded (mock agent echoes back part of the prompt)
-      await expect(
-        session.chat.getByText("completed the analysis", { exact: false }),
-      ).toBeVisible({ timeout: 5_000 });
+      await expect(session.chat.getByText("completed the analysis", { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
     } finally {
       git.removePreCommitHook();
     }
