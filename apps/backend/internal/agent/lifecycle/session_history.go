@@ -49,14 +49,10 @@ type HistoryEntry struct {
 
 // NewSessionHistoryManager creates a new SessionHistoryManager.
 // The baseDir is the directory where session history files will be stored.
-// If baseDir is empty, defaults to ~/.kandev/sessions/
-func NewSessionHistoryManager(baseDir string, log *logger.Logger) (*SessionHistoryManager, error) {
+// If baseDir is empty, it defaults to dataDir+"/sessions".
+func NewSessionHistoryManager(baseDir string, dataDir string, log *logger.Logger) (*SessionHistoryManager, error) {
 	if baseDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
-		}
-		baseDir = filepath.Join(homeDir, ".kandev", "sessions")
+		baseDir = filepath.Join(dataDir, "sessions")
 	}
 
 	// Ensure directory exists

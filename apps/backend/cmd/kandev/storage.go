@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	"github.com/kandev/kandev/internal/common/config"
@@ -89,11 +87,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger) (*db.Pool, *Rep
 	cleanups = append(cleanups, cleanup)
 
 	// Initialize master key and secrets store
-	kandevDir := os.Getenv("KANDEV_DATA_DIR")
-	if kandevDir == "" {
-		kandevDir = filepath.Join(os.Getenv("HOME"), ".kandev")
-	}
-	masterKeyProvider, err := secrets.NewMasterKeyProvider(kandevDir)
+	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
 	}

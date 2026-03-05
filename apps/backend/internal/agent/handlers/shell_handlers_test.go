@@ -184,7 +184,7 @@ func newTestManager() *lifecycle.Manager {
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
 	// Pass nil for runtime - tests don't need them
-	return lifecycle.NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, lifecycle.ExecutorFallbackWarn, log)
+	return lifecycle.NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, lifecycle.ExecutorFallbackWarn, "", log)
 }
 
 func TestWsShellStatus_NoInstanceFound(t *testing.T) {

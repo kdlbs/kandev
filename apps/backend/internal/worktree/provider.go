@@ -13,11 +13,13 @@ func Provide(writer, reader *sqlx.DB, cfg *config.Config, log *logger.Logger) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	manager, err := NewManager(Config{
+	wtCfg := Config{
 		Enabled:      cfg.Worktree.Enabled,
 		BasePath:     cfg.Worktree.BasePath,
 		BranchPrefix: "kandev/",
-	}, store, log)
+	}
+	wtCfg.SetDataDirFallback(cfg.ResolvedDataDir())
+	manager, err := NewManager(wtCfg, store, log)
 	if err != nil {
 		return nil, nil, err
 	}

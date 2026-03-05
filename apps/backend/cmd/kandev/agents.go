@@ -95,6 +95,7 @@ func provideLifecycleManager(
 		profileResolver,
 		mcpService,
 		lifecycle.ExecutorFallbackWarn,
+		cfg.ResolvedDataDir(),
 		log,
 	)
 

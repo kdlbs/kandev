@@ -15,6 +15,7 @@ import (
 
 // Config holds all configuration sections for Kandev.
 type Config struct {
+	DataDir             string                    `mapstructure:"dataDir"`
 	Server              ServerConfig              `mapstructure:"server"`
 	Database            DatabaseConfig            `mapstructure:"database"`
 	NATS                NATSConfig                `mapstructure:"nats"`
@@ -26,6 +27,20 @@ type Config struct {
 	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
 	Worktree            WorktreeConfig            `mapstructure:"worktree"`
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
+}
+
+// ResolvedDataDir returns the base data directory for Kandev.
+// Config.DataDir is populated by Viper from the config file or KANDEV_DATA_DIR env var.
+// If empty, falls back to ~/.kandev.
+func (c *Config) ResolvedDataDir() string {
+	if c.DataDir != "" {
+		return c.DataDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".kandev"
+	}
+	return filepath.Join(home, ".kandev")
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -176,9 +191,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 
+	// DataDir default — empty means resolve from KANDEV_DATA_DIR env or ~/.kandev
+	v.SetDefault("dataDir", "")
+
 	// Database defaults
 	v.SetDefault("database.driver", "sqlite")
-	v.SetDefault("database.path", "./kandev.db")
+	v.SetDefault("database.path", "")
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.port", 5432)
 	v.SetDefault("database.user", "kandev")
@@ -227,12 +245,12 @@ func setDefaults(v *viper.Viper) {
 
 	// Worktree defaults
 	v.SetDefault("worktree.enabled", true)
-	v.SetDefault("worktree.basePath", "~/.kandev/worktrees")
+	v.SetDefault("worktree.basePath", "")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
 
 	// RepoClone defaults
-	v.SetDefault("repoClone.basePath", "~/.kandev/repos")
+	v.SetDefault("repoClone.basePath", "")
 }
 
 // DefaultDockerHost returns the platform-appropriate Docker socket path.
@@ -285,6 +303,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
+	_ = v.BindEnv("dataDir", "KANDEV_DATA_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 

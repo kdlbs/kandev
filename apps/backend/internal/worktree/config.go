@@ -33,10 +33,14 @@ func (c *Config) Validate() error {
 	if c.BranchPrefix == "" {
 		c.BranchPrefix = DefaultBranchPrefix
 	}
-	if c.BasePath == "" {
-		c.BasePath = "~/.kandev/worktrees"
-	}
 	return nil
+}
+
+// SetDataDirFallback sets the BasePath from the data directory if not already configured.
+func (c *Config) SetDataDirFallback(dataDir string) {
+	if c.BasePath == "" {
+		c.BasePath = filepath.Join(dataDir, "worktrees")
+	}
 }
 
 // ExpandedBasePath returns the base path with ~ expanded to the user's home directory.

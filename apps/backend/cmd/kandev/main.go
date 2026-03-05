@@ -285,7 +285,7 @@ func startAgentInfrastructure(
 	// ============================================
 	repoCloner := repoclone.NewCloner(repoclone.Config{
 		BasePath: cfg.RepoClone.BasePath,
-	}, repoclone.DetectGitProtocol(), log)
+	}, repoclone.DetectGitProtocol(), cfg.ResolvedDataDir(), log)
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
 
@@ -341,6 +341,7 @@ func startGatewayAndServe(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, services.GitHub,
+		cfg.ResolvedDataDir(),
 	)
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))

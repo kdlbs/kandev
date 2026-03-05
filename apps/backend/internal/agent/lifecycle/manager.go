@@ -86,6 +86,7 @@ func NewManager(
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
 	fallbackPolicy ExecutorFallbackPolicy,
+	dataDir string,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -106,7 +107,7 @@ func NewManager(
 	executionStore := NewExecutionStore()
 
 	// Initialize session history manager for fork_session pattern (context injection)
-	historyManager, err := NewSessionHistoryManager("", log)
+	historyManager, err := NewSessionHistoryManager("", dataDir, log)
 	if err != nil {
 		log.Warn("failed to create session history manager, context injection disabled", zap.Error(err))
 	}

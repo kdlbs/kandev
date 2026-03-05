@@ -60,8 +60,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
         ca-certificates \
+        gosu \
         tini && \
     rm -rf /var/lib/apt/lists/*
+
+# Create kandev user (uid 1000) — not tied to base image's built-in node user
+RUN groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
 
 # Create app directory structure matching what the CLI expects:
 #   /app/apps/backend/bin/kandev
@@ -92,20 +96,22 @@ VOLUME ["/data"]
 
 # Environment defaults for containerized operation
 ENV KANDEV_NO_BROWSER=1 \
-    KANDEV_DATABASE_PATH=/data/kandev.db \
-    KANDEV_WORKTREE_BASEPATH=/data/worktrees \
+    KANDEV_DATA_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
     HOSTNAME=0.0.0.0 \
     NODE_ENV=production
 
-# Run as non-root
-RUN chown -R node:node /app /data
-USER node
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Set build-time ownership of /app and /data
+RUN chown -R kandev:kandev /app /data
 
 WORKDIR /app
 
 EXPOSE 8080 3000
 
-# tini as PID 1 for signal handling; CLI manages backend + web processes
-ENTRYPOINT ["tini", "--"]
+# tini as PID 1 for signal handling; entrypoint handles privilege drop
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["kandev", "start", "--backend-port", "8080", "--web-port", "3000", "--verbose"]

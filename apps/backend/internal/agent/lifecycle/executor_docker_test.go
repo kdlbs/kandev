@@ -269,7 +269,7 @@ func TestDockerExecutor_Close_AfterFailedInit(t *testing.T) {
 
 func TestDockerClientProvider_NilRegistry(t *testing.T) {
 	log := newTestDockerLogger()
-	mgr := NewManager(nil, nil, nil, nil, nil, nil, ExecutorFallbackWarn, log)
+	mgr := NewManager(nil, nil, nil, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
 	provider := mgr.DockerClientProvider()
 	if provider == nil {
@@ -284,7 +284,7 @@ func TestDockerClientProvider_NoDockerExecutor(t *testing.T) {
 	log := newTestDockerLogger()
 	registry := NewExecutorRegistry(log)
 	registry.Register(&MockExecutor{name: executor.NameStandalone})
-	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, log)
+	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
 	provider := mgr.DockerClientProvider()
 	if client := provider(); client != nil {
@@ -298,7 +298,7 @@ func TestDockerClientProvider_WithDockerExecutor(t *testing.T) {
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
 	dockerExec.newClientFunc = failingClientFactory("docker unavailable")
 	registry.Register(dockerExec)
-	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, log)
+	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
 	provider := mgr.DockerClientProvider()
 	if client := provider(); client != nil {
@@ -311,7 +311,7 @@ func TestDockerClientProvider_WithWorkingDocker(t *testing.T) {
 	registry := NewExecutorRegistry(log)
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, log)
 	registry.Register(dockerExec)
-	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, log)
+	mgr := NewManager(nil, nil, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 
 	provider := mgr.DockerClientProvider()
 	client := provider()

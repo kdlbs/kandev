@@ -81,12 +81,12 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 | Env Var | Default | Description |
 |---------|---------|-------------|
 | `KANDEV_SERVER_PORT` | `8080` | Backend API port |
+| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `/data/kandev.db` | SQLite database file path |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (requires DinD) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | auto | Log format: `json` (auto-detected in K8s) or `text` |
-| `KANDEV_WORKTREE_BASEPATH` | `/data/worktrees` | Git worktree storage directory |
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 

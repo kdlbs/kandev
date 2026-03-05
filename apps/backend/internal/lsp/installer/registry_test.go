@@ -106,7 +106,7 @@ func TestBinaryName(t *testing.T) {
 }
 
 func TestStrategyFor(t *testing.T) {
-	r := NewRegistry(testLogger())
+	r := NewRegistry("", testLogger())
 
 	// Supported languages should return a strategy
 	for _, lang := range []string{"typescript", "go", "rust", "python"} {
@@ -133,7 +133,7 @@ func TestStrategyFor(t *testing.T) {
 
 func TestBinaryPath_InPATH(t *testing.T) {
 	// "ls" should always be in PATH
-	r := NewRegistry(testLogger())
+	r := NewRegistry("", testLogger())
 
 	// Override the languages map temporarily — we can't do that directly,
 	// so we test that BinaryPath returns an error for a language whose binary
@@ -217,7 +217,7 @@ func TestBinaryPath_NotFound(t *testing.T) {
 }
 
 func TestBinaryPath_UnsupportedLanguage(t *testing.T) {
-	r := NewRegistry(testLogger())
+	r := NewRegistry("", testLogger())
 	_, err := r.BinaryPath("java")
 	if err == nil {
 		t.Error("BinaryPath(\"java\") should return error for unsupported language")

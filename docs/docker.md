@@ -63,12 +63,12 @@ docker run -p 8080:8080 -p 3000:3000 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `/data/kandev.db` | SQLite database file path |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
-| `KANDEV_WORKTREE_BASEPATH` | `/data/worktrees` | Git worktree storage directory |
 
 ### PostgreSQL
 
