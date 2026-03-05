@@ -189,9 +189,10 @@ test.describe("Untracked file diff update", () => {
     await openUntrackedFileDiff(testPage);
 
     // Verify initial diff content shows INITIAL_CONTENT
+    // Note: exact match is false because the line shows "line 1: INITIAL_CONTENT"
     const diffsContainer = testPage.locator("diffs-container");
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("INITIAL_CONTENT", { exact: true })).toBeVisible({
+    await expect(diffsContainer.getByText("INITIAL_CONTENT")).toBeVisible({
       timeout: 15_000,
     });
 
@@ -215,17 +216,16 @@ test.describe("Untracked file diff update", () => {
     await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
 
     // The diff should now show MODIFIED_CONTENT instead of INITIAL_CONTENT
-    await expect(updatedDiffsContainer.getByText("MODIFIED_CONTENT", { exact: true })).toBeVisible({
+    // Note: exact match is false because the line includes prefix text
+    await expect(updatedDiffsContainer.getByText("MODIFIED_CONTENT")).toBeVisible({
       timeout: 30_000,
     });
 
     // Verify INITIAL_CONTENT is no longer shown
-    await expect(updatedDiffsContainer.getByText("INITIAL_CONTENT", { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(updatedDiffsContainer.getByText("INITIAL_CONTENT")).toHaveCount(0);
 
     // Also verify the new line was added
-    await expect(updatedDiffsContainer.getByText("NEW_LINE", { exact: true })).toBeVisible({
+    await expect(updatedDiffsContainer.getByText("NEW_LINE")).toBeVisible({
       timeout: 15_000,
     });
   });
