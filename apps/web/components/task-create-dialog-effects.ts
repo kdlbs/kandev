@@ -286,6 +286,8 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     const parsed = parseGitHubUrl(githubUrl);
     if (!parsed) {
       setGitHubBranches([]);
+      setGitHubPrHeadBranch(null);
+      setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }

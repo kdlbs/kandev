@@ -119,7 +119,19 @@ func (c *Controller) httpGetPRInfo(ctx *gin.Context) {
 	}
 	pr, err := c.service.GetPR(ctx.Request.Context(), owner, repo, number)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, pr)
