@@ -673,7 +673,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "origin/master", nil)
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -722,7 +722,7 @@ esac
 
 	repoPath := t.TempDir()
 	start := time.Now()
-	ref := mgr.pullBaseBranch(repoPath, "master", nil)
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	elapsed := time.Since(start)
 
 	if ref != "master" {
@@ -773,7 +773,7 @@ esac
 	mgr.pullTimeout = 300 * time.Millisecond
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "master", nil)
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}

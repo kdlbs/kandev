@@ -89,7 +89,9 @@ export function useCommitDiffs(activeSessionId: string | null | undefined) {
     activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
   );
   const agentctlReady = useAppStore((state) =>
-    activeSessionId ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready" : false,
+    activeSessionId
+      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
+      : false,
   );
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDiffs, setCommitDiffs] = useState<Record<string, Record<string, FileInfo>>>({});

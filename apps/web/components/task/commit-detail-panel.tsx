@@ -52,7 +52,9 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
     activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
   );
   const agentctlReady = useAppStore((state) =>
-    activeSessionId ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready" : false,
+    activeSessionId
+      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
+      : false,
   );
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const { toast } = useToast();

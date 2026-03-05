@@ -99,7 +99,11 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
 	if syncStep != nil {
 		if syncStep.Status == PrepareStepRunning {
-			completeStepSuccess(syncStep)
+			if err != nil {
+				completeStepError(syncStep, "sync interrupted by worktree creation failure")
+			} else {
+				completeStepSuccess(syncStep)
+			}
 		}
 		steps = append(steps, *syncStep)
 		reportProgress(onProgress, *syncStep, syncStepIndex, totalSteps)

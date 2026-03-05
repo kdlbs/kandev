@@ -236,7 +236,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 	baseRef := req.BaseBranch
 	if req.PullBeforeWorktree {
-		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
+		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
 	// Check base branch exists
@@ -821,7 +821,7 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 //  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
 //
 // On fetch/pull failure, errors are logged but the function continues with the best available ref.
-func (m *Manager) pullBaseBranch(repoPath, baseBranch string, onProgress SyncProgressCallback) string {
+func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch string, onProgress SyncProgressCallback) string {
 	localBranch := strings.TrimPrefix(baseBranch, "origin/")
 	isRemoteRef := localBranch != baseBranch
 	stepName := "Sync base branch"
@@ -833,7 +833,7 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string, onProgress SyncPro
 	})
 
 	// Fetch branch from origin in non-interactive mode.
-	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), m.fetchTimeout)
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
 	fetchArgs := []string{"fetch", "origin"}
@@ -851,7 +851,7 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string, onProgress SyncPro
 		return resolved
 	}
 
-	return m.resolveLocalBaseRef(repoPath, baseBranch, localBranch, stepName, onProgress)
+	return m.resolveLocalBaseRef(ctx, repoPath, baseBranch, localBranch, stepName, onProgress)
 }
 
 func (m *Manager) reportSyncProgress(cb SyncProgressCallback, event SyncProgressEvent) {
@@ -882,12 +882,12 @@ func (m *Manager) handleFetchFallback(baseBranch, stepName string, onProgress Sy
 }
 
 func (m *Manager) resolveLocalBaseRef(
-	repoPath, baseBranch, localBranch, stepName string,
+	ctx context.Context, repoPath, baseBranch, localBranch, stepName string,
 	onProgress SyncProgressCallback,
 ) string {
 	remoteRef := "origin/" + localBranch
 	if m.currentBranch(repoPath) == baseBranch {
-		return m.pullCurrentBranchOrFallback(repoPath, baseBranch, remoteRef, stepName, onProgress)
+		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
 	if m.branchExists(repoPath, remoteRef) {
 		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
@@ -898,10 +898,10 @@ func (m *Manager) resolveLocalBaseRef(
 }
 
 func (m *Manager) pullCurrentBranchOrFallback(
-	repoPath, baseBranch, remoteRef, stepName string,
+	ctx context.Context, repoPath, baseBranch, remoteRef, stepName string,
 	onProgress SyncProgressCallback,
 ) string {
-	pullCtx, cancelPull := context.WithTimeout(context.Background(), m.pullTimeout)
+	pullCtx, cancelPull := context.WithTimeout(ctx, m.pullTimeout)
 	defer cancelPull()
 
 	pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
