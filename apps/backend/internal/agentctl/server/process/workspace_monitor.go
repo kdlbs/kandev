@@ -68,7 +68,7 @@ type workspaceState struct {
 }
 
 // getWorkspaceState returns the current workspace state using fast checks.
-// Uses index mtime + git diff-files output + untracked file mtimes.
+// Uses index mtime + git diff-files output + file mtimes.
 func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceState {
 	var state workspaceState
 
@@ -79,19 +79,48 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 		}
 	}
 
-	// git diff-files shows changed files with their blob hashes
-	// Output changes whenever file content changes (not just dirty/clean boolean)
-	cmd := exec.CommandContext(ctx, "git", "diff-files")
+	// git diff-files shows changed files with their blob hashes.
+	// However, the output doesn't change when an already-dirty file is modified
+	// again because the index blob hash stays constant and the worktree hash
+	// is always shown as 0000000 (not computed). To detect subsequent changes
+	// to dirty files, we also include the mtime of each dirty file.
+	cmd := exec.CommandContext(ctx, "git", "diff-files", "--name-only")
 	cmd.Dir = wt.workDir
 	out, _ := cmd.Output()
-	// Use the raw output as identity - content changes produce different output
-	state.diffFilesID = string(out)
+	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
 	// Check untracked files - git diff-files doesn't include them
 	// Use git ls-files to get untracked files, then check their mtimes
 	state.untrackedID = wt.getUntrackedFilesID(ctx)
 
 	return state
+}
+
+// buildDirtyFilesID builds an identifier string for dirty tracked files.
+// Includes file paths and their mtimes so subsequent changes are detected.
+func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
+	if diffFilesOutput == "" {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(diffFilesOutput), "\n")
+	var hashInput strings.Builder
+	for _, file := range lines {
+		if file == "" {
+			continue
+		}
+		hashInput.WriteString(file)
+		// Include mtime so we detect content changes to already-dirty files
+		safePath, err := wt.sanitizePath(file)
+		if err != nil {
+			continue // Skip files with invalid paths
+		}
+		if info, err := os.Stat(safePath); err == nil {
+			hashInput.WriteString(fmt.Sprintf(":%d", info.ModTime().UnixNano()))
+		}
+		hashInput.WriteString(";")
+	}
+	return hashInput.String()
 }
 
 // getUntrackedFilesID returns a string identifying the current state of untracked files.
