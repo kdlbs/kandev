@@ -6,11 +6,11 @@ import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import type { FileInfo } from "@/lib/state/store";
+import { requestCommitDiff } from "./commit-diff-request";
 
 type CommitDetailPanelProps = {
   panelId: string;
@@ -47,6 +47,13 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
 }: CommitDetailPanelProps) {
   const commitSha = params.commitSha as string;
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const sessionTaskId = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
+  );
+  const agentctlReady = useAppStore((state) =>
+    activeSessionId ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready" : false,
+  );
   const { commits } = useSessionCommits(activeSessionId ?? null);
   const { toast } = useToast();
   const { openFile } = usePanelActions();
@@ -77,13 +84,12 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
     if (!activeSessionId) return;
     setLoading(true);
     try {
-      const ws = getWebSocketClient();
-      if (!ws) return;
-      const response = await ws.request<{ success: boolean; files: Record<string, FileInfo> }>(
-        "session.commit_diff",
-        { session_id: activeSessionId, commit_sha: commitSha },
-        10000,
-      );
+      const response = await requestCommitDiff({
+        sessionId: activeSessionId,
+        taskId: sessionTaskId ?? activeTaskId ?? null,
+        commitSha,
+        agentctlReady,
+      });
       if (response?.success && response.files) {
         setFiles(response.files);
       }
@@ -96,7 +102,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
     } finally {
       setLoading(false);
     }
-  }, [activeSessionId, commitSha, toast]);
+  }, [activeSessionId, activeTaskId, agentctlReady, commitSha, sessionTaskId, toast]);
 
   useEffect(() => {
     fetchDiff();

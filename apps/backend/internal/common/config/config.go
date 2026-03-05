@@ -119,10 +119,12 @@ type RepositoryDiscoveryConfig struct {
 
 // WorktreeConfig holds Git worktree configuration for concurrent agent execution.
 type WorktreeConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`         // Enable worktree mode
-	BasePath        string `mapstructure:"basePath"`        // Base directory for worktrees (default: ~/.kandev/worktrees)
-	DefaultBranch   string `mapstructure:"defaultBranch"`   // Default base branch (default: main)
-	CleanupOnRemove bool   `mapstructure:"cleanupOnRemove"` // Remove worktree directory on task deletion
+	Enabled             bool   `mapstructure:"enabled"`             // Enable worktree mode
+	BasePath            string `mapstructure:"basePath"`            // Base directory for worktrees (default: ~/.kandev/worktrees)
+	DefaultBranch       string `mapstructure:"defaultBranch"`       // Default base branch (default: main)
+	CleanupOnRemove     bool   `mapstructure:"cleanupOnRemove"`     // Remove worktree directory on task deletion
+	FetchTimeoutSeconds int    `mapstructure:"fetchTimeoutSeconds"` // Git fetch timeout before worktree creation
+	PullTimeoutSeconds  int    `mapstructure:"pullTimeoutSeconds"`  // Git pull timeout before worktree creation
 }
 
 // RepoCloneConfig holds configuration for automatic repository cloning.
@@ -253,6 +255,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("worktree.basePath", "")
 	v.SetDefault("worktree.defaultBranch", "main")
 	v.SetDefault("worktree.cleanupOnRemove", true)
+	v.SetDefault("worktree.fetchTimeoutSeconds", 60)
+	v.SetDefault("worktree.pullTimeoutSeconds", 60)
 
 	// RepoClone defaults
 	v.SetDefault("repoClone.basePath", "")

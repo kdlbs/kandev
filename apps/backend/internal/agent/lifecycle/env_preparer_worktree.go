@@ -33,6 +33,9 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	var steps []PrepareStep
 
 	totalSteps := 2 // validate + create worktree
+	if req.PullBeforeWorktree {
+		totalSteps++
+	}
 	if req.CheckoutBranch != "" {
 		totalSteps++
 	}
@@ -60,6 +63,16 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 	stepIdx++
 
+	var syncStep *PrepareStep
+	syncStepIndex := -1
+	if req.PullBeforeWorktree {
+		s := beginStep("Sync base branch")
+		reportProgress(onProgress, s, stepIdx, totalSteps)
+		syncStep = &s
+		syncStepIndex = stepIdx
+		stepIdx++
+	}
+
 	// Step 2: Create worktree
 	step = beginStep("Create worktree")
 	reportProgress(onProgress, step, stepIdx, totalSteps)
@@ -76,8 +89,21 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		WorktreeID:           req.WorktreeID,
 	}
+	if syncStep != nil {
+		createReq.OnSyncProgress = func(event worktree.SyncProgressEvent) {
+			applySyncProgressEvent(syncStep, event)
+			reportProgress(onProgress, *syncStep, syncStepIndex, totalSteps)
+		}
+	}
 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
+	if syncStep != nil {
+		if syncStep.Status == PrepareStepRunning {
+			completeStepSuccess(syncStep)
+		}
+		steps = append(steps, *syncStep)
+		reportProgress(onProgress, *syncStep, syncStepIndex, totalSteps)
+	}
 	if err != nil {
 		completeStepError(&step, err.Error())
 		steps = append(steps, step)
@@ -139,4 +165,24 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		WorktreeBranch: wt.Branch,
 		MainRepoGitDir: mainRepoGitDir,
 	}, nil
+}
+
+func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent) {
+	if event.StepName != "" {
+		step.Name = event.StepName
+	}
+	step.Output = event.Output
+	step.Error = event.Error
+	switch event.Status {
+	case worktree.SyncProgressRunning:
+		step.Status = PrepareStepRunning
+		if step.StartedAt == nil {
+			now := time.Now()
+			step.StartedAt = &now
+		}
+	case worktree.SyncProgressCompleted:
+		now := time.Now()
+		step.Status = PrepareStepCompleted
+		step.EndedAt = &now
+	}
 }

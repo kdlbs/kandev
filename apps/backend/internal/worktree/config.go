@@ -23,6 +23,14 @@ type Config struct {
 	// BranchPrefix is the prefix used for worktree branch names.
 	// Default: feature/
 	BranchPrefix string `mapstructure:"branch_prefix"`
+
+	// FetchTimeoutSeconds is the timeout for pre-worktree git fetch.
+	// If <= 0, manager default is used.
+	FetchTimeoutSeconds int `mapstructure:"fetch_timeout_seconds"`
+
+	// PullTimeoutSeconds is the timeout for pre-worktree git pull.
+	// If <= 0, manager default is used.
+	PullTimeoutSeconds int `mapstructure:"pull_timeout_seconds"`
 }
 
 // DefaultBranchPrefix is used when no repository-specific prefix is provided.

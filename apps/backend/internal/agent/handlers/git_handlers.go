@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
@@ -582,6 +583,14 @@ func (h *GitHandlers) wsCommitDiff(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	client, err := h.getAgentCtlClient(req.SessionID)
 	if err != nil {
+		if isSessionNotReadyError(err) {
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success":        false,
+				"ready":          false,
+				"reason":         "agent_starting",
+				"retry_after_ms": 500,
+			})
+		}
 		return nil, err
 	}
 
@@ -591,6 +600,15 @@ func (h *GitHandlers) wsCommitDiff(ctx context.Context, msg *ws.Message) (*ws.Me
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func isSessionNotReadyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no agent running for session") ||
+		strings.Contains(msg, "agent client not available for session")
 }
 
 // getAgentCtlClient gets the agentctl client for a session

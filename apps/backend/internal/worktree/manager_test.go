@@ -117,6 +117,31 @@ func TestNewManager(t *testing.T) {
 	if !mgr.IsEnabled() {
 		t.Error("expected manager to be enabled")
 	}
+	if mgr.fetchTimeout != defaultGitFetchTimeout {
+		t.Fatalf("fetchTimeout = %v, want %v", mgr.fetchTimeout, defaultGitFetchTimeout)
+	}
+	if mgr.pullTimeout != defaultGitPullTimeout {
+		t.Fatalf("pullTimeout = %v, want %v", mgr.pullTimeout, defaultGitPullTimeout)
+	}
+}
+
+func TestNewManager_CustomSyncTimeouts(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.FetchTimeoutSeconds = 15
+	cfg.PullTimeoutSeconds = 25
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	if mgr.fetchTimeout != 15*time.Second {
+		t.Fatalf("fetchTimeout = %v, want %v", mgr.fetchTimeout, 15*time.Second)
+	}
+	if mgr.pullTimeout != 25*time.Second {
+		t.Fatalf("pullTimeout = %v, want %v", mgr.pullTimeout, 25*time.Second)
+	}
 }
 
 func TestNewManager_DisabledConfig(t *testing.T) {
@@ -648,7 +673,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "origin/master")
+	ref := mgr.pullBaseBranch(repoPath, "origin/master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -697,7 +722,7 @@ esac
 
 	repoPath := t.TempDir()
 	start := time.Now()
-	ref := mgr.pullBaseBranch(repoPath, "master")
+	ref := mgr.pullBaseBranch(repoPath, "master", nil)
 	elapsed := time.Since(start)
 
 	if ref != "master" {
@@ -748,7 +773,7 @@ esac
 	mgr.pullTimeout = 300 * time.Millisecond
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "master")
+	ref := mgr.pullBaseBranch(repoPath, "master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}

@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout = 8 * time.Second
-	defaultGitPullTimeout  = 8 * time.Second
+	defaultGitFetchTimeout = 60 * time.Second
+	defaultGitPullTimeout  = 60 * time.Second
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -92,14 +92,24 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create worktree base directory: %w", err)
 	}
 
+	fetchTimeout := defaultGitFetchTimeout
+	if cfg.FetchTimeoutSeconds > 0 {
+		fetchTimeout = time.Duration(cfg.FetchTimeoutSeconds) * time.Second
+	}
+
+	pullTimeout := defaultGitPullTimeout
+	if cfg.PullTimeoutSeconds > 0 {
+		pullTimeout = time.Duration(cfg.PullTimeoutSeconds) * time.Second
+	}
+
 	return &Manager{
 		config:       cfg,
 		logger:       log.WithFields(zap.String("component", "worktree-manager")),
 		store:        store,
 		worktrees:    make(map[string]*Worktree),
 		repoLocks:    make(map[string]*repoLockEntry),
-		fetchTimeout: defaultGitFetchTimeout,
-		pullTimeout:  defaultGitPullTimeout,
+		fetchTimeout: fetchTimeout,
+		pullTimeout:  pullTimeout,
 	}, nil
 }
 
@@ -226,7 +236,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 	baseRef := req.BaseBranch
 	if req.PullBeforeWorktree {
-		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch)
+		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
 	// Check base branch exists
@@ -811,10 +821,16 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 //  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
 //
 // On fetch/pull failure, errors are logged but the function continues with the best available ref.
-func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
-	// Normalize branch name - strip "origin/" prefix if present
+func (m *Manager) pullBaseBranch(repoPath, baseBranch string, onProgress SyncProgressCallback) string {
 	localBranch := strings.TrimPrefix(baseBranch, "origin/")
 	isRemoteRef := localBranch != baseBranch
+	stepName := "Sync base branch"
+
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName: stepName,
+		Status:   SyncProgressRunning,
+		Output:   fmt.Sprintf("Fetching latest changes for %s", baseBranch),
+	})
 
 	// Fetch branch from origin in non-interactive mode.
 	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), m.fetchTimeout)
@@ -826,47 +842,81 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 	}
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, fetchArgs...)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
-			zap.String("branch", baseBranch),
-			zap.String("reason", classifyGitFallbackReason(err, string(output), fetchCtx.Err())),
-			zap.String("fallback_ref", baseBranch),
-			zap.String("output", string(output)),
-			zap.Error(err))
-		return baseBranch
+		return m.handleFetchFallback(baseBranch, stepName, onProgress, fetchCtx.Err(), output, err)
 	}
 
-	// If the original ref was already a remote ref, use it directly
 	if isRemoteRef {
-		return "origin/" + localBranch
+		resolved := "origin/" + localBranch
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", resolved), "")
+		return resolved
 	}
 
-	// For local branches: try to update if we're on that branch, otherwise use origin/<branch>
+	return m.resolveLocalBaseRef(repoPath, baseBranch, localBranch, stepName, onProgress)
+}
+
+func (m *Manager) reportSyncProgress(cb SyncProgressCallback, event SyncProgressEvent) {
+	if cb != nil {
+		cb(event)
+	}
+}
+
+func (m *Manager) reportSyncCompleted(stepName string, onProgress SyncProgressCallback, output, errOutput string) {
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName: stepName,
+		Status:   SyncProgressCompleted,
+		Output:   output,
+		Error:    strings.TrimSpace(errOutput),
+	})
+}
+
+func (m *Manager) handleFetchFallback(baseBranch, stepName string, onProgress SyncProgressCallback, ctxErr error, output []byte, cmdErr error) string {
+	reason := classifyGitFallbackReason(cmdErr, string(output), ctxErr)
+	m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
+		zap.String("branch", baseBranch),
+		zap.String("reason", reason),
+		zap.String("fallback_ref", baseBranch),
+		zap.String("output", string(output)),
+		zap.Error(cmdErr))
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Fetch %s; using fallback ref %s", reason, baseBranch), string(output))
+	return baseBranch
+}
+
+func (m *Manager) resolveLocalBaseRef(
+	repoPath, baseBranch, localBranch, stepName string,
+	onProgress SyncProgressCallback,
+) string {
 	remoteRef := "origin/" + localBranch
-	currentBranch := m.currentBranch(repoPath)
-
-	if currentBranch == baseBranch {
-		// We're on the target branch - try to pull (fast-forward only)
-		pullCtx, cancelPull := context.WithTimeout(context.Background(), m.pullTimeout)
-		defer cancelPull()
-
-		pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
-		if output, err := pullCmd.CombinedOutput(); err != nil {
-			m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
-				zap.String("branch", baseBranch),
-				zap.String("reason", classifyGitFallbackReason(err, string(output), pullCtx.Err())),
-				zap.String("remote_ref", remoteRef),
-				zap.String("output", string(output)),
-				zap.Error(err))
-			return remoteRef
-		}
-		return baseBranch
+	if m.currentBranch(repoPath) == baseBranch {
+		return m.pullCurrentBranchOrFallback(repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
-
-	// Not on the target branch - use the remote ref if it exists
 	if m.branchExists(repoPath, remoteRef) {
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
 		return remoteRef
 	}
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Remote ref not found; using %s", baseBranch), "")
+	return baseBranch
+}
 
+func (m *Manager) pullCurrentBranchOrFallback(
+	repoPath, baseBranch, remoteRef, stepName string,
+	onProgress SyncProgressCallback,
+) string {
+	pullCtx, cancelPull := context.WithTimeout(context.Background(), m.pullTimeout)
+	defer cancelPull()
+
+	pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
+	if output, err := pullCmd.CombinedOutput(); err != nil {
+		reason := classifyGitFallbackReason(err, string(output), pullCtx.Err())
+		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
+			zap.String("branch", baseBranch),
+			zap.String("reason", reason),
+			zap.String("remote_ref", remoteRef),
+			zap.String("output", string(output)),
+			zap.Error(err))
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, remoteRef), string(output))
+		return remoteRef
+	}
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch
 }
 

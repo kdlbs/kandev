@@ -9,7 +9,6 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { hashDiff, normalizeDiffContent } from "@/components/review/types";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useFileOperations } from "@/hooks/use-file-operations";
@@ -21,6 +20,7 @@ import {
   setUserSelectedFilesPanelTab,
 } from "@/lib/local-storage";
 import { usePanelActions } from "@/hooks/use-panel-actions";
+import { requestCommitDiff } from "./commit-diff-request";
 
 export type GitStatusFiles = Record<
   string,
@@ -84,6 +84,13 @@ export function computeReviewProgress(
 }
 
 export function useCommitDiffs(activeSessionId: string | null | undefined) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const sessionTaskId = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
+  );
+  const agentctlReady = useAppStore((state) =>
+    activeSessionId ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready" : false,
+  );
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDiffs, setCommitDiffs] = useState<Record<string, Record<string, FileInfo>>>({});
   const [loadingCommitSha, setLoadingCommitSha] = useState<string | null>(null);
@@ -94,15 +101,16 @@ export function useCommitDiffs(activeSessionId: string | null | undefined) {
       if (!activeSessionId || commitDiffs[commitSha]) return;
       setLoadingCommitSha(commitSha);
       try {
-        const ws = getWebSocketClient();
-        if (!ws) return;
-        const response = await ws.request<{ success: boolean; files: Record<string, FileInfo> }>(
-          "session.commit_diff",
-          { session_id: activeSessionId, commit_sha: commitSha },
-          10000,
-        );
-        if (response?.success && response.files)
-          setCommitDiffs((prev) => ({ ...prev, [commitSha]: response.files }));
+        const response = await requestCommitDiff({
+          sessionId: activeSessionId,
+          taskId: sessionTaskId ?? activeTaskId ?? null,
+          commitSha,
+          agentctlReady,
+        });
+        if (response?.success && response.files) {
+          const files = response.files;
+          setCommitDiffs((prev) => ({ ...prev, [commitSha]: files }));
+        }
       } catch (err) {
         toast({
           title: "Failed to load commit diff",
@@ -113,7 +121,7 @@ export function useCommitDiffs(activeSessionId: string | null | undefined) {
         setLoadingCommitSha(null);
       }
     },
-    [activeSessionId, commitDiffs, toast],
+    [activeSessionId, activeTaskId, agentctlReady, commitDiffs, sessionTaskId, toast],
   );
 
   const toggleCommit = useCallback(
