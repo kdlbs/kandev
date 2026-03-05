@@ -36,12 +36,16 @@ func emitPredefinedScenario(enc *json.Encoder, scanner *bufio.Scanner, name stri
 		scenarioDiffUpdateSetup(enc)
 	case "diff-update-modify":
 		scenarioDiffUpdateModify(enc)
+	case "untracked-file-setup":
+		scenarioUntrackedFileSetup(enc)
+	case "untracked-file-modify":
+		scenarioUntrackedFileModify(enc)
 	case "clarification":
 		scenarioClarification(enc)
 	case "clarification-timeout":
 		scenarioClarificationTimeout(enc)
 	default:
-		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, clarification, clarification-timeout", "")
+		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, untracked-file-setup, untracked-file-modify, clarification, clarification-timeout", "")
 	}
 }
 
@@ -543,6 +547,44 @@ func scenarioDiffUpdateModify(enc *json.Encoder) {
 
 	fixedDelay(100)
 	emitTextBlock(enc, "diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION", "")
+}
+
+// scenarioUntrackedFileSetup creates a new untracked file (not staged, not committed).
+// This tests that the UI shows diffs for untracked files.
+func scenarioUntrackedFileSetup(enc *json.Encoder) {
+	fixedDelay(50)
+
+	filePath := "untracked_test.txt"
+	content := "line 1: INITIAL_CONTENT\nline 2: some text\n"
+
+	// Remove any existing file first
+	_ = os.Remove(filePath)
+
+	// Write new untracked file
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		emitTextBlock(enc, "untracked-file-setup: write failed: "+err.Error(), "")
+		return
+	}
+
+	fixedDelay(100)
+	emitTextBlock(enc, "untracked-file-setup complete: untracked_test.txt has INITIAL_CONTENT", "")
+}
+
+// scenarioUntrackedFileModify modifies the untracked file created by untracked-file-setup.
+// This tests that the UI updates the diff when an untracked file is modified.
+func scenarioUntrackedFileModify(enc *json.Encoder) {
+	fixedDelay(50)
+
+	filePath := "untracked_test.txt"
+	content := "line 1: MODIFIED_CONTENT\nline 2: some text\nline 3: NEW_LINE\n"
+
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		emitTextBlock(enc, "untracked-file-modify: write failed: "+err.Error(), "")
+		return
+	}
+
+	fixedDelay(100)
+	emitTextBlock(enc, "untracked-file-modify complete: untracked_test.txt now has MODIFIED_CONTENT", "")
 }
 
 // clarificationQuestionArgs returns the MCP arguments for the clarification question.

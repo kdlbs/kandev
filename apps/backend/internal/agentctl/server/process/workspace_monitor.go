@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -61,11 +63,12 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 // workspaceState holds quick-check state for detecting workspace changes.
 type workspaceState struct {
 	indexMtime  time.Time // index mtime - changes on stage/unstage/commit
-	diffFilesID string    // hash of git diff-files output - changes on any file modification
+	diffFilesID string    // hash of git diff-files output - changes on tracked file modification
+	untrackedID string    // hash of untracked files list + mtimes - changes on untracked file changes
 }
 
 // getWorkspaceState returns the current workspace state using fast checks.
-// Uses index mtime + git diff-files output which includes file content hashes.
+// Uses index mtime + git diff-files output + untracked file mtimes.
 func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceState {
 	var state workspaceState
 
@@ -87,12 +90,53 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 		state.diffFilesID = fmt.Sprintf("%d:%x:%x", len(out), out[0], out[len(out)-1])
 	}
 
+	// Check untracked files - git diff-files doesn't include them
+	// Use git ls-files to get untracked files, then check their mtimes
+	state.untrackedID = wt.getUntrackedFilesID(ctx)
+
 	return state
+}
+
+// getUntrackedFilesID returns a hash identifying the current state of untracked files.
+// Uses file list + mtimes to detect when untracked files are added, removed, or modified.
+func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
+	// Get list of untracked files (excluding ignored)
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
+	cmd.Dir = wt.workDir
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return ""
+	}
+
+	// Build a simple hash from file paths + mtimes
+	// This is faster than hashing file contents
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var hashInput strings.Builder
+	for _, file := range lines {
+		if file == "" {
+			continue
+		}
+		hashInput.WriteString(file)
+		// Include mtime so we detect content changes
+		if info, err := os.Stat(filepath.Join(wt.workDir, file)); err == nil {
+			hashInput.WriteString(fmt.Sprintf(":%d", info.ModTime().UnixNano()))
+		}
+		hashInput.WriteString(";")
+	}
+
+	// Return length + first/last bytes as cheap identity (same pattern as diffFilesID)
+	s := hashInput.String()
+	if len(s) > 0 {
+		return fmt.Sprintf("%d:%x:%x", len(s), s[0], s[len(s)-1])
+	}
+	return ""
 }
 
 // changed returns true if the workspace state has changed.
 func (s workspaceState) changed(other workspaceState) bool {
-	return s.indexMtime != other.indexMtime || s.diffFilesID != other.diffFilesID
+	return s.indexMtime != other.indexMtime ||
+		s.diffFilesID != other.diffFilesID ||
+		s.untrackedID != other.untrackedID
 }
 
 // emitFileChanges sends accumulated file changes to subscribers.
