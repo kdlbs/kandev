@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-const githubAPIBase = "https://api.github.com"
+const (
+	githubAPIBase    = "https://api.github.com"
+	githubAccept     = "application/vnd.github+json"
+	githubAPIVersion = "2022-11-28"
+)
 
 // GitHubAPIError represents an error response from the GitHub API with a status code.
 type GitHubAPIError struct {
@@ -40,6 +44,13 @@ func NewPATClient(token string) *PATClient {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// setGitHubHeaders sets the common Authorization, Accept, and API version headers.
+func (c *PATClient) setGitHubHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", githubAccept)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 }
 
 func (c *PATClient) IsAuthenticated(ctx context.Context) (bool, error) {
@@ -301,10 +312,8 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
+	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -325,9 +334,7 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	c.setGitHubHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -349,9 +356,7 @@ func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result in
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	c.setGitHubHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

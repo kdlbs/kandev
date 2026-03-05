@@ -99,19 +99,19 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 
 	e.logger.Info("cloning provider-backed repository for local execution",
 		zap.String("repository_id", repo.ID),
-		zap.String("clone_url", cloneURL))
+		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
 
 	localPath, err := e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
 	if err != nil {
 		e.logger.Error("failed to clone repository",
 			zap.String("repository_id", repo.ID),
-			zap.String("clone_url", cloneURL),
+			zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName),
 			zap.Error(err))
 		return "", err
 	}
 
 	// Persist the local path so future launches skip cloning
-	if e.repoUpdater != nil {
+	if e.repoUpdater != nil && localPath != "" {
 		if updateErr := e.repoUpdater.UpdateRepositoryLocalPath(ctx, repo.ID, localPath); updateErr != nil {
 			e.logger.Warn("failed to update repository local path after clone",
 				zap.String("repository_id", repo.ID),

@@ -201,6 +201,9 @@ type repoLocalPathUpdater struct {
 }
 
 func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error {
+	if repositoryID == "" || localPath == "" {
+		return fmt.Errorf("UpdateRepositoryLocalPath: repositoryID and localPath must be non-empty")
+	}
 	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
 		LocalPath: &localPath,
 	})

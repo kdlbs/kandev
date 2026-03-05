@@ -162,11 +162,13 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);
 
-      if (newState === "FAILED" && payload.error_message) {
+      if (newState === "FAILED") {
         store.getState().setSessionFailureNotification({
           sessionId,
           taskId,
-          message: String(payload.error_message),
+          message: payload.error_message
+            ? String(payload.error_message)
+            : "Session failed unexpectedly",
         });
       }
     },

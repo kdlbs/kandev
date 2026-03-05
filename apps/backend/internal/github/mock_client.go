@@ -213,7 +213,9 @@ func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]
 			Body:       fmt.Sprintf("repository %s/%s not found", owner, repo),
 		}
 	}
-	return branches, nil
+	out := make([]RepoBranch, len(branches))
+	copy(out, branches)
+	return out, nil
 }
 
 func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number int, event, body string) error {
@@ -255,7 +257,9 @@ func (m *MockClient) AddOrgs(orgs []GitHubOrg) {
 func (m *MockClient) AddBranches(owner, repo string, branches []RepoBranch) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.branches[repoKey{owner, repo}] = branches
+	cp := make([]RepoBranch, len(branches))
+	copy(cp, branches)
+	m.branches[repoKey{owner, repo}] = cp
 }
 
 // AddRepos appends repositories for an organization.
