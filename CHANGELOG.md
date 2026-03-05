@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## 0.15 - 2026-03-05
+
+### Features
+
+- start task from GitHub URL ([#365](https://github.com/kdlbs/kandev/pull/365))
+
 ## 0.14 - 2026-03-05
 
 ### Features
