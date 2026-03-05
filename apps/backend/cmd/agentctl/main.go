@@ -89,7 +89,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 	instMgr.SetServerFactory(func(instCfg *config.InstanceConfig, procMgr *process.Manager, instLog *logger.Logger) http.Handler {
 		// Create MCP backend client for bidirectional communication through agent stream
 		// MCP requests from agents are sent through the agent stream WebSocket to the backend
-		mcpBackendClient := mcpserver.NewChannelBackendClient()
+		mcpBackendClient := mcpserver.NewChannelBackendClient(instLog)
 
 		// Create MCP server using the channel-based backend client
 		mcpSrv := mcpserver.New(mcpBackendClient, instCfg.SessionID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion)

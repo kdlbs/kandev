@@ -211,6 +211,7 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	if err == nil {
 		// Primary path succeeded — agent will receive the answer directly.
 		h.updateClarificationMessage(c, pendingID, body.Rejected, answer)
+		h.publishPrimaryAnsweredEvent(c, pendingID, answer, body.Rejected, body.RejectReason)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID))
 		c.JSON(http.StatusOK, gin.H{"success": true})
@@ -262,32 +263,28 @@ func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, ans
 		return
 	}
 
-	// Look up session/task/question from the database message
-	msg, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
+	clarificationCtx, err := h.resolveClarificationEventContext(c.Request.Context(), pendingID)
 	if err != nil {
-		h.logger.Error("failed to find message for event fallback",
+		h.logger.Error("failed to resolve context for clarification fallback event",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
 		return
 	}
-
-	sessionID := msg.TaskSessionID
-	taskID := msg.TaskID
-	question := ""
-	if msg.Metadata != nil {
-		if qData, ok := msg.Metadata["question"].(map[string]interface{}); ok {
-			if q, ok := qData["prompt"].(string); ok {
-				question = q
-			}
-		}
+	if clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
+		h.logger.Error("missing session/task for clarification fallback event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", clarificationCtx.SessionID),
+			zap.String("task_id", clarificationCtx.TaskID))
+		return
 	}
 
 	answerText := buildAnswerText(answer, rejected, rejectReason)
 
 	eventData := map[string]any{
-		"session_id":    sessionID,
-		"task_id":       taskID,
-		"question":      question,
+		"session_id":    clarificationCtx.SessionID,
+		"task_id":       clarificationCtx.TaskID,
+		"pending_id":    pendingID,
+		"question":      clarificationCtx.Question,
 		"answer_text":   answerText,
 		"rejected":      rejected,
 		"reject_reason": rejectReason,
@@ -299,14 +296,14 @@ func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, ans
 	)); err != nil {
 		h.logger.Error("failed to publish clarification answered event",
 			zap.String("pending_id", pendingID),
-			zap.String("session_id", sessionID),
+			zap.String("session_id", clarificationCtx.SessionID),
 			zap.Error(err))
 	}
 
 	h.logger.Info("clarification answered via event fallback (new turn)",
 		zap.String("pending_id", pendingID),
-		zap.String("session_id", sessionID),
-		zap.String("task_id", taskID))
+		zap.String("session_id", clarificationCtx.SessionID),
+		zap.String("task_id", clarificationCtx.TaskID))
 }
 
 // lookupSessionForPending returns the session ID for a pending clarification.
@@ -322,6 +319,90 @@ func (h *Handlers) lookupSessionForPending(c *gin.Context, pendingID string) str
 		return ""
 	}
 	return msg.TaskSessionID
+}
+
+func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string, answer *Answer, rejected bool, rejectReason string) {
+	if h.eventBus == nil {
+		return
+	}
+	clarificationCtx, err := h.resolveClarificationEventContext(c.Request.Context(), pendingID)
+	if err != nil {
+		h.logger.Warn("failed to resolve context for primary clarification event",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		return
+	}
+	if clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
+		h.logger.Warn("missing session/task for primary clarification event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", clarificationCtx.SessionID),
+			zap.String("task_id", clarificationCtx.TaskID))
+		return
+	}
+
+	answerText := buildAnswerText(answer, rejected, rejectReason)
+	eventData := map[string]any{
+		"session_id":    clarificationCtx.SessionID,
+		"task_id":       clarificationCtx.TaskID,
+		"pending_id":    pendingID,
+		"question":      clarificationCtx.Question,
+		"answer_text":   answerText,
+		"rejected":      rejected,
+		"reject_reason": rejectReason,
+	}
+	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationPrimaryAnswered, bus.NewEvent(
+		events.ClarificationPrimaryAnswered,
+		"clarification-handlers",
+		eventData,
+	)); err != nil {
+		h.logger.Warn("failed to publish primary clarification event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", clarificationCtx.SessionID),
+			zap.Error(err))
+	}
+}
+
+type clarificationEventContext struct {
+	SessionID string
+	TaskID    string
+	Question  string
+}
+
+func (h *Handlers) resolveClarificationEventContext(ctx context.Context, pendingID string) (clarificationEventContext, error) {
+	var out clarificationEventContext
+
+	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
+		out.SessionID = req.SessionID
+		out.TaskID = req.TaskID
+		out.Question = req.Question.Prompt
+	}
+
+	if out.SessionID != "" && out.TaskID != "" && out.Question != "" {
+		return out, nil
+	}
+	if h.repo == nil {
+		return out, fmt.Errorf("message repository unavailable")
+	}
+
+	msg, err := h.repo.FindMessageByPendingID(ctx, pendingID)
+	if err != nil {
+		return out, err
+	}
+	if out.SessionID == "" {
+		out.SessionID = msg.TaskSessionID
+	}
+	if out.TaskID == "" {
+		out.TaskID = msg.TaskID
+	}
+	if out.Question == "" && msg.Metadata != nil {
+		if qData, ok := msg.Metadata["question"].(map[string]interface{}); ok {
+			if q, ok := qData["prompt"].(string); ok {
+				out.Question = q
+			}
+		}
+	}
+
+	return out, nil
 }
 
 // buildAnswerText constructs a human-readable answer text from the response.

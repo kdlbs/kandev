@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -125,4 +127,95 @@ func TestBuildClarificationPrompt(t *testing.T) {
 			t.Error("prompt should contain fallback reason")
 		}
 	})
+}
+
+func TestHandleClarificationPrimaryAnswered_SchedulesWatchdog(t *testing.T) {
+	svc := &Service{
+		logger:                       testLogger(),
+		clarificationWatchdogTimeout: 500 * time.Millisecond,
+	}
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
+		"session_id":  "s1",
+		"task_id":     "t1",
+		"pending_id":  "p1",
+		"question":    "Which approach?",
+		"answer_text": "User selected: Option A",
+	})
+
+	if err := svc.handleClarificationPrimaryAnswered(context.Background(), event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := countClarificationWatchdogs(svc); got != 1 {
+		t.Fatalf("expected 1 active watchdog, got %d", got)
+	}
+}
+
+func TestHandleAgentStreamEvent_CancelsClarificationWatchdogs(t *testing.T) {
+	svc := &Service{
+		logger:                       testLogger(),
+		clarificationWatchdogTimeout: time.Second,
+	}
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
+		"session_id":  "s1",
+		"task_id":     "t1",
+		"pending_id":  "p1",
+		"question":    "Which approach?",
+		"answer_text": "User selected: Option A",
+	})
+	if err := svc.handleClarificationPrimaryAnswered(context.Background(), event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: "session_mode",
+		},
+	})
+
+	if got := countClarificationWatchdogs(svc); got != 0 {
+		t.Fatalf("expected watchdogs to be cancelled, got %d", got)
+	}
+}
+
+func TestClarificationWatchdog_ExpiresAndClearsEntry(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.clarificationWatchdogTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+
+	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
+		"session_id":  "s1",
+		"task_id":     "t1",
+		"pending_id":  "p1",
+		"question":    "Which approach?",
+		"answer_text": "User selected: Option A",
+	})
+	if err := svc.handleClarificationPrimaryAnswered(context.Background(), event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	if got := countClarificationWatchdogs(svc); got != 0 {
+		t.Fatalf("expected watchdog map to be empty after timeout, got %d", got)
+	}
+}
+
+func countClarificationWatchdogs(svc *Service) int {
+	count := 0
+	svc.clarificationWatchdogs.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }

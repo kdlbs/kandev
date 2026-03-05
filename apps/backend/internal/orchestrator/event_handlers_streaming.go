@@ -23,6 +23,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 
+	// Any agent stream activity means the agent resumed after clarification.
+	// Cancel primary-path clarification watchdogs for this session.
+	s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+
 	s.logger.Debug("handling agent stream event",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),

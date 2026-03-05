@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -19,16 +21,24 @@ func (s *Service) subscribeClarificationEvents() {
 	if _, err := s.eventBus.Subscribe(events.ClarificationAnswered, s.handleClarificationAnswered); err != nil {
 		s.logger.Error("failed to subscribe to clarification.answered events", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.ClarificationPrimaryAnswered, s.handleClarificationPrimaryAnswered); err != nil {
+		s.logger.Error("failed to subscribe to clarification.primary_answered events", zap.Error(err))
+	}
 }
 
 // clarificationAnsweredData is the event payload for ClarificationAnswered events.
 type clarificationAnsweredData struct {
 	SessionID    string `json:"session_id"`
 	TaskID       string `json:"task_id"`
+	PendingID    string `json:"pending_id"`
 	Question     string `json:"question"`
 	AnswerText   string `json:"answer_text"`
 	Rejected     bool   `json:"rejected"`
 	RejectReason string `json:"reject_reason"`
+}
+
+type clarificationWatchdogEntry struct {
+	cancel func()
 }
 
 // handleClarificationAnswered handles user responses to agent clarification questions.
@@ -66,6 +76,145 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 			zap.Error(err))
 	}
 	return nil
+}
+
+func (s *Service) handleClarificationPrimaryAnswered(_ context.Context, event *bus.Event) error {
+	dataBytes, err := json.Marshal(event.Data)
+	if err != nil {
+		s.logger.Error("failed to marshal primary clarification event data", zap.Error(err))
+		return nil
+	}
+	var data clarificationAnsweredData
+	if err := json.Unmarshal(dataBytes, &data); err != nil {
+		s.logger.Error("failed to parse primary clarification event data", zap.Error(err))
+		return nil
+	}
+	if data.SessionID == "" || data.TaskID == "" || data.PendingID == "" {
+		s.logger.Warn("primary clarification event missing identifiers",
+			zap.String("session_id", data.SessionID),
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID))
+		return nil
+	}
+
+	s.scheduleClarificationWatchdog(data)
+	return nil
+}
+
+func (s *Service) clarificationWatchdogKey(sessionID, pendingID string) string {
+	return sessionID + "::" + pendingID
+}
+
+func (s *Service) getClarificationWatchdogTimeout() time.Duration {
+	if s.clarificationWatchdogTimeout > 0 {
+		return s.clarificationWatchdogTimeout
+	}
+	return 2 * time.Minute
+}
+
+func (s *Service) scheduleClarificationWatchdog(data clarificationAnsweredData) {
+	key := s.clarificationWatchdogKey(data.SessionID, data.PendingID)
+	timeout := s.getClarificationWatchdogTimeout()
+
+	if old, ok := s.clarificationWatchdogs.LoadAndDelete(key); ok {
+		if oldEntry, ok := old.(*clarificationWatchdogEntry); ok && oldEntry.cancel != nil {
+			oldEntry.cancel()
+		}
+	}
+
+	watchCtx, cancel := context.WithCancel(context.Background())
+	entry := &clarificationWatchdogEntry{cancel: cancel}
+	s.clarificationWatchdogs.Store(key, entry)
+
+	s.logger.Info("scheduled clarification resume watchdog",
+		zap.String("session_id", data.SessionID),
+		zap.String("task_id", data.TaskID),
+		zap.String("pending_id", data.PendingID),
+		zap.Duration("timeout", timeout))
+
+	go s.runClarificationWatchdog(watchCtx, key, entry, data, timeout)
+}
+
+func (s *Service) runClarificationWatchdog(
+	watchCtx context.Context,
+	key string,
+	entry *clarificationWatchdogEntry,
+	data clarificationAnsweredData,
+	timeout time.Duration,
+) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-watchCtx.Done():
+		return
+	case <-timer.C:
+		current, ok := s.clarificationWatchdogs.LoadAndDelete(key)
+		if !ok || current != entry {
+			return
+		}
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		s.resumeClarificationViaFallback(data)
+	}
+}
+
+func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData) {
+	prompt := buildClarificationPrompt(data)
+	s.logger.Warn("clarification resume watchdog expired; triggering fallback resume",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("pending_id", data.PendingID))
+
+	if _, err := s.PromptTask(context.Background(), data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+		s.logger.Error("failed to resume agent via clarification watchdog fallback",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("pending_id", data.PendingID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {
+	if sessionID == "" {
+		return
+	}
+
+	prefix := sessionID + "::"
+	cancelled := 0
+	s.clarificationWatchdogs.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok || !strings.HasPrefix(keyStr, prefix) {
+			return true
+		}
+		s.clarificationWatchdogs.Delete(keyStr)
+		if entry, ok := value.(*clarificationWatchdogEntry); ok && entry.cancel != nil {
+			entry.cancel()
+		}
+		cancelled++
+		return true
+	})
+
+	if cancelled > 0 {
+		s.logger.Debug("cancelled clarification watchdogs after session activity",
+			zap.String("session_id", sessionID),
+			zap.String("reason", reason),
+			zap.Int("count", cancelled))
+	}
+}
+
+func (s *Service) cancelAllClarificationWatchdogs() {
+	s.clarificationWatchdogs.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if ok {
+			s.clarificationWatchdogs.Delete(keyStr)
+		}
+		if entry, ok := value.(*clarificationWatchdogEntry); ok && entry.cancel != nil {
+			entry.cancel()
+		}
+		return true
+	})
 }
 
 // buildClarificationPrompt constructs the resume prompt from a clarification answer.

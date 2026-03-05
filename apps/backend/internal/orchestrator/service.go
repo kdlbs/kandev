@@ -196,6 +196,14 @@ type Service struct {
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
 
+	// clarificationWatchdogs tracks active clarification primary-path resume watchdogs.
+	// key: "<session_id>::<pending_id>", value: *clarificationWatchdogEntry
+	clarificationWatchdogs sync.Map
+
+	// clarificationWatchdogTimeout controls how long to wait for post-clarification
+	// activity before triggering fallback resume.
+	clarificationWatchdogTimeout time.Duration
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool
@@ -244,16 +252,17 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:       cfg,
-		logger:       svcLogger,
-		eventBus:     eventBus,
-		taskRepo:     taskRepo,
-		repo:         repo,
-		agentManager: agentManager,
-		queue:        taskQueue,
-		executor:     exec,
-		scheduler:    sched,
-		messageQueue: msgQueue,
+		config:                       cfg,
+		logger:                       svcLogger,
+		eventBus:                     eventBus,
+		taskRepo:                     taskRepo,
+		repo:                         repo,
+		agentManager:                 agentManager,
+		queue:                        taskQueue,
+		executor:                     exec,
+		scheduler:                    sched,
+		messageQueue:                 msgQueue,
+		clarificationWatchdogTimeout: 2 * time.Minute,
 	}
 
 	// Wire executor state changes through the orchestrator so events are published
@@ -522,6 +531,8 @@ func (s *Service) Stop() error {
 		s.logger.Error("failed to stop watcher", zap.Error(err))
 		errs = append(errs, err)
 	}
+
+	s.cancelAllClarificationWatchdogs()
 
 	if len(errs) > 0 {
 		return errs[0]
