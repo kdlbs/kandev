@@ -38,7 +38,7 @@ func (c *Config) Validate() error {
 
 // SetDataDirFallback sets the BasePath from the data directory if not already configured.
 func (c *Config) SetDataDirFallback(dataDir string) {
-	if c.BasePath == "" {
+	if c.BasePath == "" && dataDir != "" {
 		c.BasePath = filepath.Join(dataDir, "worktrees")
 	}
 }

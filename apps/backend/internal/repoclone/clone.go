@@ -36,7 +36,7 @@ type Cloner struct {
 // NewCloner creates a new Cloner with the given config, git protocol, and data directory.
 // If cfg.BasePath is empty, it defaults to dataDir+"/repos".
 func NewCloner(cfg Config, protocol string, dataDir string, log *logger.Logger) *Cloner {
-	if cfg.BasePath == "" {
+	if cfg.BasePath == "" && dataDir != "" {
 		cfg.BasePath = filepath.Join(dataDir, "repos")
 	}
 	return &Cloner{config: cfg, protocol: protocol, logger: log}

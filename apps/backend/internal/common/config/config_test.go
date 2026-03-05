@@ -33,3 +33,15 @@ func TestResolvedDataDir_ConfigTakesPrecedence(t *testing.T) {
 		t.Errorf("ResolvedDataDir() = %q, want %q", got, "/explicit/data")
 	}
 }
+
+func TestResolvedDataDir_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+	cfg := &Config{DataDir: "~/kandev"}
+	want := filepath.Join(home, "kandev")
+	if got := cfg.ResolvedDataDir(); got != want {
+		t.Errorf("ResolvedDataDir() = %q, want %q", got, want)
+	}
+}

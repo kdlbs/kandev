@@ -34,6 +34,11 @@ type Config struct {
 // If empty, falls back to ~/.kandev.
 func (c *Config) ResolvedDataDir() string {
 	if c.DataDir != "" {
+		if strings.HasPrefix(c.DataDir, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				return filepath.Join(home, c.DataDir[2:])
+			}
+		}
 		return c.DataDir
 	}
 	home, err := os.UserHomeDir()
