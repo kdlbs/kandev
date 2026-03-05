@@ -113,6 +113,14 @@ export type RecoveryMetadata = StatusMetadata & {
   has_resume_token: boolean;
 };
 
+export type GitOperationErrorMetadata = StatusMetadata & {
+  git_operation_error: true;
+  operation: string;
+  error_output: string;
+  session_id: string;
+  task_id: string;
+};
+
 export type TodoMetadata = { text: string; done?: boolean } | string;
 
 export type ContentBlock = {

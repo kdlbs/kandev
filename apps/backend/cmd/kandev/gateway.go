@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -116,6 +117,28 @@ func provideGateway(
 				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, prURL, branch)
 			})
 		}
+		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {
+			if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+				TaskSessionID: sessionID,
+				TaskID:        taskID,
+				Content:       fmt.Sprintf("Git %s failed", operation),
+				AuthorType:    "agent",
+				Type:          "error",
+				Metadata: map[string]interface{}{
+					"git_operation_error": true,
+					"operation":           operation,
+					"error_output":        errorOutput,
+					"session_id":          sessionID,
+					"task_id":             taskID,
+					"variant":             "error",
+				},
+			}); err != nil {
+				log.Error("failed to create git operation error message",
+					zap.String("session_id", sessionID),
+					zap.String("operation", operation),
+					zap.Error(err))
+			}
+		})
 		gitHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		passthroughHandlers := agenthandlers.NewPassthroughHandlers(lifecycleMgr, log)

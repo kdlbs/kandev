@@ -22,6 +22,7 @@ import { ClarificationRequestMessage } from "@/components/task/chat/messages/cla
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { AgentErrorRecoveryMessage } from "@/components/task/chat/messages/agent-error-recovery-message";
+import { GitOperationErrorMessage } from "@/components/task/chat/messages/git-operation-error-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -171,6 +172,12 @@ const adapters: MessageAdapter[] = [
         />
       );
     },
+  },
+  {
+    matches: (comment) =>
+      comment.type === "error" &&
+      !!(comment.metadata as Record<string, unknown> | undefined)?.git_operation_error,
+    render: (comment) => <GitOperationErrorMessage comment={comment} />,
   },
   {
     matches: (comment) =>

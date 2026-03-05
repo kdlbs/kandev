@@ -315,6 +315,16 @@ export class SessionPage {
     await expect(this.sidebar).toBeVisible();
   }
 
+  /** Git operation error message in chat (shown when a git operation fails). */
+  gitOperationErrorMessage(): Locator {
+    return this.chat.getByTestId("git-operation-error-message");
+  }
+
+  /** Fix button on a git operation error message. */
+  gitFixButton(): Locator {
+    return this.chat.getByTestId("git-fix-button");
+  }
+
   /** Locator for the VS Code dockview tab. */
   vscodeTab(): Locator {
     return this.page.locator(".dv-default-tab:has-text('VS Code')");
