@@ -35,7 +35,9 @@ async function seedUntrackedFileTask(
   await session.waitForLoad();
 
   // Wait for the first turn to complete
-  await expect(session.chat.getByText("untracked-file-setup complete", { exact: false })).toBeVisible({
+  await expect(
+    session.chat.getByText("untracked-file-setup complete", { exact: false }),
+  ).toBeVisible({
     timeout: 45_000,
   });
 
@@ -213,14 +215,14 @@ test.describe("Untracked file diff update", () => {
     await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
 
     // The diff should now show MODIFIED_CONTENT instead of INITIAL_CONTENT
-    await expect(
-      updatedDiffsContainer.getByText("MODIFIED_CONTENT", { exact: true }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(updatedDiffsContainer.getByText("MODIFIED_CONTENT", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Verify INITIAL_CONTENT is no longer shown
-    await expect(
-      updatedDiffsContainer.getByText("INITIAL_CONTENT", { exact: true }),
-    ).toHaveCount(0);
+    await expect(updatedDiffsContainer.getByText("INITIAL_CONTENT", { exact: true })).toHaveCount(
+      0,
+    );
 
     // Also verify the new line was added
     await expect(updatedDiffsContainer.getByText("NEW_LINE", { exact: true })).toBeVisible({
