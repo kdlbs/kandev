@@ -84,11 +84,8 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 	cmd := exec.CommandContext(ctx, "git", "diff-files")
 	cmd.Dir = wt.workDir
 	out, _ := cmd.Output()
-	// Use length + first/last bytes as cheap identity check
-	// (full hash would work too but this is faster for our use case)
-	if len(out) > 0 {
-		state.diffFilesID = fmt.Sprintf("%d:%x:%x", len(out), out[0], out[len(out)-1])
-	}
+	// Use the raw output as identity - content changes produce different output
+	state.diffFilesID = string(out)
 
 	// Check untracked files - git diff-files doesn't include them
 	// Use git ls-files to get untracked files, then check their mtimes
@@ -97,7 +94,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 	return state
 }
 
-// getUntrackedFilesID returns a hash identifying the current state of untracked files.
+// getUntrackedFilesID returns a string identifying the current state of untracked files.
 // Uses file list + mtimes to detect when untracked files are added, removed, or modified.
 func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 	// Get list of untracked files (excluding ignored)
@@ -108,8 +105,7 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 		return ""
 	}
 
-	// Build a simple hash from file paths + mtimes
-	// This is faster than hashing file contents
+	// Build a string from file paths + mtimes to detect any changes
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	var hashInput strings.Builder
 	for _, file := range lines {
@@ -129,12 +125,8 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 		hashInput.WriteString(";")
 	}
 
-	// Return length + first/last bytes as cheap identity (same pattern as diffFilesID)
-	s := hashInput.String()
-	if len(s) > 0 {
-		return fmt.Sprintf("%d:%x:%x", len(s), s[0], s[len(s)-1])
-	}
-	return ""
+	// Return the full string - any mtime change will produce a different string
+	return hashInput.String()
 }
 
 // sanitizePath validates that the given relative file path stays within the workspace directory.
