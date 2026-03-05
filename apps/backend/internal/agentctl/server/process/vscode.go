@@ -378,6 +378,35 @@ func (v *VscodeManager) Stop(ctx context.Context) error {
 	return nil
 }
 
+// WaitForRunning blocks until the code-server reaches "running" status.
+// Returns immediately if already running. Returns an error if the status
+// transitions to "error" or "stopped", or if the context is cancelled.
+func (v *VscodeManager) WaitForRunning(ctx context.Context) error {
+	for {
+		v.mu.Lock()
+		s := v.status
+		errMsg := v.err
+		v.mu.Unlock()
+
+		switch s {
+		case VscodeStatusRunning:
+			return nil
+		case VscodeStatusError:
+			return fmt.Errorf("code-server failed to start: %s", errMsg)
+		case VscodeStatusStopped:
+			return fmt.Errorf("code-server is stopped")
+		case VscodeStatusInstalling, VscodeStatusStarting:
+			// still booting — wait and retry
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 // Info returns the current VS Code server state.
 func (v *VscodeManager) Info() VscodeInfo {
 	v.mu.Lock()
@@ -480,7 +509,9 @@ func (v *VscodeManager) OpenFile(ctx context.Context, path string, line, col int
 	}
 
 	// Find the IPC socket for the running VS Code instance.
-	ipcSocket, err := findVscodeIPCSocket()
+	// The IPC socket may not appear immediately after code-server's HTTP port
+	// is ready, so poll for it with a timeout.
+	ipcSocket, err := waitForVscodeIPCSocket(ctx, 15*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to find VS Code IPC socket: %w", err)
 	}
@@ -527,6 +558,8 @@ func resolveRemoteCLI(binaryPath string) string {
 }
 
 // findVscodeIPCSocket searches /tmp for the most recent vscode-ipc-*.sock file.
+// It validates each candidate by attempting a Unix socket connection to skip
+// stale sockets left behind by crashed VS Code instances.
 func findVscodeIPCSocket() (string, error) {
 	tmpDir := os.TempDir()
 	entries, err := os.ReadDir(tmpDir)
@@ -563,7 +596,42 @@ func findVscodeIPCSocket() (string, error) {
 		return socks[i].modTime.After(socks[j].modTime)
 	})
 
-	return socks[0].path, nil
+	// Try each socket, most recent first, and return the first one that accepts
+	// a connection. This skips stale sockets from crashed processes.
+	for _, s := range socks {
+		conn, dialErr := net.DialTimeout("unix", s.path, 500*time.Millisecond)
+		if dialErr != nil {
+			continue
+		}
+		_ = conn.Close()
+		return s.path, nil
+	}
+
+	return "", fmt.Errorf("no live vscode-ipc-*.sock found in %s (%d stale sockets skipped)", tmpDir, len(socks))
+}
+
+// waitForVscodeIPCSocket polls for a live VS Code IPC socket until one is found
+// or the timeout/context expires. Code-server may take several seconds after its
+// HTTP port is ready before creating the IPC socket.
+func waitForVscodeIPCSocket(ctx context.Context, timeout time.Duration) (string, error) {
+	deadline := time.After(timeout)
+	var lastErr error
+
+	for {
+		sock, err := findVscodeIPCSocket()
+		if err == nil {
+			return sock, nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("%w (last attempt: %v)", ctx.Err(), lastErr)
+		case <-deadline:
+			return "", lastErr
+		case <-time.After(1 * time.Second):
+		}
+	}
 }
 
 // setStatus updates the status under lock.
