@@ -118,7 +118,12 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 		}
 		hashInput.WriteString(file)
 		// Include mtime so we detect content changes
-		if info, err := os.Stat(filepath.Join(wt.workDir, file)); err == nil {
+		// Sanitize path to prevent directory traversal attacks (CodeQL security fix)
+		safePath, err := wt.sanitizePath(file)
+		if err != nil {
+			continue // Skip files with invalid paths
+		}
+		if info, err := os.Stat(safePath); err == nil {
 			hashInput.WriteString(fmt.Sprintf(":%d", info.ModTime().UnixNano()))
 		}
 		hashInput.WriteString(";")
@@ -130,6 +135,30 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 		return fmt.Sprintf("%d:%x:%x", len(s), s[0], s[len(s)-1])
 	}
 	return ""
+}
+
+// sanitizePath validates that the given relative file path stays within the workspace directory.
+// Returns the absolute path if valid, or an error if the path escapes the workspace.
+func (wt *WorkspaceTracker) sanitizePath(relPath string) (string, error) {
+	// Clean the path to resolve any . or .. components
+	joined := filepath.Join(wt.workDir, relPath)
+	absPath, err := filepath.Abs(joined)
+	if err != nil {
+		return "", err
+	}
+
+	// Ensure the resolved path is within the workspace directory
+	workDirAbs, err := filepath.Abs(wt.workDir)
+	if err != nil {
+		return "", err
+	}
+
+	// Check that absPath starts with workDirAbs (with proper separator handling)
+	if !strings.HasPrefix(absPath, workDirAbs+string(os.PathSeparator)) && absPath != workDirAbs {
+		return "", fmt.Errorf("path escapes workspace: %s", relPath)
+	}
+
+	return absPath, nil
 }
 
 // changed returns true if the workspace state has changed.
