@@ -77,7 +77,11 @@ async function openTaskSession(page: Page, title: string): Promise<SessionPage> 
 /** Create a non-passthrough (standard) agent profile for the mock agent. */
 async function createStandardProfile(apiClient: ApiClient, name: string) {
   const { agents } = await apiClient.listAgents();
-  return apiClient.createAgentProfile(agents[0].id, name, {
+  const agentId = agents[0]?.id;
+  if (!agentId) {
+    throw new Error(`E2E setup failed: no agent available for profile "${name}"`);
+  }
+  return apiClient.createAgentProfile(agentId, name, {
     model: "mock-fast",
     auto_approve: true,
     cli_passthrough: false,

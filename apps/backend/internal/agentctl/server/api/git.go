@@ -524,8 +524,24 @@ func (s *Server) handleGitLog(c *gin.Context) {
 		return
 	}
 
+	// Bound limit to prevent expensive history scans
+	const (
+		defaultLogLimit = 100
+		maxLogLimit     = 500
+	)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultLogLimit
+	} else if limit > maxLogLimit {
+		c.JSON(http.StatusBadRequest, process.GitLogResult{
+			Success: false,
+			Error:   fmt.Sprintf("limit must be between 1 and %d", maxLogLimit),
+		})
+		return
+	}
+
 	gitOp := s.procMgr.GitOperator()
-	result, err := gitOp.GetLog(c.Request.Context(), req.Since, req.Limit)
+	result, err := gitOp.GetLog(c.Request.Context(), req.Since, limit)
 	if err != nil {
 		s.logger.Error("git log failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, process.GitLogResult{
