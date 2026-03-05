@@ -9,6 +9,7 @@ apps/
 ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
 ├── web/              # Next.js frontend (SSR + WS + Zustand)
 ├── cli/              # CLI tool (TypeScript)
+├── landing/          # Landing page
 └── packages/         # Shared packages/types
 ```
 
@@ -42,22 +43,26 @@ apps/backend/
 │   │   ├── discovery/    # Agent discovery
 │   │   ├── docker/       # Docker-specific agent logic
 │   │   ├── dto/          # Agent data transfer objects
+│   │   ├── executor/     # Executor types, checks, and service
 │   │   ├── handlers/     # Agent event handlers
 │   │   ├── registry/     # Agent type registry and defaults
-│   │   ├── runtime/      # Runtime name constants
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
 │   ├── agentctl/
 │   │   ├── client/       # HTTP client for talking to agentctl
 │   │   └── server/       # agentctl HTTP server
+│   │       ├── acp/      # ACP protocol implementation
+│   │       ├── adapter/  # Protocol adapters + transport/ (ACP, Codex, OpenCode, Copilot, Amp)
 │   │       ├── api/      # HTTP endpoints
-│   │       ├── adapter/  # Protocol adapters (ACP, Codex, Copilot, Amp)
+│   │       ├── config/   # agentctl configuration
 │   │       ├── instance/ # Multi-instance management
 │   │       ├── mcp/      # MCP server integration
 │   │       ├── process/  # Agent subprocess management
-│   │       └── shell/    # Shell session management
+│   │       ├── shell/    # Shell session management
+│   │       └── utility/  # agentctl utilities
 │   ├── orchestrator/     # Task execution coordination
+│   │   ├── dto/          # Orchestrator data transfer objects
 │   │   ├── executor/     # Launches agents via lifecycle manager
 │   │   ├── handlers/     # Orchestrator event handlers
 │   │   ├── messagequeue/ # Message queue for agent prompts
@@ -84,6 +89,7 @@ apps/backend/
 │   ├── integration/      # External integrations
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
+│   ├── health/           # Health check endpoints
 │   ├── notifications/    # Notification system
 │   ├── persistence/      # Persistence layer
 │   ├── prompts/          # Prompt management
@@ -96,6 +102,7 @@ apps/backend/
 │   │   └── ...
 │   ├── tools/            # Tool integrations
 │   ├── user/             # User management
+│   ├── utility/          # Shared utility functions
 │   ├── workflow/         # Workflow engine
 │   │   ├── engine/       # Typed state-machine engine (trigger evaluation, action callbacks, transition store)
 │   │   ├── models/       # Workflow step, template, and history models
@@ -122,13 +129,11 @@ apps/backend/
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
 **Lifecycle Manager** (`internal/agent/lifecycle/`) manages agent instances:
-- `Manager` (`manager.go`) - central coordinator for agent lifecycle
-- `Runtime` interface (`runtime.go`) - abstracts execution environment (Docker, Standalone, Remote Docker)
+- `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
+- `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
 - `session.go` - ACP session initialization and resume
 - `streams.go` - WebSocket stream connections to agentctl
-- `events.go` - publishes events to the event bus
-- `container.go` - Docker container operations
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings
 
@@ -141,43 +146,23 @@ apps/backend/
 **Executor Types** (database model):
 - `local_pc` - Standalone process on host ✅
 - `local_docker` - Docker container on host ✅
+- `sprites` - Sprites cloud environment ✅
 - `remote_docker`, `remote_vps`, `k8s` - Planned
-
-**Runtime Interface** implements execution:
-```go
-type Runtime interface {
-    Name() runtime.Name
-    HealthCheck(ctx context.Context) error
-    CreateInstance(ctx context.Context, req *RuntimeCreateRequest) (*RuntimeInstance, error)
-    StopInstance(ctx context.Context, instance *RuntimeInstance, force bool) error
-    RecoverInstances(ctx context.Context) ([]*RuntimeInstance, error)
-}
-```
 
 ### Execution Flow
 
 ```
-Client (WS)     Orchestrator        Lifecycle Manager       Runtime          agentctl
-    |                |                      |                  |                |
-    | task.start     |                      |                  |                |
-    |--------------->| LaunchAgent()        |                  |                |
-    |                |--------------------->| CreateInstance() |                |
-    |                |                      |----------------->| (container)    |
-    |                |                      |                  |--------------->|
-    |                | StartAgentProcess()  |                  |                |
-    |                |--------------------->| ConfigureAgent() |                |
-    |                |                      |----------------------------->     |
-    |                |                      | Start()          |                |
-    |                |                      |----------------------------->     |
-    |                |                      |                  |  agent proc    |
-    |                |                      |<---- stream updates (WS) ---------|
-    |<--- WS events -|                      |                  |                |
+Client (WS) → Orchestrator → Lifecycle Manager → ExecutorBackend (container/process) → agentctl
+                                                                                          ↓
+Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream updates (WS) ──────── agent subprocess
 ```
 
-**Session Resume:**
-- `TaskSession.ACPSessionID` - stored ACP session ID for resume
-- `ExecutorRunning` - tracks active executor state (container ID, port, worktree)
-- On backend restart: `RecoverInstances()` finds running containers, reconnects streams
+1. Orchestrator receives `task.start` via WS
+2. Lifecycle Manager creates executor instance (container or process)
+3. agentctl starts inside the instance, agent subprocess is configured and started
+4. Agent events stream back via WS through the chain
+
+**Session Resume:** `TaskSession.ACPSessionID` stored for resume; `ExecutorRunning` tracks active state; on restart `RecoverInstances()` reconnects.
 
 **Provider Pattern:** Packages expose `Provide(cfg, log) (*impl, cleanup, error)` for DI. Returns implementation, cleanup function, and error. Cleanup called during graceful shutdown.
 
@@ -189,47 +174,30 @@ Client (WS)     Orchestrator        Lifecycle Manager       Runtime          age
 
 ## agentctl Server
 
-### HTTP Endpoints
+### API Groups
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/api/v1/status` | GET | Agent status |
-| `/api/v1/configure` | POST | Configure agent before start |
-| `/api/v1/start` | POST | Start agent subprocess |
-| `/api/v1/stop` | POST | Stop agent |
-| `/api/v1/acp/*` | Various | ACP protocol (initialize, session/*, prompt) |
-| `/api/v1/shell/*` | Various | Shell operations |
-| `/api/v1/workspace/*` | Various | Git status, file changes |
-| `/ws/updates` | WS | Agent event stream |
-| `/ws/workspace` | WS | Workspace event stream (git, files, shell) |
+agentctl exposes these route groups (see `internal/agentctl/server/api/`):
+- `/health`, `/info`, `/status` - Health and status
+- `/instances/*` - Multi-instance management
+- `/processes/*` - Agent subprocess management (start/stop)
+- `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
+- `/git/*` - Git operations (status, commit, push, pull, rebase, stage, etc.)
+- `/shell/*` - Shell session management
+- `/workspace/*` - File operations, search, tree
+- `/vscode/*` - VS Code integration proxy
 
 ### Adapter Model
 
-Protocol adapters normalize different agent CLIs:
+Protocol adapters in `adapter/transport/` normalize different agent CLIs:
 - `AgentAdapter` interface defines `Start()`, `Stop()`, `Prompt()`, `Cancel()`
-- `ACP` - ACP JSON-RPC over stdio (Claude Code)
-- `Codex` - Codex-style JSON-RPC (OpenAI Codex)
-- `CopilotAdapter` - GitHub Copilot SDK
-- `AmpAdapter` - Sourcegraph Amp CLI
+- Transports: `acp` (Claude Code), `codex` (OpenAI Codex), `opencode`, `shared`, `streamjson`
+- Top-level adapters: `CopilotAdapter` (GitHub Copilot SDK), `AmpAdapter` (Sourcegraph Amp)
 - `process.Manager` owns subprocess, wires stdio to adapter
 - Factory pattern in `adapter/factory.go` selects adapter by agent type
 
----
+### ACP Protocol
 
-## ACP Protocol
-
-JSON-RPC 2.0 over stdin/stdout between agentctl and agent process.
-
-**Backend -> Agent (Requests)**
-- `initialize` - handshake
-- `session/new` - create new session
-- `session/load` - resume existing session
-- `session/prompt` - send user message
-- `session/cancel` - cancel current operation
-
-**Agent -> Backend (Notifications)**
-- `session/update` with types: `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`
+JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
 
 ---
 
@@ -271,11 +239,12 @@ lib/state/
 │   └── ui/                        # preview, connection, active state
 ├── hydration/                     # SSR merge strategies
 
-hooks/domains/{kanban,session,workspace,settings}/  # Domain-organized hooks
+hooks/domains/{kanban,session,workspace,settings,comments,github}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
 ├── plan-api, queue-api, workflow-api, stats-api, github-api
 ├── user-shell-api, debug-api, secrets-api, sprites-api, vscode-api
+├── health-api, utility-api
 ```
 
 **Key State Paths:**
@@ -346,4 +315,4 @@ This file is read by AI coding agents (Claude Code via `CLAUDE.md` symlink, Code
 
 ---
 
-**Last Updated**: 2026-02-26
+**Last Updated**: 2026-03-05
