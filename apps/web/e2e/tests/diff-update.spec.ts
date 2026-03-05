@@ -189,7 +189,6 @@ test.describe("Untracked file diff update", () => {
     ).toBeVisible({ timeout: 45_000 });
 
     // Wait for git polling to detect the file change (polling interval is ~1-2s)
-    // eslint-disable-next-line playwright/no-wait-for-timeout
     await testPage.waitForTimeout(3_000);
 
     // Switch back to Changes tab and click on the diff file again
