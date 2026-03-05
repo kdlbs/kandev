@@ -20,6 +20,7 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
 }) {
   const [state, setState] = useState<RecoveryState>("pending");
   const metadata = comment.metadata as RecoveryMetadata | undefined;
+  const canRecover = Boolean(metadata?.task_id && metadata?.session_id);
 
   // Hide entirely once recovery succeeded or session is active again (handles page refresh)
   const isSessionActive =
@@ -29,7 +30,7 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   }
 
   const handleRecover = async (action: "resume" | "fresh_start") => {
-    if (!metadata) return;
+    if (!canRecover || !metadata) return;
 
     const client = getWebSocketClient();
     if (!client) {
@@ -72,7 +73,7 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
                     variant="outline"
                     size="sm"
                     className={cn("h-7 text-xs cursor-pointer gap-1.5")}
-                    disabled={state === "recovering"}
+                    disabled={state === "recovering" || !canRecover}
                     onClick={() => handleRecover("resume")}
                     data-testid="recovery-resume-button"
                   >
@@ -91,7 +92,7 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
                   variant="outline"
                   size="sm"
                   className={cn("h-7 text-xs cursor-pointer gap-1.5")}
-                  disabled={state === "recovering"}
+                  disabled={state === "recovering" || !canRecover}
                   onClick={() => handleRecover("fresh_start")}
                   data-testid="recovery-fresh-button"
                 >

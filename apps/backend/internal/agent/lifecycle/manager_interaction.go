@@ -196,6 +196,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		exec.ErrorMessage = ""
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
+		exec.sessionInitialized = false
 		exec.AgentCommand = freshCmd
 		exec.ContinueCommand = freshContinueCmd
 
