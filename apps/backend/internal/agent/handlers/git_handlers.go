@@ -21,6 +21,11 @@ type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branc
 // Parameters: ctx, sessionID, taskID, operation name, error output.
 type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, operation, errorOutput string)
 
+// ExecutionLookup provides access to running agent executions by session ID.
+type ExecutionLookup interface {
+	GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool)
+}
+
 // SessionReader is a minimal interface for reading session metadata.
 // This is needed because git operations need to know the session's base commit SHA
 // to filter commits to only those made during the session.
@@ -33,7 +38,7 @@ type SessionReader interface {
 // GitHandlers provides WebSocket handlers for git worktree operations.
 // Operations are executed via agentctl which runs in the worktree context.
 type GitHandlers struct {
-	lifecycleMgr         *lifecycle.Manager
+	lifecycleMgr         ExecutionLookup
 	sessionReader        SessionReader
 	logger               *logger.Logger
 	onPRCreated          PRCreatedCallback
@@ -42,7 +47,7 @@ type GitHandlers struct {
 
 // NewGitHandlers creates a new GitHandlers instance.
 // sessionReader is required to look up session metadata (e.g., base commit SHA).
-func NewGitHandlers(lifecycleMgr *lifecycle.Manager, sessionReader SessionReader, log *logger.Logger) *GitHandlers {
+func NewGitHandlers(lifecycleMgr ExecutionLookup, sessionReader SessionReader, log *logger.Logger) *GitHandlers {
 	return &GitHandlers{
 		lifecycleMgr:  lifecycleMgr,
 		sessionReader: sessionReader,
@@ -62,7 +67,7 @@ func (h *GitHandlers) SetOnGitOperationFailed(cb GitOperationFailedCallback) {
 
 // notifyGitOperationFailed fires the failure callback asynchronously if the result indicates failure.
 func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, result *client.GitOperationResult) {
-	if result.Success || h.onGitOperationFailed == nil {
+	if result == nil || result.Success || h.onGitOperationFailed == nil {
 		return
 	}
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
