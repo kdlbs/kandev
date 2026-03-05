@@ -37,6 +37,9 @@ function hasStagedDifference(
 
 /** Compare two git status entries to determine if a meaningful change occurred. */
 function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  // Timestamp change means the backend detected a real change — always accept.
+  if (existing.timestamp !== incoming.timestamp) return true;
+
   if (existing.branch !== incoming.branch || existing.remote_branch !== incoming.remote_branch)
     return true;
   if (existing.ahead !== incoming.ahead || existing.behind !== incoming.behind) return true;
