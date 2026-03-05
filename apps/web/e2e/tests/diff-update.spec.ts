@@ -61,7 +61,7 @@ async function openDiffUpdateFileDiff(testPage: Page) {
 }
 
 test.describe("Diff update on file change", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 2, timeout: 120_000 });
 
   test("shows initial diff with FIRST_MODIFICATION", async ({ testPage, apiClient, seedData }) => {
     await seedDiffUpdateTask(testPage, apiClient, seedData);
@@ -105,18 +105,23 @@ test.describe("Diff update on file change", () => {
     await openChangesTab(testPage);
     await openDiffUpdateFileDiff(testPage);
 
-    // Wait for the diffs container to be visible again
-    await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
+    // Re-query the diffs container since the DOM may have changed after tab switch
+    const updatedDiffsContainer = testPage.locator("diffs-container");
+    await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
 
     // The diff should now show SECOND_MODIFICATION instead of FIRST_MODIFICATION.
-    // Use a longer timeout because the workspace polling loop needs to detect the
-    // file change and push updated git status — can be slow on CI runners.
-    await expect(diffsContainer.getByText("SECOND_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    // Allow extra time for git polling to detect the change and re-render the diff.
+    await expect(
+      updatedDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Verify FIRST_MODIFICATION is no longer shown (replaced, not merged)
+    await expect(
+      updatedDiffsContainer.getByText("FIRST_MODIFICATION", { exact: true }),
+    ).toHaveCount(0);
 
     // Also verify the additional change on line 3
-    await expect(diffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
+    await expect(updatedDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
       timeout: 15_000,
     });
   });

@@ -737,6 +737,14 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 	return s.client.SearchOrgRepos(ctx, org, query, limit)
 }
 
+// ListRepoBranches lists branches for a repository.
+func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.ListRepoBranches(ctx, owner, repo)
+}
+
 // RecordReviewPRTask records that a task was created for a review PR.
 func (s *Service) RecordReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL, taskID string) error {
 	rpt := &ReviewPRTask{

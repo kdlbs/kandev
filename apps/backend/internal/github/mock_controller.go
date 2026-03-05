@@ -34,6 +34,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/checks", c.addCheckRuns)
 	api.POST("/files", c.addPRFiles)
 	api.POST("/commits", c.addPRCommits)
+	api.POST("/branches", c.addBranches)
 	api.POST("/task-prs", c.associateTaskPR)
 	api.DELETE("/reset", c.reset)
 }
@@ -162,6 +163,24 @@ func (c *MockController) addPRCommits(ctx *gin.Context) {
 	}
 	c.mock.AddPRCommits(req.Owner, req.Repo, req.Number, req.Commits)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Commits)})
+}
+
+func (c *MockController) addBranches(ctx *gin.Context) {
+	var req struct {
+		Owner    string       `json:"owner"`
+		Repo     string       `json:"repo"`
+		Branches []RepoBranch `json:"branches"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.Owner == "" || req.Repo == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "owner and repo are required"})
+		return
+	}
+	c.mock.AddBranches(req.Owner, req.Repo, req.Branches)
+	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Branches)})
 }
 
 // associateTaskPR directly creates a github_task_prs record for E2E testing.

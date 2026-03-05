@@ -9,6 +9,7 @@ import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
+import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 
 export const metadata: Metadata = {
   title: "KanDev - AI Kanban",
@@ -73,6 +74,7 @@ export default function RootLayout({
             <DiffWorkerPoolProvider>
               <TooltipProvider>
                 <ToastProvider>
+                  <SessionFailureToastBridge />
                   <CommandRegistryProvider>
                     <WebSocketConnector />
                     <GlobalCommands />

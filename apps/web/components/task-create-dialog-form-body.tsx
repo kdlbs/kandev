@@ -15,7 +15,6 @@ type SelectorOption = {
 type CreateEditSelectorsProps = {
   isTaskStarted: boolean;
   hasRepositorySelection: boolean;
-  repositoryId: string;
   branchOptions: SelectorOption[];
   branch: string;
   onBranchChange: (value: string) => void;
@@ -65,7 +64,6 @@ type CreateEditSelectorsProps = {
 export const CreateEditSelectors = memo(function CreateEditSelectors({
   isTaskStarted,
   hasRepositorySelection,
-  repositoryId,
   branchOptions,
   branch,
   onBranchChange,
@@ -89,16 +87,15 @@ export const CreateEditSelectors = memo(function CreateEditSelectors({
 
   const branchPlaceholder = (() => {
     if (!hasRepositorySelection) return "Select repository first";
-    if (repositoryId) {
-      return branchesLoading ? "Loading branches..." : "Select branch";
-    }
-    if (localBranchesLoading) return "Loading branches...";
+    if (branchesLoading || localBranchesLoading) return "Loading branches...";
     return branchOptions.length > 0 ? "Select branch" : "No branches found";
   })();
 
   const branchDisabled =
     !hasRepositorySelection ||
-    (repositoryId ? branchesLoading : localBranchesLoading || branchOptions.length === 0);
+    branchesLoading ||
+    localBranchesLoading ||
+    branchOptions.length === 0;
 
   const agentPlaceholder = (() => {
     if (agentProfilesLoading) return "Loading agents...";

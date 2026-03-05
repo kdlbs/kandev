@@ -57,6 +57,12 @@ export type SystemHealthState = {
   loading: boolean;
 };
 
+export type SessionFailureNotification = {
+  sessionId: string;
+  taskId: string;
+  message: string;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -67,6 +73,7 @@ export type UISliceState = {
   chatInput: ChatInputState;
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
+  sessionFailureNotification: SessionFailureNotification | null;
 };
 
 export type UISliceActions = {
@@ -88,6 +95,7 @@ export type UISliceActions = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

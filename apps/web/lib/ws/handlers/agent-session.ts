@@ -161,6 +161,16 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);
+
+      if (newState === "FAILED") {
+        store.getState().setSessionFailureNotification({
+          sessionId,
+          taskId,
+          message: payload.error_message
+            ? String(payload.error_message)
+            : "Session failed unexpectedly",
+        });
+      }
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

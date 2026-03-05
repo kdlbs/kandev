@@ -184,6 +184,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
       dropdownLabel="Executor Profile"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      testId="executor-profile-selector"
     />
   );
 });

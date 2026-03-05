@@ -85,3 +85,6 @@ apps/landing/next-env.d.ts
 # agent message logs
 raw-*.jsonl
 normalized-*.jsonl
+
+# Serena MCP
+.serena/*

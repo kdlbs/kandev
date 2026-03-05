@@ -12,7 +12,22 @@ import (
 	"time"
 )
 
-const githubAPIBase = "https://api.github.com"
+const (
+	githubAPIBase    = "https://api.github.com"
+	githubAccept     = "application/vnd.github+json"
+	githubAPIVersion = "2022-11-28"
+)
+
+// GitHubAPIError represents an error response from the GitHub API with a status code.
+type GitHubAPIError struct {
+	StatusCode int
+	Endpoint   string
+	Body       string
+}
+
+func (e *GitHubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+}
 
 // PATClient implements Client using a GitHub Personal Access Token.
 type PATClient struct {
@@ -29,6 +44,13 @@ func NewPATClient(token string) *PATClient {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// setGitHubHeaders sets the common Authorization, Accept, and API version headers.
+func (c *PATClient) setGitHubHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", githubAccept)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 }
 
 func (c *PATClient) IsAuthenticated(ctx context.Context) (bool, error) {
@@ -252,6 +274,25 @@ func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, numbe
 	return convertRawPRCommits(raw), nil
 }
 
+func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	var branches []RepoBranch
+	endpoint := fmt.Sprintf("/repos/%s/%s/branches?per_page=100", owner, repo)
+	for endpoint != "" {
+		var page []struct {
+			Name string `json:"name"`
+		}
+		nextLink, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list repo branches: %w", err)
+		}
+		for _, b := range page {
+			branches = append(branches, RepoBranch{Name: b.Name})
+		}
+		endpoint = nextLink
+	}
+	return branches, nil
+}
+
 func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number)
 	payload := map[string]string{"event": event}
@@ -271,10 +312,8 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
+	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -295,9 +334,7 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	c.setGitHubHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -307,9 +344,59 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("GitHub API %s returned %d: %s", endpoint, resp.StatusCode, string(body))
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+// getPaginated is like get but also returns the "next" link from the Link header, if any.
+func (c *PATClient) getPaginated(ctx context.Context, endpoint string, result interface{}) (string, error) {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	c.setGitHubHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return "", err
+	}
+	return parseNextLink(resp.Header.Get("Link")), nil
+}
+
+// parseNextLink extracts the "next" URL path+query from a GitHub Link header.
+func parseNextLink(header string) string {
+	if header == "" {
+		return ""
+	}
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start < 0 || end < 0 || end <= start {
+			continue
+		}
+		link := part[start+1 : end]
+		// Strip the base URL to return just the path+query for our get method
+		if strings.HasPrefix(link, githubAPIBase) {
+			return link[len(githubAPIBase):]
+		}
+		return link
+	}
+	return ""
 }
 
 // patPR is the JSON shape from the GitHub REST API for PRs.
