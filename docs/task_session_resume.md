@@ -308,7 +308,7 @@ The session is NOT marked as failed -- the user can send a new message to start 
 | Claude Code | - | - | Uses `--resume` CLI flag with stored resume token |
 | Codex | yes | - | ACP `session/load` restores context |
 | Copilot | yes | - | ACP `session/load` restores context |
-| Auggie | - | yes | Fresh start + history injection on first prompt |
+| Auggie | yes | - | ACP `session/load` restores context (v0.18.1+) |
 | Gemini | - | - | Boots idle, no context restoration |
 | Amp | - | - | Uses `ForkSessionCmd` / `ContinueSessionCmd` |
 | OpenCode | yes | - | ACP `session/load` restores context |
