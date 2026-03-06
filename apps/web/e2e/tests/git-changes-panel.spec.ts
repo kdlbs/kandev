@@ -93,6 +93,10 @@ async function createStandardProfile(apiClient: ApiClient, name: string) {
 // ---------------------------------------------------------------------------
 
 test.describe("Git Changes Panel", () => {
+  // These tests share a worker-scoped git repo (backend.tmpDir/repos/e2e-repo).
+  // Running them serially prevents races where stageAll() picks up files from
+  // a concurrent test, causing git commit failures.
+  test.describe.configure({ mode: "serial" });
   /**
    * Verifies that modified files appear in the unstaged section of the Changes panel.
    * Creates a task, modifies a file in the repository, and verifies the Changes panel
@@ -295,7 +299,7 @@ test.describe("Git Changes Panel", () => {
 
     // Additionally verify the diff shows the actual file content (lines added)
     // This confirms the diff is working and showing the commit changes
-    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 15_000 });
   });
 
   /**
@@ -690,17 +694,18 @@ test.describe("Git Changes Panel", () => {
     };
     const git = new GitHelper(repoDir, gitEnv);
 
-    // Create multiple commits
+    // Create multiple commits — use stageFile() instead of stageAll() to avoid
+    // picking up leftover files from prior tests in the shared repo.
     git.createFile("file1.txt", "content 1");
-    git.stageAll();
+    git.stageFile("file1.txt");
     const sha1 = git.commit("First persistent commit");
 
     git.createFile("file2.txt", "content 2");
-    git.stageAll();
+    git.stageFile("file2.txt");
     const sha2 = git.commit("Second persistent commit");
 
     git.createFile("file3.txt", "content 3");
-    git.stageAll();
+    git.stageFile("file3.txt");
     const sha3 = git.commit("Third persistent commit");
 
     // Click the Changes tab

@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
-  workers: CI ? 2 : 1,
+  workers: CI ? 4 : 1,
   timeout: 60_000,
   reporter: CI ? [["html", { outputFolder: "./playwright-report" }]] : "list",
   outputDir: "./test-results",

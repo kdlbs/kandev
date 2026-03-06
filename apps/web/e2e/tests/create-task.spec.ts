@@ -44,7 +44,7 @@ test.describe("Task creation", () => {
     // Wait for the button to become enabled (repo + branch + agent profile all resolved).
     // Under load the branch/profile resolution can take a moment.
     const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
 
     // Click "Start task" — the agent starts, the dialog closes, we stay on kanban
     await startBtn.click();
@@ -116,7 +116,7 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("task-description-input").fill(script);
 
     const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
 
     await testPage.getByTestId("submit-start-agent-chevron").click();
     await expect(testPage.getByTestId("submit-plan-mode")).toBeVisible({ timeout: 5_000 });
@@ -178,7 +178,7 @@ test.describe("Task creation", () => {
     // Wait for the main submit button to be enabled (repo + agent profile resolved),
     // then open the dropdown chevron to reveal the "Start task in plan mode" option.
     const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
 
     // The split-button group wraps "Start task" + a chevron-only dropdown trigger.
     // Click the chevron to open the dropdown.
