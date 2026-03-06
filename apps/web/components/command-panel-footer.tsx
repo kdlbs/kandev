@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconArrowRight, IconLoader2, IconSubtask } from "@tabler/icons-react";
+import { IconArrowRight, IconClipboardList, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
   CommandDialog,
@@ -73,7 +73,7 @@ function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
     >
       <div className="flex flex-col gap-0.5 min-w-0">
         <div className="flex items-center gap-2">
-          <IconSubtask className="size-3 shrink-0 text-muted-foreground" />
+          <IconClipboardList className="size-3 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium">{task.title}</span>
           {step && (
             <Badge
