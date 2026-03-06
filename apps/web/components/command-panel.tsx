@@ -337,9 +337,8 @@ export function CommandPanel() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const repositories = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
-  );
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
 
   const state = useCommandPanelState();
   const {
