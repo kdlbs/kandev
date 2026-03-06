@@ -174,7 +174,7 @@ function CommandsListContent({
         </CommandGroup>
       )}
       {search.trim() ? (
-        <CommandGroup>
+        <CommandGroup heading="Commands">
           {commands.map((cmd) => (
             <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
           ))}
