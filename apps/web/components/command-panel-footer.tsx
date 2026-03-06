@@ -17,6 +17,7 @@ import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
 
@@ -214,6 +215,7 @@ function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | nu
 }
 
 function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   return (
     <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
       {mode === MODE_COMMANDS && (
@@ -224,7 +226,7 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
             <span>Navigate</span>
           </KbdGroup>
           <KbdGroup>
-            <Kbd>{formatShortcut(getShortcut("FILE_SEARCH"))}</Kbd>
+            <Kbd>{formatShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts))}</Kbd>
             <span>File Search</span>
           </KbdGroup>
         </>

@@ -33,6 +33,7 @@ type UserSettingsDTO struct {
 	SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 	DefaultUtilityModel         string                            `json:"default_utility_model"`
+	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -70,6 +71,7 @@ type UpdateUserSettingsRequest struct {
 	SavedLayouts                *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
 	DefaultUtilityAgentID       *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
+	KeyboardShortcuts           *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -102,6 +104,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		SavedLayouts:                settings.SavedLayouts,
 		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
+		KeyboardShortcuts:           settings.KeyboardShortcuts,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

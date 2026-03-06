@@ -39,6 +39,7 @@ function carryForwardSettings(current: DisplaySettings) {
     lspServerConfigs: current.lspServerConfigs ?? {},
     savedLayouts: current.savedLayouts ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
+    keyboardShortcuts: current.keyboardShortcuts ?? {},
   };
 }
 

@@ -367,6 +367,7 @@ export type UserSettings = {
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
   default_utility_model?: string;
+  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   updated_at: string;
 };
 

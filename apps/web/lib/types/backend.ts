@@ -364,6 +364,7 @@ export type UserSettingsUpdatedPayload = {
   lsp_auto_install_languages?: string[];
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
+  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   updated_at?: string;
 };
 

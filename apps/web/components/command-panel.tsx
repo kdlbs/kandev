@@ -363,8 +363,9 @@ export function CommandPanel() {
     }
   }, [setOpen, state]);
 
-  const searchShortcut = getShortcut("SEARCH");
-  const fileSearchShortcut = getShortcut("FILE_SEARCH");
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const searchShortcut = getShortcut("SEARCH", keyboardShortcuts);
+  const fileSearchShortcut = getShortcut("FILE_SEARCH", keyboardShortcuts);
 
   useKeyboardShortcut(searchShortcut, toggleCommands);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggleCommands);

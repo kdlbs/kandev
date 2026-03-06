@@ -44,6 +44,7 @@ type UpdateUserSettingsRequest struct {
 	SavedLayouts                *[]models.SavedLayout
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
+	KeyboardShortcuts           *map[string]interface{}
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -154,6 +155,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
 	}
+	if req.KeyboardShortcuts != nil {
+		settings.KeyboardShortcuts = *req.KeyboardShortcuts
+	}
 	return nil
 }
 
@@ -235,6 +239,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"saved_layouts":                   settings.SavedLayouts,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
+		"keyboard_shortcuts":              settings.KeyboardShortcuts,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

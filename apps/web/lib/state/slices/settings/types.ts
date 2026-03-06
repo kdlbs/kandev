@@ -115,6 +115,7 @@ export type UserSettingsState = {
   lspServerConfigs: Record<string, Record<string, unknown>>;
   savedLayouts: SavedLayout[];
   defaultUtilityAgentId: string | null;
+  keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   loaded: boolean;
 };
 

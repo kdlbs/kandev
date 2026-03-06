@@ -9,11 +9,12 @@ import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import {
   CONFIGURABLE_SHORTCUTS,
-  getAllConfigurableShortcuts,
-  resetShortcut,
-  setShortcut,
+  resolveAllShortcuts,
   type ConfigurableShortcutId,
+  type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
+import { useAppStore } from "@/components/state-provider";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
 function ShortcutRecorder({
   shortcutId,
@@ -106,17 +107,35 @@ function ShortcutRecorder({
 }
 
 export function KeyboardShortcutsCard() {
-  const [shortcuts, setShortcuts] = useState(getAllConfigurableShortcuts);
+  const storeOverrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const userSettings = useAppStore((s) => s.userSettings);
+  const shortcuts = resolveAllShortcuts(storeOverrides);
 
-  const handleChange = useCallback((id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => {
-    setShortcut(id, shortcut);
-    setShortcuts(getAllConfigurableShortcuts());
-  }, []);
+  const persistOverrides = useCallback(
+    (overrides: StoredShortcutOverrides) => {
+      setUserSettings({ ...userSettings, keyboardShortcuts: overrides });
+      updateUserSettings({ keyboard_shortcuts: overrides }).catch(() => {});
+    },
+    [userSettings, setUserSettings],
+  );
 
-  const handleReset = useCallback((id: ConfigurableShortcutId) => {
-    resetShortcut(id);
-    setShortcuts(getAllConfigurableShortcuts());
-  }, []);
+  const handleChange = useCallback(
+    (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => {
+      const next = { ...storeOverrides, [id]: shortcut };
+      persistOverrides(next);
+    },
+    [storeOverrides, persistOverrides],
+  );
+
+  const handleReset = useCallback(
+    (id: ConfigurableShortcutId) => {
+      const next = { ...storeOverrides };
+      delete next[id];
+      persistOverrides(next);
+    },
+    [storeOverrides, persistOverrides],
+  );
 
   const ids = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
