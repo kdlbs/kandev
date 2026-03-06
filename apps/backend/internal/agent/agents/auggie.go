@@ -17,7 +17,7 @@ var auggieLogoLight []byte
 //go:embed logos/auggie_dark.svg
 var auggieLogoDark []byte
 
-const auggiePkg = "@augmentcode/auggie@0.16.2"
+const auggiePkg = "@augmentcode/auggie@0.18.1"
 
 var (
 	_ Agent            = (*Auggie)(nil)
@@ -74,7 +74,7 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	result.SupportsMCP = true
 	result.InstallationPaths = []string{expandHomePath("~/.augment/.auggie.json")}
 	result.Capabilities = DiscoveryCapabilities{
-		SupportsSessionResume: false,
+		SupportsSessionResume: true,
 		SupportsShell:         false,
 		SupportsWorkspaceOnly: false,
 	}
@@ -92,16 +92,16 @@ func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
+	// Session resume is handled via ACP session/load, not CLI flags (NativeSessionResume: true)
 	return Cmd("npx", "-y", auggiePkg, "--acp").
 		Model(NewParam("--model", "{model}"), opts.Model).
-		Resume(NewParam("--resume"), opts.SessionID, false).
 		Permissions("--permission", auggiePermTools, opts).
 		Settings(auggiePermSettings, opts.PermissionValues).
 		Build()
 }
 
 func (a *Auggie) Runtime() *RuntimeConfig {
-	canRecover := false
+	canRecover := true
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
@@ -117,11 +117,8 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		ModelFlag:      NewParam("--model", "{model}"),
 		WorkspaceFlag:  "--workspace-root",
 		SessionConfig: SessionConfig{
-			ResumeFlag:              NewParam("--resume"),
-			CanRecover:              &canRecover,
-			HistoryContextInjection: true,
-			SessionDirTemplate:      "{home}/.augment/sessions",
-			SessionDirTarget:        "/root/.augment/sessions",
+			NativeSessionResume: true,
+			CanRecover:          &canRecover,
 		},
 	}
 }
