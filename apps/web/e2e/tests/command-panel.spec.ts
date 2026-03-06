@@ -23,10 +23,7 @@ function commandDialog(page: import("@playwright/test").Page) {
 }
 
 test.describe("Command Panel", () => {
-  test("Cmd+K opens command panel and shows commands (not files)", async ({
-    testPage,
-    seedData,
-  }) => {
+  test("Cmd+K opens command panel and shows commands (not files)", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
