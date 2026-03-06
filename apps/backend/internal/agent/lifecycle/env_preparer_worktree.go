@@ -132,6 +132,10 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if req.CheckoutBranch != "" {
 		step = beginStep("Fetch PR branch")
 		reportProgress(onProgress, step, stepIdx, totalSteps)
+		if wt.FetchWarning != "" {
+			step.Warning = wt.FetchWarning
+			step.WarningDetail = wt.FetchWarningDetail
+		}
 		completeStepSuccess(&step)
 		steps = append(steps, step)
 		reportProgress(onProgress, step, stepIdx, totalSteps)

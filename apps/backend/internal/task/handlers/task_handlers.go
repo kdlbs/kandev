@@ -101,12 +101,13 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
-			RepositoryID:  r.RepositoryID,
-			BaseBranch:    r.BaseBranch,
-			LocalPath:     r.LocalPath,
-			Name:          r.Name,
-			DefaultBranch: r.DefaultBranch,
-			GitHubURL:     r.GitHubURL,
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
+			LocalPath:      r.LocalPath,
+			Name:           r.Name,
+			DefaultBranch:  r.DefaultBranch,
+			GitHubURL:      r.GitHubURL,
 		}
 	}
 	return result

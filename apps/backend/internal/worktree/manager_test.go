@@ -779,6 +779,122 @@ esac
 	}
 }
 
+func TestFetchBranchToLocal_FetchSucceeds(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    # Simulate successful fetch
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err != nil {
+		t.Fatalf("fetchBranchToLocal() unexpected error: %v", err)
+	}
+	if result.Warning != "" {
+		t.Fatalf("expected no warning on successful fetch, got %q", result.Warning)
+	}
+}
+
+func TestFetchBranchToLocal_FetchFailsLocalBranchExists(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: no remote configured" >&2
+    exit 1
+    ;;
+  rev-parse)
+    # Simulate branch exists locally
+    if [ "${2:-}" = "--verify" ]; then
+      exit 0
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err != nil {
+		t.Fatalf("fetchBranchToLocal() should fall back to local branch, got error: %v", err)
+	}
+	if result.Warning == "" {
+		t.Fatal("expected a warning when falling back to local branch")
+	}
+	if !strings.Contains(result.Warning, "Could not fetch latest from origin") {
+		t.Fatalf("unexpected warning: %q", result.Warning)
+	}
+	if result.WarningDetail == "" {
+		t.Fatal("expected warning detail with raw git output")
+	}
+}
+
+func TestFetchBranchToLocal_FetchFailsNoBranch(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: no remote configured" >&2
+    exit 1
+    ;;
+  rev-parse)
+    # Simulate branch does NOT exist
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err == nil {
+		t.Fatal("fetchBranchToLocal() should fail when branch not found anywhere")
+	}
+	if !strings.Contains(err.Error(), "not found locally or on remote") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestClassifyGitFallbackReason_AuthPrompt(t *testing.T) {
 	reason := classifyGitFallbackReason(nil, "fatal: could not read Username for 'https://github.com'", nil)
 	if reason != "non_interactive_auth_failed" {

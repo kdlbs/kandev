@@ -44,12 +44,14 @@ type EnvPrepareRequest struct {
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name      string            `json:"name"`
-	Status    PrepareStepStatus `json:"status"`
-	Output    string            `json:"output,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	StartedAt *time.Time        `json:"started_at,omitempty"`
-	EndedAt   *time.Time        `json:"ended_at,omitempty"`
+	Name          string            `json:"name"`
+	Status        PrepareStepStatus `json:"status"`
+	Output        string            `json:"output,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Warning       string            `json:"warning,omitempty"`
+	WarningDetail string            `json:"warning_detail,omitempty"`
+	StartedAt     *time.Time        `json:"started_at,omitempty"`
+	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 }
 
 // EnvPrepareResult contains the result of environment preparation.

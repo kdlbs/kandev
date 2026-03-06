@@ -31,6 +31,7 @@ export type SubmitHandlersDeps = {
   selectedLocalRepo: LocalRepository | null;
   useGitHubUrl: boolean;
   githubUrl: string;
+  githubPrHeadBranch: string | null;
   branch: string;
   agentProfileId: string;
   executorId: string;
@@ -79,6 +80,7 @@ export function useTaskSubmitHandlers({
   selectedLocalRepo,
   useGitHubUrl,
   githubUrl,
+  githubPrHeadBranch,
   branch,
   agentProfileId,
   executorId,
@@ -136,6 +138,7 @@ export function useTaskSubmitHandlers({
         {
           repository_id: "",
           base_branch: branch || undefined,
+          checkout_branch: githubPrHeadBranch || undefined,
           github_url: githubUrl,
         },
       ];
@@ -154,7 +157,7 @@ export function useTaskSubmitHandlers({
       ];
     }
     return [];
-  }, [useGitHubUrl, repositoryId, branch, githubUrl, selectedLocalRepo]);
+  }, [useGitHubUrl, repositoryId, branch, githubUrl, githubPrHeadBranch, selectedLocalRepo]);
 
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? "";

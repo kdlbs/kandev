@@ -245,12 +245,13 @@ type GetTaskRequest struct {
 }
 
 type TaskRepositoryInput struct {
-	RepositoryID  string
-	BaseBranch    string
-	LocalPath     string
-	Name          string
-	DefaultBranch string
-	GitHubURL     string
+	RepositoryID   string
+	BaseBranch     string
+	CheckoutBranch string
+	LocalPath      string
+	Name           string
+	DefaultBranch  string
+	GitHubURL      string
 }
 
 type CreateTaskRequest struct {

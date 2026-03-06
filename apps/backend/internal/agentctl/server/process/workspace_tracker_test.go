@@ -16,8 +16,27 @@ import (
 
 // setupTestRepo creates a git repository with a remote for testing.
 // Returns the repo path and a cleanup function.
+// isolateTestGitEnv unsets GIT_* env vars that may be set by parent git hooks
+// (pre-commit). This protects both test helper commands AND the WorkspaceTracker's
+// internal git commands from operating on the wrong repository.
+// Cannot use t.Setenv("", "") because GIT_DIR="" makes git fail differently.
+func isolateTestGitEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+		"GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE",
+	} {
+		if val, ok := os.LookupEnv(key); ok {
+			_ = os.Unsetenv(key)
+			t.Cleanup(func() { _ = os.Setenv(key, val) })
+		}
+	}
+}
+
 func setupTestRepo(t *testing.T) (string, func()) {
 	t.Helper()
+
+	isolateTestGitEnv(t)
 
 	// Create temp directory for the "remote" bare repo
 	remoteDir, err := os.MkdirTemp("", "test-remote-*")
@@ -259,6 +278,8 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 // 3. User does git fetch && git reset --hard origin/main
 // 4. The upstream commits should be filtered out
 func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
+	isolateTestGitEnv(t)
+
 	// Create temp directories
 	remoteDir, err := os.MkdirTemp("", "test-remote-*")
 	if err != nil {

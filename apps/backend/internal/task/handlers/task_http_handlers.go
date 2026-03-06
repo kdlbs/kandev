@@ -284,12 +284,13 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 }
 
 type httpTaskRepositoryInput struct {
-	RepositoryID  string `json:"repository_id"`
-	BaseBranch    string `json:"base_branch"`
-	LocalPath     string `json:"local_path"`
-	Name          string `json:"name"`
-	DefaultBranch string `json:"default_branch"`
-	GitHubURL     string `json:"github_url"`
+	RepositoryID   string `json:"repository_id"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch"`
+	LocalPath      string `json:"local_path"`
+	Name           string `json:"name"`
+	DefaultBranch  string `json:"default_branch"`
+	GitHubURL      string `json:"github_url"`
 }
 
 type httpCreateTaskRequest struct {
@@ -377,12 +378,13 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:  r.RepositoryID,
-			BaseBranch:    r.BaseBranch,
-			LocalPath:     r.LocalPath,
-			Name:          r.Name,
-			DefaultBranch: r.DefaultBranch,
-			GitHubURL:     r.GitHubURL,
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
+			LocalPath:      r.LocalPath,
+			Name:           r.Name,
+			DefaultBranch:  r.DefaultBranch,
+			GitHubURL:      r.GitHubURL,
 		})
 	}
 	return repos, true

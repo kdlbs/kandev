@@ -185,9 +185,9 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
 
   if (isCreateMode || isEditMode) {
     return (
-      <DialogTitle asChild>
-        <div className="flex flex-col gap-1 min-w-0">
-          <div className="flex items-center gap-1 text-sm font-medium">
+      <>
+        <DialogTitle asChild>
+          <div className="flex items-center gap-1 text-sm font-medium min-w-0">
             <RepoSourceInput {...props} />
             <span className="text-muted-foreground mr-2">/</span>
             <InlineTaskName
@@ -196,20 +196,20 @@ function DialogHeaderContent(props: DialogHeaderContentProps) {
               autoFocus={!isEditMode && !useGitHubUrl}
             />
           </div>
-          {!isTaskStarted && (
-            <div className="flex items-center gap-2 pl-2">
-              <button
-                type="button"
-                onClick={onToggleGitHubUrl}
-                className="text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                data-testid="toggle-github-url"
-              >
-                {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
-              </button>
-            </div>
-          )}
-        </div>
-      </DialogTitle>
+        </DialogTitle>
+        {!isTaskStarted && (
+          <div className="flex items-center gap-2 pl-2">
+            <button
+              type="button"
+              onClick={onToggleGitHubUrl}
+              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+              data-testid="toggle-github-url"
+            >
+              {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
+            </button>
+          </div>
+        )}
+      </>
     );
   }
   return (
@@ -407,6 +407,7 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     selectedLocalRepo: fs.selectedLocalRepo,
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
+    githubPrHeadBranch: fs.githubPrHeadBranch,
     branch: fs.branch,
     agentProfileId: fs.agentProfileId,
     executorId: fs.executorId,

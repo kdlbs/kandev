@@ -147,6 +147,8 @@ export type PrepareStepInfo = {
   status: string;
   output?: string;
   error?: string;
+  warning?: string;
+  warningDetail?: string;
 };
 
 export type SessionPrepareState = {

@@ -64,6 +64,14 @@ type Worktree struct {
 
 	// DeletedAt is when this worktree was deleted (if applicable).
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+
+	// FetchWarning is a non-fatal warning from fetching the checkout branch.
+	// Set when fetch from origin failed but a local branch was used as fallback.
+	FetchWarning string `json:"fetch_warning,omitempty"`
+
+	// FetchWarningDetail contains the raw git command output for debugging.
+	// Shown as collapsible content alongside the user-friendly FetchWarning.
+	FetchWarningDetail string `json:"fetch_warning_detail,omitempty"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.

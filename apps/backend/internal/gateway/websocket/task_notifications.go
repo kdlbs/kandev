@@ -131,10 +131,10 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
-			if sessionID != "" {
-				b.hub.BroadcastToSession(sessionID, msg)
-				return nil
-			}
+			// Broadcast globally so prepare progress/warnings are available
+			// when the user navigates to the session page after task creation.
+			b.hub.Broadcast(msg)
+			return nil
 		}
 		b.hub.Broadcast(msg)
 		return nil

@@ -153,14 +153,16 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 func (m *Manager) newProgressCallback(taskID, sessionID string) PrepareProgressCallback {
 	return func(step PrepareStep, stepIndex int, totalSteps int) {
 		m.eventPublisher.PublishPrepareProgress(sessionID, &PrepareProgressEventPayload{
-			TaskID:     taskID,
-			SessionID:  sessionID,
-			StepName:   step.Name,
-			StepIndex:  stepIndex,
-			TotalSteps: totalSteps,
-			Status:     string(step.Status),
-			Output:     step.Output,
-			Error:      step.Error,
+			TaskID:        taskID,
+			SessionID:     sessionID,
+			StepName:      step.Name,
+			StepIndex:     stepIndex,
+			TotalSteps:    totalSteps,
+			Status:        string(step.Status),
+			Output:        step.Output,
+			Error:         step.Error,
+			Warning:       step.Warning,
+			WarningDetail: step.WarningDetail,
 		})
 	}
 }
@@ -291,6 +293,7 @@ func (m *Manager) launchApplyPrepareResult(
 			SessionID:    req.SessionID,
 			Success:      false,
 			ErrorMessage: result.ErrorMessage,
+			Steps:        result.Steps,
 		})
 		return fmt.Errorf("environment preparation failed: %s", result.ErrorMessage)
 	}
@@ -312,6 +315,7 @@ func (m *Manager) launchApplyPrepareResult(
 		Success:       true,
 		DurationMs:    result.Duration.Milliseconds(),
 		WorkspacePath: result.WorkspacePath,
+		Steps:         result.Steps,
 	})
 	return nil
 }

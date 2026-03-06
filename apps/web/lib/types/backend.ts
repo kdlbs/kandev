@@ -286,6 +286,8 @@ export type PrepareProgressPayload = {
   status: string;
   output?: string;
   error?: string;
+  warning?: string;
+  warning_detail?: string;
   timestamp: string;
 };
 
@@ -297,6 +299,14 @@ export type PrepareCompletedPayload = {
   error_message?: string;
   duration_ms: number;
   workspace_path?: string;
+  steps?: Array<{
+    name: string;
+    status: string;
+    output?: string;
+    error?: string;
+    warning?: string;
+    warning_detail?: string;
+  }>;
   timestamp: string;
 };
 

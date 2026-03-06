@@ -1,7 +1,11 @@
 // Package worktree provides Git worktree management for concurrent agent execution.
 package worktree
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 var (
 	// ErrWorktreeExists is returned when attempting to create a worktree that already exists.
@@ -30,4 +34,40 @@ var (
 
 	// ErrInvalidSession is returned when the session ID is invalid or empty.
 	ErrInvalidSession = errors.New("invalid or empty session ID")
+
+	// ErrBranchCheckedOut is returned when a branch is already checked out in another worktree.
+	ErrBranchCheckedOut = errors.New("branch is already checked out in another worktree")
+
+	// ErrAuthFailed is returned when git authentication fails (e.g. no credentials in non-interactive mode).
+	ErrAuthFailed = errors.New("git authentication failed")
+
+	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
+	ErrNonFastForward = errors.New("non-fast-forward update rejected")
 )
+
+// containsAuthFailure checks if git output indicates an authentication failure.
+func containsAuthFailure(lowerOutput string) bool {
+	return strings.Contains(lowerOutput, "authentication failed") ||
+		strings.Contains(lowerOutput, "terminal prompts disabled") ||
+		strings.Contains(lowerOutput, "could not read username") ||
+		strings.Contains(lowerOutput, "username for 'https://") ||
+		strings.Contains(lowerOutput, "askpass")
+}
+
+// ClassifyGitError wraps a raw git error with a user-friendly sentinel error
+// based on the command output.
+func ClassifyGitError(output string, _ error) error {
+	out := strings.ToLower(output)
+	trimmed := strings.TrimSpace(output)
+
+	switch {
+	case strings.Contains(out, "is already checked out at"):
+		return fmt.Errorf("%w: %s", ErrBranchCheckedOut, trimmed)
+	case containsAuthFailure(out):
+		return fmt.Errorf("%w: %s", ErrAuthFailed, trimmed)
+	case strings.Contains(out, "non-fast-forward"):
+		return fmt.Errorf("%w: %s", ErrNonFastForward, trimmed)
+	default:
+		return fmt.Errorf("%w: %s", ErrGitCommandFailed, trimmed)
+	}
+}
