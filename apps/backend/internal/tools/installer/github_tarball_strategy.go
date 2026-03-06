@@ -170,12 +170,8 @@ func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 		return writeFileFromTar(tr, target, os.FileMode(header.Mode))
 	case tar.TypeSymlink:
 		// Validate symlink target to prevent path traversal attacks
-		// Reject absolute paths and paths containing ".."
 		if filepath.IsAbs(header.Linkname) {
 			return fmt.Errorf("symlink target must not be absolute: %s -> %s", header.Name, header.Linkname)
-		}
-		if strings.Contains(header.Linkname, "..") {
-			return fmt.Errorf("symlink target must not contain '..': %s -> %s", header.Name, header.Linkname)
 		}
 
 		// Resolve the symlink target path relative to the symlink's location

@@ -206,6 +206,90 @@ func TestExtractTarGz_SymlinkEscapeBlocked(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_SymlinkWithRelativeDotDot(t *testing.T) {
+	// Legitimate relative symlinks using ".." (like npm .bin links) should be allowed
+	// as long as the resolved target stays within destDir.
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+
+	// Create directory structure: pkg/node_modules/.bin/ and pkg/node_modules/semver/bin/
+	for _, dir := range []string{
+		"pkg/node_modules/.bin/",
+		"pkg/node_modules/semver/bin/",
+	} {
+		_ = tarWriter.WriteHeader(&tar.Header{
+			Name:     dir,
+			Typeflag: tar.TypeDir,
+			Mode:     0o755,
+		})
+	}
+
+	// Create the target file
+	content := []byte("#!/bin/sh\necho semver")
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "pkg/node_modules/semver/bin/semver.js",
+		Typeflag: tar.TypeReg,
+		Mode:     0o755,
+		Size:     int64(len(content)),
+	})
+	_, _ = tarWriter.Write(content)
+
+	// Create symlink: .bin/semver -> ../semver/bin/semver.js (stays within destDir)
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "pkg/node_modules/.bin/semver",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../semver/bin/semver.js",
+	})
+
+	_ = tarWriter.Close()
+	_ = gzWriter.Close()
+
+	destDir := t.TempDir()
+	if err := extractTarGz(&buf, destDir); err != nil {
+		t.Fatalf("extractTarGz should allow relative '..' symlinks within destDir, got: %v", err)
+	}
+
+	// Verify the symlink was created
+	linkPath := filepath.Join(destDir, "pkg/node_modules/.bin/semver")
+	linkTarget, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("failed to read symlink: %v", err)
+	}
+	if linkTarget != "../semver/bin/semver.js" {
+		t.Errorf("expected symlink target '../semver/bin/semver.js', got %q", linkTarget)
+	}
+}
+
+func TestExtractTarGz_SymlinkDotDotEscapeBlocked(t *testing.T) {
+	// A ".." symlink that escapes destDir must still be blocked by the resolved-path check.
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "pkg/",
+		Typeflag: tar.TypeDir,
+		Mode:     0o755,
+	})
+
+	// Symlink that uses ".." to escape the destDir
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "pkg/escape",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../../etc/passwd",
+	})
+
+	_ = tarWriter.Close()
+	_ = gzWriter.Close()
+
+	destDir := t.TempDir()
+	err := extractTarGz(&buf, destDir)
+	if err == nil {
+		t.Error("expected error for '..' symlink escaping destDir, got nil")
+	}
+}
+
 func TestResolveTarget_Unsupported(t *testing.T) {
 	s := &GithubTarballStrategy{
 		config: GithubTarballConfig{

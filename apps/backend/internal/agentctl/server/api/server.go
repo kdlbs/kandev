@@ -99,6 +99,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/shell/buffer", s.handleShellBuffer)
 		api.POST("/shell/start", s.handleShellStart)
 
+		// Per-terminal shell sessions (for remote executor multi-terminal support)
+		api.POST("/shell/terminal/start", s.handleShellTerminalStart)
+		api.GET("/shell/terminal/:id/stream", s.handleShellTerminalStreamWS)
+		api.GET("/shell/terminal/:id/buffer", s.handleShellTerminalBuffer)
+		api.DELETE("/shell/terminal/:id", s.handleShellTerminalStop)
+
 		// Process runner
 		api.POST("/processes/start", s.handleStartProcess)
 		api.POST("/processes/stop", s.handleStopProcess)

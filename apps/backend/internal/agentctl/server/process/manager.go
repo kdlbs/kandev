@@ -91,6 +91,9 @@ type Manager struct {
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
 
+	// Per-terminal shell sessions for remote executor support
+	shellMgr *shell.Manager
+
 	// Protocol adapter for agent communication
 	adapter    adapter.AgentAdapter
 	adapterCfg *adapter.Config
@@ -132,6 +135,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		pendingPermissions: make(map[string]*PendingPermission),
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
+	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
@@ -637,6 +641,10 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	}
 	m.logger.Debug("shell session stopped")
 
+	m.logger.Debug("stopping terminal shells")
+	m.shellMgr.StopAll()
+	m.logger.Debug("terminal shells stopped")
+
 	// Stop all running workspace processes (dev server, setup, cleanup, custom).
 	m.logger.Debug("stopping workspace processes")
 	if m.processRunner != nil {
@@ -1041,6 +1049,11 @@ func (m *Manager) Shell() *shell.Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.shell
+}
+
+// ShellManager returns the per-terminal shell session manager.
+func (m *Manager) ShellManager() *shell.Manager {
+	return m.shellMgr
 }
 
 // StartShell creates and starts the shell session independently of the agent process.

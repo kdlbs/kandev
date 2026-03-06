@@ -104,8 +104,10 @@ help:
 
 .PHONY: dev
 dev:
+ifneq ($(shell uname -s)/$(shell uname -m),Linux/x86_64)
 	@echo "Building Linux agentctl for remote executors..."
 	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
+endif
 	@echo "Launching via CLI (auto ports)..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
 
@@ -190,7 +192,7 @@ install-backend:
 .PHONY: install-web
 install-web:
 	@printf "$(CYAN)Installing web dependencies...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) install --silent 2>/dev/null || cd $(APPS_DIR) && $(PNPM) install
+	@(cd $(APPS_DIR) && $(PNPM) install --silent 2>/dev/null) || (cd $(APPS_DIR) && $(PNPM) install)
 	@printf "$(CYAN)Installing Playwright browsers...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web exec playwright install chromium
 
