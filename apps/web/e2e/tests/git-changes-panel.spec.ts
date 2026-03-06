@@ -191,9 +191,10 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // The new file should appear in unstaged
+    // The new file should appear in unstaged (scope to changes panel to avoid
+    // matching the Files panel which also shows the filename)
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("new-feature.ts")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("new-feature.ts")).toBeVisible({ timeout: 15_000 });
 
     // Clean up
     git.deleteFile("new-feature.ts");

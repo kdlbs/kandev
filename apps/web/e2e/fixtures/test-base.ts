@@ -94,7 +94,7 @@ export const test = backendFixture.extend<
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();
-    await setupPage(page, backend);
+    await setupPage(page, backend, seedData);
     await use(page);
     await context.close();
   },
@@ -102,13 +102,30 @@ export const test = backendFixture.extend<
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
+async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
   await page.addInitScript(
-    ({ backendUrl }: { backendUrl: string }) => {
+    ({
+      backendUrl,
+      repositoryId,
+      agentProfileId,
+    }: {
+      backendUrl: string;
+      repositoryId: string;
+      agentProfileId: string;
+    }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");
+      // Pre-seed dialog selections so auto-select effects resolve on their
+      // first render cycle instead of waiting for async API chains.
+      localStorage.setItem("kandev.dialog.lastRepositoryId", repositoryId);
+      localStorage.setItem("kandev.dialog.lastAgentProfileId", agentProfileId);
+      localStorage.setItem("kandev.dialog.lastBranch", "main");
       // Set the window global that getBackendConfig() reads for API/WS connections
       window.__KANDEV_API_BASE_URL = backendUrl;
     },
-    { backendUrl: backend.baseUrl },
+    {
+      backendUrl: backend.baseUrl,
+      repositoryId: seedData.repositoryId,
+      agentProfileId: seedData.agentProfileId,
+    },
   );
 }

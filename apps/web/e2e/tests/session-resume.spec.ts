@@ -88,8 +88,10 @@ test.describe("Session resume (ACP mode)", () => {
     await expect(session.chat.getByText("/e2e:simple-message")).toBeVisible({ timeout: 15_000 });
 
     // 7. Wait for auto-resume to complete — useSessionResumption hook detects
-    //    needs_resume=true and relaunches the agent via session.launch
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    //    needs_resume=true and relaunches the agent via session.launch.
+    //    The full cycle (backend restart → health check → page reload → SSR →
+    //    WS reconnect → auto-resume → agent turn) can be slow under CI load.
+    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
 
     // 8. Verify the "Resumed agent Mock" boot message appeared after resume
     await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
