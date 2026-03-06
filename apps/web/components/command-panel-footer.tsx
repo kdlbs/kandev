@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconArrowRight, IconLoader2, IconSearch } from "@tabler/icons-react";
+import { IconArrowRight, IconLoader2, IconSubtask } from "@tabler/icons-react";
 import {
   Command,
   CommandDialog,
@@ -73,10 +73,14 @@ function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
     >
       <div className="flex flex-col gap-0.5 min-w-0">
         <div className="flex items-center gap-2">
-          <IconSearch className="size-3 shrink-0 text-muted-foreground" />
+          <IconSubtask className="size-3 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium">{task.title}</span>
           {step && (
-            <Badge variant="secondary" className="text-[0.6rem] shrink-0">
+            <Badge
+              variant="secondary"
+              className="text-[0.6rem] shrink-0"
+              style={step.color ? { backgroundColor: step.color + "22", color: step.color } : undefined}
+            >
               {step.name}
             </Badge>
           )}
@@ -121,6 +125,20 @@ function CommandsListContent({
   return (
     <>
       {!hasInlineResults && <CommandEmpty>No commands found.</CommandEmpty>}
+      {search.trim() && isSearching && taskResults.length === 0 && (
+        <CommandGroup heading="Tasks" forceMount>
+          <div className="flex items-center justify-center py-3">
+            <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
+          </div>
+        </CommandGroup>
+      )}
+      {taskResults.length > 0 && (
+        <CommandGroup heading="Tasks" forceMount>
+          {taskResults.map((task) => (
+            <TaskResultItem key={task.id} task={task} stepMap={stepMap} onSelect={onTaskSelect} />
+          ))}
+        </CommandGroup>
+      )}
       {search.trim() ? (
         <CommandGroup>
           {commands.map((cmd) => (
@@ -135,20 +153,6 @@ function CommandsListContent({
             ))}
           </CommandGroup>
         ))
-      )}
-      {search.trim() && isSearching && taskResults.length === 0 && (
-        <CommandGroup heading="Tasks" forceMount>
-          <div className="flex items-center justify-center py-3">
-            <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
-          </div>
-        </CommandGroup>
-      )}
-      {taskResults.length > 0 && (
-        <CommandGroup heading="Tasks" forceMount>
-          {taskResults.map((task) => (
-            <TaskResultItem key={task.id} task={task} stepMap={stepMap} onSelect={onTaskSelect} />
-          ))}
-        </CommandGroup>
       )}
     </>
   );
