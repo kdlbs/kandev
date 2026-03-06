@@ -294,9 +294,18 @@ test.describe("Git Changes Panel", () => {
     // Look for the commit message (which uniquely identifies this diff view)
     await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
 
-    // Additionally verify the diff shows the actual file content (lines added)
-    // This confirms the diff is working and showing the commit changes
-    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 15_000 });
+    // Additionally verify the diff shows the actual file content (lines added).
+    // Pierre Diffs renders in a shadow DOM — wait for content there before asserting.
+    await testPage.waitForFunction(
+      (searchText: string) => {
+        const container = document.querySelector("diffs-container");
+        const shadow = container?.shadowRoot;
+        return shadow != null && (shadow.textContent?.includes(searchText) ?? false);
+      },
+      "line 1",
+      { timeout: 30_000 },
+    );
+    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
   /**
