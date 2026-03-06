@@ -93,10 +93,6 @@ async function createStandardProfile(apiClient: ApiClient, name: string) {
 // ---------------------------------------------------------------------------
 
 test.describe("Git Changes Panel", () => {
-  // These tests share a worker-scoped git repo (backend.tmpDir/repos/e2e-repo).
-  // Running them serially prevents races where stageAll() picks up files from
-  // a concurrent test, causing git commit failures.
-  test.describe.configure({ mode: "serial" });
   /**
    * Verifies that modified files appear in the unstaged section of the Changes panel.
    * Creates a task, modifies a file in the repository, and verifies the Changes panel

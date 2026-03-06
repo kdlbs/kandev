@@ -4,7 +4,11 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: true,
+  // Parallelize across workers (each worker = own backend/frontend), but run
+  // tests sequentially within each worker. The testPage fixture does e2eReset
+  // on a shared worker-scoped backend before each test — concurrent tests
+  // within a worker would interfere via cleanup races.
+  fullyParallel: false,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
   workers: CI ? 4 : 1,
