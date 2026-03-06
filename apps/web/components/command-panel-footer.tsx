@@ -69,13 +69,27 @@ function CommandItemRow({
 type TaskResultItemProps = {
   task: Task;
   stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
   onSelect: (task: Task) => void;
 };
 
-function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
+function getRepoDir(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
+  const repoName = task.repositories?.[0]
+    ? repoMap.get(task.repositories[0].repository_id)
+    : undefined;
+  const details: string[] = [];
+  if (repoName) details.push(getRepoDir(repoName));
+  if (task.primary_executor_name) details.push(task.primary_executor_name);
+  if (task.updated_at) {
+    details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
+  }
   return (
     <CommandItem
       key={task.id}
@@ -84,29 +98,27 @@ function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
       className={isArchived ? "opacity-60" : ""}
       forceMount
     >
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <div className="flex items-center gap-2">
-          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
-          <span className="truncate font-medium">{task.title}</span>
-          {step && (
-            <Badge
-              variant="secondary"
-              className="text-[0.6rem] shrink-0"
-              style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
-            >
-              {step.name}
-            </Badge>
-          )}
-          {isArchived && (
-            <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">
-              {task.state}
-            </Badge>
-          )}
-        </div>
-        {task.updated_at && (
-          <div className="flex items-center gap-1.5 text-[0.6rem] text-muted-foreground pl-5">
-            <span>{formatDistanceToNow(new Date(task.updated_at), { addSuffix: true })}</span>
-          </div>
+      <div className="flex items-center gap-2 min-w-0 w-full">
+        <IconHammer className="size-3 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{task.title}</span>
+        {step && (
+          <Badge
+            variant="secondary"
+            className="text-[0.6rem] shrink-0"
+            style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
+          >
+            {step.name}
+          </Badge>
+        )}
+        {isArchived && (
+          <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">
+            {task.state}
+          </Badge>
+        )}
+        {details.length > 0 && (
+          <span className="ml-auto text-[0.6rem] text-muted-foreground truncate shrink-0">
+            {details.join(" · ")}
+          </span>
         )}
       </div>
     </CommandItem>
@@ -121,6 +133,7 @@ type CommandsListContentProps = {
   taskResults: Task[];
   isSearching: boolean;
   stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
   onTaskSelect: (task: Task) => void;
 };
 
@@ -132,6 +145,7 @@ function CommandsListContent({
   taskResults,
   isSearching,
   stepMap,
+  repoMap,
   onTaskSelect,
 }: CommandsListContentProps) {
   const hasInlineResults = taskResults.length > 0 || isSearching;
@@ -148,7 +162,13 @@ function CommandsListContent({
       {taskResults.length > 0 && (
         <CommandGroup heading="Tasks" forceMount>
           {taskResults.map((task) => (
-            <TaskResultItem key={task.id} task={task} stepMap={stepMap} onSelect={onTaskSelect} />
+            <TaskResultItem
+              key={task.id}
+              task={task}
+              stepMap={stepMap}
+              repoMap={repoMap}
+              onSelect={onTaskSelect}
+            />
           ))}
         </CommandGroup>
       )}
@@ -286,6 +306,7 @@ export type CommandPanelViewProps = {
   isSearching: boolean;
   taskResults: Task[];
   stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
   handleTaskSelect: (task: Task) => void;
 };
 
@@ -309,6 +330,7 @@ export function CommandPanelView({
   isSearching,
   taskResults,
   stepMap,
+  repoMap,
   handleTaskSelect,
 }: CommandPanelViewProps) {
   const modeLabel = getModeLabel(mode, inputCommand);
@@ -352,6 +374,7 @@ export function CommandPanelView({
               taskResults={taskResults}
               isSearching={isSearching}
               stepMap={stepMap}
+              repoMap={repoMap}
               onTaskSelect={handleTaskSelect}
             />
           )}

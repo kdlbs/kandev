@@ -231,6 +231,7 @@ function useCommandPanelHandlers(
   setOpen: (open: boolean) => void,
   commands: CommandItemType[],
   kanbanSteps: { id: string; title: string; color: string }[],
+  repositories: Array<{ id: string; local_path: string }>,
 ) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
   const router = useRouter();
@@ -254,6 +255,12 @@ function useCommandPanelHandlers(
     for (const step of kanbanSteps) map.set(step.id, { name: step.title, color: step.color });
     return map;
   }, [kanbanSteps]);
+
+  const repoMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const repo of repositories) map.set(repo.id, repo.local_path);
+    return map;
+  }, [repositories]);
 
   const handleSelect = useCallback(
     (cmd: CommandItemType) => {
@@ -315,6 +322,7 @@ function useCommandPanelHandlers(
   return {
     grouped,
     stepMap,
+    repoMap,
     handleSelect,
     handleTaskSelect,
     handleFileSelect,
@@ -329,6 +337,9 @@ export function CommandPanel() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const repositories = useAppStore((s) =>
+    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+  );
 
   const state = useCommandPanelState();
   const {
@@ -375,12 +386,13 @@ export function CommandPanel() {
   const {
     grouped,
     stepMap,
+    repoMap,
     handleSelect,
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
     goBack,
-  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps);
+  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
 
   return (
     <CommandPanelView
@@ -403,6 +415,7 @@ export function CommandPanel() {
       isSearching={isSearching}
       taskResults={taskResults}
       stepMap={stepMap}
+      repoMap={repoMap}
       handleTaskSelect={handleTaskSelect}
     />
   );
