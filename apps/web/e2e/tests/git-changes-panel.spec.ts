@@ -308,7 +308,7 @@ test.describe("Git Changes Panel", () => {
       "line 1",
       { timeout: 30_000 },
     );
-    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
+    await expect(session.changes.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
   /**
