@@ -295,16 +295,18 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
 
     // Additionally verify the diff shows the actual file content (lines added).
-    // Pierre Diffs renders in a shadow DOM with async shiki/WASM highlighting —
-    // wait for content there before asserting (60s for CI cold path).
+    // Pierre Diffs renders in a shadow DOM — check all diffs-container elements
+    // since multiple may exist (inline chat diffs + Changes panel).
     await testPage.waitForFunction(
       (searchText: string) => {
-        const container = document.querySelector("diffs-container");
-        const shadow = container?.shadowRoot;
-        return shadow != null && (shadow.textContent?.includes(searchText) ?? false);
+        for (const container of document.querySelectorAll("diffs-container")) {
+          const shadow = container.shadowRoot;
+          if (shadow?.textContent?.includes(searchText)) return true;
+        }
+        return false;
       },
       "line 1",
-      { timeout: 60_000 },
+      { timeout: 30_000 },
     );
     await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });

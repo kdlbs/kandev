@@ -51,15 +51,18 @@ async function openChangesTab(testPage: Page) {
 }
 
 /**
- * Wait for specific text to appear inside Pierre Diffs shadow DOM.
- * Default 60s accommodates shiki/WASM cold initialization on CI runners.
+ * Wait for specific text to appear inside any visible Pierre Diffs shadow DOM.
+ * Uses querySelectorAll because multiple diffs-container elements can exist
+ * (e.g., inline diffs in chat messages + the Changes panel diff viewer).
  */
-async function waitForDiffShadowText(testPage: Page, text: string, timeout = 60_000) {
+async function waitForDiffShadowText(testPage: Page, text: string, timeout = 30_000) {
   await testPage.waitForFunction(
     (searchText: string) => {
-      const container = document.querySelector("diffs-container");
-      const shadow = container?.shadowRoot;
-      return shadow != null && (shadow.textContent?.includes(searchText) ?? false);
+      for (const container of document.querySelectorAll("diffs-container")) {
+        const shadow = container.shadowRoot;
+        if (shadow?.textContent?.includes(searchText)) return true;
+      }
+      return false;
     },
     text,
     { timeout },
