@@ -122,27 +122,85 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 
-function useInlineTaskSearchEffect(
-  mode: CommandPanelMode,
-  search: string,
-  workspaceId: string | null,
-  setTaskResults: (tasks: Task[]) => void,
-  setIsSearching: (searching: boolean) => void,
-) {
+function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
+  return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
+}
+
+type InlineTaskSearchOptions = {
+  mode: CommandPanelMode;
+  search: string;
+  open: boolean;
+  workspaceId: string | null;
+  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
+  setTaskResults: (tasks: Task[]) => void;
+  setIsSearching: (searching: boolean) => void;
+};
+
+function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
+  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
+
+  // Build a step position map for sorting
+  const stepPositionMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const step of steps) map.set(step.id, step.position);
+    return map;
+  }, [steps]);
 
   useEffect(() => {
     if (mode !== "commands") return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
-    if (!search.trim() || search.trim().length < 2) {
+    // No search: load active tasks (excluding backlog + done steps)
+    if (!search.trim()) {
+      if (!open || !workspaceId) {
+        setTaskResults([]);
+        setIsSearching(false);
+        return;
+      }
+      setIsSearching(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      listTasksByWorkspace(
+        workspaceId,
+        { page: 1, pageSize: 20 },
+        { init: { signal: controller.signal } },
+      )
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          const tasks = (res.tasks ?? []).filter(
+            (t) => visibleStepIds.has(t.workflow_step_id) && !ARCHIVED_STATES.has(t.state),
+          );
+          tasks.sort(
+            (a, b) =>
+              (stepPositionMap.get(a.workflow_step_id) ?? 99) -
+              (stepPositionMap.get(b.workflow_step_id) ?? 99),
+          );
+          setTaskResults(tasks);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setTaskResults([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+      return () => {
+        controller.abort();
+      };
+    }
+
+    // Search with < 2 chars: clear results
+    if (search.trim().length < 2) {
       setTaskResults([]);
       setIsSearching(false);
       return;
     }
 
+    // Search: query API including archived
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
       if (!workspaceId) {
@@ -177,7 +235,7 @@ function useInlineTaskSearchEffect(
       if (debounceRef.current) clearTimeout(debounceRef.current);
       abortRef.current?.abort();
     };
-  }, [mode, search, workspaceId, setTaskResults, setIsSearching]);
+  }, [mode, search, open, workspaceId, visibleStepIds, stepPositionMap, setTaskResults, setIsSearching]);
 }
 
 function useCommandPanelEffects(
@@ -185,6 +243,7 @@ function useCommandPanelEffects(
   state: ReturnType<typeof useCommandPanelState>,
   workspaceId: string | null,
   activeSessionId: string | null,
+  steps: { id: string; position: number; show_in_command_panel?: boolean }[],
 ) {
   const {
     mode,
@@ -213,7 +272,7 @@ function useCommandPanelEffects(
     }
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
 
-  useInlineTaskSearchEffect(mode, search, workspaceId, setTaskResults, setIsSearching);
+  useInlineTaskSearchEffect({ mode, search, open, workspaceId, steps, setTaskResults, setIsSearching });
 
   useFileSearchEffect({
     mode,
@@ -354,7 +413,7 @@ export function CommandPanel() {
     setSearch,
   } = state;
 
-  useCommandPanelEffects(open, state, workspaceId, activeSessionId);
+  useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
 
   const openRef = useRef(open);
   useEffect(() => {

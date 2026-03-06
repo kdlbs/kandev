@@ -152,8 +152,8 @@ function CommandsListContent({
   const hasInlineResults = taskResults.length > 0 || isSearching;
   return (
     <>
-      {!hasInlineResults && <CommandEmpty>No commands found.</CommandEmpty>}
-      {search.trim() && isSearching && taskResults.length === 0 && (
+      {!hasInlineResults && !isSearching && <CommandEmpty>No commands found.</CommandEmpty>}
+      {isSearching && taskResults.length === 0 && (
         <CommandGroup heading="Tasks" forceMount>
           <div className="flex items-center justify-center py-3">
             <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
