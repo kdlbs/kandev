@@ -102,6 +102,7 @@ type StepDefinition struct {
 	Events                StepEvents `json:"events"`
 	AllowManualMove       bool       `json:"allow_manual_move"`
 	IsStartStep           bool       `json:"is_start_step"`
+	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 }
 
@@ -116,6 +117,7 @@ type WorkflowStep struct {
 	Events                StepEvents `json:"events"`
 	AllowManualMove       bool       `json:"allow_manual_move"`
 	IsStartStep           bool       `json:"is_start_step"`
+	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`

@@ -16,6 +16,8 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		Color:                 step.Color,
 		Prompt:                step.Prompt,
 		AllowManualMove:       step.AllowManualMove,
+		IsStartStep:           step.IsStartStep,
+		ShowInCommandPanel:    step.ShowInCommandPanel,
 		AutoArchiveAfterHours: step.AutoArchiveAfterHours,
 	}
 	if len(step.Events.OnEnter) > 0 || len(step.Events.OnTurnComplete) > 0 {
