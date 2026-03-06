@@ -79,7 +79,9 @@ function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
             <Badge
               variant="secondary"
               className="text-[0.6rem] shrink-0"
-              style={step.color ? { backgroundColor: step.color + "22", color: step.color } : undefined}
+              style={
+                step.color ? { backgroundColor: step.color + "22", color: step.color } : undefined
+              }
             >
               {step.name}
             </Badge>
