@@ -28,7 +28,7 @@ repos:
 
       - id: go-lint
         name: Go Lint (backend)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; cd apps/backend && golangci-lint run --new-from-rev=HEAD'
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/backend && golangci-lint run --new-from-rev=HEAD'
         language: system
         files: \.go$
         pass_filenames: false

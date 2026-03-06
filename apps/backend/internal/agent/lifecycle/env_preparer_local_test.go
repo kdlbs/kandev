@@ -65,6 +65,20 @@ func filterLocalTestGitEnv(env []string) []string {
 	return filtered
 }
 
+// newIsolatedGitEnv returns a clean environment for test git commands that
+// filters leaked GIT_* vars and re-adds isolation + committer identity vars.
+func newIsolatedGitEnv() []string {
+	env := filterLocalTestGitEnv(os.Environ())
+	return append(env,
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@test.local",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@test.local",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+}
+
 func currentBranch(t *testing.T, repoDir string) string {
 	t.Helper()
 	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
@@ -131,12 +145,7 @@ func TestLocalPreparer_CheckoutBranchSuccess(t *testing.T) {
 
 	repoDir := initGitRepo(t)
 	// Create a feature branch
-	env := append(filterLocalTestGitEnv(os.Environ()),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.local",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.local",
-	)
+	env := newIsolatedGitEnv()
 	for _, args := range [][]string{
 		{"checkout", "-b", "feature/pr-branch"},
 		{"commit", "--allow-empty", "-m", "pr commit"},
@@ -217,12 +226,7 @@ func TestLocalPreparer_CheckoutBranchWithSetupScript(t *testing.T) {
 	preparer := NewLocalPreparer(log)
 
 	repoDir := initGitRepo(t)
-	env := append(filterLocalTestGitEnv(os.Environ()),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.local",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.local",
-	)
+	env := newIsolatedGitEnv()
 	for _, args := range [][]string{
 		{"checkout", "-b", "feature/pr-branch"},
 		{"commit", "--allow-empty", "-m", "pr commit"},
@@ -271,12 +275,7 @@ func TestLocalPreparer_CheckoutWithDirtyWorkdir(t *testing.T) {
 	preparer := NewLocalPreparer(log)
 
 	repoDir := initGitRepo(t)
-	env := append(filterLocalTestGitEnv(os.Environ()),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.local",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.local",
-	)
+	env := newIsolatedGitEnv()
 	// Create feature branch
 	for _, args := range [][]string{
 		{"checkout", "-b", "feature/pr-branch"},
