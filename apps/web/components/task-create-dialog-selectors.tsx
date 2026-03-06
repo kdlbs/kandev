@@ -45,6 +45,7 @@ export const RepositorySelector = memo(function RepositorySelector({
       dropdownLabel="Repository"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      testId="repository-selector"
     />
   );
 });
@@ -85,6 +86,7 @@ export const BranchSelector = memo(function BranchSelector({
       disabled={disabled}
       dropdownLabel="Base Branch"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      testId="branch-selector"
     />
   );
 });
@@ -118,6 +120,7 @@ export const AgentSelector = memo(function AgentSelector({
       dropdownLabel="Agent profile"
       className={`min-w-[380px]${disabled ? "" : ` ${CURSOR_POINTER_CLASS}`}`}
       triggerClassName={triggerClassName}
+      testId="agent-profile-selector"
     />
   );
 });

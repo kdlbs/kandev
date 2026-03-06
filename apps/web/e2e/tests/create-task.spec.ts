@@ -3,6 +3,68 @@ import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
 test.describe("Task creation", () => {
+  test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
+    testPage,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    // Fill title + description to trigger the "Start task" split button (showStartTask)
+    await testPage.getByTestId("task-title-input").fill("Pre-select Test");
+    await testPage.getByTestId("task-description-input").fill("testing pre-selections");
+
+    // Wait for the submit button to be enabled — confirms all selections resolved
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+
+    // Verify the pre-seeded selections are displayed in the dialog selectors
+    await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
+    await expect(testPage.getByTestId("branch-selector")).toContainText("main");
+    // Agent profile name varies — just verify it's not the empty placeholder
+    await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
+      "Select agent...",
+    );
+  });
+
+  test("dialog remembers selections after creating a task", async ({ testPage }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // First: create a task so localStorage selections get persisted
+    await kanban.createTaskButton.first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("task-title-input").fill("First Task");
+    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+    const startBtn = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    await startBtn.click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    // Second: open the dialog again and verify selections persist
+    await kanban.createTaskButton.first().click();
+    await expect(dialog).toBeVisible();
+
+    await testPage.getByTestId("task-title-input").fill("Second Task");
+    await testPage.getByTestId("task-description-input").fill("checking persistence");
+
+    const startBtn2 = testPage.getByTestId("submit-start-agent");
+    await expect(startBtn2).toBeEnabled({ timeout: 30_000 });
+
+    // The same repo, branch, and agent profile should still be selected
+    await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
+    await expect(testPage.getByTestId("branch-selector")).toContainText("main");
+    await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
+      "Select agent...",
+    );
+  });
+
   test("opens create task dialog from kanban header", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
