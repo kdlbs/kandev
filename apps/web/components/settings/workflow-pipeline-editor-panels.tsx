@@ -108,7 +108,7 @@ type StepAutoArchiveRowProps = {
 
 function StepAutoArchiveRow({ step, onUpdate, readOnly }: StepAutoArchiveRowProps) {
   return (
-    <div className="flex items-center gap-2 pt-1">
+    <div className="flex items-center gap-2">
       <Checkbox
         id={`${step.id}-auto-archive`}
         checked={(step.auto_archive_after_hours ?? 0) > 0}
@@ -185,8 +185,8 @@ function StepBehaviorSection({ step, onUpdate, toggleOnEnterAction, readOnly }: 
         <StepCheckboxRow id={`${step.id}-reset-context`} checked={hasOnEnterAction(step, "reset_agent_context")} onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")} disabled={readOnly} label="Reset agent context" helpText="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective." />
         <StepCheckboxRow id={`${step.id}-manual-move`} checked={step.allow_manual_move !== false} onCheckedChange={(c) => !readOnly && onUpdate({ allow_manual_move: c })} disabled={readOnly} label="Allow manual move" helpText="Allow dragging tasks into this step on the board." />
         <StepCheckboxRow id={`${step.id}-command-panel`} checked={step.show_in_command_panel !== false} onCheckedChange={(c) => !readOnly && onUpdate({ show_in_command_panel: c })} disabled={readOnly} label="Show in command panel" helpText="Show tasks in this step when opening the command panel (Cmd+K). Useful for hiding backlog or done steps from quick access." />
+        <StepAutoArchiveRow step={step} onUpdate={onUpdate} readOnly={readOnly} />
       </div>
-      <StepAutoArchiveRow step={step} onUpdate={onUpdate} readOnly={readOnly} />
     </div>
   );
 }
