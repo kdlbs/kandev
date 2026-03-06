@@ -81,12 +81,13 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
-  const repoName = task.repositories?.[0]
-    ? repoMap.get(task.repositories[0].repository_id)
-    : undefined;
+  const rawPath =
+    task.primary_working_directory ??
+    (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
+  const workDir = rawPath ? getRepoDir(rawPath) : undefined;
   const details: string[] = [];
-  if (repoName) details.push(getRepoDir(repoName));
-  if (task.primary_executor_name) details.push(task.primary_executor_name);
+  if (workDir) details.push(workDir);
+  if (task.primary_agent_name) details.push(task.primary_agent_name);
   if (task.updated_at) {
     details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
   }

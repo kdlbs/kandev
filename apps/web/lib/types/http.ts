@@ -233,6 +233,8 @@ export type Task = {
   primary_executor_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
+  primary_agent_name?: string | null;
+  primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   archived_at?: string | null;
   created_at: string;
