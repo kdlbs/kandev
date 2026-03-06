@@ -71,12 +71,30 @@ func runGit(t *testing.T, dir string, args ...string) string {
 		"-c", "tag.gpgsign=false",
 	}, args...)
 	cmd := exec.Command("git", fullArgs...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// Filter out GIT_* env vars (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, etc.)
+	// that git sets when running hooks. Without this, test git commands leak into
+	// the parent repo when executed from a pre-commit hook context because GIT_DIR
+	// overrides the -C flag.
+	cmd.Env = filterTestGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)
 	}
 	return string(out)
+}
+
+// filterTestGitEnv removes GIT_* environment variables that can leak from
+// parent processes (especially git hooks) and cause test git operations to
+// modify the wrong repository.
+func filterTestGitEnv(env []string) []string {
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_") {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }
 
 func writeFile(t *testing.T, dir, name, content string) {
