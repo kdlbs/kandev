@@ -64,8 +64,8 @@ RUN apt-get update && \
         tini && \
     rm -rf /var/lib/apt/lists/*
 
-# Create kandev user (uid 1000) — not tied to base image's built-in node user
-RUN groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
+# Replace the node base image's default user so we own uid 1000
+RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
 
 # Create app directory structure matching what the CLI expects:
 #   /app/apps/backend/bin/kandev
