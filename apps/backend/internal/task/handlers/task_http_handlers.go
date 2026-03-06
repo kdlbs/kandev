@@ -154,7 +154,7 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		}
 	}
 	if info.AgentProfileSnapshot != nil {
-		if name, ok := info.AgentProfileSnapshot["agent_name"].(string); ok && name != "" {
+		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
 			si.agentName = &name
 		}
 	}
