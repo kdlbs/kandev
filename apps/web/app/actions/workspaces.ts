@@ -402,6 +402,7 @@ export async function updateWorkflowStepAction(
       | "events"
       | "allow_manual_move"
       | "is_start_step"
+      | "show_in_command_panel"
       | "auto_archive_after_hours"
     >
   >,
@@ -414,6 +415,8 @@ export async function updateWorkflowStepAction(
   if (payload.events !== undefined) body.events = payload.events;
   if (payload.allow_manual_move !== undefined) body.allow_manual_move = payload.allow_manual_move;
   if (payload.is_start_step !== undefined) body.is_start_step = payload.is_start_step;
+  if (payload.show_in_command_panel !== undefined)
+    body.show_in_command_panel = payload.show_in_command_panel;
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
   const response = await fetchJson<BackendWorkflowStep>(
