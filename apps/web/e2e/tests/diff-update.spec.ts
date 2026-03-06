@@ -86,8 +86,11 @@ async function openFileDiff(testPage: Page, fileName: string) {
   await fileRow.click();
 }
 
-/** Wait for specific text to appear inside Pierre Diffs shadow DOM. */
-async function waitForDiffShadowText(testPage: Page, text: string, timeout = 30_000) {
+/**
+ * Wait for specific text to appear inside Pierre Diffs shadow DOM.
+ * Default 60s accommodates shiki/WASM cold initialization on CI runners.
+ */
+async function waitForDiffShadowText(testPage: Page, text: string, timeout = 60_000) {
   await testPage.waitForFunction(
     (searchText: string) => {
       const container = document.querySelector("diffs-container");
