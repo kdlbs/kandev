@@ -783,7 +783,8 @@ test.describe("Git Changes Panel", () => {
     // Helper to clean up branch - ensures cleanup runs even if test fails
     const cleanupBranch = () => {
       try {
-        git.exec("git checkout main");
+        git.exec("git checkout -f main");
+        git.exec("git clean -fd");
         git.exec("git branch -D feature-rebase");
       } catch {
         // Branch may not exist if test failed before creation
@@ -791,16 +792,19 @@ test.describe("Git Changes Panel", () => {
     };
 
     try {
+      // Clean any leftover state from prior tests
+      git.exec("git clean -fd");
+
       // Create a commit on a feature branch
       git.exec("git checkout -b feature-rebase");
       git.createFile("feature-file.txt", "feature content");
-      git.stageAll();
+      git.stageFile("feature-file.txt");
       git.commit("Feature commit before rebase");
 
       // Go back to main and create a new commit
       git.exec("git checkout main");
       git.createFile("main-file.txt", "main content");
-      git.stageAll();
+      git.stageFile("main-file.txt");
       git.commit("Main commit after branch");
 
       // Go back to feature branch and rebase onto main
@@ -861,11 +865,11 @@ test.describe("Git Changes Panel", () => {
 
     // Create two commits to squash
     git.createFile("squash1.txt", "first");
-    git.stageAll();
+    git.stageFile("squash1.txt");
     git.commit("First commit to squash");
 
     git.createFile("squash2.txt", "second");
-    git.stageAll();
+    git.stageFile("squash2.txt");
     git.commit("Second commit to squash");
 
     // Click the Changes tab
@@ -937,11 +941,11 @@ test.describe("Git Changes Panel", () => {
 
     // Create commits with distinct content
     git.createFile("cumulative-file.txt", "line 1: first commit\n");
-    git.stageAll();
+    git.stageFile("cumulative-file.txt");
     git.commit("Add first line");
 
     git.modifyFile("cumulative-file.txt", "line 1: first commit\nline 2: second commit\n");
-    git.stageAll();
+    git.stageFile("cumulative-file.txt");
     git.commit("Add second line");
 
     // Click the Changes tab
