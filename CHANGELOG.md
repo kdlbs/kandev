@@ -2,6 +2,30 @@
 
 All notable changes to Kandev.
 
+## 0.16 - 2026-03-06
+
+### Features
+
+- support PR URLs in task creation dialog ([#379](https://github.com/kdlbs/kandev/pull/379))
+- improve mcp ask user debug ([#376](https://github.com/kdlbs/kandev/pull/376))
+- add git failed operations as failed chat messages ([#371](https://github.com/kdlbs/kandev/pull/371))
+
+### Bug Fixes
+
+- isolate git env in workspace tracker tests ([#381](https://github.com/kdlbs/kandev/pull/381))
+- improve startup readiness and base sync handling ([#374](https://github.com/kdlbs/kandev/pull/374))
+- detect changes to already-dirty files in git status polling ([#375](https://github.com/kdlbs/kandev/pull/375))
+- detect untracked file changes by using full identity string ([#373](https://github.com/kdlbs/kandev/pull/373))
+- refresh diff view when untracked files change ([#372](https://github.com/kdlbs/kandev/pull/372))
+
+### Refactoring
+
+- move git status and commits to real-time agentctl queries ([#366](https://github.com/kdlbs/kandev/pull/366))
+
+### Documentation
+
+- add claude code skills, settings, and update architecture guide ([#378](https://github.com/kdlbs/kandev/pull/378))
+
 ## 0.15 - 2026-03-05
 
 ### Features
