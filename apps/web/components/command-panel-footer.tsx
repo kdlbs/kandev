@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconArrowRight, IconClipboardList, IconLoader2 } from "@tabler/icons-react";
+import { IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
   CommandDialog,
@@ -24,6 +24,18 @@ import { FileIcon } from "@/components/ui/file-icon";
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 const MODE_COMMANDS: CommandPanelMode = "commands";
 const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+
+const STEP_COLOR_MAP: Record<string, string> = {
+  "bg-slate-500": "#64748b",
+  "bg-red-500": "#ef4444",
+  "bg-orange-500": "#f97316",
+  "bg-yellow-500": "#eab308",
+  "bg-green-500": "#22c55e",
+  "bg-cyan-500": "#06b6d4",
+  "bg-blue-500": "#3b82f6",
+  "bg-indigo-500": "#6366f1",
+  "bg-purple-500": "#a855f7",
+};
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
@@ -63,6 +75,7 @@ type TaskResultItemProps = {
 function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
+  const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
   return (
     <CommandItem
       key={task.id}
@@ -73,15 +86,13 @@ function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
     >
       <div className="flex flex-col gap-0.5 min-w-0">
         <div className="flex items-center gap-2">
-          <IconClipboardList className="size-3 shrink-0 text-muted-foreground" />
+          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
           <span className="truncate font-medium">{task.title}</span>
           {step && (
             <Badge
               variant="secondary"
               className="text-[0.6rem] shrink-0"
-              style={
-                step.color ? { backgroundColor: step.color + "22", color: step.color } : undefined
-              }
+              style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
             >
               {step.name}
             </Badge>
