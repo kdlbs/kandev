@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -15,8 +16,6 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { CommandPanelView } from "@/components/command-panel-footer";
-
-const MODE_SEARCH_TASKS: CommandPanelMode = "search-tasks";
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
@@ -79,7 +78,7 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
     fileDebounceRef,
   } = opts;
   useEffect(() => {
-    if (mode !== "commands" || !search.trim() || !activeSessionId) {
+    if (mode !== "search-files" || !search.trim() || !activeSessionId) {
       setFileResults([]);
       setIsSearchingFiles(false);
       return;
@@ -121,6 +120,66 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
   ]);
 }
 
+const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+
+function useInlineTaskSearchEffect(
+  mode: CommandPanelMode,
+  search: string,
+  workspaceId: string | null,
+  setTaskResults: (tasks: Task[]) => void,
+  setIsSearching: (searching: boolean) => void,
+) {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (mode !== "commands") return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+
+    if (!search.trim() || search.trim().length < 2) {
+      setTaskResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      if (!workspaceId) {
+        setIsSearching(false);
+        return;
+      }
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const res = await listTasksByWorkspace(
+          workspaceId,
+          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
+          { init: { signal: controller.signal } },
+        );
+        if (!controller.signal.aborted) {
+          const tasks = res.tasks ?? [];
+          tasks.sort((a, b) => {
+            const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
+            const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
+            return aArchived - bArchived;
+          });
+          setTaskResults(tasks);
+        }
+      } catch {
+        if (!controller.signal.aborted) setTaskResults([]);
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, [mode, search, workspaceId, setTaskResults, setIsSearching]);
+}
+
 function useCommandPanelEffects(
   open: boolean,
   state: ReturnType<typeof useCommandPanelState>,
@@ -139,7 +198,7 @@ function useCommandPanelEffects(
     setIsSearchingFiles,
     setSelectedValue,
   } = state;
-  const { debounceRef, abortRef, fileDebounceRef } = useCommandPanelEffectRefs();
+  const { fileDebounceRef } = useCommandPanelEffectRefs();
   useEffect(() => {
     if (!open) {
       const t = setTimeout(() => {
@@ -153,41 +212,9 @@ function useCommandPanelEffects(
       return () => clearTimeout(t);
     }
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
-  useEffect(() => {
-    if (mode !== MODE_SEARCH_TASKS) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-    if (!search.trim()) {
-      setTaskResults([]);
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 10 },
-          { init: { signal: controller.signal } },
-        );
-        if (!controller.signal.aborted) setTaskResults(res.tasks ?? []);
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
-  }, [abortRef, debounceRef, mode, search, setIsSearching, setTaskResults, workspaceId]);
+
+  useInlineTaskSearchEffect(mode, search, workspaceId, setTaskResults, setIsSearching);
+
   useFileSearchEffect({
     mode,
     search,
@@ -323,10 +350,26 @@ export function CommandPanel() {
   useEffect(() => {
     openRef.current = open;
   }, [open]);
-  const toggle = useCallback(() => setOpen(!openRef.current), [setOpen]);
-  useKeyboardShortcut(SHORTCUTS.SEARCH, toggle);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggle);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggle);
+
+  const toggleCommands = useCallback(() => setOpen(!openRef.current), [setOpen]);
+
+  const openFileSearch = useCallback(() => {
+    if (openRef.current && state.mode === "search-files") {
+      setOpen(false);
+    } else {
+      state.setMode("search-files");
+      state.setSearch("");
+      setOpen(true);
+    }
+  }, [setOpen, state]);
+
+  const searchShortcut = getShortcut("SEARCH");
+  const fileSearchShortcut = getShortcut("FILE_SEARCH");
+
+  useKeyboardShortcut(searchShortcut, toggleCommands);
+  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggleCommands);
+  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggleCommands);
+  useKeyboardShortcut(fileSearchShortcut, openFileSearch);
 
   const {
     grouped,
