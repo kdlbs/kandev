@@ -40,8 +40,8 @@ export function useRepositories(workspaceId: string | null, enabled = true) {
         setRepositories(workspaceId, response.repositories);
       })
       .catch(() => {
-        // Don't call setRepositories on failure — it marks loadedByWorkspaceId=true,
-        // permanently preventing retry. Leave isLoaded=false so the hook retries.
+        if (cancelled) return;
+        setRepositories(workspaceId, []);
       })
       .finally(() => {
         inFlightRef.current = false;

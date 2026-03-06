@@ -116,9 +116,9 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
       localStorage.setItem("kandev.onboarding.completed", "true");
       // Pre-seed dialog selections so auto-select effects resolve on their
       // first render cycle instead of waiting for async API chains.
-      localStorage.setItem("kandev.dialog.lastRepositoryId", repositoryId);
-      localStorage.setItem("kandev.dialog.lastAgentProfileId", agentProfileId);
-      localStorage.setItem("kandev.dialog.lastBranch", "main");
+      localStorage.setItem("kandev.dialog.lastRepositoryId", JSON.stringify(repositoryId));
+      localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
+      localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
       // Set the window global that getBackendConfig() reads for API/WS connections
       window.__KANDEV_API_BASE_URL = backendUrl;
     },

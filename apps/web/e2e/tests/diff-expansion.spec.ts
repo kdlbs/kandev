@@ -50,6 +50,19 @@ async function openChangesTab(testPage: Page) {
   await changesTab.click();
 }
 
+/** Wait for Pierre Diffs shadow DOM to finish rendering content. */
+async function waitForDiffContent(testPage: Page, timeout = 30_000) {
+  await testPage.waitForFunction(
+    () => {
+      const container = document.querySelector("diffs-container");
+      const shadow = container?.shadowRoot;
+      return shadow != null && (shadow.textContent?.length ?? 0) > 50;
+    },
+    null,
+    { timeout },
+  );
+}
+
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
   const fileRow = testPage
@@ -74,8 +87,9 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
 
     // Pierre Diffs renders a diffs-container custom element
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
+    await waitForDiffContent(testPage);
 
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
       timeout: 5_000,
     });
