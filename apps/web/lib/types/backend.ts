@@ -82,6 +82,7 @@ export type KanbanUpdatePayload = {
       on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
+    show_in_command_panel?: boolean;
   }>;
   tasks: Array<{
     id: string;

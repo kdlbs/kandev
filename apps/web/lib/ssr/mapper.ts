@@ -38,6 +38,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         allow_manual_move: step.allow_manual_move,
         prompt: step.prompt,
         is_start_step: step.is_start_step,
+        show_in_command_panel: step.show_in_command_panel,
       })),
       tasks,
     },
