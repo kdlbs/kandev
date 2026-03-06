@@ -538,9 +538,9 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	return execution, nil
 }
 
-// captureBaseCommit retrieves the current HEAD commit from agentctl and stores it
-// as the base commit for the session. This allows filtering git log to only show
-// commits made during the session.
+// captureBaseCommit retrieves the merge-base commit from agentctl and stores it
+// as the base commit for the session. This allows calculating cumulative diffs
+// that show all changes on the branch relative to the target branch (e.g., main).
 func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	// Wait for agentctl to be ready before trying to get git status.
 	// LaunchAgent returns before agentctl is fully ready (waits in goroutine),
@@ -559,22 +559,33 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 			zap.Error(err))
 		return
 	}
-	if status == nil || status.HeadCommit == "" {
-		e.logger.Debug("no head commit available for base commit capture",
+
+	// Prefer BaseCommit (merge-base with target branch) over HeadCommit.
+	// BaseCommit gives us the common ancestor with main/origin, which is correct
+	// for showing all changes on the feature branch. HeadCommit would only show
+	// changes made after the session started, missing commits already on the branch.
+	baseCommit := status.BaseCommit
+	if baseCommit == "" {
+		// Fallback to HeadCommit if no merge-base is available (e.g., detached HEAD)
+		baseCommit = status.HeadCommit
+	}
+	if baseCommit == "" {
+		e.logger.Debug("no base commit available for capture",
 			zap.String("session_id", sessionID))
 		return
 	}
 
 	// Update the session's base commit in the database
-	if err := e.repo.UpdateTaskSessionBaseCommit(ctx, sessionID, status.HeadCommit); err != nil {
+	if err := e.repo.UpdateTaskSessionBaseCommit(ctx, sessionID, baseCommit); err != nil {
 		e.logger.Warn("failed to update session base commit",
 			zap.String("session_id", sessionID),
-			zap.String("head_commit", status.HeadCommit),
+			zap.String("base_commit", baseCommit),
 			zap.Error(err))
 		return
 	}
 
 	e.logger.Info("captured base commit for session",
 		zap.String("session_id", sessionID),
-		zap.String("base_commit", status.HeadCommit))
+		zap.String("base_commit", baseCommit),
+		zap.String("head_commit", status.HeadCommit))
 }
