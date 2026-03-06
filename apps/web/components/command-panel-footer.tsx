@@ -154,14 +154,14 @@ function CommandsListContent({
     <>
       {!hasInlineResults && !isSearching && <CommandEmpty>No commands found.</CommandEmpty>}
       {isSearching && taskResults.length === 0 && (
-        <CommandGroup heading="Tasks" forceMount>
+        <CommandGroup heading="Active Tasks" forceMount>
           <div className="flex items-center justify-center py-3">
             <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
           </div>
         </CommandGroup>
       )}
       {taskResults.length > 0 && (
-        <CommandGroup heading="Tasks" forceMount>
+        <CommandGroup heading={search.trim() ? "Tasks" : "Active Tasks"} forceMount>
           {taskResults.map((task) => (
             <TaskResultItem
               key={task.id}
