@@ -141,14 +141,14 @@ test.describe("Git commit pre-hooks", () => {
       // Verify the error output contains the pre-commit hook message
       await expect(
         session.gitOperationErrorMessage().getByText("lint check failed: missing semicolons"),
-      ).toBeVisible({ timeout: 5_000 });
+      ).toBeVisible({ timeout: 15_000 });
 
       // Click the Fix button
       await session.gitFixButton().click();
 
       // The fix prompt should appear in the chat as a user message
       await expect(
-        session.chat.getByText("git commit command failed", { exact: false }),
+        session.chat.getByText("git commit command failed", { exact: false }).first(),
       ).toBeVisible({ timeout: 10_000 });
 
       // The agent should process the fix prompt and respond

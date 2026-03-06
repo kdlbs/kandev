@@ -4,16 +4,17 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  // Parallelize across workers (each worker = own backend/frontend), but run
-  // tests sequentially within each worker. The testPage fixture does e2eReset
-  // on a shared worker-scoped backend before each test — concurrent tests
-  // within a worker would interfere via cleanup races.
+  // Single worker per process — CI uses --shard to split tests across matrix
+  // runners (each gets its own 4 vCPUs). Tests run serially within the worker
+  // because the testPage fixture does e2eReset on a shared worker-scoped
+  // backend before each test.
   fullyParallel: false,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
-  workers: CI ? 4 : 1,
+  workers: 1,
   timeout: 60_000,
-  reporter: CI ? [["html", { outputFolder: "./playwright-report" }]] : "list",
+  // CI uses blob reporter for cross-shard merge-reports; local uses list.
+  reporter: CI ? [["blob", { outputDir: "./blob-report" }]] : "list",
   outputDir: "./test-results",
 
   use: {

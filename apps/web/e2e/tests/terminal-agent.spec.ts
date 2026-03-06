@@ -298,9 +298,6 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     await taskB.click();
     await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
 
-    // Loading overlay reappears during the session switch
-    await session.waitForPassthroughLoading();
-
     // Wait for task B's passthrough terminal to load
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();

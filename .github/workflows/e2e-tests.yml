@@ -29,9 +29,13 @@ permissions:
 
 jobs:
   e2e:
-    name: Run E2E Tests
+    name: E2E Shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -61,21 +65,68 @@ jobs:
         working-directory: apps/web
         run: npx playwright install chromium --with-deps
 
-      - name: Run E2E tests
-        run: make test-e2e
+      - name: Build backend and web
+        run: make build-backend build-web
 
-      - name: Upload test report
+      - name: Run E2E tests (shard ${{ matrix.shard }}/4)
+        working-directory: apps/web
+        run: npx playwright test --config e2e/playwright.config.ts --shard=${{ matrix.shard }}/4
+
+      - name: Upload blob report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: apps/web/e2e/playwright-report/
-          retention-days: 14
+          name: blob-report-${{ matrix.shard }}
+          path: apps/web/e2e/blob-report/
+          retention-days: 3
 
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
+          name: test-results-${{ matrix.shard }}
           path: apps/web/e2e/test-results/
           retention-days: 7
+
+  e2e-report:
+    name: Merge E2E Reports
+    needs: e2e
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: apps/web/e2e/blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: Merge reports
+        working-directory: apps/web
+        run: npx playwright merge-reports --reporter=html ./e2e/blob-reports
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 14
