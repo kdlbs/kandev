@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   IconNetwork,
   IconExternalLink,
@@ -407,9 +407,7 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
   );
 }
 
-// Inner component that lives inside DialogContent's portal. It remounts each
-// time the dialog opens, so useEffect fires reliably for auto-refresh.
-function PortForwardDialogInner({
+function PortForwardDialogContent({
   sessionId,
   activeTunnels,
   setActiveTunnels,
@@ -427,6 +425,11 @@ function PortForwardDialogInner({
     setActiveTunnels,
   );
 
+  // Use a ref so refresh doesn't depend on activeTunnels identity (Map reference
+  // changes when listTunnels resolves, which would recreate the callback).
+  const activeTunnelsRef = useRef(activeTunnels);
+  activeTunnelsRef.current = activeTunnels;
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -434,8 +437,9 @@ function PortForwardDialogInner({
       setDetectedPorts(ports);
       setLoaded(true);
 
+      const tunnels = activeTunnelsRef.current;
       const detectedSet = new Set(ports.map((p) => p.port));
-      const tunnelOnlyPorts = [...activeTunnels.keys()].filter((p) => !detectedSet.has(p));
+      const tunnelOnlyPorts = [...tunnels.keys()].filter((p) => !detectedSet.has(p));
       if (tunnelOnlyPorts.length > 0) {
         setManualPorts((prev) => {
           const existing = new Set(prev);
@@ -446,12 +450,7 @@ function PortForwardDialogInner({
     } finally {
       setLoading(false);
     }
-  }, [sessionId, activeTunnels]);
-
-  // Auto-refresh on mount (i.e., each time the dialog opens)
-  useEffect(() => {
-    refresh();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   const handleAddManual = useCallback(
     (port: number) => {
@@ -465,7 +464,11 @@ function PortForwardDialogInner({
   );
 
   return (
-    <>
+    <DialogContent
+      data-testid="port-forward-dialog"
+      className="sm:max-w-2xl overflow-hidden"
+      onOpenAutoFocus={() => !loaded && refresh()}
+    >
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconNetwork className="h-5 w-5" />
@@ -487,26 +490,6 @@ function PortForwardDialogInner({
         />
         <ManualPortInput onAdd={handleAddManual} />
       </div>
-    </>
-  );
-}
-
-function PortForwardDialogContent({
-  sessionId,
-  activeTunnels,
-  setActiveTunnels,
-}: {
-  sessionId: string;
-  activeTunnels: Map<number, number>;
-  setActiveTunnels: (updater: (prev: Map<number, number>) => Map<number, number>) => void;
-}) {
-  return (
-    <DialogContent data-testid="port-forward-dialog" className="sm:max-w-2xl overflow-hidden">
-      <PortForwardDialogInner
-        sessionId={sessionId}
-        activeTunnels={activeTunnels}
-        setActiveTunnels={setActiveTunnels}
-      />
     </DialogContent>
   );
 }
