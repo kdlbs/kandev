@@ -62,13 +62,16 @@ test.describe("PR external detection", () => {
       repository_ids: [seedData.repositoryId],
     });
 
+    // Navigate to kanban BEFORE moving tasks so the WebSocket is already
+    // subscribed when task.updated events fire. The mock agent completes in
+    // <100ms; if we navigate after moveTask the events are emitted before
+    // the browser subscribes and the kanban never receives them.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
     // Move tasks to Working → auto_start → mock agent completes → Done
     await apiClient.moveTask(featureTask.id, workflow.id, workingStep.id);
     await apiClient.moveTask(helperTask.id, workflow.id, workingStep.id);
-
-    // --- Navigate to kanban and wait for tasks to complete ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
 
     await expect(kanban.taskCardInColumn("Feature Task", doneStep.id)).toBeVisible({
       timeout: 45_000,

@@ -127,6 +127,13 @@ test.describe("PR switcher changes panel", () => {
       repository_ids: [seedData.repositoryId],
     });
 
+    // Navigate to kanban BEFORE moving tasks so the WebSocket is already
+    // subscribed when task.updated events fire. The mock agent completes in
+    // <100ms; if we navigate after moveTask the events are emitted before
+    // the browser subscribes and the kanban never receives them.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
     // Move all tasks to Working → auto_start → mock agent completes → Done
     await apiClient.moveTask(taskA.id, workflow.id, workingStep.id);
     await apiClient.moveTask(taskB.id, workflow.id, workingStep.id);
@@ -159,10 +166,6 @@ test.describe("PR switcher changes panel", () => {
       additions: 125,
       deletions: 5,
     });
-
-    // --- Navigate to kanban and wait for tasks to complete ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
 
     // Wait for all three tasks to reach Done
     await expect(kanban.taskCardInColumn("Auth Fix Task", doneStep.id)).toBeVisible({
