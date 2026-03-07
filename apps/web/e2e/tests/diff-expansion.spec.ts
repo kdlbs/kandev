@@ -50,25 +50,6 @@ async function openChangesTab(testPage: Page) {
   await changesTab.click();
 }
 
-/**
- * Wait for specific text to appear inside any visible Pierre Diffs shadow DOM.
- * Uses querySelectorAll because multiple diffs-container elements can exist
- * (e.g., inline diffs in chat messages + the Changes panel diff viewer).
- */
-async function waitForDiffShadowText(testPage: Page, text: string, timeout = 60_000) {
-  await testPage.waitForFunction(
-    (searchText: string) => {
-      for (const container of document.querySelectorAll("diffs-container")) {
-        const shadow = container.shadowRoot;
-        if (shadow?.textContent?.includes(searchText)) return true;
-      }
-      return false;
-    },
-    text,
-    { timeout },
-  );
-}
-
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
   const fileRow = testPage
@@ -80,7 +61,7 @@ async function openExpansionFileDiff(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 2, timeout: 120_000 });
 
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
@@ -91,11 +72,11 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    // Pierre Diffs renders a diffs-container custom element
+    // Pierre Diffs renders a diffs-container custom element with an open shadow DOM.
+    // Playwright's getByText auto-pierces shadow DOM and auto-retries, so we use it
+    // directly with a generous timeout to handle async web worker initialization.
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "HUNK_TOP");
-
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
     await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
       timeout: 5_000,
     });

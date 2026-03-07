@@ -86,25 +86,6 @@ async function openFileDiff(testPage: Page, fileName: string) {
   await fileRow.click();
 }
 
-/**
- * Wait for specific text to appear inside any visible Pierre Diffs shadow DOM.
- * Uses querySelectorAll because multiple diffs-container elements can exist
- * (e.g., inline diffs in chat messages + the Changes panel diff viewer).
- */
-async function waitForDiffShadowText(testPage: Page, text: string, timeout = 60_000) {
-  await testPage.waitForFunction(
-    (searchText: string) => {
-      for (const container of document.querySelectorAll("diffs-container")) {
-        const shadow = container.shadowRoot;
-        if (shadow?.textContent?.includes(searchText)) return true;
-      }
-      return false;
-    },
-    text,
-    { timeout },
-  );
-}
-
 /** Helper to get the diffs container locator. */
 function getDiffsContainer(testPage: Page) {
   return testPage.locator(DIFFS_CONTAINER);
@@ -118,12 +99,13 @@ test.describe("Diff update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
-    // The Pierre Diffs viewer should show the initial modification
+    // The Pierre Diffs viewer should show the initial modification.
+    // Playwright's getByText auto-pierces shadow DOM and auto-retries, so we use it
+    // directly with a generous timeout to handle async web worker initialization.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "FIRST_MODIFICATION");
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 5_000,
+      timeout: 60_000,
     });
   });
 
@@ -135,9 +117,8 @@ test.describe("Diff update on file change", () => {
     // Verify initial diff content (scoped to diffs-container to avoid matching chat text)
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "FIRST_MODIFICATION");
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 5_000,
+      timeout: 60_000,
     });
 
     // Click on the Agent tab to make the chat input visible again
@@ -160,7 +141,6 @@ test.describe("Diff update on file change", () => {
     // Re-query the diffs container since the DOM may have changed after tab switch
     const updatedDiffsContainer = getDiffsContainer(testPage);
     await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "SECOND_MODIFICATION");
 
     // The diff should now show SECOND_MODIFICATION instead of FIRST_MODIFICATION.
     // Allow extra time for git polling to detect the change and re-render the diff.
@@ -195,9 +175,8 @@ test.describe("Untracked file diff update", () => {
     // Note: exact match is false because the line shows "line 1: INITIAL_CONTENT"
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "INITIAL_CONTENT");
     await expect(diffsContainer.getByText("INITIAL_CONTENT")).toBeVisible({
-      timeout: 5_000,
+      timeout: 60_000,
     });
 
     // Click on the Agent tab to make the chat input visible again
@@ -221,7 +200,6 @@ test.describe("Untracked file diff update", () => {
     // Re-query the diffs container
     const updatedDiffsContainer = getDiffsContainer(testPage);
     await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForDiffShadowText(testPage, "MODIFIED_CONTENT");
 
     // The diff should now show MODIFIED_CONTENT instead of INITIAL_CONTENT
     // Note: exact match is false because the line includes prefix text
