@@ -101,14 +101,16 @@ test.describe("Port Forward Dialog", () => {
     await expect(session.portForwardDialog).toBeVisible();
   });
 
-  test("refresh shows no listening ports message", async ({ testPage, apiClient, seedData }) => {
+  test("auto-refresh loads port list on open", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Refresh Test");
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
-    // Dialog auto-refreshes on open; wait for the "no ports" message
-    await expect(session.portForwardDialog.getByText("No listening ports detected")).toBeVisible({
-      timeout: 10_000,
-    });
+    // Dialog auto-refreshes on open; wait for the placeholder to disappear,
+    // meaning either ports were detected or the "no ports" message appeared.
+    // The E2E host may have real listening ports, so we accept either outcome.
+    const noPortsMessage = session.portForwardDialog.getByText("No listening ports detected");
+    const detectedBadge = session.portForwardDialog.getByText("Detected").first();
+    await expect(noPortsMessage.or(detectedBadge)).toBeVisible({ timeout: 10_000 });
   });
 
   test("add manual port shows row with Manual badge", async ({ testPage, apiClient, seedData }) => {
