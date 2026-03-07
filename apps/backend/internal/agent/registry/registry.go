@@ -49,11 +49,14 @@ func (r *Registry) LoadDefaults() {
 		agents.NewClaudeCode(),
 		agents.NewClaudeACP(),
 		agents.NewCodex(),
+		agents.NewCodexACP(),
 		agents.NewCopilot(),
+		agents.NewCopilotACP(),
 		agents.NewGemini(),
 		agents.NewOpenCode(),
 		agents.NewOpenCodeACP(),
 		agents.NewAmp(),
+		agents.NewAmpACP(),
 		agents.NewMockAgent(),
 	}
 
