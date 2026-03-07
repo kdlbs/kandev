@@ -123,6 +123,7 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 
 function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
+  if (steps.length === 0) return null; // no steps loaded yet — don't filter
   return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
 }
 
@@ -173,7 +174,9 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
         .then((res) => {
           if (controller.signal.aborted) return;
           const tasks = (res.tasks ?? []).filter(
-            (t) => visibleStepIds.has(t.workflow_step_id) && !ARCHIVED_STATES.has(t.state),
+            (t) =>
+              (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) &&
+              !ARCHIVED_STATES.has(t.state),
           );
           tasks.sort(
             (a, b) =>

@@ -321,6 +321,7 @@ type BackendWorkflowStep = {
   events?: StepEvents;
   allow_manual_move?: boolean;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   created_at: string;
   updated_at: string;
@@ -336,6 +337,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   events: step.events,
   allow_manual_move: step.allow_manual_move,
   is_start_step: step.is_start_step,
+  show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   created_at: step.created_at,
   updated_at: step.updated_at,
