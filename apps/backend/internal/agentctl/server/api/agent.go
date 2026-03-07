@@ -248,6 +248,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSPermissionRespond(ctx, msg)
 	case "agent.stderr":
 		return s.handleWSStderr(ctx, msg)
+	case "agent.session.set_mode":
+		return s.handleWSSetMode(ctx, msg)
 	default:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
@@ -474,5 +476,37 @@ func (s *Server) handleWSPermissionRespond(_ context.Context, msg *ws.Message) *
 func (s *Server) handleWSStderr(_ context.Context, msg *ws.Message) *ws.Message {
 	lines := s.procMgr.GetRecentStderr()
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, AgentStderrResponse{Lines: lines})
+	return resp
+}
+
+func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req struct {
+		SessionID string `json:"session_id"`
+		ModeID    string `json:"mode_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	ms, ok := agentAdapter.(adapter.ModeSettableAdapter)
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support mode switching", nil)
+		return resp
+	}
+
+	if err := ms.SetMode(ctx, req.ModeID); err != nil {
+		s.logger.Error("set mode failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
 	return resp
 }

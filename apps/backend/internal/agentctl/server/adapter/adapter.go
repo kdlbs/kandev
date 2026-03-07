@@ -88,6 +88,12 @@ type StderrProviderSetter interface {
 	SetStderrProvider(provider StderrProvider)
 }
 
+// ModeSettableAdapter is an optional interface implemented by adapters that
+// support changing the session mode (e.g., ACP adapters with session/set_mode).
+type ModeSettableAdapter interface {
+	SetMode(ctx context.Context, modeID string) error
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

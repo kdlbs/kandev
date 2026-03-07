@@ -422,6 +422,27 @@ function useSessionData(
   };
 }
 
+type TodoStatus = "pending" | "in_progress" | "completed" | "failed";
+
+function useSessionTodoItems(
+  resolvedSessionId: string | null,
+  messageTodos: Array<{ text: string; done?: boolean }>,
+) {
+  const storeTodos = useAppStore((s) =>
+    resolvedSessionId ? s.sessionTodos.bySessionId[resolvedSessionId] : undefined,
+  );
+  return useMemo(() => {
+    if (storeTodos && storeTodos.length > 0) {
+      return storeTodos.map((e: { description: string; status: string }) => ({
+        text: e.description,
+        done: e.status === "completed",
+        status: e.status as TodoStatus,
+      }));
+    }
+    return messageTodos;
+  }, [storeTodos, messageTodos]);
+}
+
 export type UseChatPanelStateOptions = {
   sessionId: string | null;
   onOpenFile?: (path: string) => void;
@@ -515,6 +536,8 @@ export function useChatPanelState({
     onOpenFileAtLine,
   });
 
+  const todoItems = useSessionTodoItems(resolvedSessionId, sessionData.todoItems);
+
   return {
     ...sessionState,
     ...planMode,
@@ -527,5 +550,6 @@ export function useChatPanelState({
     planModeAvailable,
     mcpServers,
     prompts,
+    todoItems,
   };
 }

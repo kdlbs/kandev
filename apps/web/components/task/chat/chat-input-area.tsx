@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { IconBrain, IconGitMerge, IconX } from "@tabler/icons-react";
+import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -292,6 +293,36 @@ function PRMergedBanner({ taskId }: { taskId: string }) {
   );
 }
 
+type TodoDisplayItem = {
+  text: string;
+  done?: boolean;
+  status?: "pending" | "in_progress" | "completed" | "failed";
+};
+
+function SessionStatusBar({
+  agentMode,
+  todoItems,
+}: {
+  agentMode: string | undefined;
+  todoItems: TodoDisplayItem[];
+}) {
+  const showMode = agentMode && agentMode !== "default";
+  const showTodos = todoItems.length > 0;
+  if (!showMode && !showTodos) return null;
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
+      {showMode && (
+        <>
+          <IconBrain className="h-3 w-3" />
+          <span className="capitalize">{agentMode} mode</span>
+        </>
+      )}
+      {showMode && showTodos && <span className="text-border">·</span>}
+      <TodoIndicator todos={todoItems} />
+    </div>
+  );
+}
+
 type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
   clarificationKey: number;
@@ -349,9 +380,10 @@ export function ChatInputArea({
     chatInputRef,
   );
 
-  const agentMode = useAppStore((state) =>
+  const agentModeState = useAppStore((state) =>
     resolvedSessionId ? state.sessionMode.bySessionId[resolvedSessionId] : undefined,
   );
+  const agentMode = agentModeState?.currentModeId;
 
   const hasClarification = !!panelState.pendingClarification;
   const placeholder = resolveInputPlaceholder(
@@ -363,12 +395,7 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      {agentMode && agentMode !== "default" && (
-        <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
-          <IconBrain className="h-3 w-3" />
-          <span className="capitalize">{agentMode} mode</span>
-        </div>
-      )}
+      <SessionStatusBar agentMode={agentMode} todoItems={todoItems} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       <ChatInputContainer
         ref={chatInputRef}
@@ -404,7 +431,6 @@ export function ChatInputArea({
         contextFiles={contextFiles}
         onToggleContextFile={handleToggleContextFile}
         onAddContextFile={handleAddContextFile}
-        todoItems={todoItems}
         onImplementPlan={handleImplementPlan}
       />
     </div>

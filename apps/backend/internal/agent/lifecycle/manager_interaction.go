@@ -72,6 +72,27 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	return nil
 }
 
+// SetSessionMode changes the session mode for a running agent.
+func (m *Manager) SetSessionMode(ctx context.Context, executionID, acpSessionID, modeID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+	return execution.agentctl.SetMode(ctx, acpSessionID, modeID)
+}
+
+// SetSessionModeBySessionID changes the session mode for a running agent by session ID.
+func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
+}
+
 // CancelAgentBySessionID cancels the current agent turn for a specific session
 func (m *Manager) CancelAgentBySessionID(ctx context.Context, sessionID string) error {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)

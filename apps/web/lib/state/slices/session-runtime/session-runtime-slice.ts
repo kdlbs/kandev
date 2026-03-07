@@ -82,6 +82,10 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
   sessionMode: { bySessionId: {} },
+  agentCapabilities: { bySessionId: {} },
+  sessionModels: { bySessionId: {} },
+  promptUsage: { bySessionId: {} },
+  sessionTodos: { bySessionId: {} },
   userShells: { bySessionId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
 };
@@ -228,13 +232,33 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId) =>
+  setSessionMode: (sessionId, modeId, availableModes) =>
     set((draft) => {
-      draft.sessionMode.bySessionId[sessionId] = modeId;
+      const existing = draft.sessionMode.bySessionId[sessionId];
+      draft.sessionMode.bySessionId[sessionId] = {
+        currentModeId: modeId,
+        availableModes: availableModes ?? existing?.availableModes ?? [],
+      };
     }),
   clearSessionMode: (sessionId) =>
     set((draft) => {
       delete draft.sessionMode.bySessionId[sessionId];
+    }),
+  setAgentCapabilities: (sessionId, caps) =>
+    set((draft) => {
+      draft.agentCapabilities.bySessionId[sessionId] = caps;
+    }),
+  setSessionModels: (sessionId, data) =>
+    set((draft) => {
+      draft.sessionModels.bySessionId[sessionId] = data;
+    }),
+  setPromptUsage: (sessionId, usage) =>
+    set((draft) => {
+      draft.promptUsage.bySessionId[sessionId] = usage;
+    }),
+  setSessionTodos: (sessionId, entries) =>
+    set((draft) => {
+      draft.sessionTodos.bySessionId[sessionId] = entries;
     }),
   ...buildUserShellActions(set),
 });

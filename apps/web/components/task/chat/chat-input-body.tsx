@@ -5,13 +5,10 @@ import { cn } from "@/lib/utils";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
-import { TodoSummary } from "./todo-summary";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
-
-type TodoItem = { text: string; done?: boolean };
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -156,20 +153,15 @@ export type ChatInputContextAreaProps = {
   hasContextZone: boolean;
   allItems: ContextItem[];
   sessionId: string | null;
-  hasTodos: boolean;
-  todoItems: TodoItem[];
 };
 
 export function ChatInputContextArea({
   hasContextZone,
   allItems,
   sessionId,
-  hasTodos,
-  todoItems,
 }: ChatInputContextAreaProps) {
   if (!hasContextZone) return null;
-  const todoSlot = hasTodos ? <TodoSummary todos={todoItems} /> : undefined;
-  return <ContextZone items={allItems} sessionId={sessionId} todoSlot={todoSlot} />;
+  return <ContextZone items={allItems} sessionId={sessionId} />;
 }
 
 export type ChatInputBodyProps = {

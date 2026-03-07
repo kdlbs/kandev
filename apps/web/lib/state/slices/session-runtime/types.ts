@@ -123,8 +123,79 @@ export type AvailableCommandsState = {
   bySessionId: Record<string, AvailableCommand[]>;
 };
 
+export type SessionModeEntry = {
+  id: string;
+  name: string;
+  description?: string;
+};
+
 export type SessionModeState = {
-  bySessionId: Record<string, string>;
+  bySessionId: Record<
+    string,
+    {
+      currentModeId: string;
+      availableModes: SessionModeEntry[];
+    }
+  >;
+};
+
+export type AuthMethodEntry = {
+  id: string;
+  name: string;
+  description?: string;
+  terminalAuth?: { command: string; args?: string[]; label?: string };
+  meta?: Record<string, unknown>;
+};
+
+export type SessionModelEntry = {
+  modelId: string;
+  name: string;
+  description?: string;
+  usageMultiplier?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type ConfigOptionEntry = {
+  type: string;
+  id: string;
+  name: string;
+  currentValue: string;
+  category?: string;
+  options?: { value: string; name: string }[];
+};
+
+export type AgentCapabilitiesEntry = {
+  supportsImage: boolean;
+  supportsAudio: boolean;
+  supportsEmbeddedContext: boolean;
+  authMethods: AuthMethodEntry[];
+};
+
+export type PromptUsageEntry = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  totalTokens: number;
+};
+
+export type AgentCapabilitiesState = {
+  bySessionId: Record<string, AgentCapabilitiesEntry>;
+};
+
+export type SessionModelsState = {
+  bySessionId: Record<
+    string,
+    {
+      currentModelId: string;
+      models: SessionModelEntry[];
+      configOptions: ConfigOptionEntry[];
+    }
+  >;
+};
+
+export type PromptUsageState = {
+  bySessionId: Record<string, PromptUsageEntry>;
 };
 
 export type UserShellInfo = {
@@ -163,6 +234,16 @@ export type PrepareProgressState = {
   bySessionId: Record<string, SessionPrepareState>;
 };
 
+export type TodoEntry = {
+  description: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  priority?: string;
+};
+
+export type SessionTodosState = {
+  bySessionId: Record<string, TodoEntry[]>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -173,6 +254,10 @@ export type SessionRuntimeSliceState = {
   agents: AgentState;
   availableCommands: AvailableCommandsState;
   sessionMode: SessionModeState;
+  agentCapabilities: AgentCapabilitiesState;
+  sessionModels: SessionModelsState;
+  promptUsage: PromptUsageState;
+  sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
 };
@@ -201,8 +286,23 @@ export type SessionRuntimeSliceActions = {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string) => void;
+  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
   clearSessionMode: (sessionId: string) => void;
+  // Agent capabilities actions
+  setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
+  // Session models actions
+  setSessionModels: (
+    sessionId: string,
+    data: {
+      currentModelId: string;
+      models: SessionModelEntry[];
+      configOptions: ConfigOptionEntry[];
+    },
+  ) => void;
+  // Prompt usage actions
+  setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  // Session todos actions
+  setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
   setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;

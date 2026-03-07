@@ -36,8 +36,6 @@ export type ChatInputContainerHandle = {
   clear: () => void;
 };
 
-type TodoItem = { text: string; done?: boolean };
-
 type ChatInputContainerProps = {
   onSubmit: (
     message: string,
@@ -73,7 +71,6 @@ type ChatInputContainerProps = {
   contextFiles?: ContextFile[];
   onToggleContextFile?: (file: ContextFile) => void;
   onAddContextFile?: (file: ContextFile) => void;
-  todoItems?: TodoItem[];
   onImplementPlan?: () => void;
 };
 
@@ -134,8 +131,6 @@ function buildContextAreaProps(
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
-    hasTodos: s.hasTodos,
-    todoItems: p.todoItems ?? [],
   };
 }
 
@@ -208,7 +203,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       planContextEnabled: props.planContextEnabled ?? false,
       contextFiles: props.contextFiles ?? [],
       contextItems: props.contextItems ?? [],
-      todoItems: props.todoItems ?? [],
       showRequestChangesTooltip,
     } as const;
 
@@ -227,7 +221,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onClarificationResolved: props.onClarificationResolved,
       pendingCommentsByFile: props.pendingCommentsByFile,
       hasContextComments: props.hasContextComments ?? false,
-      todoItems: p.todoItems,
       showRequestChangesTooltip,
       onRequestChangesTooltipDismiss: props.onRequestChangesTooltipDismiss,
       onSubmit: props.onSubmit,
