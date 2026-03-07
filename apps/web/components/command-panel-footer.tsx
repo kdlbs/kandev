@@ -351,6 +351,7 @@ export function CommandPanelView({
           {mode !== MODE_COMMANDS && (
             <button
               onClick={goBack}
+              tabIndex={-1}
               className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <span>←</span>
