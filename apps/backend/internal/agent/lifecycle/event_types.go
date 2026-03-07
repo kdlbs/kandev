@@ -130,6 +130,27 @@ type AgentStreamEventData struct {
 	// CurrentModeID is the active session mode identifier.
 	// Populated when Type is "session_mode".
 	CurrentModeID string `json:"current_mode_id,omitempty"`
+
+	// AvailableModes lists modes the agent supports.
+	// Populated when Type is "session_mode".
+	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
+
+	// Agent capabilities (from "agent_capabilities" event)
+	SupportsImage           bool                     `json:"supports_image"`
+	SupportsAudio           bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
+
+	// Session models (from "session_models" event)
+	CurrentModelID string                     `json:"current_model_id,omitempty"`
+	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
+	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+
+	// Usage (attached to "complete" event)
+	Usage *streams.PromptUsage `json:"usage,omitempty"`
+
+	// Plan entries (from "plan" event — ACP/Codex agent todos)
+	PlanEntries []streams.PlanEntry `json:"plan_entries,omitempty"`
 }
 
 // AgentStreamEventPayload is the payload for agent stream events (WebSocket streaming).
@@ -363,14 +384,62 @@ func (p AvailableCommandsEventPayload) GetSessionID() string {
 
 // SessionModeEventPayload is the payload for session mode change events.
 type SessionModeEventPayload struct {
-	TaskID        string `json:"task_id"`
-	SessionID     string `json:"session_id"`
-	AgentID       string `json:"agent_id"`
-	CurrentModeID string `json:"current_mode_id"`
-	Timestamp     string `json:"timestamp"`
+	TaskID         string                    `json:"task_id"`
+	SessionID      string                    `json:"session_id"`
+	AgentID        string                    `json:"agent_id"`
+	CurrentModeID  string                    `json:"current_mode_id"`
+	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
+	Timestamp      string                    `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p SessionModeEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// AgentCapabilitiesEventPayload is the payload for agent capabilities events.
+type AgentCapabilitiesEventPayload struct {
+	TaskID                  string                   `json:"task_id"`
+	SessionID               string                   `json:"session_id"`
+	AgentID                 string                   `json:"agent_id"`
+	SupportsImage           bool                     `json:"supports_image"`
+	SupportsAudio           bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods"`
+	Timestamp               string                   `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p AgentCapabilitiesEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionModelsEventPayload is the payload for session models events.
+type SessionModelsEventPayload struct {
+	TaskID         string                     `json:"task_id"`
+	SessionID      string                     `json:"session_id"`
+	AgentID        string                     `json:"agent_id"`
+	CurrentModelID string                     `json:"current_model_id"`
+	Models         []streams.SessionModelInfo `json:"models"`
+	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	Timestamp      string                     `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionModelsEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionTodosEventPayload is the payload for session todos (ACP plan entries) events.
+type SessionTodosEventPayload struct {
+	TaskID    string              `json:"task_id"`
+	SessionID string              `json:"session_id"`
+	AgentID   string              `json:"agent_id"`
+	Entries   []streams.PlanEntry `json:"entries"`
+	Timestamp string              `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionTodosEventPayload) GetSessionID() string {
 	return p.SessionID
 }

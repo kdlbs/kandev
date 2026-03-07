@@ -1,0 +1,140 @@
+package agents
+
+import (
+	"context"
+	_ "embed"
+	"time"
+
+	"github.com/kandev/kandev/pkg/agent"
+)
+
+//go:embed logos/claude_code_light.svg
+var claudeACPLogoLight []byte
+
+//go:embed logos/claude_code_dark.svg
+var claudeACPLogoDark []byte
+
+const claudeACPPkg = "@zed-industries/claude-agent-acp"
+
+var (
+	_ Agent            = (*ClaudeACP)(nil)
+	_ PassthroughAgent = (*ClaudeACP)(nil)
+)
+
+// ClaudeACP implements Agent for the Zed Industries claude-agent-acp package.
+// It speaks the ACP protocol (JSON-RPC 2.0 over stdin/stdout) and wraps the
+// Claude Agent SDK. Used for A/B comparison against the stream-json Claude Code agent.
+type ClaudeACP struct {
+	StandardPassthrough
+}
+
+func NewClaudeACP() *ClaudeACP {
+	return &ClaudeACP{
+		StandardPassthrough: StandardPassthrough{
+			PermSettings: claudeCodePermSettings,
+			Cfg: PassthroughConfig{
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
+				ResumeFlag:        NewParam("-c"),
+				SessionResumeFlag: NewParam("--resume"),
+			},
+		},
+	}
+}
+
+func (a *ClaudeACP) ID() string          { return "claude-acp" }
+func (a *ClaudeACP) Name() string        { return "Claude ACP Agent" }
+func (a *ClaudeACP) DisplayName() string { return "Claude (ACP)" }
+func (a *ClaudeACP) Description() string {
+	return "Anthropic Claude coding agent using the ACP protocol via the Zed Industries bridge."
+}
+func (a *ClaudeACP) Enabled() bool     { return true }
+func (a *ClaudeACP) DisplayOrder() int { return 2 }
+
+func (a *ClaudeACP) Logo(v LogoVariant) []byte {
+	if v == LogoDark {
+		return claudeACPLogoDark
+	}
+	return claudeACPLogoLight
+}
+
+func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
+	result, err := Detect(ctx, WithFileExists("~/.claude.json"))
+	if err != nil {
+		return result, err
+	}
+	result.SupportsMCP = true
+	result.InstallationPaths = []string{expandHomePath("~/.claude.json")}
+	result.Capabilities = DiscoveryCapabilities{
+		SupportsSessionResume: true,
+	}
+	return result, nil
+}
+
+func (a *ClaudeACP) DefaultModel() string { return "claude-sonnet-4-6" }
+
+func (a *ClaudeACP) ListModels(ctx context.Context) (*ModelList, error) {
+	return &ModelList{SupportsDynamic: true}, nil
+}
+
+func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
+	return Cmd("npx", "-y", claudeACPPkg).Build()
+}
+
+func (a *ClaudeACP) Runtime() *RuntimeConfig {
+	canRecover := true
+	return &RuntimeConfig{
+		Image:       "kandev/multi-agent",
+		Tag:         "latest",
+		Cmd:         Cmd("npx", "-y", claudeACPPkg).Build(),
+		WorkingDir:  "{workspace}",
+		RequiredEnv: []string{"ANTHROPIC_API_KEY"},
+		Env: map[string]string{
+			"MCP_TIMEOUT": "7200000",
+		},
+		Mounts: []MountTemplate{
+			{Source: "{workspace}", Target: "/workspace"},
+		},
+		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:       agent.ProtocolACP,
+		SessionConfig: SessionConfig{
+			NativeSessionResume: true,
+			CanRecover:          &canRecover,
+			SessionDirTemplate:  "{home}/.claude",
+		},
+	}
+}
+
+func (a *ClaudeACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:      "env",
+				EnvVar:    "CLAUDE_CODE_OAUTH_TOKEN",
+				SetupHint: "Run `claude setup-token` to generate a long-lived OAuth token",
+				SetupScript: `mkdir -p "${HOME}/.claude"
+cat > "${HOME}/.claude/.credentials.json" <<CREDS
+{"claudeAiOauth":{"accessToken":"${CLAUDE_CODE_OAUTH_TOKEN}","expiresAt":4102444800000}}
+CREDS
+cat > "${HOME}/.claude.json" <<'JSON'
+{"hasCompletedOnboarding":true}
+JSON
+chmod 600 "${HOME}/.claude/.credentials.json"
+chmod 600 "${HOME}/.claude.json"`,
+			},
+		},
+	}
+}
+
+func (a *ClaudeACP) InstallScript() string {
+	return "npm install -g " + claudeACPPkg
+}
+
+func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
+	return claudeCodePermSettings
+}

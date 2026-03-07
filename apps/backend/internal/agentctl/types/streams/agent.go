@@ -45,6 +45,12 @@ const (
 
 	// EventTypeRateLimit indicates the agent is being rate-limited by the API.
 	EventTypeRateLimit = "rate_limit"
+
+	// EventTypeAgentCapabilities indicates agent capabilities from ACP initialize.
+	EventTypeAgentCapabilities = "agent_capabilities"
+
+	// EventTypeSessionModels indicates available models from ACP session/new.
+	EventTypeSessionModels = "session_models"
 )
 
 // Session status constants for EventTypeSessionStatus events.
@@ -195,6 +201,39 @@ type AgentEvent struct {
 
 	// CurrentModeID is the active session mode identifier (e.g., "code", "ask", "architect").
 	CurrentModeID string `json:"current_mode_id,omitempty"`
+
+	// AvailableModes lists the modes the agent supports.
+	AvailableModes []SessionModeInfo `json:"available_modes,omitempty"`
+
+	// --- Agent capabilities fields (for "agent_capabilities" type) ---
+
+	// SupportsImage indicates the agent natively supports image content blocks.
+	SupportsImage bool `json:"supports_image"`
+
+	// SupportsAudio indicates the agent natively supports audio content blocks.
+	SupportsAudio bool `json:"supports_audio"`
+
+	// SupportsEmbeddedContext indicates the agent supports embedded context.
+	SupportsEmbeddedContext bool `json:"supports_embedded_context"`
+
+	// AuthMethods lists authentication methods from ACP initialize.
+	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`
+
+	// --- Session models fields (for "session_models" type) ---
+
+	// CurrentModelID is the active model identifier.
+	CurrentModelID string `json:"current_model_id,omitempty"`
+
+	// SessionModels lists models available in the ACP session.
+	SessionModels []SessionModelInfo `json:"session_models,omitempty"`
+
+	// ConfigOptions lists session configuration options from ACP _meta.
+	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
+
+	// --- Usage fields (attached to "complete" event) ---
+
+	// Usage contains token usage stats from the prompt response.
+	Usage *PromptUsage `json:"usage,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -250,6 +289,105 @@ type ContentBlock struct {
 
 	// Size is the resource size in bytes (for "resource_link" type).
 	Size *int `json:"size,omitempty"`
+}
+
+// SessionModeInfo represents an available session mode from ACP.
+type SessionModeInfo struct {
+	// ID is the mode identifier (e.g., "code", "ask", "architect").
+	ID string `json:"id"`
+
+	// Name is a human-readable name for the mode.
+	Name string `json:"name"`
+
+	// Description provides additional context about the mode.
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModelInfo represents a model available in an ACP session.
+type SessionModelInfo struct {
+	// ModelID is the model identifier.
+	ModelID string `json:"model_id"`
+
+	// Name is a human-readable model name.
+	Name string `json:"name"`
+
+	// Description provides additional context about the model.
+	Description string `json:"description,omitempty"`
+
+	// UsageMultiplier is the normalized pricing multiplier (e.g., "1x", "3x").
+	UsageMultiplier string `json:"usage_multiplier,omitempty"`
+
+	// Meta contains raw _meta from the agent for agent-specific rendering.
+	Meta map[string]any `json:"meta,omitempty"`
+}
+
+// AuthMethodInfo represents an authentication method from ACP initialize.
+type AuthMethodInfo struct {
+	// ID is the auth method identifier.
+	ID string `json:"id"`
+
+	// Name is a human-readable name for the auth method.
+	Name string `json:"name"`
+
+	// Description provides additional context.
+	Description string `json:"description,omitempty"`
+
+	// TerminalAuth contains normalized terminal-based auth info from _meta.
+	TerminalAuth *TerminalAuth `json:"terminal_auth,omitempty"`
+
+	// Meta contains raw _meta from the agent.
+	Meta map[string]any `json:"meta,omitempty"`
+}
+
+// TerminalAuth contains normalized terminal-based authentication info.
+type TerminalAuth struct {
+	// Command is the CLI command to run (e.g., "copilot").
+	Command string `json:"command"`
+
+	// Args are the command arguments (e.g., ["auth", "login"]).
+	Args []string `json:"args,omitempty"`
+
+	// Label is a human-readable description of the auth action.
+	Label string `json:"label,omitempty"`
+}
+
+// ConfigOption represents a session configuration option from ACP _meta.
+type ConfigOption struct {
+	// Type is the option type: "select", "toggle", etc.
+	Type string `json:"type"`
+
+	// ID is the option identifier (e.g., "mode", "model", "reasoning_effort").
+	ID string `json:"id"`
+
+	// Name is a human-readable name.
+	Name string `json:"name"`
+
+	// CurrentValue is the currently selected value.
+	CurrentValue string `json:"current_value"`
+
+	// Category groups related options.
+	Category string `json:"category,omitempty"`
+
+	// Options lists the selectable values.
+	Options []ConfigOptionValue `json:"options,omitempty"`
+}
+
+// ConfigOptionValue represents a selectable value for a ConfigOption.
+type ConfigOptionValue struct {
+	// Value is the option value.
+	Value string `json:"value"`
+
+	// Name is a human-readable label.
+	Name string `json:"name"`
+}
+
+// PromptUsage contains token usage info from an ACP prompt response.
+type PromptUsage struct {
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedReadTokens  int64 `json:"cached_read_tokens,omitempty"`
+	CachedWriteTokens int64 `json:"cached_write_tokens,omitempty"`
+	TotalTokens       int64 `json:"total_tokens"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

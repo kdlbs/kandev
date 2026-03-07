@@ -55,6 +55,16 @@ import {
   type PreviewDevicePreset,
   type ConnectionState,
 } from "./slices";
+import type {
+  AvailableCommand,
+  SessionModeEntry,
+  AgentCapabilitiesEntry,
+  SessionModelEntry,
+  ConfigOptionEntry,
+  PromptUsageEntry,
+  TodoEntry,
+  UserShellInfo,
+} from "./slices/session-runtime/types";
 
 // Re-export all types from slices for backwards compatibility
 export type {
@@ -172,6 +182,10 @@ export type AppState = {
   sessionMode: (typeof defaultSessionRuntimeState)["sessionMode"];
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
   prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
+  sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
+  agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
+  sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
+  promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -344,24 +358,30 @@ export type AppState = {
   setQueueLoading: (sessionId: string, loading: boolean) => void;
   clearQueueStatus: (sessionId: string) => void;
   // Available commands actions
-  setAvailableCommands: (
-    sessionId: string,
-    commands: import("./slices/session-runtime/types").AvailableCommand[],
-  ) => void;
+  setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string) => void;
+  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
   clearSessionMode: (sessionId: string) => void;
+  // Agent capabilities actions
+  setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
+  // Session models actions
+  setSessionModels: (
+    sessionId: string,
+    data: {
+      currentModelId: string;
+      models: SessionModelEntry[];
+      configOptions: ConfigOptionEntry[];
+    },
+  ) => void;
+  // Prompt usage actions
+  setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  // Session todos actions
+  setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
-  setUserShells: (
-    sessionId: string,
-    shells: import("./slices/session-runtime/types").UserShellInfo[],
-  ) => void;
+  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (
-    sessionId: string,
-    shell: import("./slices/session-runtime/types").UserShellInfo,
-  ) => void;
+  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
 };
 
@@ -409,6 +429,10 @@ const defaultState = {
   sessionMode: defaultSessionRuntimeState.sessionMode,
   userShells: defaultSessionRuntimeState.userShells,
   prepareProgress: defaultSessionRuntimeState.prepareProgress,
+  sessionTodos: defaultSessionRuntimeState.sessionTodos,
+  agentCapabilities: defaultSessionRuntimeState.agentCapabilities,
+  sessionModels: defaultSessionRuntimeState.sessionModels,
+  promptUsage: defaultSessionRuntimeState.promptUsage,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
   prWatches: defaultGitHubState.prWatches,
@@ -476,6 +500,10 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
     userShells: { ...defaultState.userShells, ...initialState.userShells },
     prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
+    sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },
+    agentCapabilities: { ...defaultState.agentCapabilities, ...initialState.agentCapabilities },
+    sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
+    promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
@@ -551,6 +579,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       sessionMode: merged.sessionMode,
       userShells: merged.userShells,
       prepareProgress: merged.prepareProgress,
+      sessionTodos: merged.sessionTodos,
+      agentCapabilities: merged.agentCapabilities,
+      sessionModels: merged.sessionModels,
+      promptUsage: merged.promptUsage,
       githubStatus: merged.githubStatus,
       taskPRs: merged.taskPRs,
       prWatches: merged.prWatches,

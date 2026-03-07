@@ -349,16 +349,16 @@ function RightTopGroupActions() {
 
 function SessionModeBadge() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const modeId = useAppStore((state) => {
+  const modeState = useAppStore((state) => {
     if (!activeSessionId) return null;
     return state.sessionMode.bySessionId[activeSessionId] ?? null;
   });
 
-  if (!modeId) return null;
+  if (!modeState?.currentModeId) return null;
 
   return (
     <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
-      {modeId}
+      {modeState.currentModeId}
     </span>
   );
 }

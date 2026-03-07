@@ -33,6 +33,9 @@ export type BackendMessageType =
   | "session.turn.completed"
   | "session.available_commands"
   | "session.mode_changed"
+  | "session.agent_capabilities"
+  | "session.models_updated"
+  | "session.todos_updated"
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
@@ -70,6 +73,12 @@ import type { AvailableAgent, SavedLayout, StepEvents, TaskState } from "@/lib/t
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { TaskPR } from "@/lib/types/github";
+import type { FileChangeNotificationPayload } from "./workspace-files";
+import type {
+  AgentCapabilitiesPayload,
+  SessionModelsPayload,
+  SessionTodosPayload,
+} from "./session-runtime-payloads";
 
 export type KanbanUpdatePayload = {
   workflowId: string;
@@ -407,8 +416,23 @@ export type SessionModeChangedPayload = {
   session_id: string;
   agent_id: string;
   current_mode_id: string;
+  available_modes?: {
+    id: string;
+    name: string;
+    description?: string;
+  }[];
   timestamp?: string;
 };
+
+// Session runtime payload types (extracted to reduce file size)
+export {
+  type AuthMethodInfoPayload,
+  type AgentCapabilitiesPayload,
+  type SessionModelInfoPayload,
+  type ConfigOptionPayload,
+  type SessionModelsPayload,
+  type SessionTodosPayload,
+} from "./session-runtime-payloads";
 
 export type TaskPlanEventPayload = {
   id: string;
@@ -482,6 +506,12 @@ export type BackendMessageMap = {
     AvailableCommandsPayload
   >;
   "session.mode_changed": BackendMessage<"session.mode_changed", SessionModeChangedPayload>;
+  "session.agent_capabilities": BackendMessage<
+    "session.agent_capabilities",
+    AgentCapabilitiesPayload
+  >;
+  "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+  "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
@@ -517,74 +547,14 @@ export type BackendMessageMap = {
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
 };
 
-// Workspace file types
-export type FileTreeNode = {
-  name: string;
-  path: string;
-  is_dir: boolean;
-  size?: number;
-  children?: FileTreeNode[];
-};
-
-export type FileTreeResponse = {
-  request_id?: string;
-  root: FileTreeNode;
-  error?: string;
-};
-
-export type FileContentResponse = {
-  request_id?: string;
-  path: string;
-  content: string;
-  size: number;
-  is_binary?: boolean;
-  resolved_path?: string;
-  error?: string;
-};
-
-export type FileSearchResponse = {
-  files: string[];
-  error?: string;
-};
-
-// Single file change event (used within batched notifications)
-export type FileChangeEvent = {
-  timestamp: string;
-  path: string;
-  operation: "create" | "write" | "remove" | "rename" | "chmod" | "refresh";
-  session_id: string;
-  task_id: string;
-  agent_id: string;
-};
-
-// Batched file change notification payload (multiple changes batched for efficiency)
-export type FileChangeNotificationPayload = {
-  session_id: string;
-  changes: FileChangeEvent[];
-};
-
-// Open file tab for file viewer
-export type OpenFileTab = {
-  path: string;
-  name: string;
-  content: string;
-  originalContent: string; // For diff generation
-  originalHash: string; // SHA256 for conflict detection
-  isDirty: boolean; // Has unsaved changes
-  isBinary?: boolean; // Binary file (content is base64-encoded)
-};
-
-// File extension to color mapping for file type indicators
-export const FILE_EXTENSION_COLORS: Record<string, string> = {
-  ts: "bg-blue-500",
-  tsx: "bg-blue-400",
-  js: "bg-yellow-500",
-  jsx: "bg-yellow-400",
-  go: "bg-cyan-500",
-  py: "bg-green-500",
-  rs: "bg-orange-500",
-  json: "bg-amber-400",
-  css: "bg-purple-500",
-  html: "bg-red-500",
-  md: "bg-gray-400",
-};
+// Workspace file types (extracted to reduce file size)
+export {
+  type FileTreeNode,
+  type FileTreeResponse,
+  type FileContentResponse,
+  type FileSearchResponse,
+  type FileChangeEvent,
+  type FileChangeNotificationPayload,
+  type OpenFileTab,
+  FILE_EXTENSION_COLORS,
+} from "./workspace-files";

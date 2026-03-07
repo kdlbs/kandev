@@ -62,6 +62,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_mode":
 		s.handleSessionModeEvent(ctx, payload)
 
+	case "agent_capabilities":
+		s.handleAgentCapabilitiesEvent(ctx, payload)
+
+	case "session_models":
+		s.handleSessionModelsEvent(ctx, payload)
+
+	case "plan":
+		s.handleSessionTodosEvent(ctx, payload)
+
 	case "permission_cancelled":
 		s.handlePermissionCancelledEvent(ctx, payload)
 
@@ -530,14 +539,71 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 		return
 	}
 	eventPayload := lifecycle.SessionModeEventPayload{
-		TaskID:        payload.TaskID,
-		SessionID:     sessionID,
-		AgentID:       payload.AgentID,
-		CurrentModeID: payload.Data.CurrentModeID,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		TaskID:         payload.TaskID,
+		SessionID:      sessionID,
+		AgentID:        payload.AgentID,
+		CurrentModeID:  payload.Data.CurrentModeID,
+		AvailableModes: payload.Data.AvailableModes,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionModeSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))
+}
+
+// handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
+func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
+		TaskID:                  payload.TaskID,
+		SessionID:               sessionID,
+		AgentID:                 payload.AgentID,
+		SupportsImage:           payload.Data.SupportsImage,
+		SupportsAudio:           payload.Data.SupportsAudio,
+		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
+		AuthMethods:             payload.Data.AuthMethods,
+		Timestamp:               time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildAgentCapabilitiesSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AgentCapabilitiesUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelsEvent broadcasts session_models events to the WebSocket.
+func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelsEventPayload{
+		TaskID:         payload.TaskID,
+		SessionID:      sessionID,
+		AgentID:        payload.AgentID,
+		CurrentModelID: payload.Data.CurrentModelID,
+		Models:         payload.Data.SessionModels,
+		ConfigOptions:  payload.Data.ConfigOptions,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionModelsSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionTodosEvent broadcasts plan/todo entries to the WebSocket for the frontend.
+func (s *Service) handleSessionTodosEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionTodosEventPayload{
+		TaskID:    payload.TaskID,
+		SessionID: sessionID,
+		AgentID:   payload.AgentID,
+		Entries:   payload.Data.PlanEntries,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionTodosSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionTodosUpdated, "orchestrator", eventPayload))
 }
 
 // handlePermissionCancelledEvent marks the pending permission message as expired.
