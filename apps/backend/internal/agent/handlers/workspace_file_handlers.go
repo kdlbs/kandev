@@ -168,11 +168,11 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 // wsUpdateFileContent handles workspace.file.update action
 func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID      string `json:"session_id"`
-		Path           string `json:"path"`
-		Diff           string `json:"diff"`
-		OriginalHash   string `json:"original_hash"`
-		DesiredContent string `json:"desired_content"`
+		SessionID      string  `json:"session_id"`
+		Path           string  `json:"path"`
+		Diff           string  `json:"diff"`
+		OriginalHash   string  `json:"original_hash"`
+		DesiredContent *string `json:"desired_content"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {

@@ -188,6 +188,7 @@ export function useFileSaveDelete({
           path,
           diff,
           originalHash: tab.originalHash,
+          desiredContent: tab.content,
         });
         if (response.success && response.new_hash) {
           setOpenFileTabs((prev) =>

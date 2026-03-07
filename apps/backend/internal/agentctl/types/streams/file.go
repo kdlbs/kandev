@@ -172,7 +172,8 @@ type FileUpdateRequest struct {
 
 	// DesiredContent is the full file content the user wants to save.
 	// Used as a fallback when the diff cannot be applied (e.g., hash conflict).
-	DesiredContent string `json:"desired_content,omitempty"`
+	// Nil means no fallback; pointer to empty string means save as empty file.
+	DesiredContent *string `json:"desired_content,omitempty"`
 }
 
 // FileUpdateResponse represents a response to a file update request.

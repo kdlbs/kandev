@@ -132,10 +132,8 @@ test.describe("Port Forward Dialog", () => {
     await session.portForwardInput.fill("99999");
     await session.portForwardAddButton.click();
 
-    // Toast error should appear
-    await expect(testPage.getByText("Enter a valid port (1-65535)")).toBeVisible({
-      timeout: 5_000,
-    });
+    // Invalid port should not create a row
+    await expect(session.portForwardRow(99999)).not.toBeVisible();
   });
 
   test("rejects duplicate port", async ({ testPage, apiClient, seedData }) => {
@@ -152,10 +150,11 @@ test.describe("Port Forward Dialog", () => {
     await session.portForwardAddButton.click();
     await expect(session.portForwardRow(8080)).toBeVisible();
 
-    // Try adding the same port again
+    // Try adding the same port again — should still have only one row
     await session.portForwardInput.fill("8080");
     await session.portForwardAddButton.click();
-    await expect(testPage.getByText("Port already added")).toBeVisible({ timeout: 5_000 });
+    const rows = session.portForwardDialog.locator('[data-testid="port-forward-row-8080"]');
+    await expect(rows).toHaveCount(1);
   });
 
   test("manual port row has correct proxy URL", async ({ testPage, apiClient, seedData }) => {

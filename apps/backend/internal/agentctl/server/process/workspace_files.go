@@ -328,7 +328,7 @@ func (wt *WorkspaceTracker) resolveSymlinkRelPath(reqPath string) string {
 // When desiredContent is provided and the diff cannot be applied (hash conflict),
 // the file is overwritten with the desired content as a fallback.
 // Returns the new hash and a resolution string ("applied" or "overwritten").
-func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash, desiredContent string) (string, string, error) {
+func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", "", err
@@ -345,8 +345,8 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash, de
 	// Calculate hash of current content for conflict detection
 	currentHash := calculateSHA256(currentContent)
 	if originalHash != "" && currentHash != originalHash {
-		if desiredContent != "" {
-			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, desiredContent, currentHash)
+		if desiredContent != nil {
+			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
 		}
 		return "", "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
@@ -371,8 +371,8 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash, de
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		if desiredContent != "" {
-			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, desiredContent, currentHash)
+		if desiredContent != nil {
+			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
 		}
 		return "", "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
 	}
