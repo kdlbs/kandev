@@ -44,8 +44,8 @@ Options:
   run             Use release bundles (default).
   --dev            Alias for "dev".
   --version        Release tag to install (default: latest).
-  --backend-port   Override backend port.
-  --web-port       Override web port.
+  --backend-port   Override backend port (or KANDEV_BACKEND_PORT env var).
+  --web-port       Override web port (or KANDEV_WEB_PORT env var).
   --verbose, -v    Show info logs from backend + web (start mode only).
   --debug          Show debug logs + agent message dumps (start mode only).
   --help, -h       Show help.
@@ -107,6 +107,11 @@ function parseArgs(argv: string[]): CliOptions {
   return opts;
 }
 
+function envPort(name: string): number | undefined {
+  const val = process.env[name];
+  return val ? Number(val) : undefined;
+}
+
 function findRepoRoot(startDir: string): string | null {
   let current = path.resolve(startDir);
   while (true) {
@@ -132,8 +137,11 @@ function findRepoRoot(startDir: string): string | null {
 
 async function main(): Promise<void> {
   const raw = parseArgs(process.argv.slice(2));
-  const backendPort = ensureValidPort(raw.backendPort, "backend port");
-  const webPort = ensureValidPort(raw.webPort, "web port");
+  const backendPort = ensureValidPort(
+    raw.backendPort ?? envPort("KANDEV_BACKEND_PORT"),
+    "backend port",
+  );
+  const webPort = ensureValidPort(raw.webPort ?? envPort("KANDEV_WEB_PORT"), "web port");
 
   if (raw.command === "dev") {
     const repoRoot = findRepoRoot(process.cwd());

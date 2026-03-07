@@ -19,6 +19,7 @@ type Gateway struct {
 	LSPHandler         *LSPHandler
 	VscodeProxyHandler *VscodeProxyHandler
 	PortProxyHandler   *PortProxyHandler
+	TunnelManager      *TunnelManager
 	logger             *logger.Logger
 }
 
@@ -58,6 +59,11 @@ func (g *Gateway) SetVscodeProxy(lifecycleMgr *lifecycle.Manager) {
 // SetPortProxy enables the generic port reverse proxy handler.
 func (g *Gateway) SetPortProxy(lifecycleMgr *lifecycle.Manager) {
 	g.PortProxyHandler = NewPortProxyHandler(lifecycleMgr, g.logger)
+}
+
+// SetPortTunnel enables dedicated port tunnel management.
+func (g *Gateway) SetPortTunnel(lifecycleMgr *lifecycle.Manager) {
+	g.TunnelManager = NewTunnelManager(lifecycleMgr, g.logger)
 }
 
 // SetupRoutes adds the WebSocket routes to the Gin engine

@@ -1,8 +1,11 @@
 package repoclone
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"strings"
+	"time"
 )
 
 // ProtocolSSH is the SSH git protocol.
@@ -12,9 +15,17 @@ const ProtocolSSH = "ssh"
 const ProtocolHTTPS = "https"
 
 // DetectGitProtocol returns the user's preferred git clone protocol.
-// Currently returns "ssh" unconditionally. In the future this may be
-// configurable or auto-detected from gh CLI / SSH config.
+// It checks the gh CLI config (`gh config get git_protocol`). If gh reports
+// "https", it returns ProtocolHTTPS. Otherwise it defaults to ProtocolSSH.
 func DetectGitProtocol() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", "config", "get", "git_protocol").Output()
+	if err == nil {
+		if strings.TrimSpace(string(out)) == ProtocolHTTPS {
+			return ProtocolHTTPS
+		}
+	}
 	return ProtocolSSH
 }
 

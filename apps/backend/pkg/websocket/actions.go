@@ -261,7 +261,10 @@ const (
 	ActionVscodeOpenFile = "vscode.openFile" // Open a file in code-server for a session
 
 	// Port actions
-	ActionPortList = "port.list" // List listening ports on a remote executor
+	ActionPortList        = "port.list"         // List listening ports on a remote executor
+	ActionPortTunnelStart = "port.tunnel.start" // Start a port tunnel
+	ActionPortTunnelStop  = "port.tunnel.stop"  // Stop a port tunnel
+	ActionPortTunnelList  = "port.tunnel.list"  // List active port tunnels
 
 	// Secret actions
 	ActionSecretList   = "secrets.list"

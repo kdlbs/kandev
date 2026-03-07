@@ -68,7 +68,7 @@ const defaultSpritesPrepareScript = `#!/bin/bash
 # Prepare Sprites.dev cloud sandbox
 #
 # Pre-installed tools (no need to install):
-#   git, curl, wget, gh (GitHub CLI), node, pnpm (via corepack), python, go,
+#   git, curl, wget, gh (GitHub CLI), node, python, go,
 #   build-essential, openssh-client, ca-certificates
 
 set -euo pipefail
@@ -77,8 +77,17 @@ set -euo pipefail
 mkdir -p ~/.ssh
 ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
 
-# ---- Enable pnpm via corepack ----
-corepack enable
+# ---- Configure git/gh for HTTPS auth (token-based, no SSH keys needed) ----
+# Rewrite SSH URLs to HTTPS so git clone git@github.com:... works via token auth
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+# Register gh as git credential helper (provides GITHUB_TOKEN to git for HTTPS)
+gh auth setup-git 2>/dev/null || true
+# Ensure gh CLI itself uses HTTPS for gh repo clone
+gh config set git_protocol https --host github.com 2>/dev/null || true
+
+# ---- Install pnpm globally ----
+npm install -g pnpm > /dev/null 2>&1
 
 # ---- Git identity ----
 {{git.identity_setup}}

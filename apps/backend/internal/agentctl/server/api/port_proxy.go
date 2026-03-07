@@ -89,7 +89,8 @@ func (s *Server) createPortProxy(port int) *httputil.ReverseProxy {
 		r.SetURL(target)
 		r.Out.URL.Path = r.In.URL.Path
 		r.Out.URL.RawPath = ""
-		r.Out.Header.Set("Origin", target.String())
+		// Preserve original Host header for CORS/Origin validation in tunneled apps.
+		r.Out.Host = r.In.Host
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")
 		}
