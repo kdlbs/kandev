@@ -25,11 +25,7 @@ export type BackendContext = {
   restart: () => Promise<void>;
 };
 
-async function waitForHealth(
-  url: string,
-  timeoutMs: number,
-  proc?: ChildProcess,
-): Promise<void> {
+async function waitForHealth(url: string, timeoutMs: number, proc?: ChildProcess): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
   // Track process exit so we can fail fast instead of polling for the full timeout.
