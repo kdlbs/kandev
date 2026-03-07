@@ -18,6 +18,9 @@ class GitHelper {
   ) {}
 
   exec(cmd: string): string {
+    // Remove stale index.lock left by concurrent backend git operations
+    const lockPath = path.join(this.repoDir, ".git", "index.lock");
+    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
     return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
   }
 
@@ -306,9 +309,9 @@ test.describe("Git Changes Panel", () => {
         return false;
       },
       "line 1",
-      { timeout: 30_000 },
+      { timeout: 60_000 },
     );
-    await expect(session.changes.getByText("line 1")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
   /**

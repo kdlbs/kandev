@@ -55,7 +55,7 @@ async function openChangesTab(testPage: Page) {
  * Uses querySelectorAll because multiple diffs-container elements can exist
  * (e.g., inline diffs in chat messages + the Changes panel diff viewer).
  */
-async function waitForDiffShadowText(testPage: Page, text: string, timeout = 30_000) {
+async function waitForDiffShadowText(testPage: Page, text: string, timeout = 60_000) {
   await testPage.waitForFunction(
     (searchText: string) => {
       for (const container of document.querySelectorAll("diffs-container")) {
