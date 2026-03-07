@@ -26,7 +26,6 @@ type UseChatInputContainerParams = {
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
   hasContextComments: boolean;
-  todoItems: { text: string; done?: boolean }[];
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss: (() => void) | undefined;
   onSubmit: (
@@ -78,7 +77,6 @@ function computeDerivedState(params: {
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
-  todoItems: { text: string }[];
   allItemsLength: number;
   isInputFocused: boolean;
   placeholder: string | undefined;
@@ -91,8 +89,7 @@ function computeDerivedState(params: {
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );
-  const hasTodos = params.todoItems.length > 0;
-  const hasContextZone = hasTodos || params.allItemsLength > 0;
+  const hasContextZone = params.allItemsLength > 0;
   const showFocusHint = !params.isInputFocused && !hasClarification && !hasPendingComments;
   const inputPlaceholder = getInputPlaceholder(
     params.placeholder,
@@ -104,7 +101,6 @@ function computeDerivedState(params: {
     isDisabled,
     hasClarification,
     hasPendingComments,
-    hasTodos,
     hasContextZone,
     showFocusHint,
     inputPlaceholder,
@@ -126,7 +122,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,
-    todoItems,
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     onSubmit,
@@ -192,7 +187,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     pendingClarification,
     onClarificationResolved,
     pendingCommentsByFile,
-    todoItems,
     allItemsLength: allItems.length,
     isInputFocused,
     placeholder,

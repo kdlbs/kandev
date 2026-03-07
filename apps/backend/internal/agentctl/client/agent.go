@@ -139,6 +139,29 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// SetMode changes the agent's session mode via the agent WebSocket stream.
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
+	payload := struct {
+		SessionID string `json:"session_id"`
+		ModeID    string `json:"mode_id"`
+	}{SessionID: sessionID, ModeID: modeID}
+
+	resp, err := c.sendStreamRequest(ctx, "agent.session.set_mode", payload)
+	if err != nil {
+		return fmt.Errorf("set mode request failed: %w", err)
+	}
+
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("set mode failed: unable to parse error")
+		}
+		return fmt.Errorf("set mode failed: %s", errPayload.Message)
+	}
+
+	return nil
+}
+
 // Prompt sends a fire-and-forget prompt to the agent via the agent WebSocket stream.
 // The server returns an accepted response immediately; completion is signaled via stream events.
 // Attachments (images) are passed to the agent if provided.

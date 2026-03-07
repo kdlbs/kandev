@@ -189,6 +189,15 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		zap.String("agent_version", a.agentInfo.Version),
 		zap.Bool("supports_load_session", a.capabilities.LoadSession))
 
+	// Emit agent capabilities event with prompt capabilities and auth methods
+	a.sendUpdate(AgentEvent{
+		Type:                    streams.EventTypeAgentCapabilities,
+		SupportsImage:           a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
+		AuthMethods:             convertAuthMethods(resp.AuthMethods),
+	})
+
 	return nil
 }
 
@@ -230,6 +239,11 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
 		a.emitInitialModeState(resp.Modes)
+	}
+
+	// Emit session models if the agent returned model state
+	if resp.Models != nil {
+		a.emitSessionModels(sessionID, resp.Models, resp.Meta)
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -330,6 +344,11 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 		a.emitInitialModeState(resp.Modes)
 	}
 
+	// Emit session models if the agent returned model state
+	if resp.Models != nil {
+		a.emitSessionModels(sessionID, resp.Models, resp.Meta)
+	}
+
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
 	a.sendUpdate(AgentEvent{
@@ -423,6 +442,7 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		Type:      streams.EventTypeComplete,
 		SessionID: sessionID,
 		Data:      map[string]any{"stop_reason": stopReason},
+		Usage:     extractPromptUsage(resp.Meta),
 	})
 
 	return nil
@@ -736,11 +756,58 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 // emitInitialModeState emits a session_mode event from the session response's Modes field.
 // Called after session/new and session/load to provide the initial mode state.
 func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
+	availModes := make([]streams.SessionModeInfo, 0, len(modes.AvailableModes))
+	for _, m := range modes.AvailableModes {
+		availModes = append(availModes, streams.SessionModeInfo{
+			ID:          string(m.Id),
+			Name:        m.Name,
+			Description: derefStr(m.Description),
+		})
+	}
+	a.sendUpdate(AgentEvent{
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      a.sessionID,
+		CurrentModeID:  string(modes.CurrentModeId),
+		AvailableModes: availModes,
+	})
+}
+
+// emitSessionModels emits a session_models event from the session response.
+func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta any) {
+	a.sendUpdate(AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		SessionID:      sessionID,
+		CurrentModelID: string(models.CurrentModelId),
+		SessionModels:  convertSessionModels(models.AvailableModels),
+		ConfigOptions:  extractConfigOptions(meta),
+	})
+}
+
+// SetMode changes the agent's session mode via ACP session/set_mode.
+func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
+	a.mu.RLock()
+	conn := a.acpConn
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("adapter not initialized")
+	}
+
+	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
+		SessionId: acp.SessionId(sessionID),
+		ModeId:    acp.SessionModeId(modeID),
+	})
+	if err != nil {
+		return fmt.Errorf("set session mode failed: %w", err)
+	}
+
 	a.sendUpdate(AgentEvent{
 		Type:          streams.EventTypeSessionMode,
-		SessionID:     a.sessionID,
-		CurrentModeID: string(modes.CurrentModeId),
+		SessionID:     sessionID,
+		CurrentModeID: modeID,
 	})
+	return nil
 }
 
 // derefStr safely dereferences a string pointer, returning empty string if nil.
