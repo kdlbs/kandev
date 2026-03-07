@@ -25,18 +25,41 @@ export type BackendContext = {
   restart: () => Promise<void>;
 };
 
-async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
+async function waitForHealth(
+  url: string,
+  timeoutMs: number,
+  proc?: ChildProcess,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      // not ready yet
+
+  // Track process exit so we can fail fast instead of polling for the full timeout.
+  let processExited = false;
+  let processExitCode: number | null = null;
+  const onExit = (code: number | null) => {
+    processExited = true;
+    processExitCode = code;
+  };
+  proc?.once("exit", onExit);
+
+  try {
+    while (Date.now() < deadline) {
+      if (processExited) {
+        throw new Error(
+          `Backend process exited with code ${processExitCode} while waiting for health at ${url}`,
+        );
+      }
+      try {
+        const res = await fetch(url);
+        if (res.ok) return;
+      } catch {
+        // not ready yet
+      }
+      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
     }
-    await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+    throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
+  } finally {
+    proc?.off("exit", onExit);
   }
-  throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
 }
 
 function killProcess(proc: ChildProcess): Promise<void> {
@@ -229,10 +252,11 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
        */
       const restart = async () => {
         await killProcessGroup(backendProc);
-        // Brief delay to ensure ports are fully released by the OS
-        await new Promise((r) => setTimeout(r, 500));
+        // Wait for OS to release the TCP port — Linux TIME_WAIT can exceed 500ms under load
+        await new Promise((r) => setTimeout(r, 2_000));
         backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
-        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
+        // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
+        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
       };
 
       try {
