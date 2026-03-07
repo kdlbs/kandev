@@ -73,41 +73,9 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 	m.tunnels[cacheKey] = nil
 	m.mu.Unlock()
 
-	// On failure, remove the placeholder.
-	cleanup := func() {
-		m.mu.Lock()
-		if m.tunnels[cacheKey] == nil {
-			delete(m.tunnels, cacheKey)
-		}
-		m.mu.Unlock()
-	}
-
-	execution, ok := m.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !ok {
-		cleanup()
-		return 0, fmt.Errorf("session not found or no active execution")
-	}
-
-	agentctlClient := execution.GetAgentCtlClient()
-	if agentctlClient == nil {
-		cleanup()
-		return 0, fmt.Errorf("agentctl client not available")
-	}
-
-	target, err := url.Parse(agentctlClient.BaseURL())
+	target, ln, err := m.resolveAndBind(cacheKey, sessionID, tunnelPort)
 	if err != nil {
-		cleanup()
-		return 0, fmt.Errorf("failed to parse agentctl URL: %w", err)
-	}
-
-	bindAddr := fmt.Sprintf(":%d", tunnelPort)
-	ln, err := net.Listen("tcp", bindAddr)
-	if err != nil {
-		cleanup()
-		if isAddrInUse(err) {
-			return 0, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
-		}
-		return 0, fmt.Errorf("failed to bind tunnel port %d: %w", tunnelPort, err)
+		return 0, err
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
@@ -127,6 +95,60 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 	m.tunnels[cacheKey] = entry
 	m.mu.Unlock()
 
+	m.serveTunnel(ctx, srv, ln, cacheKey, sessionID, port, actualPort)
+
+	m.logger.Info("tunnel started",
+		zap.String("session_id", sessionID),
+		zap.Int("port", port),
+		zap.Int("tunnel_port", actualPort))
+
+	return actualPort, nil
+}
+
+// resolveAndBind resolves the agentctl target URL for the session and binds a
+// local TCP listener for the tunnel. On failure it cleans up the placeholder
+// entry reserved by StartTunnel.
+func (m *TunnelManager) resolveAndBind(cacheKey, sessionID string, tunnelPort int) (*url.URL, net.Listener, error) {
+	cleanup := func() {
+		m.mu.Lock()
+		if m.tunnels[cacheKey] == nil {
+			delete(m.tunnels, cacheKey)
+		}
+		m.mu.Unlock()
+	}
+
+	execution, ok := m.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		cleanup()
+		return nil, nil, fmt.Errorf("session not found or no active execution")
+	}
+
+	agentctlClient := execution.GetAgentCtlClient()
+	if agentctlClient == nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("agentctl client not available")
+	}
+
+	target, err := url.Parse(agentctlClient.BaseURL())
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to parse agentctl URL: %w", err)
+	}
+
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", tunnelPort))
+	if err != nil {
+		cleanup()
+		if isAddrInUse(err) {
+			return nil, nil, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
+		}
+		return nil, nil, fmt.Errorf("failed to bind tunnel port %d: %w", tunnelPort, err)
+	}
+
+	return target, ln, nil
+}
+
+// serveTunnel starts the tunnel HTTP server and its shutdown goroutine.
+func (m *TunnelManager) serveTunnel(ctx context.Context, srv *http.Server, ln net.Listener, cacheKey, sessionID string, port, tunnelPort int) {
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
@@ -137,19 +159,11 @@ func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) 
 			m.logger.Error("tunnel server error",
 				zap.String("session_id", sessionID),
 				zap.Int("port", port),
-				zap.Int("tunnel_port", actualPort),
+				zap.Int("tunnel_port", tunnelPort),
 				zap.Error(serveErr))
 			m.removeTunnel(cacheKey)
 		}
 	}()
-
-	m.logger.Info("tunnel started",
-		zap.String("session_id", sessionID),
-		zap.Int("port", port),
-		zap.Int("tunnel_port", actualPort),
-		zap.String("target", agentctlClient.BaseURL()))
-
-	return actualPort, nil
 }
 
 // StopTunnel stops a tunnel for the given session and port.
