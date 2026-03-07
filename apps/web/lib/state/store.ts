@@ -183,6 +183,9 @@ export type AppState = {
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
   prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
   sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
+  agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
+  sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
+  promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -427,6 +430,9 @@ const defaultState = {
   userShells: defaultSessionRuntimeState.userShells,
   prepareProgress: defaultSessionRuntimeState.prepareProgress,
   sessionTodos: defaultSessionRuntimeState.sessionTodos,
+  agentCapabilities: defaultSessionRuntimeState.agentCapabilities,
+  sessionModels: defaultSessionRuntimeState.sessionModels,
+  promptUsage: defaultSessionRuntimeState.promptUsage,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
   prWatches: defaultGitHubState.prWatches,
@@ -495,6 +501,9 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     userShells: { ...defaultState.userShells, ...initialState.userShells },
     prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
     sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },
+    agentCapabilities: { ...defaultState.agentCapabilities, ...initialState.agentCapabilities },
+    sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
+    promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
@@ -571,6 +580,9 @@ export function createAppStore(initialState?: Partial<AppState>) {
       userShells: merged.userShells,
       prepareProgress: merged.prepareProgress,
       sessionTodos: merged.sessionTodos,
+      agentCapabilities: merged.agentCapabilities,
+      sessionModels: merged.sessionModels,
+      promptUsage: merged.promptUsage,
       githubStatus: merged.githubStatus,
       taskPRs: merged.taskPRs,
       prWatches: merged.prWatches,

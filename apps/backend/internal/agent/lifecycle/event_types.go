@@ -136,9 +136,9 @@ type AgentStreamEventData struct {
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
 
 	// Agent capabilities (from "agent_capabilities" event)
-	SupportsImage           bool                     `json:"supports_image,omitempty"`
-	SupportsAudio           bool                     `json:"supports_audio,omitempty"`
-	SupportsEmbeddedContext bool                     `json:"supports_embedded_context,omitempty"`
+	SupportsImage           bool                     `json:"supports_image"`
+	SupportsAudio           bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
 	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)

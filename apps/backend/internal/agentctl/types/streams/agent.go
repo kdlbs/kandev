@@ -208,13 +208,13 @@ type AgentEvent struct {
 	// --- Agent capabilities fields (for "agent_capabilities" type) ---
 
 	// SupportsImage indicates the agent natively supports image content blocks.
-	SupportsImage bool `json:"supports_image,omitempty"`
+	SupportsImage bool `json:"supports_image"`
 
 	// SupportsAudio indicates the agent natively supports audio content blocks.
-	SupportsAudio bool `json:"supports_audio,omitempty"`
+	SupportsAudio bool `json:"supports_audio"`
 
 	// SupportsEmbeddedContext indicates the agent supports embedded context.
-	SupportsEmbeddedContext bool `json:"supports_embedded_context,omitempty"`
+	SupportsEmbeddedContext bool `json:"supports_embedded_context"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`

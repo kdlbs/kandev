@@ -22,7 +22,8 @@ export function registerSessionModeHandlers(store: StoreApi<AppState>): WsHandle
       if (modeId) {
         store.getState().setSessionMode(sessionId, modeId, availableModes);
       } else {
-        store.getState().clearSessionMode(sessionId);
+        // Keep availableModes so the UI still knows what modes exist
+        store.getState().setSessionMode(sessionId, "", availableModes);
       }
     },
   };

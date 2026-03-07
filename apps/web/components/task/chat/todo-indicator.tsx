@@ -65,10 +65,10 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
           />
         </div>
         <div className="space-y-1.5 max-h-48 overflow-y-auto">
-          {todos.map((todo) => {
+          {todos.map((todo, idx) => {
             const s = resolveStatus(todo);
             return (
-              <div key={todo.text} className="flex items-start gap-2 text-xs">
+              <div key={idx} className="flex items-start gap-2 text-xs">
                 <StatusIcon status={s} className="mt-0.5 shrink-0 h-3 w-3" />
                 <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
                   {todo.text}
