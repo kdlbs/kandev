@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
+import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
   CommandDialog,
@@ -100,7 +100,11 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
       forceMount
     >
       <div className="flex items-center gap-2 min-w-0 w-full">
-        <IconHammer className="size-3 shrink-0 text-muted-foreground" />
+        {isArchived ? (
+          <IconArchive className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
+        )}
         <span className="truncate font-medium">{task.title}</span>
         {step && (
           <Badge
@@ -109,11 +113,6 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
             style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
           >
             {step.name}
-          </Badge>
-        )}
-        {isArchived && (
-          <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">
-            {task.state}
           </Badge>
         )}
         {details.length > 0 && (
