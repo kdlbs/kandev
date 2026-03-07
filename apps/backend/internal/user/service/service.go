@@ -156,6 +156,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
 	}
 	if req.KeyboardShortcuts != nil {
+		if err := validateKeyboardShortcuts(*req.KeyboardShortcuts); err != nil {
+			return err
+		}
 		settings.KeyboardShortcuts = *req.KeyboardShortcuts
 	}
 	return nil
@@ -245,6 +248,31 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
+}
+
+func validateKeyboardShortcuts(shortcuts map[string]interface{}) error {
+	for name, raw := range shortcuts {
+		shortcut, ok := raw.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("keyboard_shortcuts.%s must be an object", name)
+		}
+		key, ok := shortcut["key"].(string)
+		if !ok || strings.TrimSpace(key) == "" {
+			return fmt.Errorf("keyboard_shortcuts.%s.key must be a non-empty string", name)
+		}
+		if modsRaw, exists := shortcut["modifiers"]; exists {
+			mods, ok := modsRaw.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("keyboard_shortcuts.%s.modifiers must be an object", name)
+			}
+			for mod, v := range mods {
+				if _, ok := v.(bool); !ok {
+					return fmt.Errorf("keyboard_shortcuts.%s.modifiers.%s must be a boolean", name, mod)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func validateLSPLanguages(langs []string) error {

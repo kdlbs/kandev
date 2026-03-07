@@ -14,6 +14,7 @@ import {
   type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
 function ShortcutRecorder({
@@ -111,13 +112,18 @@ export function KeyboardShortcutsCard() {
   const setUserSettings = useAppStore((s) => s.setUserSettings);
   const userSettings = useAppStore((s) => s.userSettings);
   const shortcuts = resolveAllShortcuts(storeOverrides);
+  const { toast } = useToast();
 
   const persistOverrides = useCallback(
     (overrides: StoredShortcutOverrides) => {
+      const previous = userSettings.keyboardShortcuts;
       setUserSettings({ ...userSettings, keyboardShortcuts: overrides });
-      updateUserSettings({ keyboard_shortcuts: overrides }).catch(() => {});
+      updateUserSettings({ keyboard_shortcuts: overrides }).catch(() => {
+        setUserSettings({ ...userSettings, keyboardShortcuts: previous });
+        toast({ title: "Failed to save shortcut", variant: "error" });
+      });
     },
-    [userSettings, setUserSettings],
+    [userSettings, setUserSettings, toast],
   );
 
   const handleChange = useCallback(

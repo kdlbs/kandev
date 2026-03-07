@@ -195,6 +195,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
+		settings.KeyboardShortcuts = map[string]interface{}{}
 		return settings, nil
 	}
 	var payload struct {
@@ -262,5 +263,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts
+	if settings.KeyboardShortcuts == nil {
+		settings.KeyboardShortcuts = map[string]interface{}{}
+	}
 	return settings, nil
 }

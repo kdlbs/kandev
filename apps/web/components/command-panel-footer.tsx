@@ -73,10 +73,6 @@ type TaskResultItemProps = {
   onSelect: (task: Task) => void;
 };
 
-function getRepoDir(path: string) {
-  return path.split("/").pop() ?? path;
-}
-
 function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
@@ -84,7 +80,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   const rawPath =
     task.primary_working_directory ??
     (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
-  const workDir = rawPath ? getRepoDir(rawPath) : undefined;
+  const workDir = rawPath ? getFileName(rawPath) : undefined;
   const details: string[] = [];
   if (workDir) details.push(workDir);
   if (task.primary_agent_name) details.push(task.primary_agent_name);
