@@ -156,11 +156,25 @@ type StepCheckboxRowProps = {
   helpText: string;
 };
 
-function StepCheckboxRow({ id, checked, onCheckedChange, disabled, label, helpText }: StepCheckboxRowProps) {
+function StepCheckboxRow({
+  id,
+  checked,
+  onCheckedChange,
+  disabled,
+  label,
+  helpText,
+}: StepCheckboxRowProps) {
   return (
     <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onCheckedChange(v === true)} disabled={disabled} />
-      <Label htmlFor={id} className="text-sm">{label}</Label>
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(v) => onCheckedChange(v === true)}
+        disabled={disabled}
+      />
+      <Label htmlFor={id} className="text-sm">
+        {label}
+      </Label>
       <HelpTip text={helpText} />
     </div>
   );
@@ -175,16 +189,63 @@ type StepBehaviorSectionProps = {
   readOnly: boolean;
 };
 
-function StepBehaviorSection({ step, onUpdate, toggleOnEnterAction, readOnly }: StepBehaviorSectionProps) {
+function StepBehaviorSection({
+  step,
+  onUpdate,
+  toggleOnEnterAction,
+  readOnly,
+}: StepBehaviorSectionProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <StepCheckboxRow id={`${step.id}-start-step`} checked={step.is_start_step === true} onCheckedChange={(c) => !readOnly && onUpdate({ is_start_step: c })} disabled={readOnly} label="Start step" helpText="New tasks start in this step. Only one step per workflow can be the start step." />
-        <StepCheckboxRow id={`${step.id}-auto-start`} checked={hasOnEnterAction(step, "auto_start_agent")} onCheckedChange={() => !readOnly && toggleOnEnterAction("auto_start_agent")} disabled={readOnly} label="Auto-start agent" helpText="Automatically start the agent when a task enters this step." />
-        <StepCheckboxRow id={`${step.id}-plan-mode`} checked={hasOnEnterAction(step, "enable_plan_mode")} onCheckedChange={() => !readOnly && toggleOnEnterAction("enable_plan_mode")} disabled={readOnly} label="Plan mode" helpText="Agent proposes a plan instead of making changes directly." />
-        <StepCheckboxRow id={`${step.id}-reset-context`} checked={hasOnEnterAction(step, "reset_agent_context")} onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")} disabled={readOnly} label="Reset agent context" helpText="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective." />
-        <StepCheckboxRow id={`${step.id}-manual-move`} checked={step.allow_manual_move !== false} onCheckedChange={(c) => !readOnly && onUpdate({ allow_manual_move: c })} disabled={readOnly} label="Allow manual move" helpText="Allow dragging tasks into this step on the board." />
-        <StepCheckboxRow id={`${step.id}-command-panel`} checked={step.show_in_command_panel !== false} onCheckedChange={(c) => !readOnly && onUpdate({ show_in_command_panel: c })} disabled={readOnly} label="Show in command panel" helpText="Show tasks in this step when opening the command panel (Cmd+K). Useful for hiding backlog or done steps from quick access." />
+        <StepCheckboxRow
+          id={`${step.id}-start-step`}
+          checked={step.is_start_step === true}
+          onCheckedChange={(c) => !readOnly && onUpdate({ is_start_step: c })}
+          disabled={readOnly}
+          label="Start step"
+          helpText="New tasks start in this step. Only one step per workflow can be the start step."
+        />
+        <StepCheckboxRow
+          id={`${step.id}-auto-start`}
+          checked={hasOnEnterAction(step, "auto_start_agent")}
+          onCheckedChange={() => !readOnly && toggleOnEnterAction("auto_start_agent")}
+          disabled={readOnly}
+          label="Auto-start agent"
+          helpText="Automatically start the agent when a task enters this step."
+        />
+        <StepCheckboxRow
+          id={`${step.id}-plan-mode`}
+          checked={hasOnEnterAction(step, "enable_plan_mode")}
+          onCheckedChange={() => !readOnly && toggleOnEnterAction("enable_plan_mode")}
+          disabled={readOnly}
+          label="Plan mode"
+          helpText="Agent proposes a plan instead of making changes directly."
+        />
+        <StepCheckboxRow
+          id={`${step.id}-reset-context`}
+          checked={hasOnEnterAction(step, "reset_agent_context")}
+          onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")}
+          disabled={readOnly}
+          label="Reset agent context"
+          helpText="Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
+        />
+        <StepCheckboxRow
+          id={`${step.id}-manual-move`}
+          checked={step.allow_manual_move !== false}
+          onCheckedChange={(c) => !readOnly && onUpdate({ allow_manual_move: c })}
+          disabled={readOnly}
+          label="Allow manual move"
+          helpText="Allow dragging tasks into this step on the board."
+        />
+        <StepCheckboxRow
+          id={`${step.id}-command-panel`}
+          checked={step.show_in_command_panel !== false}
+          onCheckedChange={(c) => !readOnly && onUpdate({ show_in_command_panel: c })}
+          disabled={readOnly}
+          label="Show in command panel"
+          helpText="Show tasks in this step when opening the command panel (Cmd+K). Useful for hiding backlog or done steps from quick access."
+        />
         <StepAutoArchiveRow step={step} onUpdate={onUpdate} readOnly={readOnly} />
       </div>
     </div>

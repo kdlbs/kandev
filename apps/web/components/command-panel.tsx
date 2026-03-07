@@ -137,19 +137,21 @@ type InlineTaskSearchOptions = {
   setIsSearching: (searching: boolean) => void;
 };
 
-function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
-  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
+function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
   const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
-
-  // Build a step position map for sorting
   const stepPositionMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const step of steps) map.set(step.id, step.position);
     return map;
   }, [steps]);
+  return { visibleStepIds, stepPositionMap };
+}
+
+function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
+  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
 
   useEffect(() => {
     if (mode !== "commands") return;
@@ -238,7 +240,16 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       abortRef.current?.abort();
     };
-  }, [mode, search, open, workspaceId, visibleStepIds, stepPositionMap, setTaskResults, setIsSearching]);
+  }, [
+    mode,
+    search,
+    open,
+    workspaceId,
+    visibleStepIds,
+    stepPositionMap,
+    setTaskResults,
+    setIsSearching,
+  ]);
 }
 
 function useCommandPanelEffects(
@@ -275,7 +286,15 @@ function useCommandPanelEffects(
     }
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
 
-  useInlineTaskSearchEffect({ mode, search, open, workspaceId, steps, setTaskResults, setIsSearching });
+  useInlineTaskSearchEffect({
+    mode,
+    search,
+    open,
+    workspaceId,
+    steps,
+    setTaskResults,
+    setIsSearching,
+  });
 
   useFileSearchEffect({
     mode,
