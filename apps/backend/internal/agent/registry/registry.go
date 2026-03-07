@@ -47,6 +47,7 @@ func (r *Registry) LoadDefaults() {
 	all := []agents.Agent{
 		agents.NewAuggie(),
 		agents.NewClaudeCode(),
+		agents.NewClaudeACP(),
 		agents.NewCodex(),
 		agents.NewCopilot(),
 		agents.NewGemini(),
