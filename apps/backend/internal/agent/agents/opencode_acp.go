@@ -8,15 +8,35 @@ import (
 )
 
 var (
-	_ Agent          = (*OpenCodeACP)(nil)
-	_ InferenceAgent = (*OpenCodeACP)(nil)
+	_ Agent            = (*OpenCodeACP)(nil)
+	_ PassthroughAgent = (*OpenCodeACP)(nil)
+	_ InferenceAgent   = (*OpenCodeACP)(nil)
 )
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
 // Uses JSON-RPC 2.0 over stdin/stdout via "opencode acp" instead of REST/SSE.
-type OpenCodeACP struct{}
+type OpenCodeACP struct {
+	StandardPassthrough
+}
 
-func NewOpenCodeACP() *OpenCodeACP { return &OpenCodeACP{} }
+func NewOpenCodeACP() *OpenCodeACP {
+	return &OpenCodeACP{
+		StandardPassthrough: StandardPassthrough{
+			PermSettings: opencodePermSettings,
+			Cfg: PassthroughConfig{
+				Supported:      true,
+				Label:          "CLI Passthrough",
+				Description:    "Show terminal directly instead of chat interface",
+				PassthroughCmd: NewCommand("opencode"),
+				ModelFlag:      NewParam("--model", "{model}"),
+				PromptFlag:     NewParam("--prompt", "{prompt}"),
+				IdleTimeout:    3 * time.Second,
+				BufferMaxBytes: DefaultBufferMaxBytes,
+				ResumeFlag:     NewParam("-c"),
+			},
+		},
+	}
+}
 
 func (a *OpenCodeACP) ID() string          { return "opencode-acp" }
 func (a *OpenCodeACP) Name() string        { return "OpenCode AI Agent (ACP)" }
