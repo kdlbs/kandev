@@ -11,6 +11,7 @@ import (
 type ListeningPort struct {
 	Port    int    `json:"port"`
 	Address string `json:"address"`
+	Process string `json:"process,omitempty"`
 }
 
 // ListPorts returns all TCP ports currently listening inside the executor.

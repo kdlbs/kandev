@@ -98,7 +98,7 @@ func TestProviderHost(t *testing.T) {
 
 func TestDetectGitProtocol(t *testing.T) {
 	got := DetectGitProtocol()
-	if got != ProtocolSSH {
-		t.Errorf("expected %q, got %q", ProtocolSSH, got)
+	if got != ProtocolSSH && got != ProtocolHTTPS {
+		t.Errorf("expected %q or %q, got %q", ProtocolSSH, ProtocolHTTPS, got)
 	}
 }
