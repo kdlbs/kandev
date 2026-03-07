@@ -81,6 +81,7 @@ help:
 	@echo "  test-e2e         Run E2E tests (headless, parallel)"
 	@echo "  test-e2e-headed  Run E2E tests with visible browser"
 	@echo "  test-e2e-ui      Run E2E tests in Playwright UI mode"
+	@echo "  test-e2e-ci      Run E2E tests in Docker with CI-like Linux + resource limits"
 	@echo "  test-e2e-report  Open Playwright HTML report"
 	@echo ""
 	@echo "Code Quality:"
@@ -239,6 +240,24 @@ test-e2e-ui: build-backend build-web
 .PHONY: test-e2e-report
 test-e2e-report:
 	@cd $(WEB_DIR) && npx playwright show-report e2e/playwright-report
+
+# Run E2E tests inside Docker to simulate CI conditions (Linux + resource limits).
+# Configurable via env vars; defaults match GitHub Actions ubuntu-latest runners.
+E2E_CI_CPUS ?= 4
+E2E_CI_MEMORY ?= 16g
+E2E_CI_SHM_SIZE ?= 1g
+E2E_CI_IMAGE ?= kandev-e2e
+
+.PHONY: test-e2e-ci
+test-e2e-ci:
+	@printf "$(CYAN)Building E2E Docker image...$(RESET)\n"
+	@docker build -f e2e.Dockerfile -t $(E2E_CI_IMAGE) .
+	@printf "$(CYAN)Running E2E tests in Docker (cpus=$(E2E_CI_CPUS), memory=$(E2E_CI_MEMORY))...$(RESET)\n"
+	@docker run --rm \
+		--cpus=$(E2E_CI_CPUS) \
+		--memory=$(E2E_CI_MEMORY) \
+		--shm-size=$(E2E_CI_SHM_SIZE) \
+		$(E2E_CI_IMAGE) $(E2E_ARGS)
 
 #
 # Code Quality
