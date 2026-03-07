@@ -23,6 +23,7 @@ RUN go mod download
 COPY apps/backend/ ./
 
 RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
+    go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl && \
     go build -ldflags "-s -w" -o /out/mock-agent ./cmd/mock-agent
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Prefer IPv4 over IPv6 for localhost — matches GitHub Actions ubuntu-latest behavior.
+# Debian Bookworm's gai.conf defaults to IPv6-first, so Node's server.listen('localhost')
+# binds to ::1 while undici's fetch('http://localhost:port') tries 127.0.0.1 → ECONNREFUSED.
+RUN echo 'precedence ::ffff:0:0/96  100' >> /etc/gai.conf
+
 WORKDIR /app
 
 # Copy node_modules + source + built output from node-builder
@@ -70,14 +76,19 @@ COPY --from=node-builder /build/apps/ ./apps/
 # Copy Go binaries into the location global-setup.ts expects
 COPY --from=go-builder /out/kandev ./apps/backend/bin/kandev
 COPY --from=go-builder /out/mock-agent ./apps/backend/bin/mock-agent
+# agentctl must be in PATH — kandev spawns it as a subprocess
+COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
 
 # Create static/public symlinks for standalone server (mirrors global-setup.ts)
 RUN mkdir -p /app/apps/web/.next/standalone/web/.next && \
     ln -sf /app/apps/web/.next/static /app/apps/web/.next/standalone/web/.next/static && \
     ln -sf /app/apps/web/public /app/apps/web/.next/standalone/web/public
 
+# Store Playwright browsers in a shared location accessible by all users
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+
 # Install Playwright chromium with all system dependencies
-RUN cd /app/apps/web && npx playwright install chromium --with-deps
+RUN cd /app/apps/web && npx playwright install --with-deps chromium
 
 # Configure git system-wide so backend fixture's temp dirs inherit it
 RUN git config --system user.name "E2E Test" && \
@@ -86,11 +97,10 @@ RUN git config --system user.name "E2E Test" && \
     git config --system tag.gpgsign false && \
     git config --system init.defaultBranch main
 
-# Create non-root user (Playwright sandbox works better as non-root)
-RUN groupadd -r tester && useradd -r -g tester -u 1000 -m tester && \
-    chown -R tester:tester /app /home/tester
+# Use the built-in node user (uid 1000) as non-root user
+RUN chown -R node:node /app
 
-USER tester
+USER node
 
 # CI=true enables retries=2 in playwright.config.ts
 ENV CI=true
