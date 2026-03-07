@@ -67,3 +67,7 @@ func (r *RemoteDockerExecutor) GetInteractiveRunner() *process.InteractiveRunner
 	// Remote docker does not support passthrough mode.
 	return nil
 }
+
+func (r *RemoteDockerExecutor) RequiresCloneURL() bool          { return true }
+func (r *RemoteDockerExecutor) ShouldApplyPreferredShell() bool { return false }
+func (r *RemoteDockerExecutor) IsAlwaysResumable() bool         { return false }

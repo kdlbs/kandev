@@ -87,6 +87,9 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
 function useEffectivePrepareStatus(sessionId: string) {
   const prepareState = useAppStore((state) => state.prepareProgress.bySessionId[sessionId] ?? null);
   const sessionState = useAppStore((state) => state.taskSessions.items[sessionId]?.state);
+  const agentctlStatus = useAppStore(
+    (state) => state.sessionAgentctl.itemsBySessionId[sessionId]?.status,
+  );
   const profileLabel = useAppStore((state) => {
     const session = state.taskSessions.items[sessionId];
     if (!session?.agent_profile_id) return null;
@@ -120,6 +123,11 @@ function useEffectivePrepareStatus(sessionId: string) {
       profileLabel,
       hasWarnings: true,
     } as const;
+
+  // Agentctl ready implies environment preparation succeeded —
+  // dismiss even if the completed event hasn't arrived yet.
+  if (agentctlStatus === "ready")
+    return { visible: false, status: "completed", prepareState, profileLabel } as const;
 
   // If session reached a terminal state but prepare status is still "preparing",
   // treat it as failed (the completed event may not have arrived)

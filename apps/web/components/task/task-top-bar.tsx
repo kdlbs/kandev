@@ -31,6 +31,7 @@ import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { VcsSplitButton } from "@/components/vcs-split-button";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
+import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { DEBUG_UI } from "@/lib/config";
@@ -56,6 +57,7 @@ type TaskTopBarProps = {
   workflowId?: string | null;
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
+  isAgentctlReady?: boolean;
   remoteExecutorName?: string | null;
   remoteExecutorType?: string | null;
   remoteState?: string | null;
@@ -80,6 +82,7 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowId,
   isArchived,
   isRemoteExecutor,
+  isAgentctlReady,
   remoteExecutorName,
   remoteExecutorType,
   remoteState,
@@ -141,6 +144,8 @@ const TaskTopBar = memo(function TaskTopBar({
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
+        isRemoteExecutor={isRemoteExecutor}
+        isAgentctlReady={isAgentctlReady}
       />
     </header>
   );
@@ -541,6 +546,8 @@ function TopBarRight({
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
+  isRemoteExecutor,
+  isAgentctlReady,
 }: {
   activeSessionId?: string | null;
   baseBranch?: string;
@@ -548,6 +555,8 @@ function TopBarRight({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
+  isRemoteExecutor?: boolean;
+  isAgentctlReady?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 justify-end">
@@ -572,6 +581,11 @@ function TopBarRight({
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
+          <PortForwardButton
+            isRemoteExecutor={isRemoteExecutor}
+            sessionId={activeSessionId}
+            isAgentctlReady={isAgentctlReady}
+          />
           <PRTopbarButton />
           <VcsSplitButton sessionId={activeSessionId ?? null} baseBranch={baseBranch} />
           <LayoutPresetSelector />

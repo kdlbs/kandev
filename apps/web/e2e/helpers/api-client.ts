@@ -167,6 +167,7 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
+      executor_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -180,6 +181,7 @@ export class ApiClient {
       ...(opts?.repository_ids
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
+      ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
     });
   }
 
@@ -225,6 +227,20 @@ export class ApiClient {
       ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
       ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
     });
+  }
+
+  async createExecutor(
+    name: string,
+    type: string,
+  ): Promise<{ id: string; name: string; type: string }> {
+    return this.request("POST", "/api/v1/executors", { name, type });
+  }
+
+  async updateWorkspace(
+    workspaceId: string,
+    updates: { default_executor_id?: string },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);
   }
 
   async listExecutors(): Promise<{

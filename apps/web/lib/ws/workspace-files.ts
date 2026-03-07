@@ -75,6 +75,7 @@ export type FileUpdateResponse = {
   path: string;
   success: boolean;
   new_hash?: string;
+  resolution?: "applied" | "overwritten";
   error?: string;
 };
 
@@ -84,15 +85,16 @@ export type FileUpdateResponse = {
 export async function updateFileContent(
   client: WebSocketClient,
   sessionId: string,
-  path: string,
-  diff: string,
-  originalHash: string,
+  params: { path: string; diff: string; originalHash: string; desiredContent?: string },
 ): Promise<FileUpdateResponse> {
   return client.request<FileUpdateResponse>("workspace.file.update", {
     session_id: sessionId,
-    path,
-    diff,
-    original_hash: originalHash,
+    path: params.path,
+    diff: params.diff,
+    original_hash: params.originalHash,
+    ...(params.desiredContent !== undefined && {
+      desired_content: params.desiredContent,
+    }),
   });
 }
 

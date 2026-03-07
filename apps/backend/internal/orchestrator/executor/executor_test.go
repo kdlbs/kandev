@@ -597,9 +597,11 @@ func newTestExecutor(t *testing.T, agentManager AgentManagerClient, repo *mockRe
 	if err != nil {
 		t.Fatalf("failed to create logger: %v", err)
 	}
-	return NewExecutor(agentManager, repo, log, ExecutorConfig{
+	exec := NewExecutor(agentManager, repo, log, ExecutorConfig{
 		ShellPrefs: &mockShellPrefs{},
 	})
+	exec.SetCapabilities(&mockCapabilities{})
+	return exec
 }
 
 // Tests
@@ -989,22 +991,24 @@ func TestShouldUseWorktree(t *testing.T) {
 	}
 }
 
-func TestShouldApplyPreferredShell(t *testing.T) {
-	tests := []struct {
-		executorType string
-		want         bool
-	}{
-		{"local", true},
-		{"worktree", true},
-		{"local_docker", false},
-		{"remote_docker", false},
-		{"sprites", false},
-		{"", false},
+// mockCapabilities implements ExecutorTypeCapabilities for testing.
+type mockCapabilities struct{}
+
+func (m *mockCapabilities) RequiresCloneURL(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeRemoteDocker, models.ExecutorTypeSprites:
+		return true
+	default:
+		return false
 	}
-	for _, tt := range tests {
-		if got := shouldApplyPreferredShell(tt.executorType); got != tt.want {
-			t.Errorf("shouldApplyPreferredShell(%q) = %v, want %v", tt.executorType, got, tt.want)
-		}
+}
+
+func (m *mockCapabilities) ShouldApplyPreferredShell(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, models.ExecutorTypeMockRemote:
+		return true
+	default:
+		return false
 	}
 }
 

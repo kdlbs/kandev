@@ -242,6 +242,30 @@ function FileDiffHeader({
   );
 }
 
+async function revertBlock(sessionId: string, filePath: string, info: RevertBlockInfo) {
+  const client = getWebSocketClient();
+  if (!client) return;
+  try {
+    const response = await requestFileContent(client, sessionId, filePath);
+    if (response.error) return;
+    const currentContent = response.content;
+    const hash = await calculateHash(currentContent);
+    const lines = currentContent.split("\n");
+    lines.splice(info.addStart - 1, info.addCount, ...info.oldLines);
+    const nextContent = lines.join("\n");
+    if (nextContent === currentContent) return;
+    const patch = generateUnifiedDiff(currentContent, nextContent, filePath);
+    if (!patch || !/^@@/m.test(patch)) return;
+    await updateFileContent(client, sessionId, {
+      path: filePath,
+      diff: patch,
+      originalHash: hash,
+    });
+  } catch (err) {
+    console.error("Failed to revert change block:", err);
+  }
+}
+
 function FileDiffSection({
   file,
   isReviewed,
@@ -283,28 +307,7 @@ function FileDiffSection({
   }, [file.path, onDiscard]);
 
   const handleRevertBlock = useCallback(
-    async (filePath: string, info: RevertBlockInfo) => {
-      const client = getWebSocketClient();
-      if (!client) return;
-      try {
-        const response = await requestFileContent(client, sessionId, filePath);
-        if (response.error) return;
-        const currentContent = response.content;
-        const hash = await calculateHash(currentContent);
-        const lines = currentContent.split("\n");
-        lines.splice(info.addStart - 1, info.addCount, ...info.oldLines);
-        const nextContent = lines.join("\n");
-        if (nextContent === currentContent) return;
-
-        const patch = generateUnifiedDiff(currentContent, nextContent, filePath);
-        // Guard against no-op diffs ("No valid patches in input") from createTwoFilesPatch.
-        if (!patch || !/^@@/m.test(patch)) return;
-
-        await updateFileContent(client, sessionId, filePath, patch, hash);
-      } catch (err) {
-        console.error("Failed to revert change block:", err);
-      }
-    },
+    (filePath: string, info: RevertBlockInfo) => revertBlock(sessionId, filePath, info),
     [sessionId],
   );
 

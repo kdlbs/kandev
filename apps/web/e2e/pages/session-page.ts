@@ -21,6 +21,26 @@ export class SessionPage {
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
   }
 
+  // Port forward dialog locators
+  get portForwardButton() {
+    return this.page.getByTestId("port-forward-button");
+  }
+  get portForwardDialog() {
+    return this.page.getByTestId("port-forward-dialog");
+  }
+  get portForwardRefresh() {
+    return this.page.getByTestId("port-forward-refresh");
+  }
+  get portForwardInput() {
+    return this.page.getByTestId("port-forward-port-input");
+  }
+  get portForwardAddButton() {
+    return this.page.getByTestId("port-forward-add-button");
+  }
+  portForwardRow(port: number) {
+    return this.page.getByTestId(`port-forward-row-${port}`);
+  }
+
   async waitForLoad(timeout = 15_000) {
     await this.chat.waitFor({ state: "visible", timeout });
   }

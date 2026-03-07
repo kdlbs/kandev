@@ -5,12 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +19,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
-	agentctl "github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
@@ -264,17 +261,7 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		c.JSON(http.StatusNotFound, gin.H{"error": "remote execution not available"})
 		return
 	}
-	baseClient := execution.GetAgentCtlClient()
-	streamClient, err := cloneAgentctlClientForWorkspace(baseClient, h.logger)
-	if err != nil {
-		h.logger.Error("failed to create remote shell stream client",
-			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID),
-			zap.Error(err))
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
-	}
-	defer streamClient.Close()
+	client := execution.GetAgentCtlClient()
 
 	_, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
@@ -282,8 +269,9 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		return
 	}
 
-	if err := baseClient.StartShell(c.Request.Context()); err != nil {
-		h.logger.Error("failed to start remote shell",
+	// Create a per-terminal shell on agentctl (idempotent if already exists)
+	if err := client.StartShellTerminal(c.Request.Context(), terminalID, 80, 24); err != nil {
+		h.logger.Error("failed to start remote terminal shell",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
 			zap.Error(err))
@@ -291,8 +279,21 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		return
 	}
 
-	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	// Open binary WS to the per-terminal shell on agentctl
+	agentctlConn, err := client.StreamShellTerminal(c.Request.Context(), terminalID)
 	if err != nil {
+		h.logger.Error("failed to connect to remote terminal shell stream",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Upgrade the client-facing WebSocket
+	clientConn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		_ = agentctlConn.Close()
 		h.logger.Error("failed to upgrade remote shell websocket",
 			zap.String("session_id", sessionID),
 			zap.String("terminal_id", terminalID),
@@ -300,96 +301,77 @@ func (h *TerminalHandler) handleRemoteUserShellWS(c *gin.Context, sessionID, ter
 		return
 	}
 
-	stream, err := streamClient.StreamWorkspace(c.Request.Context(), agentctl.WorkspaceStreamCallbacks{
-		OnShellOutput: func(data string) {
-			_ = conn.WriteMessage(gorillaws.BinaryMessage, []byte(data))
-		},
-	})
-	if err != nil {
-		_ = conn.Close()
-		h.logger.Error("failed to open remote workspace stream",
-			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID),
-			zap.Error(err))
-		return
-	}
 	defer func() {
-		stream.Close()
-		_ = conn.Close()
+		_ = agentctlConn.Close()
+		_ = clientConn.Close()
 	}()
 
-	// Replay recent buffered shell output so prompt/current state appears immediately
-	// without requiring user input to trigger the first visible update.
-	if buffered, err := baseClient.ShellBuffer(c.Request.Context()); err == nil && buffered != "" {
-		_ = conn.WriteMessage(gorillaws.BinaryMessage, []byte(buffered))
-	}
+	h.logger.Info("remote terminal shell WebSocket connected",
+		zap.String("session_id", sessionID),
+		zap.String("terminal_id", terminalID))
 
+	// Send initial command if specified
 	if initialCommand != "" {
-		_ = stream.WriteShellInput(initialCommand + "\n")
+		if err := agentctlConn.WriteMessage(gorillaws.BinaryMessage, []byte(initialCommand+"\n")); err != nil {
+			h.logger.Debug("failed to send initial command to remote terminal shell",
+				zap.String("terminal_id", terminalID),
+				zap.Error(err))
+		}
 	}
 
-	h.remoteShellReadLoop(conn, stream, sessionID, terminalID)
+	h.bridgeBinaryWebSockets(clientConn, agentctlConn, terminalID)
 }
 
-func (h *TerminalHandler) remoteShellReadLoop(conn *gorillaws.Conn, stream *agentctl.WorkspaceStream, sessionID, terminalID string) {
-	for {
-		messageType, data, readErr := conn.ReadMessage()
-		if readErr != nil {
-			if !gorillaws.IsCloseError(readErr, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
-				h.logger.Debug("remote shell websocket read error",
-					zap.String("session_id", sessionID),
-					zap.String("terminal_id", terminalID),
-					zap.Error(readErr))
+// bridgeBinaryWebSockets forwards binary WebSocket frames bidirectionally between
+// a client connection and an agentctl connection until either side disconnects.
+func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *gorillaws.Conn, terminalID string) {
+	done := make(chan struct{})
+
+	// agentctl → client (shell output)
+	go func() {
+		defer close(done)
+		for {
+			msgType, data, err := agentctlConn.ReadMessage()
+			if err != nil {
+				if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+					h.logger.Debug("remote terminal shell upstream read error",
+						zap.String("terminal_id", terminalID),
+						zap.Error(err))
+				}
+				return
 			}
-			return
+			if err := clientConn.WriteMessage(msgType, data); err != nil {
+				h.logger.Debug("remote terminal shell client write error",
+					zap.String("terminal_id", terminalID),
+					zap.Error(err))
+				return
+			}
 		}
-		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {
-			continue
-		}
-		if len(data) > 0 {
-			h.processRemoteShellMessage(data, stream, sessionID, terminalID)
-		}
-	}
-}
+	}()
 
-func (h *TerminalHandler) processRemoteShellMessage(data []byte, stream *agentctl.WorkspaceStream, sessionID, terminalID string) {
-	if data[0] == resizeCommandByte {
-		var resize ResizePayload
-		if err := json.Unmarshal(data[1:], &resize); err != nil {
-			h.logger.Debug("failed to decode remote shell resize",
-				zap.String("session_id", sessionID),
-				zap.String("terminal_id", terminalID),
-				zap.Error(err))
-			return
+	// client → agentctl (input + resize)
+	go func() {
+		for {
+			msgType, data, err := clientConn.ReadMessage()
+			if err != nil {
+				if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+					h.logger.Debug("remote terminal shell client read error",
+						zap.String("terminal_id", terminalID),
+						zap.Error(err))
+				}
+				_ = agentctlConn.Close()
+				return
+			}
+			if err := agentctlConn.WriteMessage(msgType, data); err != nil {
+				h.logger.Debug("remote terminal shell upstream write error",
+					zap.String("terminal_id", terminalID),
+					zap.Error(err))
+				return
+			}
 		}
-		if err := stream.ResizeShell(int(resize.Cols), int(resize.Rows)); err != nil {
-			h.logger.Debug("failed to resize remote shell",
-				zap.String("session_id", sessionID),
-				zap.String("terminal_id", terminalID),
-				zap.Uint16("cols", resize.Cols),
-				zap.Uint16("rows", resize.Rows),
-				zap.Error(err))
-		}
-		return
-	}
-	if err := stream.WriteShellInput(string(data)); err != nil {
-		h.logger.Debug("failed to write remote shell input",
-			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID),
-			zap.Error(err))
-	}
-}
+	}()
 
-func cloneAgentctlClientForWorkspace(base *agentctl.Client, log *logger.Logger) (*agentctl.Client, error) {
-	parsed, err := url.Parse(base.BaseURL())
-	if err != nil {
-		return nil, fmt.Errorf("invalid agentctl base url: %w", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		return nil, fmt.Errorf("invalid agentctl port: %w", err)
-	}
-	return agentctl.NewClient(parsed.Hostname(), port, log), nil
+	<-done
 }
 
 // handleAgentPassthroughWS handles WebSocket connections for agent passthrough terminals.

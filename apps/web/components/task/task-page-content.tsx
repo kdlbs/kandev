@@ -251,6 +251,7 @@ function buildTaskTopBarProps(params: {
   effectiveSessionId: string | null;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
+  agentctlReady: boolean;
 }) {
   const { taskProps, agent, merged, workflowSteps, showDebugOverlay, onToggleDebugOverlay } =
     params;
@@ -274,6 +275,7 @@ function buildTaskTopBarProps(params: {
     workflowId: taskProps.workflowId,
     isArchived: taskProps.isArchived,
     isRemoteExecutor: params.remote.isRemoteExecutor,
+    isAgentctlReady: params.agentctlReady,
     remoteExecutorType: params.remote.remoteExecutorType,
     remoteExecutorName: params.remote.remoteExecutorName,
     remoteState: params.remote.remoteState,
@@ -387,6 +389,7 @@ function TaskPageInner({
     effectiveSessionId,
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
+    agentctlReady: agentctlStatus.isReady,
   });
   const layoutProps = buildTaskLayoutProps({
     taskProps,

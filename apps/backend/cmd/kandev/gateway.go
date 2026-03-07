@@ -92,6 +92,7 @@ func provideGateway(
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(dataDir, log))
 		gateway.SetVscodeProxy(lifecycleMgr)
+		gateway.SetPortProxy(lifecycleMgr)
 	}
 
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
@@ -147,6 +148,9 @@ func provideGateway(
 
 		vscodeHandlers := agenthandlers.NewVscodeHandlers(lifecycleMgr, gateway.VscodeProxyHandler, log)
 		vscodeHandlers.RegisterHandlers(gateway.Dispatcher)
+
+		portHandlers := agenthandlers.NewPortHandlers(lifecycleMgr, log)
+		portHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
 	go gateway.Hub.Run(ctx)

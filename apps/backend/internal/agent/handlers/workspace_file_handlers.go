@@ -168,10 +168,11 @@ func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *
 // wsUpdateFileContent handles workspace.file.update action
 func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID    string `json:"session_id"`
-		Path         string `json:"path"`
-		Diff         string `json:"diff"`
-		OriginalHash string `json:"original_hash"`
+		SessionID      string  `json:"session_id"`
+		Path           string  `json:"path"`
+		Diff           string  `json:"diff"`
+		OriginalHash   string  `json:"original_hash"`
+		DesiredContent *string `json:"desired_content"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -201,7 +202,7 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	}
 
 	// Apply file diff via agentctl
-	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash)
+	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		h.logger.Error("failed to apply file diff", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to apply file diff: %v", err), nil)

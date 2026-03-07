@@ -353,7 +353,25 @@ const (
 	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
+	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
+
+// IsRemoteExecutorType reports whether the given executor type represents
+// a remote execution environment.
+func IsRemoteExecutorType(t ExecutorType) bool {
+	switch t {
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAlwaysResumableRuntime reports whether the given runtime string represents
+// an executor that can always be resumed even without an explicit resume token.
+func IsAlwaysResumableRuntime(runtime string) bool {
+	return ExecutorType(runtime) == ExecutorTypeSprites
+}
 
 const (
 	ExecutorIDLocal       = "exec-local"

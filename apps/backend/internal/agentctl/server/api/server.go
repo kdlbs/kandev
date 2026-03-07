@@ -24,6 +24,7 @@ type Server struct {
 	mcpBackendClient *mcp.ChannelBackendClient
 	logger           *logger.Logger
 	router           *gin.Engine
+	portProxies      *portProxyCache
 
 	upgrader websocket.Upgrader
 }
@@ -41,6 +42,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		mcpBackendClient: mcpBackendClient,
 		logger:           log.WithFields(zap.String("component", "api-server")),
 		router:           gin.New(),
+		portProxies:      newPortProxyCache(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -97,6 +99,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/shell/buffer", s.handleShellBuffer)
 		api.POST("/shell/start", s.handleShellStart)
 
+		// Per-terminal shell sessions (for remote executor multi-terminal support)
+		api.POST("/shell/terminal/start", s.handleShellTerminalStart)
+		api.GET("/shell/terminal/:id/stream", s.handleShellTerminalStreamWS)
+		api.GET("/shell/terminal/:id/buffer", s.handleShellTerminalBuffer)
+		api.DELETE("/shell/terminal/:id", s.handleShellTerminalStop)
+
 		// Process runner
 		api.POST("/processes/start", s.handleStartProcess)
 		api.POST("/processes/stop", s.handleStopProcess)
@@ -110,6 +118,13 @@ func (s *Server) setupRoutes() {
 		api.POST("/vscode/open-file", s.handleVscodeOpenFile)
 		api.Any("/vscode/proxy", s.handleVscodeProxy)
 		api.Any("/vscode/proxy/*path", s.handleVscodeProxy)
+
+		// Port proxy - generic reverse proxy for any localhost port
+		api.Any("/port-proxy/:port", s.handlePortProxy)
+		api.Any("/port-proxy/:port/*path", s.handlePortProxy)
+
+		// Port listener detection
+		api.GET("/ports", s.handleListPorts)
 
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)

@@ -297,10 +297,10 @@ func (e *Executor) applyRepositoryToSwitchRequest(ctx context.Context, req *Laun
 	}
 	req.RepositoryURL = repository.LocalPath
 	req.Branch = session.BaseBranch
-	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker {
+	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) {
 		cloneURL := repositoryCloneURL(repository)
 		if cloneURL == "" {
-			return "", ErrRemoteDockerNoRepoURL
+			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}

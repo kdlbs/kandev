@@ -404,3 +404,7 @@ func (r *SpritesExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstan
 func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }
+
+func (r *SpritesExecutor) RequiresCloneURL() bool          { return true }
+func (r *SpritesExecutor) ShouldApplyPreferredShell() bool { return false }
+func (r *SpritesExecutor) IsAlwaysResumable() bool         { return true }

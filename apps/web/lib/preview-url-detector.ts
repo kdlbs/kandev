@@ -3,6 +3,8 @@
  * Handles various formats including full URLs and host:port patterns.
  */
 
+import { getBackendConfig } from "@/lib/config";
+
 export interface PreviewUrlInfo {
   url: string;
   port?: number;
@@ -65,6 +67,34 @@ export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
   }
 
   return null;
+}
+
+/**
+ * Rewrites a detected localhost URL to route through the port proxy for remote executors.
+ * For local executors, returns the URL unchanged.
+ *
+ * @param detectedUrl - The detected localhost URL (e.g., http://localhost:3000/path)
+ * @param sessionId - The session ID to include in the proxy path
+ * @param isRemote - Whether the session runs on a remote executor
+ * @returns The proxy URL (e.g., /port-proxy/{sessionId}/3000/path) or the original URL
+ */
+export function rewritePreviewUrlForProxy(
+  detectedUrl: string,
+  sessionId: string,
+  isRemote: boolean,
+): string | null {
+  if (!isRemote) return detectedUrl;
+
+  try {
+    const parsed = new URL(detectedUrl);
+    if (!LOCALHOST_HOSTS.has(parsed.hostname)) return null;
+    if (!parsed.port) return null;
+    const path = parsed.pathname + parsed.search + parsed.hash;
+    const backendUrl = getBackendConfig().apiBaseUrl;
+    return `${backendUrl}/port-proxy/${sessionId}/${parsed.port}${path}`;
+  } catch {
+    return null;
+  }
 }
 
 /**
