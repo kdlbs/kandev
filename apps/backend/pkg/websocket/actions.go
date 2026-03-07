@@ -260,6 +260,9 @@ const (
 	ActionVscodeStatus   = "vscode.status"   // Get code-server status for a session
 	ActionVscodeOpenFile = "vscode.openFile" // Open a file in code-server for a session
 
+	// Port actions
+	ActionPortList = "port.list" // List listening ports on a remote executor
+
 	// Secret actions
 	ActionSecretList   = "secrets.list"
 	ActionSecretCreate = "secrets.create"

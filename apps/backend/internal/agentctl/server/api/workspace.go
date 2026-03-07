@@ -116,13 +116,13 @@ func (s *Server) handleFileContent(c *gin.Context) {
 		return
 	}
 
-	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
+	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 
-	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary})
+	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary, ResolvedPath: resolvedPath})
 }
 
 // handleFileContentAtRef handles file content requests at a specific git ref via HTTP GET
@@ -167,7 +167,7 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	// Apply the diff
-	newHash, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash)
+	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		c.JSON(400, streams.FileUpdateResponse{
 			Path:    req.Path,
@@ -178,9 +178,10 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	c.JSON(200, streams.FileUpdateResponse{
-		Path:    req.Path,
-		Success: true,
-		NewHash: newHash,
+		Path:       req.Path,
+		Success:    true,
+		NewHash:    newHash,
+		Resolution: resolution,
 	})
 }
 

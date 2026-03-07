@@ -35,6 +35,9 @@ func (m *MockExecutor) RecoverInstances(ctx context.Context) ([]*ExecutorInstanc
 func (m *MockExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }
+func (m *MockExecutor) RequiresCloneURL() bool          { return false }
+func (m *MockExecutor) ShouldApplyPreferredShell() bool { return false }
+func (m *MockExecutor) IsAlwaysResumable() bool         { return false }
 
 func newTestRegistryLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})

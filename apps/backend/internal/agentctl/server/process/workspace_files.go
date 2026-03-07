@@ -22,6 +22,13 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// ResolutionApplied indicates the diff was applied normally via git apply.
+	ResolutionApplied = "applied"
+	// ResolutionOverwritten indicates the file was overwritten with desired content.
+	ResolutionOverwritten = "overwritten"
+)
+
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
 // updateFiles updates the file listing
@@ -238,31 +245,35 @@ func resolveNonExistentPath(path string) (string, error) {
 
 // GetFileContent returns the content of a file.
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
-func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, error) {
+// If the file is a symlink, resolvedPath contains the target path relative to the workspace root.
+func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
-		return "", 0, false, err
+		return "", 0, false, "", err
 	}
+
+	// Check if the original path is a symlink and compute the resolved relative path.
+	resolvedPath := wt.resolveSymlinkRelPath(reqPath)
 
 	// Check if file exists and is a regular file
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("file not found: %w", err)
+		return "", 0, false, "", fmt.Errorf("file not found: %w", err)
 	}
 
 	if info.IsDir() {
-		return "", 0, false, fmt.Errorf("path is a directory, not a file")
+		return "", 0, false, "", fmt.Errorf("path is a directory, not a file")
 	}
 
 	// Check file size
 	if info.Size() > maxFileSize {
-		return "", info.Size(), false, fmt.Errorf("file too large (max 10MB)")
+		return "", info.Size(), false, "", fmt.Errorf("file too large (max 10MB)")
 	}
 
 	// Read file content
 	file, err := os.Open(safePath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("failed to open file: %w", err)
+		return "", 0, false, "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -270,71 +281,85 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("failed to read file: %w", err)
+		return "", 0, false, "", fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Detect binary: if content is not valid UTF-8, base64-encode it
 	if !utf8.Valid(content) {
 		encoded := base64.StdEncoding.EncodeToString(content)
-		return encoded, info.Size(), true, nil
+		return encoded, info.Size(), true, resolvedPath, nil
 	}
 
-	return string(content), info.Size(), false, nil
+	return string(content), info.Size(), false, resolvedPath, nil
 }
 
-// ApplyFileDiff applies a unified diff to a file with conflict detection
+// resolveSymlinkRelPath checks if reqPath is a symlink and returns the resolved
+// target path relative to the workspace root. Returns "" if not a symlink.
+func (wt *WorkspaceTracker) resolveSymlinkRelPath(reqPath string) string {
+	cleanReqPath := filepath.Clean(reqPath)
+	if strings.Contains(cleanReqPath, "..") || filepath.IsAbs(cleanReqPath) {
+		return ""
+	}
+	unresolvedPath := filepath.Join(wt.workDir, cleanReqPath)
+	info, err := os.Lstat(unresolvedPath)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return ""
+	}
+	// Resolve the symlink target
+	realTarget, err := filepath.EvalSymlinks(unresolvedPath)
+	if err != nil {
+		return ""
+	}
+	realWorkDir, _ := filepath.EvalSymlinks(filepath.Clean(wt.workDir))
+	if realWorkDir == "" {
+		realWorkDir = filepath.Clean(wt.workDir)
+	}
+	rel, err := filepath.Rel(realWorkDir, realTarget)
+	if err != nil {
+		return ""
+	}
+	return rel
+}
+
+// ApplyFileDiff applies a unified diff to a file with conflict detection.
 // Uses git apply for reliable, battle-tested patch application.
 // For symlinked files, resolves to the real path and rewrites the diff header
 // so that git apply operates on the actual file.
-func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
+// When desiredContent is provided and the diff cannot be applied (hash conflict),
+// the file is overwritten with the desired content as a fallback.
+// Returns the new hash and a resolution string ("applied" or "overwritten").
+func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash, desiredContent string) (string, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	cleanWorkDir := filepath.Clean(wt.workDir)
 
 	// Read current file content
-	currentContent, _, _, err := wt.GetFileContent(reqPath)
+	currentContent, _, _, _, err := wt.GetFileContent(reqPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read current file: %w", err)
+		return "", "", fmt.Errorf("failed to read current file: %w", err)
 	}
 
 	// Calculate hash of current content for conflict detection
 	currentHash := calculateSHA256(currentContent)
 	if originalHash != "" && currentHash != originalHash {
-		return "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
+		if desiredContent != "" {
+			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, desiredContent, currentHash)
+		}
+		return "", "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
 
 	// If the file is a symlink, resolve to the real path and rewrite the diff header.
 	// git apply cannot patch through symlinks — it needs the real file path.
-	// Note: safePath is already resolved by resolveSafePath, so we check the
-	// unresolved path to detect whether the original request targets a symlink.
-	applyPath := reqPath
-	cleanReqPath := filepath.Clean(reqPath)
-	// Validate path doesn't attempt traversal before constructing filesystem path
-	if strings.Contains(cleanReqPath, "..") || filepath.IsAbs(cleanReqPath) {
-		return "", fmt.Errorf("invalid path: %s", reqPath)
-	}
-	unresolvedPath := filepath.Join(wt.workDir, cleanReqPath)
-	if info, lErr := os.Lstat(unresolvedPath); lErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		// File is a symlink. safePath already points to the real target.
-		realWorkDir, _ := filepath.EvalSymlinks(cleanWorkDir)
-		if realWorkDir == "" {
-			realWorkDir = cleanWorkDir
-		}
-		realRel, relErr := filepath.Rel(realWorkDir, safePath)
-		if relErr == nil {
-			unifiedDiff = rewriteDiffPaths(unifiedDiff, reqPath, realRel)
-			applyPath = realRel
-		}
-	}
+	applyPath, unifiedDiff := wt.resolveSymlinkForDiff(reqPath, safePath, cleanWorkDir, unifiedDiff)
 
 	// Write diff to a temporary patch file
 	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
 	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0o644)
 	if err != nil {
-		return "", fmt.Errorf("failed to write patch file: %w", err)
+		return "", "", fmt.Errorf("failed to write patch file: %w", err)
 	}
 	defer func() {
 		_ = os.Remove(patchFile) // Best effort cleanup
@@ -346,14 +371,17 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
+		if desiredContent != "" {
+			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, desiredContent, currentHash)
+		}
+		return "", "", fmt.Errorf("git apply failed: %w\nOutput: %s", err, string(output))
 	}
 
 	// Read the updated content (use the real file path for symlinks)
 	readPath := filepath.Join(cleanWorkDir, applyPath)
 	updatedContent, err := os.ReadFile(readPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read updated file: %w", err)
+		return "", "", fmt.Errorf("failed to read updated file: %w", err)
 	}
 
 	// Calculate new hash
@@ -369,7 +397,56 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 		zap.String("new_hash", newHash),
 	)
 
-	return newHash, nil
+	return newHash, ResolutionApplied, nil
+}
+
+// resolveSymlinkForDiff checks if reqPath is a symlink and, if so, rewrites the diff
+// paths to target the real file. Returns the path to use for git apply and the
+// (possibly rewritten) diff.
+func (wt *WorkspaceTracker) resolveSymlinkForDiff(
+	reqPath, safePath, cleanWorkDir, unifiedDiff string,
+) (string, string) {
+	cleanReqPath := filepath.Clean(reqPath)
+	if strings.Contains(cleanReqPath, "..") || filepath.IsAbs(cleanReqPath) {
+		return reqPath, unifiedDiff
+	}
+	unresolvedPath := filepath.Join(wt.workDir, cleanReqPath)
+	info, lErr := os.Lstat(unresolvedPath)
+	if lErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		return reqPath, unifiedDiff
+	}
+	// File is a symlink. safePath already points to the real target.
+	realWorkDir, _ := filepath.EvalSymlinks(cleanWorkDir)
+	if realWorkDir == "" {
+		realWorkDir = cleanWorkDir
+	}
+	realRel, relErr := filepath.Rel(realWorkDir, safePath)
+	if relErr != nil {
+		return reqPath, unifiedDiff
+	}
+	return realRel, rewriteDiffPaths(unifiedDiff, reqPath, realRel)
+}
+
+// writeDesiredContent writes the desired content directly to the file as a fallback
+// when the diff cannot be applied. Returns the new hash and "overwritten" resolution.
+func (wt *WorkspaceTracker) writeDesiredContent(
+	safePath, cleanWorkDir, reqPath, desiredContent, oldHash string,
+) (string, string, error) {
+	if err := os.WriteFile(safePath, []byte(desiredContent), 0o644); err != nil {
+		return "", "", fmt.Errorf("failed to write desired content: %w", err)
+	}
+
+	newHash := calculateSHA256(desiredContent)
+	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
+	wt.notifyFileChange(relPath, types.FileOpWrite)
+
+	wt.logger.Warn("overwrote file with desired content (conflict fallback)",
+		zap.String("path", reqPath),
+		zap.String("old_hash", oldHash),
+		zap.String("new_hash", newHash),
+	)
+
+	return newHash, ResolutionOverwritten, nil
 }
 
 // rewriteDiffPaths replaces file paths in unified diff headers.

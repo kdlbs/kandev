@@ -3,6 +3,8 @@
  * Handles various formats including full URLs and host:port patterns.
  */
 
+import { getBackendConfig } from "@/lib/config";
+
 export interface PreviewUrlInfo {
   url: string;
   port?: number;
@@ -88,7 +90,8 @@ export function rewritePreviewUrlForProxy(
     if (!LOCALHOST_HOSTS.has(parsed.hostname)) return null;
     if (!parsed.port) return null;
     const path = parsed.pathname + parsed.search + parsed.hash;
-    return `/port-proxy/${sessionId}/${parsed.port}${path}`;
+    const backendUrl = getBackendConfig().apiBaseUrl;
+    return `${backendUrl}/port-proxy/${sessionId}/${parsed.port}${path}`;
   } catch {
     return null;
   }

@@ -30,6 +30,8 @@ func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 		return NameRemoteDocker
 	case models.ExecutorTypeSprites:
 		return NameSprites
+	case models.ExecutorTypeMockRemote:
+		return NameStandalone
 	default:
 		return NameStandalone
 	}

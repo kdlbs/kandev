@@ -490,10 +490,10 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		req.Metadata[lifecycle.MetadataKeyRepoSetupScript] = repository.SetupScript
 	}
 
-	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker {
+	if e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
 		cloneURL := repositoryCloneURL(repository)
 		if cloneURL == "" {
-			return "", ErrRemoteDockerNoRepoURL
+			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}

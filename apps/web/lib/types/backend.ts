@@ -538,6 +538,7 @@ export type FileContentResponse = {
   content: string;
   size: number;
   is_binary?: boolean;
+  resolved_path?: string;
   error?: string;
 };
 

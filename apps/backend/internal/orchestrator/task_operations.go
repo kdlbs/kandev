@@ -856,11 +856,7 @@ func (s *Service) populateExecutorStatusInfo(ctx context.Context, session *model
 	}
 	resp.ExecutorType = string(execModel.Type)
 	resp.ExecutorName = execModel.Name
-	resp.IsRemoteExecutor = isRemoteExecutorType(execModel.Type)
-}
-
-func isRemoteExecutorType(t models.ExecutorType) bool {
-	return t == models.ExecutorTypeSprites || t == models.ExecutorTypeRemoteDocker
+	resp.IsRemoteExecutor = models.IsRemoteExecutorType(execModel.Type)
 }
 
 func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string, resp *dto.TaskSessionStatusResponse) {

@@ -350,8 +350,11 @@ func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 	if err != nil || info == nil {
 		return false
 	}
-	return info.RuntimeName == string(executor.NameSprites) || info.ExecutorType == string(models.ExecutorTypeSprites) ||
-		info.ExecutorType == string(models.ExecutorTypeRemoteDocker)
+	if models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return true
+	}
+	// Backwards compatibility: old records may only have RuntimeName set.
+	return info.RuntimeName == string(executor.NameSprites) || info.RuntimeName == string(executor.NameRemoteDocker)
 }
 
 // GetAvailableCommandsForSession returns the available slash commands for a session.

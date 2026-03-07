@@ -386,7 +386,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	textContent := "Hello, world!\nLine 2\n"
 	writeFile(t, repoDir, "text.txt", textContent)
 
-	content, size, isBinary, err := wt.GetFileContent("text.txt")
+	content, size, isBinary, _, err := wt.GetFileContent("text.txt")
 	if err != nil {
 		t.Fatalf("GetFileContent(text.txt) error: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 		t.Fatalf("failed to write binary file: %v", err)
 	}
 
-	content, size, isBinary, err = wt.GetFileContent("image.png")
+	content, size, isBinary, _, err = wt.GetFileContent("image.png")
 	if err != nil {
 		t.Fatalf("GetFileContent(image.png) error: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	// Test 3: Empty file returns isBinary=false
 	writeFile(t, repoDir, "empty.txt", "")
 
-	_, _, isBinary, err = wt.GetFileContent("empty.txt")
+	_, _, isBinary, _, err = wt.GetFileContent("empty.txt")
 	if err != nil {
 		t.Fatalf("GetFileContent(empty.txt) error: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	}
 
 	// Test 4: Path traversal is rejected
-	_, _, _, err = wt.GetFileContent("../../etc/passwd")
+	_, _, _, _, err = wt.GetFileContent("../../etc/passwd")
 	if err == nil {
 		t.Error("expected error for path traversal, got nil")
 	}
@@ -673,12 +673,15 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 	// Build a unified diff that changes line2 -> modified
 	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
 
-	hash, err := wt.ApplyFileDiff("test.txt", diff, "")
+	hash, resolution, err := wt.ApplyFileDiff("test.txt", diff, "", "")
 	if err != nil {
 		t.Fatalf("ApplyFileDiff failed: %v", err)
 	}
 	if hash == "" {
 		t.Fatal("expected non-empty hash")
+	}
+	if resolution != "applied" {
+		t.Errorf("expected resolution 'applied', got %q", resolution)
 	}
 
 	// Verify file content
@@ -722,12 +725,15 @@ func TestApplyFileDiff_Symlink(t *testing.T) {
 	// Build a diff targeting the symlink path
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
 
-	hash, err := wt.ApplyFileDiff("LINK.md", diff, "")
+	hash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, "", "")
 	if err != nil {
 		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
 	}
 	if hash == "" {
 		t.Fatal("expected non-empty hash")
+	}
+	if resolution != "applied" {
+		t.Errorf("expected resolution 'applied', got %q", resolution)
 	}
 
 	// Verify the real file was patched (not replaced by a regular file)
@@ -780,12 +786,182 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 
 	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
 
-	_, err := wt.ApplyFileDiff("conflict.txt", diff, origHash)
+	_, _, err := wt.ApplyFileDiff("conflict.txt", diff, origHash, "")
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
 	if !strings.Contains(err.Error(), "conflict detected") {
 		t.Errorf("expected 'conflict detected' error, got: %v", err)
+	}
+}
+
+func TestGetFileContent_SymlinkResolvedPath(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create a real file and a symlink
+	realDir := filepath.Join(repoDir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	writeFile(t, repoDir, "real/target.md", "content\n")
+
+	symlinkPath := filepath.Join(repoDir, "LINK.md")
+	if err := os.Symlink(filepath.Join(repoDir, "real", "target.md"), symlinkPath); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	t.Run("symlink returns resolved path", func(t *testing.T) {
+		_, _, _, resolvedPath, err := wt.GetFileContent("LINK.md")
+		if err != nil {
+			t.Fatalf("GetFileContent error: %v", err)
+		}
+		if resolvedPath != filepath.Join("real", "target.md") {
+			t.Errorf("resolvedPath = %q, want %q", resolvedPath, filepath.Join("real", "target.md"))
+		}
+	})
+
+	t.Run("regular file returns empty resolved path", func(t *testing.T) {
+		_, _, _, resolvedPath, err := wt.GetFileContent(filepath.Join("real", "target.md"))
+		if err != nil {
+			t.Fatalf("GetFileContent error: %v", err)
+		}
+		if resolvedPath != "" {
+			t.Errorf("resolvedPath = %q, want empty string for non-symlink", resolvedPath)
+		}
+	})
+}
+
+func TestApplyFileDiff_ConflictWithDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	writeFile(t, repoDir, "file.txt", "original\n")
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "add file.txt")
+
+	origHash := calculateSHA256("original\n")
+
+	// Modify file behind the diff's back (simulating agent edit)
+	writeFile(t, repoDir, "file.txt", "modified-by-agent\n")
+
+	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
+	desiredContent := "user-desired-content\n"
+
+	newHash, resolution, err := wt.ApplyFileDiff("file.txt", diff, origHash, desiredContent)
+	if err != nil {
+		t.Fatalf("ApplyFileDiff with desiredContent should not fail: %v", err)
+	}
+	if resolution != "overwritten" {
+		t.Errorf("resolution = %q, want %q", resolution, "overwritten")
+	}
+	if newHash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify file contains the desired content
+	content, err := os.ReadFile(filepath.Join(repoDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(content) != desiredContent {
+		t.Errorf("content = %q, want %q", string(content), desiredContent)
+	}
+}
+
+func TestApplyFileDiff_ConflictWithoutDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	writeFile(t, repoDir, "file.txt", "original\n")
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "add file.txt")
+
+	origHash := calculateSHA256("original\n")
+	writeFile(t, repoDir, "file.txt", "modified-by-agent\n")
+
+	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
+
+	// Without desiredContent, conflict should still fail
+	_, _, err := wt.ApplyFileDiff("file.txt", diff, origHash, "")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "conflict detected") {
+		t.Errorf("expected 'conflict detected' error, got: %v", err)
+	}
+}
+
+func TestApplyFileDiff_SymlinkConflictWithDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create real file and symlink
+	realDir := filepath.Join(repoDir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	writeFile(t, repoDir, "real/target.md", "original\n")
+
+	symlinkPath := filepath.Join(repoDir, "LINK.md")
+	if err := os.Symlink(filepath.Join(repoDir, "real", "target.md"), symlinkPath); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add files")
+
+	origHash := calculateSHA256("original\n")
+
+	// Modify the real file behind the diff's back
+	writeFile(t, repoDir, "real/target.md", "agent-modified\n")
+
+	diff := "--- LINK.md\n+++ LINK.md\n@@ -1 +1 @@\n-original\n+user-version\n"
+	desiredContent := "user-content\n"
+
+	newHash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, origHash, desiredContent)
+	if err != nil {
+		t.Fatalf("ApplyFileDiff with desiredContent through symlink should not fail: %v", err)
+	}
+	if resolution != "overwritten" {
+		t.Errorf("resolution = %q, want %q", resolution, "overwritten")
+	}
+	if newHash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify the real target file has the desired content
+	content, err := os.ReadFile(filepath.Join(repoDir, "real", "target.md"))
+	if err != nil {
+		t.Fatalf("failed to read real file: %v", err)
+	}
+	if string(content) != desiredContent {
+		t.Errorf("real file content = %q, want %q", string(content), desiredContent)
+	}
+
+	// Verify the symlink still exists
+	linkInfo, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatalf("failed to lstat symlink: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("LINK.md is no longer a symlink after overwrite")
 	}
 }
 

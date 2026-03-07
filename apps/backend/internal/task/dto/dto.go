@@ -507,7 +507,7 @@ func FromTaskWithSessionInfo(
 		PrimaryAgentName:        primaryAgentName,
 		PrimaryWorkingDirectory: primaryWorkingDirectory,
 		PrimarySessionState:     primarySessionState,
-		IsRemoteExecutor:        primaryExecutorType != nil && (*primaryExecutorType == string(models.ExecutorTypeSprites) || *primaryExecutorType == string(models.ExecutorTypeRemoteDocker)),
+		IsRemoteExecutor:        primaryExecutorType != nil && models.IsRemoteExecutorType(models.ExecutorType(*primaryExecutorType)),
 		ArchivedAt:              task.ArchivedAt,
 		CreatedAt:               task.CreatedAt,
 		UpdatedAt:               task.UpdatedAt,

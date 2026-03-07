@@ -38,6 +38,18 @@ type ExecutorBackend interface {
 	// GetInteractiveRunner returns the interactive runner for passthrough mode.
 	// May return nil if the runtime doesn't support passthrough mode.
 	GetInteractiveRunner() *process.InteractiveRunner
+
+	// RequiresCloneURL reports whether this executor needs a git clone URL
+	// instead of a local filesystem path for repository access.
+	RequiresCloneURL() bool
+
+	// ShouldApplyPreferredShell reports whether the user's preferred shell
+	// should be injected into the agent environment.
+	ShouldApplyPreferredShell() bool
+
+	// IsAlwaysResumable reports whether sessions on this executor can be
+	// resumed even without an explicit resume token.
+	IsAlwaysResumable() bool
 }
 
 // McpServerConfig holds configuration for an MCP server.

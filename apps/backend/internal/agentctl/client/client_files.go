@@ -142,11 +142,12 @@ func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref s
 }
 
 // ApplyFileDiff applies a unified diff to a file via HTTP POST
-func (c *Client) ApplyFileDiff(ctx context.Context, path string, diff string, originalHash string) (*streams.FileUpdateResponse, error) {
+func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash, desiredContent string) (*streams.FileUpdateResponse, error) {
 	reqBody := streams.FileUpdateRequest{
-		Path:         path,
-		Diff:         diff,
-		OriginalHash: originalHash,
+		Path:           path,
+		Diff:           diff,
+		OriginalHash:   originalHash,
+		DesiredContent: desiredContent,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

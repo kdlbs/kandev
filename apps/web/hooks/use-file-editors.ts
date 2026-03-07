@@ -57,6 +57,7 @@ async function buildFileEditorState(
     originalHash: hash,
     isDirty: false,
     isBinary: response.is_binary,
+    resolvedPath: response.resolved_path,
   };
 }
 
@@ -294,8 +295,11 @@ function useOpenFileWorkspaceSync({
 
     const gitFiles = gitStatus?.files ?? {};
     const sigMap = gitFileSignaturesRef.current;
-    for (const path of openFiles.keys()) {
-      const nextSignature = buildGitFileSignature(gitFiles[path] as FileInfo | undefined);
+    for (const [path, file] of openFiles.entries()) {
+      // For symlinks, also check the resolved target path in git status
+      const gitFileInfo = (gitFiles[path] ??
+        (file.resolvedPath ? gitFiles[file.resolvedPath] : undefined)) as FileInfo | undefined;
+      const nextSignature = buildGitFileSignature(gitFileInfo);
       const prevSignature = sigMap.get(path);
       if (prevSignature === undefined) {
         sigMap.set(path, nextSignature);
@@ -334,13 +338,12 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
   params.setSavingFiles((prev) => new Set(prev).add(path));
   try {
     const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
-    const response = await updateFileContent(
-      client,
-      currentSessionId,
+    const response = await updateFileContent(client, currentSessionId, {
       path,
       diff,
-      file.originalHash,
-    );
+      originalHash: file.originalHash,
+      desiredContent: file.content,
+    });
     if (response.success && response.new_hash) {
       params.updateFileState(path, {
         originalContent: file.content,
@@ -351,6 +354,13 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
         remoteOriginalHash: undefined,
       });
       updatePanelAfterSave(path, file.name);
+      if (response.resolution === "overwritten") {
+        params.toast({
+          title: "File saved (overwritten)",
+          description: "The file was modified externally. Your version was saved.",
+          variant: "default",
+        });
+      }
     } else {
       params.toast({
         title: "Save failed",

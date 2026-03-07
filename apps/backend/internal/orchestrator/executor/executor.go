@@ -51,7 +51,6 @@ var (
 	ErrNoAgentProfileID        = errors.New("task has no agent_profile_id configured")
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
-	ErrRemoteDockerNoRepoURL   = errors.New("remote_docker executor requires a repository with provider owner and name set")
 	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
 )
 
@@ -282,12 +281,20 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// ExecutorTypeCapabilities provides behavioral queries about executor types.
+// Implemented by the lifecycle manager using its backend registry.
+type ExecutorTypeCapabilities interface {
+	RequiresCloneURL(executorType string) bool
+	ShouldApplyPreferredShell(executorType string) bool
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager AgentManagerClient
 	repo         executorStore
 	secretStore  secrets.SecretStore
 	shellPrefs   ShellPreferenceProvider
+	capabilities ExecutorTypeCapabilities
 	logger       *logger.Logger
 
 	// Configuration
@@ -367,4 +374,9 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 	e.repoCloner = cloner
 	e.repoUpdater = updater
+}
+
+// SetCapabilities sets the executor type capabilities provider.
+func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
+	e.capabilities = c
 }

@@ -88,15 +88,6 @@ func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
 }
 
-func shouldApplyPreferredShell(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
-		return true
-	default:
-		return false
-	}
-}
-
 // repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
 // Returns an empty string if the repository has no provider owner/name or if the
 // provider is not recognized.
@@ -127,7 +118,7 @@ func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
 }
 
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, executorType string, env map[string]string) map[string]string {
-	if !shouldApplyPreferredShell(executorType) {
+	if e.capabilities == nil || !e.capabilities.ShouldApplyPreferredShell(executorType) {
 		return env
 	}
 	if e.shellPrefs == nil {
@@ -462,11 +453,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
-	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repoInfo.Repository != nil {
+	// Remote executors need a clone URL since the remote host has no access to the local filesystem.
+	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
-			return nil, execConfig, ErrRemoteDockerNoRepoURL
+			return nil, execConfig, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}

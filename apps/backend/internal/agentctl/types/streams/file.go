@@ -128,6 +128,10 @@ type FileContentResponse struct {
 	// When true, Content is base64-encoded.
 	IsBinary bool `json:"is_binary,omitempty"`
 
+	// ResolvedPath is the symlink target path (relative to workspace root).
+	// Only set when the requested file is a symlink.
+	ResolvedPath string `json:"resolved_path,omitempty"`
+
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`
 }
@@ -165,6 +169,10 @@ type FileUpdateRequest struct {
 	// OriginalHash is the SHA256 hash of the original file content.
 	// Used for conflict detection.
 	OriginalHash string `json:"original_hash"`
+
+	// DesiredContent is the full file content the user wants to save.
+	// Used as a fallback when the diff cannot be applied (e.g., hash conflict).
+	DesiredContent string `json:"desired_content,omitempty"`
 }
 
 // FileUpdateResponse represents a response to a file update request.
@@ -180,6 +188,10 @@ type FileUpdateResponse struct {
 
 	// NewHash is the SHA256 hash of the updated file content.
 	NewHash string `json:"new_hash,omitempty"`
+
+	// Resolution indicates how the update was applied.
+	// "applied" = normal diff apply, "overwritten" = full content write fallback.
+	Resolution string `json:"resolution,omitempty"`
 
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`

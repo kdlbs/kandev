@@ -275,6 +275,9 @@ func NewService(
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
+		exec.SetCapabilities(caps)
+	}
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
@@ -570,7 +573,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 
 	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
-		if isRemoteRuntime(running.Runtime) {
+		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
@@ -656,11 +659,6 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
-// isRemoteRuntime checks if a runtime string corresponds to a remote executor type.
-func isRemoteRuntime(runtime string) bool {
-	return runtime == string(models.ExecutorTypeSprites) || runtime == string(models.ExecutorTypeRemoteDocker)
-}
-
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
@@ -724,7 +722,7 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 	if running.Resumable {
 		return true
 	}
-	return running.Runtime == string(models.ExecutorTypeSprites)
+	return models.IsAlwaysResumableRuntime(running.Runtime)
 }
 
 // IsRunning returns true if the service is running

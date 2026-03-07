@@ -1,9 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   detectPreviewUrl,
   detectPreviewUrlFromOutput,
   rewritePreviewUrlForProxy,
 } from "./preview-url-detector";
+
+vi.mock("@/lib/config", () => ({
+  getBackendConfig: () => ({
+    apiBaseUrl: "http://localhost:8080",
+    mcpServerUrl: "http://localhost:9090/sse",
+  }),
+}));
 
 const LOCALHOST_3000_URL = "http://localhost:3000/";
 
@@ -224,7 +231,8 @@ Ready!
 
 describe("rewritePreviewUrlForProxy", () => {
   const SESSION_ID = "test-session-123";
-  const proxyPath = (port: number, path: string) => `/port-proxy/${SESSION_ID}/${port}${path}`;
+  const proxyPath = (port: number, path: string) =>
+    `http://localhost:8080/port-proxy/${SESSION_ID}/${port}${path}`;
 
   it("returns URL unchanged for local executors", () => {
     expect(rewritePreviewUrlForProxy(LOCALHOST_3000_URL, SESSION_ID, false)).toBe(

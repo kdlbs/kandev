@@ -176,3 +176,7 @@ func (r *StandaloneExecutor) SetInteractiveRunner(runner *process.InteractiveRun
 func (r *StandaloneExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return r.interactiveRunner
 }
+
+func (r *StandaloneExecutor) RequiresCloneURL() bool          { return false }
+func (r *StandaloneExecutor) ShouldApplyPreferredShell() bool { return true }
+func (r *StandaloneExecutor) IsAlwaysResumable() bool         { return false }

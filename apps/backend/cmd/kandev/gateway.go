@@ -148,6 +148,9 @@ func provideGateway(
 
 		vscodeHandlers := agenthandlers.NewVscodeHandlers(lifecycleMgr, gateway.VscodeProxyHandler, log)
 		vscodeHandlers.RegisterHandlers(gateway.Dispatcher)
+
+		portHandlers := agenthandlers.NewPortHandlers(lifecycleMgr, log)
+		portHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
 	go gateway.Hub.Run(ctx)

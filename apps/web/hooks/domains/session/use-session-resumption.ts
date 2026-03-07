@@ -56,6 +56,7 @@ type ResumeStateSetter = {
     started_at: string;
     updated_at: string;
   }) => void;
+  setAgentctlReady?: (sessionId: string) => void;
 };
 
 type SessionLike = { started_at?: string; updated_at?: string } | null;
@@ -168,6 +169,11 @@ async function checkAndResume({
       return;
     }
     applyStatusToState(status, taskId, sessionId, session, setters);
+    // Seed agentctl readiness from session status — the WS event may have
+    // already been sent before we subscribed (page reload on running session).
+    if (status.is_agent_running && setters.setAgentctlReady) {
+      setters.setAgentctlReady(sessionId);
+    }
     if (status.is_agent_running) {
       setters.setResumptionState("running");
     } else if (status.needs_resume && status.is_resumable) {
@@ -212,6 +218,7 @@ export function useSessionResumption(
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
   const hasAttemptedResume = useRef(false);
   const remoteStatusRetryCount = useRef(0);
 
@@ -221,6 +228,7 @@ export function useSessionResumption(
     setWorktreePath,
     setWorktreeBranch,
     setTaskSession,
+    setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
   };
 
   useEffect(() => {
