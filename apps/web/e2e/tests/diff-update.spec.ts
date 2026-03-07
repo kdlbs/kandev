@@ -105,7 +105,7 @@ test.describe("Diff update on file change", () => {
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 60_000,
+      timeout: 15_000,
     });
   });
 
@@ -118,7 +118,7 @@ test.describe("Diff update on file change", () => {
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 60_000,
+      timeout: 15_000,
     });
 
     // Click on the Agent tab to make the chat input visible again
@@ -176,7 +176,7 @@ test.describe("Untracked file diff update", () => {
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("INITIAL_CONTENT")).toBeVisible({
-      timeout: 60_000,
+      timeout: 15_000,
     });
 
     // Click on the Agent tab to make the chat input visible again

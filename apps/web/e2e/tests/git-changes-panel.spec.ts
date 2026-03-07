@@ -18,10 +18,24 @@ class GitHelper {
   ) {}
 
   exec(cmd: string): string {
-    // Remove stale index.lock left by concurrent backend git operations
     const lockPath = path.join(this.repoDir, ".git", "index.lock");
-    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
-    return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
+    // Retry up to 3 times on index.lock conflicts. The backend's git status
+    // polling briefly holds the lock; waiting a short time and retrying is
+    // safer than deleting an actively-held lock.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+      try {
+        return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
+      } catch (err) {
+        const msg = (err as Error).message ?? "";
+        if (msg.includes("index.lock") && attempt < 2) {
+          execSync("sleep 0.2");
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error(`git exec failed after 3 attempts: ${cmd}`);
   }
 
   createFile(name: string, content: string) {

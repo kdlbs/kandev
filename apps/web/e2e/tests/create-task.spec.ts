@@ -2,6 +2,9 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
+const START_AGENT_TEST_ID = "submit-start-agent";
+const START_ENABLED_TIMEOUT = 30_000;
+
 test.describe("Task creation", () => {
   test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
     testPage,
@@ -18,8 +21,8 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("task-description-input").fill("testing pre-selections");
 
     // Wait for the submit button to be enabled — confirms all selections resolved
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     // Verify the pre-seeded selections are displayed in the dialog selectors
     await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
@@ -42,8 +45,8 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("task-title-input").fill("First Task");
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
 
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
@@ -54,8 +57,8 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("task-title-input").fill("Second Task");
     await testPage.getByTestId("task-description-input").fill("checking persistence");
 
-    const startBtn2 = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn2).toBeEnabled({ timeout: 30_000 });
+    const startBtn2 = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn2).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     // The same repo, branch, and agent profile should still be selected
     await expect(testPage.getByTestId("repository-selector")).toContainText("E2E Repo");
@@ -105,8 +108,8 @@ test.describe("Task creation", () => {
     // The dialog auto-selects the E2E Repo (first available repository) and the main branch.
     // Wait for the button to become enabled (repo + branch + agent profile all resolved).
     // Under load the branch/profile resolution can take a moment.
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     // Click "Start task" — the agent starts, the dialog closes, we stay on kanban
     await startBtn.click();
@@ -177,8 +180,8 @@ test.describe("Task creation", () => {
     await testPage.getByTestId("task-title-input").fill("Plan MCP Task");
     await testPage.getByTestId("task-description-input").fill(script);
 
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     await testPage.getByTestId("submit-start-agent-chevron").click();
     await expect(testPage.getByTestId("submit-plan-mode")).toBeVisible({ timeout: 5_000 });
@@ -239,8 +242,8 @@ test.describe("Task creation", () => {
 
     // Wait for the main submit button to be enabled (repo + agent profile resolved),
     // then open the dropdown chevron to reveal the "Start task in plan mode" option.
-    const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
+    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
     // The split-button group wraps "Start task" + a chevron-only dropdown trigger.
     // Click the chevron to open the dropdown.

@@ -73,10 +73,9 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openExpansionFileDiff(testPage);
 
     // Pierre Diffs renders a diffs-container custom element with an open shadow DOM.
-    // Playwright's getByText auto-pierces shadow DOM and auto-retries, so we use it
-    // directly with a generous timeout to handle async web worker initialization.
+    // Playwright's getByText auto-pierces shadow DOM and auto-retries.
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
       timeout: 5_000,
     });
