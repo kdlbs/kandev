@@ -172,17 +172,7 @@ func parseHexIP(hexIP string) string {
 		// IPv4: /proc/net/tcp stores in little-endian
 		return fmt.Sprintf("%d.%d.%d.%d", b[3], b[2], b[1], b[0])
 	}
-	// IPv6: return defaultListenAddr for all-zeros or "::" addresses
-	allZero := true
-	for _, v := range b {
-		if v != 0 {
-			allZero = false
-			break
-		}
-	}
-	if allZero {
-		return defaultListenAddr
-	}
+	// IPv6: treat all addresses as all-interfaces for port detection purposes.
 	return defaultListenAddr
 }
 

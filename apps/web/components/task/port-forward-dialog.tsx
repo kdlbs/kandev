@@ -500,6 +500,13 @@ function PortForwardDialogContent({
     setActiveTunnels,
   );
 
+  // Reset session-scoped state when sessionId changes
+  useEffect(() => {
+    setDetectedPorts([]);
+    setManualPorts([]);
+    setLoaded(false);
+  }, [sessionId]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {

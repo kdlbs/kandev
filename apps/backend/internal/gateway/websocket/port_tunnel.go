@@ -62,31 +62,48 @@ func NewTunnelManager(lifecycleMgr *lifecycle.Manager, log *logger.Logger) *Tunn
 func (m *TunnelManager) StartTunnel(sessionID string, port int, tunnelPort int) (int, error) {
 	cacheKey := sessionID + ":" + strconv.Itoa(port)
 
+	// Check for existing tunnel under lock to prevent duplicate creation.
 	m.mu.Lock()
 	if entry, ok := m.tunnels[cacheKey]; ok {
+		tp := entry.tunnelPort
 		m.mu.Unlock()
-		return entry.tunnelPort, nil
+		return tp, nil
 	}
+	// Reserve the key with a nil entry to prevent concurrent creation.
+	m.tunnels[cacheKey] = nil
 	m.mu.Unlock()
+
+	// On failure, remove the placeholder.
+	cleanup := func() {
+		m.mu.Lock()
+		if m.tunnels[cacheKey] == nil {
+			delete(m.tunnels, cacheKey)
+		}
+		m.mu.Unlock()
+	}
 
 	execution, ok := m.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
+		cleanup()
 		return 0, fmt.Errorf("session not found or no active execution")
 	}
 
 	agentctlClient := execution.GetAgentCtlClient()
 	if agentctlClient == nil {
+		cleanup()
 		return 0, fmt.Errorf("agentctl client not available")
 	}
 
 	target, err := url.Parse(agentctlClient.BaseURL())
 	if err != nil {
+		cleanup()
 		return 0, fmt.Errorf("failed to parse agentctl URL: %w", err)
 	}
 
 	bindAddr := fmt.Sprintf(":%d", tunnelPort)
 	ln, err := net.Listen("tcp", bindAddr)
 	if err != nil {
+		cleanup()
 		if isAddrInUse(err) {
 			return 0, fmt.Errorf("port %d is already in use, choose a different port", tunnelPort)
 		}

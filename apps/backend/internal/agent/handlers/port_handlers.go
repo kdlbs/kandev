@@ -101,6 +101,9 @@ func (h *PortHandlers) wsTunnelStart(_ context.Context, msg *ws.Message) (*ws.Me
 	if req.Port < 1 || req.Port > 65535 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "port must be 1-65535", nil)
 	}
+	if req.TunnelPort != 0 && (req.TunnelPort < 1 || req.TunnelPort > 65535) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "tunnel_port must be 0 (random) or 1-65535", nil)
+	}
 
 	tunnelPort, err := h.tunnelCtrl.StartTunnel(req.SessionID, req.Port, req.TunnelPort)
 	if err != nil {
