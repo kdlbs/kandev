@@ -24,6 +24,7 @@ type Server struct {
 	mcpBackendClient *mcp.ChannelBackendClient
 	logger           *logger.Logger
 	router           *gin.Engine
+	portProxies      *portProxyCache
 
 	upgrader websocket.Upgrader
 }
@@ -41,6 +42,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		mcpBackendClient: mcpBackendClient,
 		logger:           log.WithFields(zap.String("component", "api-server")),
 		router:           gin.New(),
+		portProxies:      newPortProxyCache(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -85,8 +87,10 @@ func (s *Server) setupRoutes() {
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)
+		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
 
@@ -94,6 +98,12 @@ func (s *Server) setupRoutes() {
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/buffer", s.handleShellBuffer)
 		api.POST("/shell/start", s.handleShellStart)
+
+		// Per-terminal shell sessions (for remote executor multi-terminal support)
+		api.POST("/shell/terminal/start", s.handleShellTerminalStart)
+		api.GET("/shell/terminal/:id/stream", s.handleShellTerminalStreamWS)
+		api.GET("/shell/terminal/:id/buffer", s.handleShellTerminalBuffer)
+		api.DELETE("/shell/terminal/:id", s.handleShellTerminalStop)
 
 		// Process runner
 		api.POST("/processes/start", s.handleStartProcess)
@@ -109,6 +119,13 @@ func (s *Server) setupRoutes() {
 		api.Any("/vscode/proxy", s.handleVscodeProxy)
 		api.Any("/vscode/proxy/*path", s.handleVscodeProxy)
 
+		// Port proxy - generic reverse proxy for any localhost port
+		api.Any("/port-proxy/:port", s.handlePortProxy)
+		api.Any("/port-proxy/:port/*path", s.handlePortProxy)
+
+		// Port listener detection
+		api.GET("/ports", s.handleListPorts)
+
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)
@@ -121,7 +138,12 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/discard", s.handleGitDiscard)
 		api.POST("/git/create-pr", s.handleGitCreatePR)
 		api.POST("/git/revert-commit", s.handleGitRevertCommit)
+		api.POST("/git/rename-branch", s.handleGitRenameBranch)
+		api.POST("/git/reset", s.handleGitReset)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
+		api.GET("/git/log", s.handleGitLog)
+		api.GET("/git/cumulative-diff", s.handleGitCumulativeDiff)
+		api.GET("/git/status", s.handleGitStatus)
 	}
 
 	// Utility agent routes

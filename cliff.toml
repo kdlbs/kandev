@@ -13,7 +13,7 @@ body = """
 ## Unreleased
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | upper_first }}
+### {{ group | striptags | trim | upper_first }}
 {% for commit in commits %}
 - {{ commit.message }}\
 {% endfor %}
@@ -31,11 +31,11 @@ commit_preprocessors = [
   { pattern = '\(#(\d+)\)', replace = "([#${1}](https://github.com/kdlbs/kandev/pull/${1}))" },
 ]
 commit_parsers = [
-  { message = "^feat", group = "Features" },
-  { message = "^fix", group = "Bug Fixes" },
-  { message = "^perf", group = "Performance" },
-  { message = "^refactor", group = "Refactoring" },
-  { message = "^docs", group = "Documentation" },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
   { message = "^release", skip = true },
   { message = "^chore", skip = true },
   { message = "^ci", skip = true },

@@ -68,7 +68,7 @@ const defaultSpritesPrepareScript = `#!/bin/bash
 # Prepare Sprites.dev cloud sandbox
 #
 # Pre-installed tools (no need to install):
-#   git, curl, wget, gh (GitHub CLI), node, python, go,
+#   git, curl, wget, gh (GitHub CLI), node, pnpm (via corepack), python, go,
 #   build-essential, openssh-client, ca-certificates
 
 set -euo pipefail
@@ -76,6 +76,9 @@ set -euo pipefail
 # ---- Add SSH host keys (prevent "Host key verification failed") ----
 mkdir -p ~/.ssh
 ssh-keyscan -t ed25519 github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
+
+# ---- Enable pnpm via corepack ----
+corepack enable
 
 # ---- Git identity ----
 {{git.identity_setup}}

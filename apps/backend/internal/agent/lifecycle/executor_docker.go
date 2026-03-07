@@ -225,3 +225,7 @@ func (r *DockerExecutor) Close() error {
 func (r *DockerExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 	return nil
 }
+
+func (r *DockerExecutor) RequiresCloneURL() bool          { return false }
+func (r *DockerExecutor) ShouldApplyPreferredShell() bool { return false }
+func (r *DockerExecutor) IsAlwaysResumable() bool         { return false }

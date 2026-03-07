@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +27,7 @@ type executorStore interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -49,7 +51,7 @@ var (
 	ErrNoAgentProfileID        = errors.New("task has no agent_profile_id configured")
 	ErrExecutionNotFound       = errors.New("execution not found")
 	ErrExecutionAlreadyRunning = errors.New("execution already running")
-	ErrRemoteDockerNoRepoURL   = errors.New("remote_docker executor requires a repository with provider owner and name set")
+	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -98,8 +100,18 @@ type AgentManagerClient interface {
 	// clearing the agent's conversation context. The execution environment (container/agentctl) is preserved.
 	RestartAgentProcess(ctx context.Context, agentExecutionID string) error
 
+	// WasSessionInitialized reports whether the given execution completed session initialization.
+	// Used to distinguish launch-phase failures from normal prompt failures.
+	WasSessionInitialized(executionID string) bool
+
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
+
+	// WritePassthroughStdin writes data to the agent's PTY stdin for passthrough sessions.
+	WritePassthroughStdin(ctx context.Context, sessionID string, data string) error
+
+	// MarkPassthroughRunning marks a passthrough execution as running.
+	MarkPassthroughRunning(sessionID string) error
 
 	// GetRemoteRuntimeStatusBySession returns remote runtime status metadata for a session
 	// (used by UI cloud indicators). Returns nil,nil when unavailable.
@@ -119,6 +131,22 @@ type AgentManagerClient interface {
 	// session so that workspace operations (file tree, terminals, git) are accessible.
 	// Used for restoring workspace access on terminal-state sessions.
 	EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error
+
+	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
+	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
+	GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int) (*client.GitLogResult, error)
+
+	// GetCumulativeDiff retrieves the cumulative diff for a session from baseCommit to HEAD.
+	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
+	GetCumulativeDiff(ctx context.Context, sessionID, baseCommit string) (*client.CumulativeDiffResult, error)
+
+	// GetGitStatus retrieves the current git status for a session.
+	// Returns nil, nil if no execution exists.
+	GetGitStatus(ctx context.Context, sessionID string) (*client.GitStatusResult, error)
+
+	// WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
+	// This must be called before other agentctl operations (git status, shell, etc.).
+	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
@@ -180,6 +208,7 @@ type LaunchAgentRequest struct {
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
+	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }
@@ -252,12 +281,20 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// ExecutorTypeCapabilities provides behavioral queries about executor types.
+// Implemented by the lifecycle manager using its backend registry.
+type ExecutorTypeCapabilities interface {
+	RequiresCloneURL(executorType string) bool
+	ShouldApplyPreferredShell(executorType string) bool
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager AgentManagerClient
 	repo         executorStore
 	secretStore  secrets.SecretStore
 	shellPrefs   ShellPreferenceProvider
+	capabilities ExecutorTypeCapabilities
 	logger       *logger.Logger
 
 	// Configuration
@@ -277,6 +314,22 @@ type Executor struct {
 	// This prevents race conditions when the backend restarts and multiple resume requests
 	// arrive simultaneously (e.g., from frontend auto-resume).
 	sessionLocks sync.Map // map[string]*sync.Mutex
+
+	// Optional cloner for provider-backed repos without a local path.
+	repoCloner  RepoCloner
+	repoUpdater RepoUpdater
+}
+
+// RepoCloner clones remote repositories to local disk.
+type RepoCloner interface {
+	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
+	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
+	BuildCloneURL(provider, owner, name string) (string, error)
+}
+
+// RepoUpdater updates repository records in the database.
+type RepoUpdater interface {
+	UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error
 }
 
 // ExecutorConfig holds configuration for the Executor
@@ -315,4 +368,15 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // which updates the DB and publishes WebSocket events to the frontend.
 func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 	e.onSessionStateChange = fn
+}
+
+// SetRepoCloner sets the cloner used to clone provider-backed repositories on launch.
+func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
+	e.repoCloner = cloner
+	e.repoUpdater = updater
+}
+
+// SetCapabilities sets the executor type capabilities provider.
+func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
+	e.capabilities = c
 }

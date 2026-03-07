@@ -166,6 +166,38 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			opts:    agents.PassthroughOptions{SessionID: "sess-123"},
 			wantCmd: []string{"test-cli", "--resume", "sess-123"},
 		},
+		{
+			name: "mock agent resume with -c flag",
+			agent: &testAgent{
+				id: "mock-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:      true,
+						PassthroughCmd: agents.NewCommand("mock-agent", "--tui"),
+						ModelFlag:      agents.NewParam("--model", "{model}"),
+						ResumeFlag:     agents.NewParam("-c"),
+					},
+				},
+			},
+			opts:    agents.PassthroughOptions{Model: "mock-fast", Resume: true},
+			wantCmd: []string{"mock-agent", "--tui", "--model", "mock-fast", "-c"},
+		},
+		{
+			name: "mock agent session resume with --resume flag",
+			agent: &testAgent{
+				id: "mock-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:         true,
+						PassthroughCmd:    agents.NewCommand("mock-agent", "--tui"),
+						ModelFlag:         agents.NewParam("--model", "{model}"),
+						SessionResumeFlag: agents.NewParam("--resume"),
+					},
+				},
+			},
+			opts:    agents.PassthroughOptions{Model: "mock-fast", SessionID: "sess-123"},
+			wantCmd: []string{"mock-agent", "--tui", "--model", "mock-fast", "--resume", "sess-123"},
+		},
 	}
 
 	for _, tt := range tests {

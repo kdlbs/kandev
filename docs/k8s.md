@@ -72,6 +72,17 @@ kubectl port-forward svc/kandev 3000:3000 8080:8080
 
 **Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes `/api` and `/ws` to the backend (port 8080) and everything else to the web UI (port 3000).
 
+### Custom Domain / Reverse Proxy
+
+When serving Kandev behind an ingress with a custom domain (e.g., `https://kandev.example.com`), set `KANDEV_PUBLIC_URL` so the frontend knows to use the ingress URL instead of trying to reach the backend on port 8080 directly:
+
+```yaml
+# In k8s/configmap.yaml
+KANDEV_PUBLIC_URL: "https://kandev.example.com"
+```
+
+Without this, the browser tries to connect to `https://kandev.example.com:8080/api/...` which doesn't exist — only the ingress port (443) is exposed externally.
+
 ## Configuration
 
 Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Set these in `k8s/configmap.yaml` or as environment variables in the deployment.
@@ -80,13 +91,14 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
+| `KANDEV_PUBLIC_URL` | (unset) | External URL when behind a reverse proxy (e.g., `https://kandev.example.com`) |
 | `KANDEV_SERVER_PORT` | `8080` | Backend API port |
+| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `/data/kandev.db` | SQLite database file path |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (requires DinD) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | auto | Log format: `json` (auto-detected in K8s) or `text` |
-| `KANDEV_WORKTREE_BASEPATH` | `/data/worktrees` | Git worktree storage directory |
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 

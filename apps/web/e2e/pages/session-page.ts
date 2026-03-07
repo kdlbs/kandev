@@ -5,20 +5,105 @@ export class SessionPage {
   readonly sidebar: Locator;
   readonly terminal: Locator;
   readonly files: Locator;
+  readonly changes: Locator;
   readonly planPanel: Locator;
   readonly stepper: Locator;
+  readonly passthroughTerminal: Locator;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
     this.sidebar = page.getByTestId("task-sidebar");
     this.terminal = page.getByTestId("terminal-panel");
     this.files = page.getByTestId("files-panel");
+    this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
+    this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+  }
+
+  // Port forward dialog locators
+  get portForwardButton() {
+    return this.page.getByTestId("port-forward-button");
+  }
+  get portForwardDialog() {
+    return this.page.getByTestId("port-forward-dialog");
+  }
+  get portForwardRefresh() {
+    return this.page.getByTestId("port-forward-refresh");
+  }
+  get portForwardInput() {
+    return this.page.getByTestId("port-forward-port-input");
+  }
+  get portForwardAddButton() {
+    return this.page.getByTestId("port-forward-add-button");
+  }
+  portForwardRow(port: number) {
+    return this.page.getByTestId(`port-forward-row-${port}`);
   }
 
   async waitForLoad(timeout = 15_000) {
     await this.chat.waitFor({ state: "visible", timeout });
+  }
+
+  /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
+  async waitForPassthroughLoad(timeout = 15_000) {
+    await this.passthroughTerminal.waitFor({ state: "visible", timeout });
+  }
+
+  /** Wait for the passthrough loading indicator to be visible (scoped to agent terminal). */
+  async waitForPassthroughLoading(timeout = 5_000) {
+    await this.passthroughTerminal
+      .getByTestId("passthrough-loading")
+      .waitFor({ state: "visible", timeout });
+  }
+
+  /** Wait for the passthrough loading indicator to disappear (scoped to agent terminal). */
+  async waitForPassthroughLoaded(timeout = 15_000) {
+    await this.passthroughTerminal
+      .getByTestId("passthrough-loading")
+      .waitFor({ state: "hidden", timeout });
+  }
+
+  /**
+   * Read the text content of an xterm.js terminal buffer.
+   * xterm renders to canvas/WebGL so text isn't in the DOM. Uses the
+   * __xtermReadBuffer() helper exposed on the terminal container element.
+   */
+  private readXtermBuffer(testId: string): Promise<string> {
+    return this.page.evaluate((tid) => {
+      const panel = document.querySelector(`[data-testid="${tid}"]`);
+      if (!panel) return "";
+      const xtermEl = panel.querySelector(".xterm");
+      type XC = HTMLElement & { __xtermReadBuffer?: () => string };
+      const container = xtermEl?.parentElement as XC | null | undefined;
+      return container?.__xtermReadBuffer?.() ?? "";
+    }, testId);
+  }
+
+  /**
+   * Assert the passthrough terminal buffer contains the given text.
+   */
+  async expectPassthroughHasText(text: string, timeout = 15_000): Promise<void> {
+    await expect
+      .poll(async () => (await this.readXtermBuffer("passthrough-terminal")).includes(text), {
+        timeout,
+        message: `Expected passthrough terminal to contain "${text}"`,
+      })
+      .toBe(true);
+  }
+
+  /**
+   * Assert the passthrough terminal buffer does NOT contain the given text.
+   * Waits briefly to confirm absence (text could arrive asynchronously).
+   */
+  async expectPassthroughNotHasText(text: string, stableMs = 2_000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < stableMs) {
+      if ((await this.readXtermBuffer("passthrough-terminal")).includes(text)) {
+        throw new Error(`Expected passthrough terminal NOT to contain "${text}", but it was found`);
+      }
+      await this.page.waitForTimeout(200);
+    }
   }
 
   /** Scoped to the sidebar — finds task title text rendered by TaskItem. */
@@ -68,6 +153,58 @@ export class SessionPage {
     return this.chat.getByText("Plan mode", { exact: true });
   }
 
+  /** Clarification overlay (visible when a clarification request is pending). */
+  clarificationOverlay(): Locator {
+    return this.page.getByTestId("clarification-overlay");
+  }
+
+  /** A specific clarification option button by its text label. */
+  clarificationOption(text: string): Locator {
+    return this.clarificationOverlay()
+      .getByTestId("clarification-option")
+      .filter({ hasText: text });
+  }
+
+  /** Skip (X) button on the clarification overlay. */
+  clarificationSkip(): Locator {
+    return this.page.getByTestId("clarification-skip");
+  }
+
+  /** Custom text input on the clarification overlay. */
+  clarificationInput(): Locator {
+    return this.page.getByTestId("clarification-input");
+  }
+
+  /** Deferred notice shown when agent has disconnected from clarification. */
+  clarificationDeferredNotice(): Locator {
+    return this.page.getByTestId("clarification-deferred-notice");
+  }
+
+  /** Reset context button in the chat input toolbar. */
+  resetContextButton(): Locator {
+    return this.page.getByTestId("reset-context-button");
+  }
+
+  /** Confirm button in the reset context alert dialog. */
+  resetContextConfirm(): Locator {
+    return this.page.getByTestId("reset-context-confirm");
+  }
+
+  /** "Resume session" button shown after agent crash. */
+  recoveryResumeButton(): Locator {
+    return this.page.getByTestId("recovery-resume-button");
+  }
+
+  /** "Start fresh session" button shown after agent crash. */
+  recoveryFreshButton(): Locator {
+    return this.page.getByTestId("recovery-fresh-button");
+  }
+
+  /** Context reset divider shown in chat after resetting agent context. */
+  contextResetDivider(): Locator {
+    return this.chat.getByText("Context reset");
+  }
+
   /**
    * Delete a task via the sidebar context menu.
    * Hovers to reveal the menu trigger, opens it, and clicks "Delete".
@@ -92,6 +229,27 @@ export class SessionPage {
 
   stepperStep(name: string): Locator {
     return this.page.getByTestId(`workflow-step-${name}`);
+  }
+
+  /** PR button in the topbar (visible only when a PR is associated). */
+  prTopbarButton(): Locator {
+    return this.page.getByTestId("pr-topbar-button");
+  }
+
+  /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
+  async clickTab(label: string): Promise<void> {
+    const tab = this.page.locator(`.dv-default-tab:has-text('${label}')`);
+    await tab.click();
+  }
+
+  /** PR files section within the changes panel. */
+  prFilesSection(): Locator {
+    return this.changes.getByTestId("pr-files-section");
+  }
+
+  /** PR commits section within the changes panel. */
+  prCommitsSection(): Locator {
+    return this.changes.getByTestId("pr-commits-section");
   }
 
   /**
@@ -120,19 +278,10 @@ export class SessionPage {
    */
   async typeInTerminal(command: string): Promise<void> {
     await expect
-      .poll(
-        async () => {
-          return this.page.evaluate(() => {
-            const panel = document.querySelector('[data-testid="terminal-panel"]');
-            const xtermEl = panel?.querySelector(".xterm");
-            type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-            const container = xtermEl?.parentElement as XC | null | undefined;
-            const buf = container?.__xtermReadBuffer?.();
-            return (buf?.length ?? 0) > 0;
-          });
-        },
-        { timeout: 15_000, message: "Waiting for terminal shell to connect" },
-      )
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
+        timeout: 15_000,
+        message: "Waiting for terminal shell to connect",
+      })
       .toBe(true);
 
     const xterm = this.terminal.locator(".xterm");
@@ -143,25 +292,13 @@ export class SessionPage {
 
   /**
    * Assert the terminal buffer contains the given text.
-   * xterm renders to canvas/WebGL so text isn't in the DOM. Uses the
-   * __xtermReadBuffer() helper exposed on the terminal container element.
    */
   async expectTerminalHasText(text: string): Promise<void> {
     await expect
-      .poll(
-        async () => {
-          return this.page.evaluate((marker) => {
-            const panel = document.querySelector('[data-testid="terminal-panel"]');
-            if (!panel) return false;
-            const xtermEl = panel.querySelector(".xterm");
-            type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-            const container = xtermEl?.parentElement as XC | null | undefined;
-            const buf = container?.__xtermReadBuffer?.();
-            return buf?.includes(marker) ?? false;
-          }, text);
-        },
-        { timeout: 10_000, message: `Expected terminal to contain "${text}"` },
-      )
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
+        timeout: 10_000,
+        message: `Expected terminal to contain "${text}"`,
+      })
       .toBe(true);
   }
 
@@ -196,5 +333,25 @@ export class SessionPage {
     await expect(this.terminal).toBeVisible({ timeout: 10_000 });
     await expect(this.files).toBeVisible({ timeout: 10_000 });
     await expect(this.sidebar).toBeVisible();
+  }
+
+  /** Git operation error message in chat (shown when a git operation fails). */
+  gitOperationErrorMessage(): Locator {
+    return this.chat.getByTestId("git-operation-error-message");
+  }
+
+  /** Fix button on a git operation error message. */
+  gitFixButton(): Locator {
+    return this.chat.getByTestId("git-fix-button");
+  }
+
+  /** Locator for the VS Code dockview tab. */
+  vscodeTab(): Locator {
+    return this.page.locator(".dv-default-tab:has-text('VS Code')");
+  }
+
+  /** Locator for the VS Code code-server iframe. */
+  vscodeIframe(): Locator {
+    return this.page.locator('iframe[title="VS Code"]');
   }
 }

@@ -61,14 +61,15 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID           string                 `json:"id"`
-	TaskID       string                 `json:"task_id"`
-	RepositoryID string                 `json:"repository_id"`
-	BaseBranch   string                 `json:"base_branch"`
-	Position     int                    `json:"position"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID             string                 `json:"id"`
+	TaskID         string                 `json:"task_id"`
+	RepositoryID   string                 `json:"repository_id"`
+	BaseBranch     string                 `json:"base_branch"`
+	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
+	Position       int                    `json:"position"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // MessageAuthorType represents who authored a message
@@ -238,6 +239,7 @@ type TaskSession struct {
 	EnvironmentID        string                 `json:"environment_id"`
 	RepositoryID         string                 `json:"repository_id"`       // Primary repository (for backward compatibility)
 	BaseBranch           string                 `json:"base_branch"`         // Primary base branch (for backward compatibility)
+	BaseCommitSHA        string                 `json:"base_commit_sha"`     // Git commit SHA at session start (for cumulative diff)
 	Worktrees            []*TaskSessionWorktree `json:"worktrees,omitempty"` // Associated worktrees
 	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
 	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
@@ -271,6 +273,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		"environment_id":      s.EnvironmentID,
 		"repository_id":       s.RepositoryID,
 		"base_branch":         s.BaseBranch,
+		"base_commit_sha":     s.BaseCommitSHA,
 		"worktrees":           s.Worktrees,
 		"state":               string(s.State),
 		"started_at":          s.StartedAt,
@@ -351,7 +354,25 @@ const (
 	ExecutorTypeLocalDocker  ExecutorType = "local_docker"
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
+	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
+
+// IsRemoteExecutorType reports whether the given executor type represents
+// a remote execution environment.
+func IsRemoteExecutorType(t ExecutorType) bool {
+	switch t {
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeMockRemote:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAlwaysResumableRuntime reports whether the given runtime string represents
+// an executor that can always be resumed even without an explicit resume token.
+func IsAlwaysResumableRuntime(runtime string) bool {
+	return ExecutorType(runtime) == ExecutorTypeSprites
+}
 
 const (
 	ExecutorIDLocal       = "exec-local"

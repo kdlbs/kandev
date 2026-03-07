@@ -69,6 +69,10 @@ func (c *NoopClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
 	return ErrNoClient
 }

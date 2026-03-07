@@ -128,6 +128,10 @@ type FileContentResponse struct {
 	// When true, Content is base64-encoded.
 	IsBinary bool `json:"is_binary,omitempty"`
 
+	// ResolvedPath is the symlink target path (relative to workspace root).
+	// Only set when the requested file is a symlink.
+	ResolvedPath string `json:"resolved_path,omitempty"`
+
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`
 }
@@ -165,6 +169,11 @@ type FileUpdateRequest struct {
 	// OriginalHash is the SHA256 hash of the original file content.
 	// Used for conflict detection.
 	OriginalHash string `json:"original_hash"`
+
+	// DesiredContent is the full file content the user wants to save.
+	// Used as a fallback when the diff cannot be applied (e.g., hash conflict).
+	// Nil means no fallback; pointer to empty string means save as empty file.
+	DesiredContent *string `json:"desired_content,omitempty"`
 }
 
 // FileUpdateResponse represents a response to a file update request.
@@ -180,6 +189,10 @@ type FileUpdateResponse struct {
 
 	// NewHash is the SHA256 hash of the updated file content.
 	NewHash string `json:"new_hash,omitempty"`
+
+	// Resolution indicates how the update was applied.
+	// "applied" = normal diff apply, "overwritten" = full content write fallback.
+	Resolution string `json:"resolution,omitempty"`
 
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`
@@ -205,7 +218,7 @@ type FileCreateResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// FileDeleteRequest represents a request to delete a file.
+// FileDeleteRequest represents a request to delete a file or directory.
 //
 // HTTP endpoint: DELETE /api/v1/workspace/file
 type FileDeleteRequest struct {
@@ -222,6 +235,32 @@ type FileDeleteResponse struct {
 	Path string `json:"path"`
 
 	// Success indicates if the deletion was successful.
+	Success bool `json:"success"`
+
+	// Error contains error message if the request failed.
+	Error string `json:"error,omitempty"`
+}
+
+// FileRenameRequest represents a request to rename a file or directory.
+//
+// HTTP endpoint: POST /api/v1/workspace/file/rename
+type FileRenameRequest struct {
+	// OldPath is the current path (relative to workspace root).
+	OldPath string `json:"old_path"`
+
+	// NewPath is the new path (relative to workspace root).
+	NewPath string `json:"new_path"`
+}
+
+// FileRenameResponse represents a response to a rename request.
+type FileRenameResponse struct {
+	// OldPath is the original path.
+	OldPath string `json:"old_path"`
+
+	// NewPath is the new path.
+	NewPath string `json:"new_path"`
+
+	// Success indicates if the rename was successful.
 	Success bool `json:"success"`
 
 	// Error contains error message if the request failed.

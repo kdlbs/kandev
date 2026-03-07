@@ -17,6 +17,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         color: step.color ?? "bg-neutral-400",
         position: step.position ?? index,
         events: step.events,
+        show_in_command_panel: step.show_in_command_panel,
       }));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tasks: KanbanTask[] = message.payload.tasks.map((task: any) => ({

@@ -29,22 +29,39 @@ export function registerExecutorPrepareHandlers(store: StoreApi<AppState>): WsHa
     },
     "executor.prepare.completed": (message) => {
       const payload = message.payload as PrepareCompletedPayload;
-      store.setState((state) => ({
-        ...state,
-        prepareProgress: {
-          ...state.prepareProgress,
-          bySessionId: {
-            ...state.prepareProgress.bySessionId,
-            [payload.session_id]: {
-              ...state.prepareProgress.bySessionId[payload.session_id],
-              sessionId: payload.session_id,
-              status: payload.success ? "completed" : "failed",
-              errorMessage: payload.error_message,
-              durationMs: payload.duration_ms,
+      store.setState((state) => {
+        const existing = state.prepareProgress.bySessionId[payload.session_id];
+        // Use steps from the completed payload if available (ensures warnings
+        // are present even if progress events were missed due to late subscription).
+        const steps = payload.steps?.length
+          ? payload.steps.map((s) => ({
+              name: s.name,
+              status: s.status,
+              output: s.output,
+              error: s.error,
+              warning: s.warning,
+              warningDetail: s.warning_detail,
+            }))
+          : existing?.steps;
+
+        return {
+          ...state,
+          prepareProgress: {
+            ...state.prepareProgress,
+            bySessionId: {
+              ...state.prepareProgress.bySessionId,
+              [payload.session_id]: {
+                ...existing,
+                sessionId: payload.session_id,
+                status: payload.success ? "completed" : "failed",
+                steps: steps ?? [],
+                errorMessage: payload.error_message,
+                durationMs: payload.duration_ms,
+              },
             },
           },
-        },
-      }));
+        };
+      });
     },
   };
 }
@@ -63,6 +80,8 @@ function updateSteps(
     status: payload.status,
     output: payload.output,
     error: payload.error,
+    warning: payload.warning,
+    warningDetail: payload.warning_detail,
   };
   return steps;
 }

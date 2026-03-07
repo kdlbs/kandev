@@ -10,11 +10,13 @@ import (
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID  string `json:"repository_id"`
-	BaseBranch    string `json:"base_branch"`
-	LocalPath     string `json:"local_path,omitempty"`
-	Name          string `json:"name,omitempty"`
-	DefaultBranch string `json:"default_branch,omitempty"`
+	RepositoryID   string `json:"repository_id"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	LocalPath      string `json:"local_path,omitempty"`
+	Name           string `json:"name,omitempty"`
+	DefaultBranch  string `json:"default_branch,omitempty"`
+	GitHubURL      string `json:"github_url,omitempty"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

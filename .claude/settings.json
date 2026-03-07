@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$TOOL_INPUT_FILE_PATH\"; case \"$f\" in *.ts|*.tsx|*.js|*.jsx) root=$(cd \"$(dirname \"$f\")\" && git rev-parse --show-toplevel 2>/dev/null) && npx --prefix \"$root/apps\" prettier --write \"$f\" 2>/dev/null ;; *.go) gofmt -w \"$f\" 2>/dev/null ;; esac"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$TOOL_INPUT_FILE_PATH\"; case \"$f\" in *.ts|*.tsx|*.js|*.jsx) root=$(cd \"$(dirname \"$f\")\" && git rev-parse --show-toplevel 2>/dev/null) && npx --prefix \"$root/apps\" prettier --write \"$f\" 2>/dev/null ;; *.go) gofmt -w \"$f\" 2>/dev/null ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

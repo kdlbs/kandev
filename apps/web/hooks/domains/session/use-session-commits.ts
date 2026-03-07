@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { SessionCommit } from "@/lib/state/slices/session-runtime/types";
@@ -17,6 +17,9 @@ export function useSessionCommits(sessionId: string | null) {
   const setSessionCommits = useAppStore((state) => state.setSessionCommits);
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
+
+  // Track whether we had commits before (to detect clears)
+  const prevCommitsRef = useRef<SessionCommit[] | undefined>(undefined);
 
   const fetchCommits = useCallback(async () => {
     if (!sessionId) return;
@@ -40,12 +43,22 @@ export function useSessionCommits(sessionId: string | null) {
     }
   }, [sessionId, setSessionCommits, setSessionCommitsLoading]);
 
-  // Fetch commits on mount
+  // Fetch commits on mount or when commits are cleared (e.g., after reset)
   useEffect(() => {
     if (connectionStatus !== "connected") return;
-    if (sessionId && !commits) {
+    if (!sessionId) return;
+
+    // Fetch if:
+    // 1. commits is undefined (initial load or after clear)
+    // 2. commits was previously set but is now undefined (reset scenario)
+    const wasCleared = prevCommitsRef.current !== undefined && commits === undefined;
+    const needsInitialFetch = commits === undefined;
+
+    if (needsInitialFetch || wasCleared) {
       fetchCommits();
     }
+
+    prevCommitsRef.current = commits;
   }, [sessionId, commits, fetchCommits, connectionStatus]);
 
   return {

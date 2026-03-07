@@ -116,7 +116,30 @@ func (s *Server) handleFileContent(c *gin.Context) {
 		return
 	}
 
-	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
+	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(path)
+	if err != nil {
+		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		return
+	}
+
+	c.JSON(200, types.FileContentResponse{Path: path, Content: content, Size: size, IsBinary: isBinary, ResolvedPath: resolvedPath})
+}
+
+// handleFileContentAtRef handles file content requests at a specific git ref via HTTP GET
+func (s *Server) handleFileContentAtRef(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(400, types.FileContentResponse{Error: "path is required"})
+		return
+	}
+
+	ref := c.Query("ref")
+	if ref == "" {
+		c.JSON(400, types.FileContentResponse{Error: "ref is required"})
+		return
+	}
+
+	content, size, isBinary, err := s.procMgr.GetWorkspaceTracker().GetFileContentAtRef(c.Request.Context(), path, ref)
 	if err != nil {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
@@ -144,7 +167,7 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	// Apply the diff
-	newHash, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash)
+	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		c.JSON(400, streams.FileUpdateResponse{
 			Path:    req.Path,
@@ -155,9 +178,10 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	c.JSON(200, streams.FileUpdateResponse{
-		Path:    req.Path,
-		Success: true,
-		NewHash: newHash,
+		Path:       req.Path,
+		Success:    true,
+		NewHash:    newHash,
+		Resolution: resolution,
 	})
 }
 
@@ -229,6 +253,41 @@ func (s *Server) handleFileDelete(c *gin.Context) {
 
 	c.JSON(200, streams.FileDeleteResponse{
 		Path:    path,
+		Success: true,
+	})
+}
+
+// handleFileRename handles file/directory rename requests via HTTP POST
+func (s *Server) handleFileRename(c *gin.Context) {
+	var req streams.FileRenameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, streams.FileRenameResponse{Error: "invalid request: " + err.Error()})
+		return
+	}
+	if req.OldPath == "" {
+		c.JSON(400, streams.FileRenameResponse{Error: "old_path is required"})
+		return
+	}
+
+	if req.NewPath == "" {
+		c.JSON(400, streams.FileRenameResponse{Error: "new_path is required"})
+		return
+	}
+
+	err := s.procMgr.GetWorkspaceTracker().RenameFile(req.OldPath, req.NewPath)
+	if err != nil {
+		c.JSON(400, streams.FileRenameResponse{
+			OldPath: req.OldPath,
+			NewPath: req.NewPath,
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(200, streams.FileRenameResponse{
+		OldPath: req.OldPath,
+		NewPath: req.NewPath,
 		Success: true,
 	})
 }

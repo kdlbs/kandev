@@ -10,15 +10,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // setupTestRepo creates a git repository with a remote for testing.
 // Returns the repo path and a cleanup function.
+// isolateTestGitEnv unsets GIT_* env vars that may be set by parent git hooks
+// (pre-commit). This protects both test helper commands AND the WorkspaceTracker's
+// internal git commands from operating on the wrong repository.
+// Cannot use t.Setenv("", "") because GIT_DIR="" makes git fail differently.
+func isolateTestGitEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+		"GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE",
+	} {
+		if val, ok := os.LookupEnv(key); ok {
+			_ = os.Unsetenv(key)
+			t.Cleanup(func() { _ = os.Setenv(key, val) })
+		}
+	}
+}
+
 func setupTestRepo(t *testing.T) (string, func()) {
 	t.Helper()
+
+	isolateTestGitEnv(t)
 
 	// Create temp directory for the "remote" bare repo
 	remoteDir, err := os.MkdirTemp("", "test-remote-*")
@@ -72,12 +90,30 @@ func runGit(t *testing.T, dir string, args ...string) string {
 		"-c", "tag.gpgsign=false",
 	}, args...)
 	cmd := exec.Command("git", fullArgs...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// Filter out GIT_* env vars (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, etc.)
+	// that git sets when running hooks. Without this, test git commands leak into
+	// the parent repo when executed from a pre-commit hook context because GIT_DIR
+	// overrides the -C flag.
+	cmd.Env = filterTestGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)
 	}
 	return string(out)
+}
+
+// filterTestGitEnv removes GIT_* environment variables that can leak from
+// parent processes (especially git hooks) and cause test git operations to
+// modify the wrong repository.
+func filterTestGitEnv(env []string) []string {
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_") {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }
 
 func writeFile(t *testing.T, dir, name, content string) {
@@ -242,6 +278,8 @@ func TestGetGitStatus_AheadBehindWithoutUpstream(t *testing.T) {
 // 3. User does git fetch && git reset --hard origin/main
 // 4. The upstream commits should be filtered out
 func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
+	isolateTestGitEnv(t)
+
 	// Create temp directories
 	remoteDir, err := os.MkdirTemp("", "test-remote-*")
 	if err != nil {
@@ -348,7 +386,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	textContent := "Hello, world!\nLine 2\n"
 	writeFile(t, repoDir, "text.txt", textContent)
 
-	content, size, isBinary, err := wt.GetFileContent("text.txt")
+	content, size, isBinary, _, err := wt.GetFileContent("text.txt")
 	if err != nil {
 		t.Fatalf("GetFileContent(text.txt) error: %v", err)
 	}
@@ -368,7 +406,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 		t.Fatalf("failed to write binary file: %v", err)
 	}
 
-	content, size, isBinary, err = wt.GetFileContent("image.png")
+	content, size, isBinary, _, err = wt.GetFileContent("image.png")
 	if err != nil {
 		t.Fatalf("GetFileContent(image.png) error: %v", err)
 	}
@@ -391,7 +429,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	// Test 3: Empty file returns isBinary=false
 	writeFile(t, repoDir, "empty.txt", "")
 
-	_, _, isBinary, err = wt.GetFileContent("empty.txt")
+	_, _, isBinary, _, err = wt.GetFileContent("empty.txt")
 	if err != nil {
 		t.Fatalf("GetFileContent(empty.txt) error: %v", err)
 	}
@@ -400,7 +438,7 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	}
 
 	// Test 4: Path traversal is rejected
-	_, _, _, err = wt.GetFileContent("../../etc/passwd")
+	_, _, _, _, err = wt.GetFileContent("../../etc/passwd")
 	if err == nil {
 		t.Error("expected error for path traversal, got nil")
 	}
@@ -523,41 +561,58 @@ func TestDeleteFile(t *testing.T) {
 		}
 	})
 
-	t.Run("directory deletion rejected", func(t *testing.T) {
+	t.Run("directory deletion succeeds", func(t *testing.T) {
 		dir, wt := setupTestDir(t)
-		if err := os.Mkdir(filepath.Join(dir, "mydir"), 0o755); err != nil {
+		targetDir := filepath.Join(dir, "mydir")
+		if err := os.Mkdir(targetDir, 0o755); err != nil {
 			t.Fatalf("mkdir failed: %v", err)
 		}
 		err := wt.DeleteFile("mydir")
-		if err == nil {
-			t.Fatal("expected error for directory deletion, got nil")
+		if err != nil {
+			t.Fatalf("expected directory deletion to succeed, got: %v", err)
 		}
-		if !strings.Contains(err.Error(), "cannot delete directory") {
-			t.Errorf("expected 'cannot delete directory' error, got: %v", err)
+		if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
+			t.Fatalf("expected directory to be deleted, got err: %v", err)
 		}
 	})
 }
 
-func TestFsOpToString(t *testing.T) {
-	tests := []struct {
-		op   fsnotify.Op
-		want string
-	}{
-		{fsnotify.Create, types.FileOpCreate},
-		{fsnotify.Write, types.FileOpWrite},
-		{fsnotify.Remove, types.FileOpRemove},
-		{fsnotify.Rename, types.FileOpRename},
-		{fsnotify.Chmod, types.FileOpRefresh},
-	}
+func TestRenameFile(t *testing.T) {
+	t.Run("renames file", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		oldPath := filepath.Join(dir, "from.txt")
+		newPath := filepath.Join(dir, "to.txt")
+		if err := os.WriteFile(oldPath, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		if err := wt.RenameFile("from.txt", "to.txt"); err != nil {
+			t.Fatalf("RenameFile failed: %v", err)
+		}
+		if _, err := os.Stat(newPath); err != nil {
+			t.Fatalf("expected new path to exist, got: %v", err)
+		}
+		if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+			t.Fatalf("expected old path to be gone, got: %v", err)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.op.String(), func(t *testing.T) {
-			got := fsOpToString(tt.op)
-			if got != tt.want {
-				t.Errorf("fsOpToString(%v) = %q, want %q", tt.op, got, tt.want)
-			}
-		})
-	}
+	t.Run("renames directory", func(t *testing.T) {
+		dir, wt := setupTestDir(t)
+		oldDir := filepath.Join(dir, "dir-a")
+		newDir := filepath.Join(dir, "dir-b")
+		if err := os.Mkdir(oldDir, 0o755); err != nil {
+			t.Fatalf("mkdir failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(oldDir, "file.txt"), []byte("hello"), 0o644); err != nil {
+			t.Fatalf("write failed: %v", err)
+		}
+		if err := wt.RenameFile("dir-a", "dir-b"); err != nil {
+			t.Fatalf("RenameFile failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(newDir, "file.txt")); err != nil {
+			t.Fatalf("expected file to be moved with directory, got: %v", err)
+		}
+	})
 }
 
 func TestRewriteDiffPaths(t *testing.T) {
@@ -618,12 +673,15 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 	// Build a unified diff that changes line2 -> modified
 	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
 
-	hash, err := wt.ApplyFileDiff("test.txt", diff, "")
+	hash, resolution, err := wt.ApplyFileDiff("test.txt", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff failed: %v", err)
 	}
 	if hash == "" {
 		t.Fatal("expected non-empty hash")
+	}
+	if resolution != "applied" {
+		t.Errorf("expected resolution 'applied', got %q", resolution)
 	}
 
 	// Verify file content
@@ -667,12 +725,15 @@ func TestApplyFileDiff_Symlink(t *testing.T) {
 	// Build a diff targeting the symlink path
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
 
-	hash, err := wt.ApplyFileDiff("LINK.md", diff, "")
+	hash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
 	}
 	if hash == "" {
 		t.Fatal("expected non-empty hash")
+	}
+	if resolution != "applied" {
+		t.Errorf("expected resolution 'applied', got %q", resolution)
 	}
 
 	// Verify the real file was patched (not replaced by a regular file)
@@ -725,13 +786,295 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 
 	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
 
-	_, err := wt.ApplyFileDiff("conflict.txt", diff, origHash)
+	_, _, err := wt.ApplyFileDiff("conflict.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
 	if !strings.Contains(err.Error(), "conflict detected") {
 		t.Errorf("expected 'conflict detected' error, got: %v", err)
 	}
+}
+
+func TestGetFileContent_SymlinkResolvedPath(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create a real file and a symlink
+	realDir := filepath.Join(repoDir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	writeFile(t, repoDir, "real/target.md", "content\n")
+
+	symlinkPath := filepath.Join(repoDir, "LINK.md")
+	if err := os.Symlink(filepath.Join(repoDir, "real", "target.md"), symlinkPath); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	t.Run("symlink returns resolved path", func(t *testing.T) {
+		_, _, _, resolvedPath, err := wt.GetFileContent("LINK.md")
+		if err != nil {
+			t.Fatalf("GetFileContent error: %v", err)
+		}
+		if resolvedPath != filepath.Join("real", "target.md") {
+			t.Errorf("resolvedPath = %q, want %q", resolvedPath, filepath.Join("real", "target.md"))
+		}
+	})
+
+	t.Run("regular file returns empty resolved path", func(t *testing.T) {
+		_, _, _, resolvedPath, err := wt.GetFileContent(filepath.Join("real", "target.md"))
+		if err != nil {
+			t.Fatalf("GetFileContent error: %v", err)
+		}
+		if resolvedPath != "" {
+			t.Errorf("resolvedPath = %q, want empty string for non-symlink", resolvedPath)
+		}
+	})
+}
+
+func TestApplyFileDiff_ConflictWithDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	writeFile(t, repoDir, "file.txt", "original\n")
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "add file.txt")
+
+	origHash := calculateSHA256("original\n")
+
+	// Modify file behind the diff's back (simulating agent edit)
+	writeFile(t, repoDir, "file.txt", "modified-by-agent\n")
+
+	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
+	desiredContent := "user-desired-content\n"
+
+	newHash, resolution, err := wt.ApplyFileDiff("file.txt", diff, origHash, &desiredContent)
+	if err != nil {
+		t.Fatalf("ApplyFileDiff with desiredContent should not fail: %v", err)
+	}
+	if resolution != "overwritten" {
+		t.Errorf("resolution = %q, want %q", resolution, "overwritten")
+	}
+	if newHash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify file contains the desired content
+	content, err := os.ReadFile(filepath.Join(repoDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(content) != desiredContent {
+		t.Errorf("content = %q, want %q", string(content), desiredContent)
+	}
+}
+
+func TestApplyFileDiff_ConflictWithoutDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	writeFile(t, repoDir, "file.txt", "original\n")
+	runGit(t, repoDir, "add", "file.txt")
+	runGit(t, repoDir, "commit", "-m", "add file.txt")
+
+	origHash := calculateSHA256("original\n")
+	writeFile(t, repoDir, "file.txt", "modified-by-agent\n")
+
+	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
+
+	// Without desiredContent, conflict should still fail
+	_, _, err := wt.ApplyFileDiff("file.txt", diff, origHash, nil)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !strings.Contains(err.Error(), "conflict detected") {
+		t.Errorf("expected 'conflict detected' error, got: %v", err)
+	}
+}
+
+func TestApplyFileDiff_SymlinkConflictWithDesiredContent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	repoDir, _ = filepath.EvalSymlinks(repoDir)
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	// Create real file and symlink
+	realDir := filepath.Join(repoDir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	writeFile(t, repoDir, "real/target.md", "original\n")
+
+	symlinkPath := filepath.Join(repoDir, "LINK.md")
+	if err := os.Symlink(filepath.Join(repoDir, "real", "target.md"), symlinkPath); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add files")
+
+	origHash := calculateSHA256("original\n")
+
+	// Modify the real file behind the diff's back
+	writeFile(t, repoDir, "real/target.md", "agent-modified\n")
+
+	diff := "--- LINK.md\n+++ LINK.md\n@@ -1 +1 @@\n-original\n+user-version\n"
+	desiredContent := "user-content\n"
+
+	newHash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, origHash, &desiredContent)
+	if err != nil {
+		t.Fatalf("ApplyFileDiff with desiredContent through symlink should not fail: %v", err)
+	}
+	if resolution != "overwritten" {
+		t.Errorf("resolution = %q, want %q", resolution, "overwritten")
+	}
+	if newHash == "" {
+		t.Fatal("expected non-empty hash")
+	}
+
+	// Verify the real target file has the desired content
+	content, err := os.ReadFile(filepath.Join(repoDir, "real", "target.md"))
+	if err != nil {
+		t.Fatalf("failed to read real file: %v", err)
+	}
+	if string(content) != desiredContent {
+		t.Errorf("real file content = %q, want %q", string(content), desiredContent)
+	}
+
+	// Verify the symlink still exists
+	linkInfo, err := os.Lstat(symlinkPath)
+	if err != nil {
+		t.Fatalf("failed to lstat symlink: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Error("LINK.md is no longer a symlink after overwrite")
+	}
+}
+
+func TestGetFileContentAtRef(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	// Commit a text file at HEAD so we can reference it by ref
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\nline3\n")
+	runGit(t, repoDir, "add", "hello.txt")
+	runGit(t, repoDir, "commit", "-m", "add hello.txt")
+
+	t.Run("existing file at HEAD returns content", func(t *testing.T) {
+		content, size, isBinary, err := wt.GetFileContentAtRef(ctx, "hello.txt", "HEAD")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if isBinary {
+			t.Error("expected isBinary=false for text file")
+		}
+		if content != "line1\nline2\nline3\n" {
+			t.Errorf("unexpected content: %q", content)
+		}
+		if size != int64(len("line1\nline2\nline3\n")) {
+			t.Errorf("unexpected size: %d", size)
+		}
+	})
+
+	t.Run("file not found at ref returns sentinel error", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "nonexistent.txt", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for missing file, got nil")
+		}
+		if !strings.Contains(err.Error(), "file not found at ref") {
+			t.Errorf("expected 'file not found at ref' error, got: %v", err)
+		}
+	})
+
+	t.Run("binary file is base64 encoded", func(t *testing.T) {
+		binaryContent := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE}
+		if err := os.WriteFile(filepath.Join(repoDir, "image.png"), binaryContent, 0o644); err != nil {
+			t.Fatalf("failed to write binary file: %v", err)
+		}
+		runGit(t, repoDir, "add", "image.png")
+		runGit(t, repoDir, "commit", "-m", "add binary file")
+
+		content, _, isBinary, err := wt.GetFileContentAtRef(ctx, "image.png", "HEAD")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !isBinary {
+			t.Error("expected isBinary=true for binary file")
+		}
+		decoded, decErr := base64.StdEncoding.DecodeString(content)
+		if decErr != nil {
+			t.Fatalf("failed to decode base64: %v", decErr)
+		}
+		if string(decoded) != string(binaryContent) {
+			t.Error("decoded binary content does not match original")
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "../../etc/passwd", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for path traversal, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("absolute path rejected", func(t *testing.T) {
+		_, _, _, err := wt.GetFileContentAtRef(ctx, "/etc/passwd", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for absolute path, got nil")
+		}
+		if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("expected path traversal error, got: %v", err)
+		}
+	})
+
+	t.Run("file exists in older commit but deleted at HEAD", func(t *testing.T) {
+		writeFile(t, repoDir, "temporary.txt", "I will be deleted\n")
+		runGit(t, repoDir, "add", "temporary.txt")
+		runGit(t, repoDir, "commit", "-m", "add temporary.txt")
+		oldRef := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+		runGit(t, repoDir, "rm", "temporary.txt")
+		runGit(t, repoDir, "commit", "-m", "delete temporary.txt")
+
+		// File should be found at the old commit
+		content, _, _, err := wt.GetFileContentAtRef(ctx, "temporary.txt", oldRef)
+		if err != nil {
+			t.Fatalf("expected content at old ref, got error: %v", err)
+		}
+		if content != "I will be deleted\n" {
+			t.Errorf("unexpected content: %q", content)
+		}
+
+		// File should NOT be found at HEAD
+		_, _, _, err = wt.GetFileContentAtRef(ctx, "temporary.txt", "HEAD")
+		if err == nil {
+			t.Fatal("expected error for deleted file at HEAD, got nil")
+		}
+		if !strings.Contains(err.Error(), "file not found at ref") {
+			t.Errorf("expected 'file not found at ref' error, got: %v", err)
+		}
+	})
 }
 
 func TestEmitFileChanges(t *testing.T) {

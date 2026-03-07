@@ -23,26 +23,35 @@ const (
 type EnvPrepareRequest struct {
 	TaskID         string
 	SessionID      string
+	TaskTitle      string
 	ExecutionID    string
 	ExecutorType   executor.Name
 	WorkspacePath  string
 	RepositoryPath string
+	RepositoryID   string
 	UseWorktree    bool
 	SetupScript    string
 	BaseBranch     string
+	CheckoutBranch string
 	WorktreeID     string
 	WorktreeBranch string
-	Env            map[string]string
+
+	WorktreeBranchPrefix string
+	PullBeforeWorktree   bool
+
+	Env map[string]string
 }
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name      string            `json:"name"`
-	Status    PrepareStepStatus `json:"status"`
-	Output    string            `json:"output,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	StartedAt *time.Time        `json:"started_at,omitempty"`
-	EndedAt   *time.Time        `json:"ended_at,omitempty"`
+	Name          string            `json:"name"`
+	Status        PrepareStepStatus `json:"status"`
+	Output        string            `json:"output,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Warning       string            `json:"warning,omitempty"`
+	WarningDetail string            `json:"warning_detail,omitempty"`
+	StartedAt     *time.Time        `json:"started_at,omitempty"`
+	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 }
 
 // EnvPrepareResult contains the result of environment preparation.
@@ -52,6 +61,11 @@ type EnvPrepareResult struct {
 	WorkspacePath string        `json:"workspace_path,omitempty"`
 	ErrorMessage  string        `json:"error_message,omitempty"`
 	Duration      time.Duration `json:"duration"`
+
+	// Worktree fields (populated when worktree preparer runs)
+	WorktreeID     string `json:"worktree_id,omitempty"`
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	MainRepoGitDir string `json:"main_repo_git_dir,omitempty"`
 }
 
 // PrepareProgressCallback is called when a preparation step changes status.

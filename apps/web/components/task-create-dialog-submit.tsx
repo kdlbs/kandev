@@ -29,6 +29,9 @@ export type SubmitHandlersDeps = {
   effectiveDefaultStepId: string | null;
   repositoryId: string;
   selectedLocalRepo: LocalRepository | null;
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  githubPrHeadBranch: string | null;
   branch: string;
   agentProfileId: string;
   executorId: string;
@@ -75,6 +78,9 @@ export function useTaskSubmitHandlers({
   effectiveDefaultStepId,
   repositoryId,
   selectedLocalRepo,
+  useGitHubUrl,
+  githubUrl,
+  githubPrHeadBranch,
   branch,
   agentProfileId,
   executorId,
@@ -127,6 +133,16 @@ export function useTaskSubmitHandlers({
   ]);
 
   const getRepositoriesPayload = useCallback(() => {
+    if (useGitHubUrl && githubUrl) {
+      return [
+        {
+          repository_id: "",
+          base_branch: branch || undefined,
+          checkout_branch: githubPrHeadBranch || undefined,
+          github_url: githubUrl,
+        },
+      ];
+    }
     if (repositoryId) {
       return [{ repository_id: repositoryId, base_branch: branch || undefined }];
     }
@@ -141,7 +157,7 @@ export function useTaskSubmitHandlers({
       ];
     }
     return [];
-  }, [repositoryId, branch, selectedLocalRepo]);
+  }, [useGitHubUrl, repositoryId, branch, githubUrl, githubPrHeadBranch, selectedLocalRepo]);
 
   const handleSessionSubmit = useCallback(async () => {
     const description = descriptionInputRef.current?.getValue() ?? "";
@@ -167,10 +183,9 @@ export function useTaskSubmitHandlers({
       const response = await launchSession(request);
 
       const newSessionId = response?.session_id;
+      onOpenChange(false);
       if (newSessionId) {
         router.push(linkToSession(newSessionId));
-      } else {
-        onOpenChange(false);
       }
     } catch (error) {
       toast({
@@ -299,8 +314,8 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      onOpenChange(false);
       if (planMode && newSessionId) {
-        onOpenChange(false);
         activatePlanMode({
           sessionId: newSessionId,
           taskId: taskResponse.id,
@@ -310,8 +325,6 @@ export function useTaskSubmitHandlers({
         });
       } else if (isPassthroughProfile && newSessionId) {
         router.push(linkToSession(newSessionId));
-      } else {
-        onOpenChange(false);
       }
     },
     [
@@ -348,6 +361,7 @@ export function useTaskSubmitHandlers({
       );
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      onOpenChange(false);
       if (newSessionId) {
         activatePlanMode({
           sessionId: newSessionId,
@@ -356,8 +370,6 @@ export function useTaskSubmitHandlers({
           setPlanMode,
           router,
         });
-      } else {
-        onOpenChange(false);
       }
     },
     [
@@ -425,6 +437,7 @@ export function useTaskSubmitHandlers({
             effectiveWorkflowId,
             repositoryId,
             selectedLocalRepo,
+            githubUrl,
             agentProfileId,
           })
         )
@@ -453,6 +466,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     getRepositoriesPayload,
     performCreateWithAgent,
@@ -472,6 +486,7 @@ export function useTaskSubmitHandlers({
         effectiveWorkflowId,
         repositoryId,
         selectedLocalRepo,
+        githubUrl,
         agentProfileId,
       })
     )
@@ -499,6 +514,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     isPassthroughProfile,
     getRepositoriesPayload,
@@ -520,6 +536,7 @@ export function useTaskSubmitHandlers({
         effectiveWorkflowId,
         repositoryId,
         selectedLocalRepo,
+        githubUrl,
         agentProfileId,
       })
     )
@@ -560,6 +577,7 @@ export function useTaskSubmitHandlers({
     effectiveWorkflowId,
     repositoryId,
     selectedLocalRepo,
+    githubUrl,
     agentProfileId,
     effectiveDefaultStepId,
     executorId,

@@ -10,15 +10,25 @@ import (
 )
 
 // Provide creates and loads the agent registry.
+//
+// KANDEV_MOCK_AGENT controls mock-agent availability:
+//   - "only"  → E2E mode: only register mock agent, skip all others
+//   - "true"  → Dev mode: load all agents AND enable mock agent
+//   - unset   → Production: load all agents, mock agent disabled
 func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	reg := NewRegistry(log)
 
-	if os.Getenv("KANDEV_MOCK_AGENT") == "true" {
-		// Only register mock agent — skip slow agent discovery for all others
+	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
+	if mockMode == "only" {
+		// E2E mode: only register mock agent — skip agent discovery for all others
 		_ = reg.Register(agents.NewMockAgent())
 		configureMockAgent(reg, log)
 	} else {
 		reg.LoadDefaults()
+		if mockMode == "true" {
+			// Dev mode: enable mock agent alongside all other agents
+			configureMockAgent(reg, log)
+		}
 	}
 
 	return reg, func() error { return nil }, nil

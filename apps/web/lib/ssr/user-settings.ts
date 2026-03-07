@@ -17,6 +17,7 @@ export function buildCoreFields(s: UserSettingsData) {
     releaseNotesLastSeenVersion: s.release_notes_last_seen_version || null,
     savedLayouts: s.saved_layouts ?? [],
     defaultUtilityAgentId: s.default_utility_agent_id || null,
+    keyboardShortcuts: s.keyboard_shortcuts ?? {},
   };
 }
 
@@ -51,6 +52,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       releaseNotesLastSeenVersion: null,
       savedLayouts: [] as SavedLayout[],
       defaultUtilityAgentId: null,
+      keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
       ...buildLspFields(undefined),
       loaded: false,
     };

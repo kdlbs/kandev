@@ -9,7 +9,13 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
-import { DiscardDialog, CommitDialog, PRDialog } from "./changes-panel-dialogs";
+import {
+  DiscardDialog,
+  CommitDialog,
+  PRDialog,
+  AmendDialog,
+  ResetDialog,
+} from "./changes-panel-dialogs";
 import { ChangesPanelHeader } from "./changes-panel-header";
 import {
   FileListSection,
@@ -21,7 +27,7 @@ import {
 } from "./changes-panel-timeline";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useActiveTaskPR, useTaskPRDetection } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -171,6 +177,7 @@ function getBaseBranchDisplay(baseBranch: string | undefined): string {
 }
 
 function useChangesPanelStoreData() {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const taskTitle = useAppStore((state) => {
     if (!state.tasks.activeTaskId) return undefined;
@@ -184,7 +191,7 @@ function useChangesPanelStoreData() {
     if (!taskId) return undefined;
     return state.taskPRs.byTaskId[taskId]?.pr_url ?? undefined;
   });
-  return { activeSessionId, taskTitle, baseBranch, existingPrUrl };
+  return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
 
 type ChangesPanelBodyProps = {
@@ -207,6 +214,7 @@ type ChangesPanelBodyProps = {
   totalFileCount: number;
   aheadCount: number;
   isLoading: boolean;
+  loadingOperation: string | null;
   dialogs: ReturnType<typeof useChangesDialogHandlers>;
   onOpenDiffFile: (path: string) => void;
   onEditFile: (path: string) => void;
@@ -214,6 +222,7 @@ type ChangesPanelBodyProps = {
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string) => void;
   onStageAll: () => void;
+  onUnstageAll: () => void;
   onStage: (path: string) => Promise<void>;
   onUnstage: (path: string) => Promise<void>;
   onPush: () => void;
@@ -233,6 +242,7 @@ function ChangesPanelDialogsSection({
   stagedDeletions,
   displayBranch,
   baseBranch,
+  lastCommitMessage,
 }: Pick<
   ChangesPanelBodyProps,
   | "dialogs"
@@ -242,7 +252,7 @@ function ChangesPanelDialogsSection({
   | "stagedDeletions"
   | "displayBranch"
   | "baseBranch"
->) {
+> & { lastCommitMessage?: string | null }) {
   return (
     <>
       <DiscardDialog
@@ -261,6 +271,9 @@ function ChangesPanelDialogsSection({
         stagedFileCount={stagedFileCount}
         stagedAdditions={stagedAdditions}
         stagedDeletions={stagedDeletions}
+        isAmend={dialogs.isAmendCommit}
+        onAmendChange={dialogs.setIsAmendCommit}
+        lastCommitMessage={lastCommitMessage}
       />
       <PRDialog
         open={dialogs.prDialogOpen}
@@ -275,6 +288,21 @@ function ChangesPanelDialogsSection({
         isLoading={isLoading}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
+      />
+      <AmendDialog
+        open={dialogs.amendDialogOpen}
+        onOpenChange={dialogs.setAmendDialogOpen}
+        amendMessage={dialogs.amendMessage}
+        onAmendMessageChange={dialogs.setAmendMessage}
+        onAmend={dialogs.handleAmend}
+        isLoading={isLoading}
+      />
+      <ResetDialog
+        open={dialogs.resetDialogOpen}
+        onOpenChange={dialogs.setResetDialogOpen}
+        commitSha={dialogs.resetCommitSha}
+        onReset={dialogs.handleReset}
+        isLoading={isLoading}
       />
     </>
   );
@@ -299,12 +327,14 @@ type TimelineProps = Pick<
   | "pendingStageFiles"
   | "aheadCount"
   | "isLoading"
+  | "loadingOperation"
   | "dialogs"
   | "onOpenDiffFile"
   | "onEditFile"
   | "onOpenCommitDetail"
   | "onRevertCommit"
   | "onStageAll"
+  | "onUnstageAll"
   | "onStage"
   | "onUnstage"
   | "onPush"
@@ -314,6 +344,9 @@ type TimelineProps = Pick<
 function TimelineLocalChanges(props: TimelineProps) {
   const showStaged = props.hasUnstaged || props.hasStaged;
   const showCommits = props.hasStaged || props.hasCommits;
+  // Only show bulk-action spinners when no individual files are pending
+  // (per-file ops set pendingStageFiles; bulk ops don't)
+  const isBulkOp = props.pendingStageFiles.size === 0;
 
   return (
     <>
@@ -324,6 +357,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           pendingStageFiles={props.pendingStageFiles}
           isLast={!showStaged}
           actionLabel="Stage all"
+          isActionLoading={isBulkOp && props.loadingOperation === "stage"}
           onAction={props.onStageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
@@ -339,7 +373,11 @@ function TimelineLocalChanges(props: TimelineProps) {
           pendingStageFiles={props.pendingStageFiles}
           isLast={!showCommits}
           actionLabel="Commit"
+          isActionLoading={props.loadingOperation === "commit"}
           onAction={props.dialogs.handleOpenCommitDialog}
+          secondaryActionLabel="Unstage all"
+          isSecondaryActionLoading={isBulkOp && props.loadingOperation === "unstage"}
+          onSecondaryAction={props.onUnstageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
           onStage={props.onStage}
@@ -353,6 +391,8 @@ function TimelineLocalChanges(props: TimelineProps) {
           isLast={false}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
+          onAmendCommit={props.dialogs.handleOpenAmendDialog}
+          onResetToCommit={props.dialogs.handleOpenResetDialog}
         />
       )}
       {showCommits && (
@@ -360,6 +400,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           onOpenPRDialog={props.dialogs.handleOpenPRDialog}
           onPush={props.onPush}
           isLoading={props.isLoading}
+          loadingOperation={props.loadingOperation}
           aheadCount={props.aheadCount}
           canPush={props.canPush}
           canCreatePR={props.canCreatePR}
@@ -385,18 +426,22 @@ function ChangesPanelTimeline(props: TimelineProps) {
   return (
     <div className="flex flex-col">
       {props.hasPRFiles && (
-        <PRFilesSection
-          files={props.prFiles}
-          isLast={!props.hasPRCommits && !hasLocalChanges}
-          onOpenDiff={props.onOpenDiffFile}
-        />
+        <div data-testid="pr-files-section">
+          <PRFilesSection
+            files={props.prFiles}
+            isLast={!props.hasPRCommits && !hasLocalChanges}
+            onOpenDiff={props.onOpenDiffFile}
+          />
+        </div>
       )}
       {props.hasPRCommits && (
-        <PRCommitsSection
-          commits={props.prCommits}
-          isLast={!hasLocalChanges}
-          onOpenCommitDetail={props.onOpenCommitDetail}
-        />
+        <div data-testid="pr-commits-section">
+          <PRCommitsSection
+            commits={props.prCommits}
+            isLast={!hasLocalChanges}
+            onOpenCommitDetail={props.onOpenCommitDetail}
+          />
+        </div>
       )}
       <TimelineLocalChanges {...props} />
     </div>
@@ -404,6 +449,9 @@ function ChangesPanelTimeline(props: TimelineProps) {
 }
 
 function ChangesPanelBody(props: ChangesPanelBodyProps) {
+  // Get last commit message for amend feature
+  const lastCommitMessage = props.commits?.[0]?.commit_message ?? null;
+
   return (
     <PanelBody className="flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
@@ -422,6 +470,7 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         stagedDeletions={props.stagedDeletions}
         displayBranch={props.displayBranch}
         baseBranch={props.baseBranch}
+        lastCommitMessage={lastCommitMessage}
       />
     </PanelBody>
   );
@@ -453,12 +502,20 @@ const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
 }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { activeSessionId, taskTitle, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl } =
+    useChangesPanelStoreData();
 
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
   const { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles } = useChangesPanelPRData();
+
+  // Periodically check for a PR when the session has a branch but no PR yet
+  useTaskPRDetection(
+    isArchived ? null : (activeTaskId ?? null),
+    isArchived ? null : (activeSessionId ?? null),
+    isArchived ? null : (git.branch ?? null),
+  );
 
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
@@ -471,18 +528,17 @@ const ChangesPanel = memo(function ChangesPanel({
   const staged = useMemo(() => computeStagedStats(git.stagedFiles), [git.stagedFiles]);
 
   const gitHandlers = useChangesGitHandlers(git, toast, baseBranch);
-  const dialogs = useChangesDialogHandlers(
-    git,
-    toast,
-    gitHandlers.handleGitOperation,
+  const firstCommitMessage = git.commits?.[0]?.commit_message;
+  const dialogs = useChangesDialogHandlers(git, toast, gitHandlers.handleGitOperation, {
     taskTitle,
     baseBranch,
-  );
+    firstCommitMessage,
+  });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
-    <PanelRoot>
+    <PanelRoot data-testid="changes-panel">
       <ChangesPanelHeader
         hasChanges={git.hasChanges}
         hasCommits={git.hasCommits}
@@ -491,6 +547,7 @@ const ChangesPanel = memo(function ChangesPanel({
         baseBranchDisplay={baseBranchDisplay}
         behindCount={git.behind}
         isLoading={git.isLoading}
+        loadingOperation={git.loadingOperation}
         onOpenDiffAll={onOpenDiffAll}
         onOpenReview={onOpenReview}
         onPull={gitHandlers.handlePull}
@@ -516,6 +573,7 @@ const ChangesPanel = memo(function ChangesPanel({
         totalFileCount={totalFileCount}
         aheadCount={git.ahead}
         isLoading={git.isLoading}
+        loadingOperation={git.loadingOperation}
         dialogs={dialogs}
         onOpenDiffFile={onOpenDiffFile}
         onEditFile={onEditFile}
@@ -523,8 +581,9 @@ const ChangesPanel = memo(function ChangesPanel({
         onRevertCommit={gitHandlers.handleRevertCommit}
         onOpenReview={onOpenReview}
         onStageAll={git.stageAll}
-        onStage={(path) => git.stage([path]).then(() => undefined)}
-        onUnstage={(path) => git.unstage([path]).then(() => undefined)}
+        onUnstageAll={git.unstageAll}
+        onStage={(path) => git.stageFile([path]).then(() => undefined)}
+        onUnstage={(path) => git.unstageFile([path]).then(() => undefined)}
         onPush={gitHandlers.handlePush}
         onForcePush={gitHandlers.handleForcePush}
         stagedFileCount={staged.stagedFileCount}

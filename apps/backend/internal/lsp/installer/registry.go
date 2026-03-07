@@ -68,13 +68,21 @@ type Registry struct {
 }
 
 // NewRegistry creates a new installer registry.
-func NewRegistry(log *logger.Logger) *Registry {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+// If dataDir is non-empty, LSP binaries are stored under dataDir+"/lsp-servers".
+// Otherwise falls back to ~/.kandev/lsp-servers.
+func NewRegistry(dataDir string, log *logger.Logger) *Registry {
+	var binDir string
+	if dataDir != "" {
+		binDir = filepath.Join(dataDir, "lsp-servers")
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		binDir = filepath.Join(home, DefaultBinDir)
 	}
 	return &Registry{
-		binDir: filepath.Join(home, DefaultBinDir),
+		binDir: binDir,
 		logger: log.WithFields(zap.String("component", "lsp-installer")),
 	}
 }

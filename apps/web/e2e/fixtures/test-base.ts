@@ -80,19 +80,22 @@ export const test = backendFixture.extend<
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
-    // Clean up tasks and test-created workflows from previous tests in this worker.
-    // Keep the seeded workflow so the worker-scoped seedData fixture remains valid.
+    // Clean up tasks, test-created workflows, and extra agent profiles from
+    // previous tests in this worker. Keep the seeded workflow and the seed
+    // agent profile so the worker-scoped seedData fixture remains valid.
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
 
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      keyboard_shortcuts: {},
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();
-    await setupPage(page, backend);
+    await setupPage(page, backend, seedData);
     await use(page);
     await context.close();
   },
@@ -100,13 +103,30 @@ export const test = backendFixture.extend<
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
+async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
   await page.addInitScript(
-    ({ backendUrl }: { backendUrl: string }) => {
+    ({
+      backendUrl,
+      repositoryId,
+      agentProfileId,
+    }: {
+      backendUrl: string;
+      repositoryId: string;
+      agentProfileId: string;
+    }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");
+      // Pre-seed dialog selections so auto-select effects resolve on their
+      // first render cycle instead of waiting for async API chains.
+      localStorage.setItem("kandev.dialog.lastRepositoryId", JSON.stringify(repositoryId));
+      localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
+      localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
       // Set the window global that getBackendConfig() reads for API/WS connections
       window.__KANDEV_API_BASE_URL = backendUrl;
     },
-    { backendUrl: backend.baseUrl },
+    {
+      backendUrl: backend.baseUrl,
+      repositoryId: seedData.repositoryId,
+      agentProfileId: seedData.agentProfileId,
+    },
   );
 }

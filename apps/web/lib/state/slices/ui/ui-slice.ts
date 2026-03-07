@@ -20,6 +20,7 @@ export const defaultUIState: UISliceState = {
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessionId: null, workspaceId: null },
+  sessionFailureNotification: null,
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -137,5 +138,9 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
       draft.quickChat.sessionId = null;
       draft.quickChat.workspaceId = null;
       draft.quickChat.isOpen = false;
+    }),
+  setSessionFailureNotification: (n) =>
+    set((draft) => {
+      draft.sessionFailureNotification = n;
     }),
 });

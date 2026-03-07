@@ -16,6 +16,8 @@ const (
 	SnapshotTypePreStage SnapshotType = "pre_stage"
 	// SnapshotTypePostStage is for snapshots taken after staging
 	SnapshotTypePostStage SnapshotType = "post_stage"
+	// SnapshotTypeArchive is for final state captured when task is archived
+	SnapshotTypeArchive SnapshotType = "archive"
 )
 
 // GitSnapshot represents a git status snapshot at a specific point in time

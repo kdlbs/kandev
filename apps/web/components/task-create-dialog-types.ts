@@ -120,4 +120,16 @@ export type DialogFormState = {
   setIsCreatingSession: (v: boolean) => void;
   isCreatingTask: boolean;
   setIsCreatingTask: (v: boolean) => void;
+  useGitHubUrl: boolean;
+  setUseGitHubUrl: (v: boolean) => void;
+  githubUrl: string;
+  setGitHubUrl: (v: string) => void;
+  githubBranches: Branch[];
+  setGitHubBranches: (v: Branch[]) => void;
+  githubBranchesLoading: boolean;
+  setGitHubBranchesLoading: (v: boolean) => void;
+  githubUrlError: string | null;
+  setGitHubUrlError: (v: string | null) => void;
+  githubPrHeadBranch: string | null;
+  setGitHubPrHeadBranch: (v: string | null) => void;
 };

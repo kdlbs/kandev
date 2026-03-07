@@ -33,10 +33,11 @@ type Cloner struct {
 	repoMus sync.Map
 }
 
-// NewCloner creates a new Cloner with the given config and git protocol.
-func NewCloner(cfg Config, protocol string, log *logger.Logger) *Cloner {
-	if cfg.BasePath == "" {
-		cfg.BasePath = "~/.kandev/repos"
+// NewCloner creates a new Cloner with the given config, git protocol, and data directory.
+// If cfg.BasePath is empty, it defaults to dataDir+"/repos".
+func NewCloner(cfg Config, protocol string, dataDir string, log *logger.Logger) *Cloner {
+	if cfg.BasePath == "" && dataDir != "" {
+		cfg.BasePath = filepath.Join(dataDir, "repos")
 	}
 	return &Cloner{config: cfg, protocol: protocol, logger: log}
 }
@@ -58,6 +59,12 @@ func (c *Cloner) ExpandedBasePath() (string, error) {
 		path = filepath.Join(home, path[2:])
 	}
 	return path, nil
+}
+
+// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
+// This ensures the clone URL matches the user's configured git protocol (SSH vs HTTPS).
+func (c *Cloner) BuildCloneURL(provider, owner, name string) (string, error) {
+	return CloneURL(provider, owner, name, c.protocol)
 }
 
 // RepoPath returns the full local path for a repository.

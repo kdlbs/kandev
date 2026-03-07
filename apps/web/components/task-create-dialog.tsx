@@ -96,50 +96,120 @@ type DialogHeaderContentProps = {
   headerRepositoryOptions: ReturnType<typeof useRepositoryOptions>["headerRepositoryOptions"];
   onRepositoryChange: (v: string) => void;
   onTaskNameChange: (v: string) => void;
+  useGitHubUrl: boolean;
+  githubUrl: string;
+  githubUrlError: string | null;
+  onToggleGitHubUrl: () => void;
+  onGitHubUrlChange: (v: string) => void;
 };
 
-function DialogHeaderContent({
-  isCreateMode,
-  isEditMode,
+function RepoSourceInput({
+  useGitHubUrl,
+  githubUrl,
+  githubUrlError,
+  onGitHubUrlChange,
   isTaskStarted,
-  sessionRepoName,
-  initialTitle,
-  taskName,
+  headerRepositoryOptions,
   repositoryId,
   discoveredRepoPath,
+  onRepositoryChange,
   workspaceId,
   repositoriesLoading,
   discoverReposLoading,
-  headerRepositoryOptions,
-  onRepositoryChange,
-  onTaskNameChange,
-}: DialogHeaderContentProps) {
+}: Pick<
+  DialogHeaderContentProps,
+  | "useGitHubUrl"
+  | "githubUrl"
+  | "githubUrlError"
+  | "onGitHubUrlChange"
+  | "isTaskStarted"
+  | "headerRepositoryOptions"
+  | "repositoryId"
+  | "discoveredRepoPath"
+  | "onRepositoryChange"
+  | "workspaceId"
+  | "repositoriesLoading"
+  | "discoverReposLoading"
+>): React.ReactNode {
+  if (useGitHubUrl) {
+    return (
+      <div className="relative">
+        <input
+          type="text"
+          value={githubUrl}
+          onChange={(e) => onGitHubUrlChange(e.target.value)}
+          placeholder="github.com/owner/repo"
+          data-testid="github-url-input"
+          aria-label="GitHub repository URL"
+          aria-invalid={!!githubUrlError}
+          aria-describedby={githubUrlError ? "github-url-error" : undefined}
+          size={Math.max((githubUrl || "").length + 1, "github.com/owner/repo".length)}
+          className={`bg-transparent border-none outline-none focus:ring-0 text-sm font-medium min-w-0 h-7 rounded-md px-2 hover:bg-muted focus:bg-muted transition-colors placeholder:text-muted-foreground ${githubUrlError ? "text-destructive" : ""}`}
+          disabled={isTaskStarted}
+          autoFocus
+        />
+        {githubUrlError && (
+          <div
+            id="github-url-error"
+            role="alert"
+            className="absolute left-0 top-full mt-1 z-50 rounded-md border bg-popover px-2 py-1 text-[11px] text-destructive shadow-md whitespace-nowrap"
+            data-testid="github-url-error"
+          >
+            {githubUrlError}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <RepositorySelector
+      options={headerRepositoryOptions}
+      value={repositoryId || discoveredRepoPath}
+      onValueChange={onRepositoryChange}
+      placeholder={getRepositoryPlaceholder(workspaceId, repositoriesLoading, discoverReposLoading)}
+      searchPlaceholder="Search repositories..."
+      emptyMessage={
+        repositoriesLoading || discoverReposLoading
+          ? "Loading repositories..."
+          : "No repositories found."
+      }
+      disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
+      triggerClassName="w-auto text-sm"
+    />
+  );
+}
+
+function DialogHeaderContent(props: DialogHeaderContentProps) {
+  const { isCreateMode, isEditMode, isTaskStarted, sessionRepoName, initialTitle } = props;
+  const { taskName, onTaskNameChange, useGitHubUrl, onToggleGitHubUrl } = props;
+
   if (isCreateMode || isEditMode) {
     return (
-      <DialogTitle asChild>
-        <div className="flex items-center gap-1 min-w-0 text-sm font-medium">
-          <RepositorySelector
-            options={headerRepositoryOptions}
-            value={repositoryId || discoveredRepoPath}
-            onValueChange={onRepositoryChange}
-            placeholder={getRepositoryPlaceholder(
-              workspaceId,
-              repositoriesLoading,
-              discoverReposLoading,
-            )}
-            searchPlaceholder="Search repositories..."
-            emptyMessage={
-              repositoriesLoading || discoverReposLoading
-                ? "Loading repositories..."
-                : "No repositories found."
-            }
-            disabled={isTaskStarted || !workspaceId || repositoriesLoading || discoverReposLoading}
-            triggerClassName="w-auto text-sm"
-          />
-          <span className="text-muted-foreground mr-2">/</span>
-          <InlineTaskName value={taskName} onChange={onTaskNameChange} autoFocus={!isEditMode} />
-        </div>
-      </DialogTitle>
+      <>
+        <DialogTitle asChild>
+          <div className="flex items-center gap-1 text-sm font-medium min-w-0">
+            <RepoSourceInput {...props} />
+            <span className="text-muted-foreground mr-2">/</span>
+            <InlineTaskName
+              value={taskName}
+              onChange={onTaskNameChange}
+              autoFocus={!isEditMode && !useGitHubUrl}
+            />
+          </div>
+        </DialogTitle>
+        {!isTaskStarted && (
+          <div className="flex items-center gap-2 pl-2">
+            <button
+              type="button"
+              onClick={onToggleGitHubUrl}
+              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+              data-testid="toggle-github-url"
+            >
+              {useGitHubUrl ? "or select a repository" : "or paste a GitHub URL"}
+            </button>
+          </div>
+        )}
+      </>
     );
   }
   return (
@@ -243,7 +313,6 @@ function DialogFormBody({
         <CreateEditSelectors
           isTaskStarted={isTaskStarted}
           hasRepositorySelection={hasRepositorySelection}
-          repositoryId={fs.repositoryId}
           branchOptions={branchOptions}
           branch={fs.branch}
           onBranchChange={onBranchChange}
@@ -336,6 +405,9 @@ function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
     repositoryId: fs.repositoryId,
     selectedLocalRepo: fs.selectedLocalRepo,
+    useGitHubUrl: fs.useGitHubUrl,
+    githubUrl: fs.githubUrl,
+    githubPrHeadBranch: fs.githubPrHeadBranch,
     branch: fs.branch,
     agentProfileId: fs.agentProfileId,
     executorId: fs.executorId,
@@ -410,6 +482,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             headerRepositoryOptions={computed.headerRepositoryOptions}
             onRepositoryChange={handlers.handleRepositoryChange}
             onTaskNameChange={handlers.handleTaskNameChange}
+            useGitHubUrl={fs.useGitHubUrl}
+            githubUrl={fs.githubUrl}
+            githubUrlError={fs.githubUrlError}
+            onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
+            onGitHubUrlChange={handlers.handleGitHubUrlChange}
           />
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-hidden">
@@ -422,7 +499,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialDescription={initialValues?.description ?? ""}
             hasDescription={fs.hasDescription}
             branchOptions={computed.branchOptions}
-            branchesLoading={branchesLoading}
+            branchesLoading={branchesLoading || (fs.useGitHubUrl && fs.githubBranchesLoading)}
             agentProfileOptions={computed.agentProfileOptions}
             executorProfileOptions={computed.executorProfileOptions}
             agentProfiles={agentProfiles}

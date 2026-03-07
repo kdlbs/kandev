@@ -24,6 +24,7 @@ type repoInfo struct {
 	RepositoryID         string
 	RepositoryPath       string
 	BaseBranch           string
+	CheckoutBranch       string
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	Repository           *models.Repository
@@ -44,6 +45,7 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 	}
 	info.RepositoryID = primaryTaskRepo.RepositoryID
 	info.BaseBranch = primaryTaskRepo.BaseBranch
+	info.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 	if info.RepositoryID == "" {
 		return info, nil
 	}
@@ -54,6 +56,16 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 			zap.Error(err))
 		return nil, err
 	}
+
+	// Clone provider-backed repos that have no local path yet
+	if repo.LocalPath == "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
+		if localPath, cloneErr := e.ensureRepoCloned(ctx, repo); cloneErr != nil {
+			return nil, cloneErr
+		} else if localPath != "" {
+			repo.LocalPath = localPath
+		}
+	}
+
 	info.Repository = repo
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
@@ -64,24 +76,57 @@ func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*
 	return info, nil
 }
 
-// persistLaunchState updates the session and executor running records after a successful agent launch.
-// If existingRunning is provided, resume token and message UUID are carried forward without a DB read.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
-	session.AgentExecutionID = resp.AgentExecutionID
-	session.ContainerID = resp.ContainerID
-	if startAgent {
-		session.State = models.TaskSessionStateStarting
+// ensureRepoCloned clones a provider-backed repository to local disk and updates its local path in the database.
+// Returns the local path on success, or empty string if no cloner is configured.
+func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	if e.repoCloner == nil {
+		e.logger.Warn("repository has no local path and no cloner configured",
+			zap.String("repository_id", repo.ID),
+			zap.String("provider", repo.Provider),
+			zap.String("owner", repo.ProviderOwner),
+			zap.String("name", repo.ProviderName))
+		return "", nil
 	}
-	session.ErrorMessage = ""
-	session.UpdatedAt = now
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		e.logger.Error("failed to update agent session after launch",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
+	cloneURL, urlErr := e.repoCloner.BuildCloneURL(repo.Provider, repo.ProviderOwner, repo.ProviderName)
+	if urlErr != nil || cloneURL == "" {
+		// Fall back to HTTPS URL if BuildCloneURL fails
+		cloneURL = repositoryCloneURL(repo)
+		if cloneURL == "" {
+			return "", ErrNoCloneURL
+		}
+	}
+
+	e.logger.Info("cloning provider-backed repository for local execution",
+		zap.String("repository_id", repo.ID),
+		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
+
+	localPath, err := e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
+	if err != nil {
+		e.logger.Error("failed to clone repository",
+			zap.String("repository_id", repo.ID),
+			zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName),
 			zap.Error(err))
+		return "", err
 	}
 
+	// Persist the local path so future launches skip cloning
+	if e.repoUpdater != nil && localPath != "" {
+		if updateErr := e.repoUpdater.UpdateRepositoryLocalPath(ctx, repo.ID, localPath); updateErr != nil {
+			e.logger.Warn("failed to update repository local path after clone",
+				zap.String("repository_id", repo.ID),
+				zap.String("local_path", localPath),
+				zap.Error(updateErr))
+			// Non-fatal: the clone succeeded, we can use the path
+		}
+	}
+
+	return localPath, nil
+}
+
+// buildExecutorRunning constructs an ExecutorRunning record from the launch/resume response,
+// carrying forward resume token and metadata from the previous running record if available.
+func buildExecutorRunning(session *models.TaskSession, taskID string, resp *LaunchAgentResponse, execCfg executorConfig, existingRunning *models.ExecutorRunning) *models.ExecutorRunning {
 	running := &models.ExecutorRunning{
 		ID:               session.ID,
 		SessionID:        session.ID,
@@ -104,6 +149,28 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 			running.Metadata = lifecycle.FilterPersistentMetadata(existingRunning.Metadata)
 		}
 	}
+	return running
+}
+
+// persistLaunchState updates the session and executor running records after a successful agent launch.
+// If existingRunning is provided, resume token and message UUID are carried forward without a DB read.
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time, execCfg executorConfig, existingRunning *models.ExecutorRunning) {
+	session.AgentExecutionID = resp.AgentExecutionID
+	session.ContainerID = resp.ContainerID
+	if startAgent {
+		session.State = models.TaskSessionStateStarting
+	}
+	session.ErrorMessage = ""
+	session.UpdatedAt = now
+
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Error("failed to update agent session after launch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+
+	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after launch",
 			zap.String("task_id", taskID),
@@ -112,13 +179,19 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	}
 }
 
-// persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains a worktree.
-func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID, sessionID, repositoryID string, resp *LaunchAgentResponse) {
+// persistWorktreeAssociation creates a TaskSessionWorktree record if the response contains
+// a new worktree not already tracked by the session.
+func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
 	if resp.WorktreeID == "" {
 		return
 	}
+	for _, wt := range session.Worktrees {
+		if wt.WorktreeID == resp.WorktreeID {
+			return
+		}
+	}
 	sessionWorktree := &models.TaskSessionWorktree{
-		SessionID:      sessionID,
+		SessionID:      session.ID,
 		WorktreeID:     resp.WorktreeID,
 		RepositoryID:   repositoryID,
 		Position:       0,
@@ -128,7 +201,7 @@ func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID, sessi
 	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
 		e.logger.Error("failed to persist session worktree association",
 			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
+			zap.String("session_id", session.ID),
 			zap.String("worktree_id", resp.WorktreeID),
 			zap.Error(err))
 	}
@@ -183,7 +256,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 
 	e.persistResumeState(ctx, task.ID, session, resp, startAgent, execCfg, existingRunning)
-	e.persistResumeWorktree(ctx, task.ID, session, repositoryID, resp)
+	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch
@@ -417,10 +490,10 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		req.Metadata[lifecycle.MetadataKeyRepoSetupScript] = repository.SetupScript
 	}
 
-	if models.ExecutorType(req.ExecutorType) == models.ExecutorTypeRemoteDocker {
+	if e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
 		cloneURL := repositoryCloneURL(repository)
 		if cloneURL == "" {
-			return "", ErrRemoteDockerNoRepoURL
+			return "", ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}
@@ -433,6 +506,11 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 			req.BaseBranch = baseBranch
 		} else {
 			req.BaseBranch = defaultBaseBranch
+		}
+		// Carry forward CheckoutBranch from task repository (e.g. PR head branch)
+		primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
+		if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
+			req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		}
 		req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repository.PullBeforeWorktree
@@ -458,59 +536,11 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.Error(err))
 	}
 
-	running := &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           taskID,
-		ExecutorID:       session.ExecutorID,
-		Runtime:          execCfg.RuntimeName,
-		Status:           "starting",
-		Resumable:        execCfg.Resumable,
-		AgentExecutionID: resp.AgentExecutionID,
-		ContainerID:      resp.ContainerID,
-		WorktreeID:       resp.WorktreeID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-		Metadata:         resp.Metadata,
-	}
-	if existingRunning != nil {
-		running.ResumeToken = existingRunning.ResumeToken
-		running.LastMessageUUID = existingRunning.LastMessageUUID
-		if running.Metadata == nil {
-			running.Metadata = lifecycle.FilterPersistentMetadata(existingRunning.Metadata)
-		}
-	}
+	running := buildExecutorRunning(session, taskID, resp, execCfg, existingRunning)
 	if err := e.repo.UpsertExecutorRunning(ctx, running); err != nil {
 		e.logger.Warn("failed to persist executor runtime after resume",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
-			zap.Error(err))
-	}
-}
-
-// persistResumeWorktree creates a worktree association if a new worktree was allocated during resume.
-func (e *Executor) persistResumeWorktree(ctx context.Context, taskID string, session *models.TaskSession, repositoryID string, resp *LaunchAgentResponse) {
-	if resp.WorktreeID == "" {
-		return
-	}
-	for _, wt := range session.Worktrees {
-		if wt.WorktreeID == resp.WorktreeID {
-			return
-		}
-	}
-	sessionWorktree := &models.TaskSessionWorktree{
-		SessionID:      session.ID,
-		WorktreeID:     resp.WorktreeID,
-		RepositoryID:   repositoryID,
-		Position:       0,
-		WorktreePath:   resp.WorktreePath,
-		WorktreeBranch: resp.WorktreeBranch,
-	}
-	if err := e.repo.CreateTaskSessionWorktree(ctx, sessionWorktree); err != nil {
-		e.logger.Error("failed to persist session worktree association on resume",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("worktree_id", resp.WorktreeID),
 			zap.Error(err))
 	}
 }

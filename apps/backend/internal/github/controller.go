@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
+	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
@@ -46,6 +48,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos/search", c.httpSearchRepos)
+	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 
 	api.GET("/stats", c.httpGetStats)
 }
@@ -103,6 +106,35 @@ func (c *Controller) httpGetPRFeedback(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, feedback)
+}
+
+func (c *Controller) httpGetPRInfo(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	numberStr := ctx.Param("number")
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	pr, err := c.service.GetPR(ctx.Request.Context(), owner, repo, number)
+	if err != nil {
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, pr)
 }
 
 func (c *Controller) httpSubmitReview(ctx *gin.Context) {
@@ -258,6 +290,29 @@ func (c *Controller) httpSearchRepos(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"repos": repos})
+}
+
+func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	branches, err := c.service.ListRepoBranches(ctx.Request.Context(), owner, repo)
+	if err != nil {
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
 }
 
 func (c *Controller) httpGetStats(ctx *gin.Context) {

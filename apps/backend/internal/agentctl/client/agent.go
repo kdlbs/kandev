@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
@@ -263,6 +264,12 @@ func (c *Client) readUpdatesStream(
 			// This is an MCP request - dispatch it
 			if wsMsg.Type == ws.MessageTypeRequest {
 				if mcpHandler != nil {
+					sessionID, pendingID := extractMCPRequestCorrelation(wsMsg.Payload)
+					c.logger.Debug("received MCP request from agent stream",
+						zap.String("request_id", wsMsg.ID),
+						zap.String("action", wsMsg.Action),
+						zap.String("session_id", sessionID),
+						zap.String("pending_id", pendingID))
 					go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
 				}
 				continue
@@ -284,27 +291,90 @@ func (c *Client) readUpdatesStream(
 // dispatchMCPRequest handles an incoming MCP request message, dispatches it to the handler,
 // and writes the response back over the stream.
 func (c *Client) dispatchMCPRequest(ctx context.Context, msg ws.Message, mcpHandler MCPHandler, writeMessage func([]byte) error) {
+	start := time.Now()
+	sessionID, pendingID := extractMCPRequestCorrelation(msg.Payload)
 	ctx, span := tracing.TraceMCPDispatch(ctx, msg.Action, msg.ID, c.executionID)
 	defer span.End()
 
+	c.logger.Debug("dispatching MCP request",
+		zap.String("request_id", msg.ID),
+		zap.String("action", msg.Action),
+		zap.String("session_id", sessionID),
+		zap.String("pending_id", pendingID))
+
 	resp, err := mcpHandler.Dispatch(ctx, &msg)
 	if err != nil {
-		c.logger.Error("MCP dispatch error", zap.Error(err))
+		c.logger.Error("MCP dispatch error",
+			zap.String("request_id", msg.ID),
+			zap.String("action", msg.Action),
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.Duration("duration", time.Since(start)),
+			zap.Error(err))
 		tracing.TraceMCPResponse(span, err)
 		resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	} else {
+		c.logger.Debug("MCP request dispatched",
+			zap.String("request_id", msg.ID),
+			zap.String("action", msg.Action),
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.Bool("has_response", resp != nil),
+			zap.Duration("duration", time.Since(start)))
 		tracing.TraceMCPResponse(span, nil)
 	}
 	if resp != nil {
 		data, err := json.Marshal(resp)
 		if err != nil {
-			c.logger.Error("failed to marshal MCP response", zap.Error(err))
+			c.logger.Error("failed to marshal MCP response",
+				zap.String("request_id", msg.ID),
+				zap.String("action", msg.Action),
+				zap.String("session_id", sessionID),
+				zap.String("pending_id", pendingID),
+				zap.Error(err))
 			return
 		}
+		writeStarted := time.Now()
 		if err := writeMessage(data); err != nil {
-			c.logger.Debug("failed to write MCP response", zap.Error(err))
+			c.logger.Warn("failed to write MCP response",
+				zap.String("request_id", msg.ID),
+				zap.String("action", msg.Action),
+				zap.String("session_id", sessionID),
+				zap.String("pending_id", pendingID),
+				zap.Int("response_bytes", len(data)),
+				zap.Duration("write_duration", time.Since(writeStarted)),
+				zap.Error(err))
+			return
 		}
+		c.logger.Debug("wrote MCP response to agent stream",
+			zap.String("request_id", msg.ID),
+			zap.String("action", msg.Action),
+			zap.String("session_id", sessionID),
+			zap.String("pending_id", pendingID),
+			zap.String("response_type", string(resp.Type)),
+			zap.Int("response_bytes", len(data)),
+			zap.Duration("write_duration", time.Since(writeStarted)),
+			zap.Duration("total_duration", time.Since(start)))
 	}
+}
+
+func extractMCPRequestCorrelation(payload json.RawMessage) (sessionID string, pendingID string) {
+	if len(payload) == 0 {
+		return "", ""
+	}
+
+	var payloadMap map[string]interface{}
+	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+		return "", ""
+	}
+
+	if v, ok := payloadMap["session_id"].(string); ok {
+		sessionID = v
+	}
+	if v, ok := payloadMap["pending_id"].(string); ok {
+		pendingID = v
+	}
+	return sessionID, pendingID
 }
 
 // CloseUpdatesStream closes the agent events stream connection.

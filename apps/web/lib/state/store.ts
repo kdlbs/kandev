@@ -47,7 +47,6 @@ import {
   type ProcessStatusEntry,
   type Worktree,
   type GitStatusEntry,
-  type GitSnapshot,
   type SessionCommit,
   type ContextWindowEntry,
   type SessionAgentctlStatus,
@@ -166,7 +165,6 @@ export type AppState = {
   shell: (typeof defaultSessionRuntimeState)["shell"];
   processes: (typeof defaultSessionRuntimeState)["processes"];
   gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
-  gitSnapshots: (typeof defaultSessionRuntimeState)["gitSnapshots"];
   sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
   contextWindow: (typeof defaultSessionRuntimeState)["contextWindow"];
   agents: (typeof defaultSessionRuntimeState)["agents"];
@@ -192,6 +190,7 @@ export type AppState = {
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
+  sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -296,6 +295,9 @@ export type AppState = {
   openQuickChat: (sessionId: string, workspaceId: string) => void;
   closeQuickChat: () => void;
   clearQuickChatSession: () => void;
+  setSessionFailureNotification: (
+    n: import("./slices/ui/types").SessionFailureNotification | null,
+  ) => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -327,9 +329,6 @@ export type AppState = {
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
-  setGitSnapshots: (sessionId: string, snapshots: GitSnapshot[]) => void;
-  setGitSnapshotsLoading: (sessionId: string, loading: boolean) => void;
-  addGitSnapshot: (sessionId: string, snapshot: GitSnapshot) => void;
   setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
@@ -407,7 +406,6 @@ const defaultState = {
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
   gitStatus: defaultSessionRuntimeState.gitStatus,
-  gitSnapshots: defaultSessionRuntimeState.gitSnapshots,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
@@ -429,6 +427,7 @@ const defaultState = {
   documentPanel: defaultUIState.documentPanel,
   systemHealth: defaultUIState.systemHealth,
   quickChat: defaultUIState.quickChat,
+  sessionFailureNotification: defaultUIState.sessionFailureNotification,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -478,7 +477,6 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     shell: { ...defaultState.shell, ...initialState.shell },
     processes: { ...defaultState.processes, ...initialState.processes },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
-    gitSnapshots: { ...defaultState.gitSnapshots, ...initialState.gitSnapshots },
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
@@ -499,6 +497,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
     quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    sessionFailureNotification: initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
   };
 }
 
@@ -576,6 +575,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       documentPanel: merged.documentPanel,
       systemHealth: merged.systemHealth,
       quickChat: merged.quickChat,
+      sessionFailureNotification: merged.sessionFailureNotification,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

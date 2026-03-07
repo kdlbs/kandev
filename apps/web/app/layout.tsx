@@ -10,6 +10,7 @@ import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
+import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 
 export const metadata: Metadata = {
   title: "KanDev - AI Kanban",
@@ -41,10 +42,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Extract ports from server-side env vars
-  // We inject only ports, not full URLs, so client can build URLs from window.location.hostname
-  // This allows accessing the app from any device (iPhone, Tailscale, etc.)
-  const apiPort = extractPort(process.env.KANDEV_API_BASE_URL ?? "");
+  // Runtime URL configuration for the browser client.
+  // KANDEV_PUBLIC_URL: full external URL when behind a reverse proxy / ingress
+  //   (e.g., "https://kandev.example.com") — injected as window.__KANDEV_API_BASE_URL.
+  // Otherwise: extract ports so client builds URLs from window.location.hostname,
+  //   allowing access from any device (iPhone, Tailscale, etc.)
+  const publicUrl = process.env.KANDEV_PUBLIC_URL?.replace(/\/$/, "") || null;
+  const apiPort = publicUrl ? null : extractPort(process.env.KANDEV_API_BASE_URL ?? "");
   const mcpPort = extractPort(process.env.KANDEV_MCP_SERVER_URL ?? "");
   const debugMode = process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
 
@@ -54,12 +58,14 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="KanDev" />
       </head>
       <body className="antialiased font-sans">
-        {apiPort || mcpPort || debugMode ? (
-          // Inject runtime config for production bundles where ports are chosen at launch.
-          // Client will build full URLs using window.location.hostname + port
+        {publicUrl || apiPort || mcpPort || debugMode ? (
+          // Inject runtime config for production bundles.
+          // publicUrl: full base URL for reverse-proxy deployments (same-origin API)
+          // ports: client builds URLs using window.location.hostname + port
           <script
             dangerouslySetInnerHTML={{
               __html: [
+                publicUrl ? `window.__KANDEV_API_BASE_URL = ${JSON.stringify(publicUrl)};` : "",
                 apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
                 mcpPort ? `window.__KANDEV_MCP_PORT = ${JSON.stringify(mcpPort)};` : "",
                 debugMode ? `window.__KANDEV_DEBUG = true;` : "",
@@ -74,6 +80,7 @@ export default function RootLayout({
             <DiffWorkerPoolProvider>
               <TooltipProvider>
                 <ToastProvider>
+                  <SessionFailureToastBridge />
                   <CommandRegistryProvider>
                     <WebSocketConnector />
                     <GlobalCommands />

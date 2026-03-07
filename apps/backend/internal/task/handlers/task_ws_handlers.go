@@ -112,8 +112,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// Convert repositories
 	var repos []dto.TaskRepositoryInput
 	for _, r := range req.Repositories {
-		if r.RepositoryID == "" && r.LocalPath == "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id or local_path is required", nil)
+		if r.RepositoryID == "" && r.LocalPath == "" && strings.TrimSpace(r.GitHubURL) == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id, local_path, or github_url is required", nil)
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
 			RepositoryID:  r.RepositoryID,
@@ -121,6 +121,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			LocalPath:     r.LocalPath,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,
+			GitHubURL:     r.GitHubURL,
 		})
 	}
 
@@ -226,6 +227,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				LocalPath:     r.LocalPath,
 				Name:          r.Name,
 				DefaultBranch: r.DefaultBranch,
+				GitHubURL:     r.GitHubURL,
 			})
 		}
 	}

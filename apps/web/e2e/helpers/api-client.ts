@@ -125,6 +125,39 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents");
   }
 
+  async deleteAgentProfile(profileId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/agent-profiles/${profileId}`);
+  }
+
+  /** Delete all agent profiles except the ones in keepIds. */
+  async cleanupTestProfiles(keepIds: string[]): Promise<void> {
+    const { agents } = await this.listAgents();
+    for (const agent of agents) {
+      for (const profile of agent.profiles ?? []) {
+        if (!keepIds.includes(profile.id)) {
+          await this.deleteAgentProfile(profile.id);
+        }
+      }
+    }
+  }
+
+  async createAgentProfile(
+    agentId: string,
+    name: string,
+    opts: {
+      model: string;
+      auto_approve?: boolean;
+      cli_passthrough?: boolean;
+    },
+  ): Promise<{ id: string }> {
+    return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
+      name,
+      model: opts.model,
+      auto_approve: opts.auto_approve ?? true,
+      cli_passthrough: opts.cli_passthrough ?? false,
+    });
+  }
+
   async createTaskWithAgent(
     workspaceId: string,
     title: string,
@@ -134,6 +167,7 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
+      executor_id?: string;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -147,6 +181,7 @@ export class ApiClient {
       ...(opts?.repository_ids
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
+      ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
     });
   }
 
@@ -176,13 +211,47 @@ export class ApiClient {
     workspaceId: string,
     localPath: string,
     defaultBranch = "main",
+    opts?: {
+      name?: string;
+      provider?: string;
+      provider_owner?: string;
+      provider_name?: string;
+    },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
-      name: "E2E Repo",
+      name: opts?.name ?? "E2E Repo",
       source_type: "local",
       local_path: localPath,
       default_branch: defaultBranch,
+      ...(opts?.provider ? { provider: opts.provider } : {}),
+      ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
+      ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
     });
+  }
+
+  async createExecutor(
+    name: string,
+    type: string,
+  ): Promise<{ id: string; name: string; type: string }> {
+    return this.request("POST", "/api/v1/executors", { name, type });
+  }
+
+  async updateWorkspace(
+    workspaceId: string,
+    updates: { default_executor_id?: string },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);
+  }
+
+  async listExecutors(): Promise<{
+    executors: Array<{
+      id: string;
+      name: string;
+      type: string;
+      profiles?: Array<{ id: string; name: string }>;
+    }>;
+  }> {
+    return this.request("GET", "/api/v1/executors");
   }
 
   async saveUserSettings(settings: {
@@ -272,11 +341,87 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubAddPRFiles(
+    owner: string,
+    repo: string,
+    number: number,
+    files: Array<{
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch?: string;
+    }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/files", {
+      owner,
+      repo,
+      number,
+      files,
+    });
+  }
+
+  async mockGitHubAddPRCommits(
+    owner: string,
+    repo: string,
+    number: number,
+    commits: Array<{
+      sha: string;
+      message: string;
+      author_login: string;
+      author_date: string;
+    }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commits", {
+      owner,
+      repo,
+      number,
+      commits,
+    });
+  }
+
+  async mockGitHubAddBranches(
+    owner: string,
+    repo: string,
+    branches: Array<{ name: string }>,
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/branches", {
+      owner,
+      repo,
+      branches,
+    });
+  }
+
+  async mockGitHubAssociateTaskPR(data: {
+    task_id: string;
+    owner: string;
+    repo: string;
+    pr_number: number;
+    pr_url: string;
+    pr_title: string;
+    head_branch: string;
+    base_branch: string;
+    author_login: string;
+    state?: string;
+    additions?: number;
+    deletions?: number;
+  }): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/task-prs", data);
+  }
+
   async mockGitHubGetStatus(): Promise<{
     authenticated: boolean;
     username: string;
     auth_method: string;
   }> {
     return this.request("GET", "/api/v1/github/status");
+  }
+
+  // --- Session ---
+
+  async listSessionMessages(
+    sessionId: string,
+  ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
+    return this.request("GET", `/api/v1/sessions/${sessionId}/messages`);
   }
 }

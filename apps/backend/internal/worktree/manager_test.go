@@ -117,6 +117,31 @@ func TestNewManager(t *testing.T) {
 	if !mgr.IsEnabled() {
 		t.Error("expected manager to be enabled")
 	}
+	if mgr.fetchTimeout != defaultGitFetchTimeout {
+		t.Fatalf("fetchTimeout = %v, want %v", mgr.fetchTimeout, defaultGitFetchTimeout)
+	}
+	if mgr.pullTimeout != defaultGitPullTimeout {
+		t.Fatalf("pullTimeout = %v, want %v", mgr.pullTimeout, defaultGitPullTimeout)
+	}
+}
+
+func TestNewManager_CustomSyncTimeouts(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.FetchTimeoutSeconds = 15
+	cfg.PullTimeoutSeconds = 25
+	log := newTestLogger()
+	store := newMockStore()
+
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	if mgr.fetchTimeout != 15*time.Second {
+		t.Fatalf("fetchTimeout = %v, want %v", mgr.fetchTimeout, 15*time.Second)
+	}
+	if mgr.pullTimeout != 25*time.Second {
+		t.Fatalf("pullTimeout = %v, want %v", mgr.pullTimeout, 25*time.Second)
+	}
 }
 
 func TestNewManager_DisabledConfig(t *testing.T) {
@@ -648,7 +673,7 @@ esac
 	}
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "origin/master")
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "origin/master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
 	}
@@ -697,7 +722,7 @@ esac
 
 	repoPath := t.TempDir()
 	start := time.Now()
-	ref := mgr.pullBaseBranch(repoPath, "master")
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	elapsed := time.Since(start)
 
 	if ref != "master" {
@@ -748,9 +773,125 @@ esac
 	mgr.pullTimeout = 300 * time.Millisecond
 
 	repoPath := t.TempDir()
-	ref := mgr.pullBaseBranch(repoPath, "master")
+	ref := mgr.pullBaseBranch(context.Background(), repoPath, "master", nil)
 	if ref != "origin/master" {
 		t.Fatalf("pullBaseBranch() ref = %q, want %q", ref, "origin/master")
+	}
+}
+
+func TestFetchBranchToLocal_FetchSucceeds(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    # Simulate successful fetch
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err != nil {
+		t.Fatalf("fetchBranchToLocal() unexpected error: %v", err)
+	}
+	if result.Warning != "" {
+		t.Fatalf("expected no warning on successful fetch, got %q", result.Warning)
+	}
+}
+
+func TestFetchBranchToLocal_FetchFailsLocalBranchExists(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: no remote configured" >&2
+    exit 1
+    ;;
+  rev-parse)
+    # Simulate branch exists locally
+    if [ "${2:-}" = "--verify" ]; then
+      exit 0
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	result, err := mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err != nil {
+		t.Fatalf("fetchBranchToLocal() should fall back to local branch, got error: %v", err)
+	}
+	if result.Warning == "" {
+		t.Fatal("expected a warning when falling back to local branch")
+	}
+	if !strings.Contains(result.Warning, "Could not fetch latest from origin") {
+		t.Fatalf("unexpected warning: %q", result.Warning)
+	}
+	if result.WarningDetail == "" {
+		t.Fatal("expected warning detail with raw git output")
+	}
+}
+
+func TestFetchBranchToLocal_FetchFailsNoBranch(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    echo "fatal: no remote configured" >&2
+    exit 1
+    ;;
+  rev-parse)
+    # Simulate branch does NOT exist
+    if [ "${2:-}" = "--verify" ]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := newTestConfig(t)
+	log := newTestLogger()
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, log)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	_, err = mgr.fetchBranchToLocal(context.Background(), repoPath, "feature/pr-branch")
+	if err == nil {
+		t.Fatal("fetchBranchToLocal() should fail when branch not found anywhere")
+	}
+	if !strings.Contains(err.Error(), "not found locally or on remote") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }
 

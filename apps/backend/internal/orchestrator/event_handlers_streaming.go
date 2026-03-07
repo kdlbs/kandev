@@ -23,6 +23,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
 
+	// Any agent stream activity means the agent resumed after clarification.
+	// Cancel primary-path clarification watchdogs for this session.
+	s.cancelClarificationWatchdogsForSession(sessionID, eventType)
+
 	s.logger.Debug("handling agent stream event",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -448,6 +452,16 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
+
+	// Cancel any pending clarifications for this session so WaitForResponse
+	// unblocks and later user responses go through the event fallback path.
+	if s.clarificationCanceller != nil && payload.SessionID != "" {
+		if n := s.clarificationCanceller.CancelSessionAndNotify(ctx, payload.SessionID); n > 0 {
+			s.logger.Info("cancelled pending clarifications on turn complete",
+				zap.String("session_id", payload.SessionID),
+				zap.Int("count", n))
+		}
+	}
 
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.

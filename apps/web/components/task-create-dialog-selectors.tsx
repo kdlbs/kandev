@@ -45,6 +45,7 @@ export const RepositorySelector = memo(function RepositorySelector({
       dropdownLabel="Repository"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      testId="repository-selector"
     />
   );
 });
@@ -85,6 +86,7 @@ export const BranchSelector = memo(function BranchSelector({
       disabled={disabled}
       dropdownLabel="Base Branch"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
+      testId="branch-selector"
     />
   );
 });
@@ -118,6 +120,7 @@ export const AgentSelector = memo(function AgentSelector({
       dropdownLabel="Agent profile"
       className={`min-w-[380px]${disabled ? "" : ` ${CURSOR_POINTER_CLASS}`}`}
       triggerClassName={triggerClassName}
+      testId="agent-profile-selector"
     />
   );
 });
@@ -184,6 +187,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
       dropdownLabel="Executor Profile"
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
+      testId="executor-profile-selector"
     />
   );
 });
@@ -300,8 +304,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
         rows={2}
         className={
           isSessionMode
-            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto"
-            : "min-h-[96px] max-h-[240px] resize-y overflow-auto"
+            ? "min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+            : "min-h-[96px] max-h-[240px] resize-y overflow-auto text-[13px]"
         }
         required={isSessionMode}
         disabled={disabled}

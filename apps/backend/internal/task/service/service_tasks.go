@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -115,11 +116,12 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 			return fmt.Errorf("repository_id is required")
 		}
 		taskRepo := &models.TaskRepository{
-			TaskID:       taskID,
-			RepositoryID: repositoryID,
-			BaseBranch:   baseBranch,
-			Position:     i,
-			Metadata:     make(map[string]interface{}),
+			TaskID:         taskID,
+			RepositoryID:   repositoryID,
+			BaseBranch:     baseBranch,
+			CheckoutBranch: repoInput.CheckoutBranch,
+			Position:       i,
+			Metadata:       make(map[string]interface{}),
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
@@ -134,7 +136,38 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
-	if repositoryID != "" || repoInput.LocalPath == "" {
+	if repositoryID != "" {
+		return repositoryID, baseBranch, nil
+	}
+
+	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
+	if repoInput.GitHubURL != "" {
+		owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
+		if parseErr != nil {
+			return "", "", parseErr
+		}
+		defaultBranch := repoInput.DefaultBranch
+		if defaultBranch == "" {
+			defaultBranch = repoInput.BaseBranch
+		}
+		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+			WorkspaceID:   workspaceID,
+			Provider:      "github",
+			ProviderOwner: owner,
+			ProviderName:  name,
+			DefaultBranch: defaultBranch,
+		})
+		if createErr != nil {
+			return "", "", createErr
+		}
+		repositoryID = repo.ID
+		if baseBranch == "" {
+			baseBranch = repo.DefaultBranch
+		}
+		return repositoryID, baseBranch, nil
+	}
+
+	if repoInput.LocalPath == "" {
 		return repositoryID, baseBranch, nil
 	}
 	repo := repoByPath[repoInput.LocalPath]
@@ -167,6 +200,40 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		baseBranch = repo.DefaultBranch
 	}
 	return repositoryID, baseBranch, nil
+}
+
+// parseGitHubRepoURL parses a GitHub repository URL into owner and name.
+// Supports: https://github.com/owner/repo, github.com/owner/repo,
+// https://github.com/owner/repo.git, with optional trailing slashes.
+func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", "", fmt.Errorf("empty GitHub URL")
+	}
+
+	// Add scheme if missing so url.Parse works correctly
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "https://" + rawURL
+	}
+
+	parsed, parseErr := url.Parse(rawURL)
+	if parseErr != nil {
+		return "", "", fmt.Errorf("invalid GitHub URL: %w", parseErr)
+	}
+
+	if parsed.Host != "github.com" && parsed.Host != "www.github.com" {
+		return "", "", fmt.Errorf("not a GitHub URL: %s", parsed.Host)
+	}
+
+	// Path should be /owner/name (possibly with .git suffix and trailing slash)
+	path := strings.Trim(parsed.Path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid GitHub repository URL: expected github.com/owner/repo")
+	}
+
+	return parts[0], parts[1], nil
 }
 
 // replaceTaskRepositories deletes all existing task-repository associations and recreates them.
@@ -275,14 +342,33 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 2. Gather data needed for cleanup BEFORE archive
 	var stopTargets []taskStopTarget
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list active sessions for archive",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
 	if s.executionStopper != nil {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list active sessions for archive",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
 		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+	}
+
+	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
+	// Use a bounded timeout to prevent blocking the archive operation if agentctl is stuck.
+	if s.gitArchiveCapture != nil && len(activeSessions) > 0 {
+		for _, sess := range activeSessions {
+			if sess == nil || sess.ID == "" {
+				continue
+			}
+			snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := s.gitArchiveCapture.CaptureArchiveSnapshot(snapCtx, sess.ID)
+			cancel()
+			if err != nil {
+				s.logger.Warn("failed to capture git archive snapshot",
+					zap.String("task_id", id),
+					zap.String("session_id", sess.ID),
+					zap.Error(err))
+			}
+		}
 	}
 
 	sessions, err := s.sessions.ListTaskSessions(ctx, id)

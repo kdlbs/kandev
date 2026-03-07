@@ -91,6 +91,9 @@ type Manager struct {
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
 
+	// Per-terminal shell sessions for remote executor support
+	shellMgr *shell.Manager
+
 	// Protocol adapter for agent communication
 	adapter    adapter.AgentAdapter
 	adapterCfg *adapter.Config
@@ -132,6 +135,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		pendingPermissions: make(map[string]*PendingPermission),
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
+	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
@@ -412,10 +416,13 @@ func (m *Manager) startProcessPipes() error {
 	}
 	m.stdout, err = m.cmd.StdoutPipe()
 	if err != nil {
+		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 	m.stderr, err = m.cmd.StderrPipe()
 	if err != nil {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 	return nil
@@ -633,6 +640,10 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 		m.shell = nil
 	}
 	m.logger.Debug("shell session stopped")
+
+	m.logger.Debug("stopping terminal shells")
+	m.shellMgr.StopAll()
+	m.logger.Debug("terminal shells stopped")
 
 	// Stop all running workspace processes (dev server, setup, cleanup, custom).
 	m.logger.Debug("stopping workspace processes")
@@ -1040,6 +1051,11 @@ func (m *Manager) Shell() *shell.Session {
 	return m.shell
 }
 
+// ShellManager returns the per-terminal shell session manager.
+func (m *Manager) ShellManager() *shell.Manager {
+	return m.shellMgr
+}
+
 // StartShell creates and starts the shell session independently of the agent process.
 // This is used in passthrough mode where the agent runs directly via InteractiveRunner
 // but we still need shell access for the workspace.
@@ -1143,13 +1159,36 @@ func (m *Manager) VscodeInfo() VscodeInfo {
 }
 
 // VscodeOpenFile opens a file in the running VS Code instance via the Remote CLI.
+// If code-server is not running, it auto-starts it and waits for readiness.
+//
+// Note: there is a benign race between the needsStart check and WaitForRunning —
+// another goroutine could stop vscode in between. WaitForRunning handles this
+// correctly by returning an error for stopped/error states.
 func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	m.vscodeMu.Lock()
+	needsStart := m.vscode == nil
+	if !needsStart {
+		info := m.vscode.Info()
+		needsStart = info.Status == VscodeStatusStopped || info.Status == VscodeStatusError
+	}
+	m.vscodeMu.Unlock()
+
+	if needsStart {
+		m.logger.Info("auto-starting code-server for open-file request")
+		m.StartVscode(ctx, "")
+	}
+
 	m.vscodeMu.Lock()
 	vscode := m.vscode
 	m.vscodeMu.Unlock()
 
 	if vscode == nil {
-		return fmt.Errorf("code-server is not running")
+		return fmt.Errorf("failed to initialize code-server")
 	}
+
+	if err := vscode.WaitForRunning(ctx); err != nil {
+		return fmt.Errorf("code-server not ready: %w", err)
+	}
+
 	return vscode.OpenFile(ctx, path, line, col)
 }

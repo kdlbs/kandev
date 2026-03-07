@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/editors/models"
 	"github.com/kandev/kandev/internal/editors/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -503,7 +504,10 @@ func parseHostedURLConfig(data json.RawMessage) (hostedURLConfig, error) {
 
 func launchCommand(commandTemplate, worktreePath, absPath string, line, column int) (string, error) {
 	expanded := expandCommandPlaceholders(commandTemplate, worktreePath, absPath, line, column)
-	parts := strings.Fields(expanded)
+	parts, err := securityutil.SplitShellCommand(expanded)
+	if err != nil {
+		return "", fmt.Errorf("invalid command template: %w", err)
+	}
 	if len(parts) == 0 {
 		return "", ErrEditorConfigInvalid
 	}
@@ -524,10 +528,11 @@ func expandCommandPlaceholders(template, worktreePath, absPath string, line, col
 			relPath = relative
 		}
 	}
+	// Shell-escape paths to handle spaces and special characters safely
 	replacements := map[string]string{
-		"{cwd}":    worktreePath,
-		"{file}":   absPath,
-		"{rel}":    relPath,
+		"{cwd}":    securityutil.ShellEscape(worktreePath),
+		"{file}":   securityutil.ShellEscape(absPath),
+		"{rel}":    securityutil.ShellEscape(relPath),
 		"{line}":   strconv.Itoa(line),
 		"{column}": strconv.Itoa(column),
 	}

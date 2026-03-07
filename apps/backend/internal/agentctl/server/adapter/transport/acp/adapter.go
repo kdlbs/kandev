@@ -74,6 +74,11 @@ type Adapter struct {
 	// When set, this context will be prepended to the first prompt sent to the session.
 	pendingContext string
 
+	// isLoadingSession is true during LoadSession() to suppress history replay notifications.
+	// ACP agents stream the entire conversation history during session/load which should
+	// not be emitted as new message events.
+	isLoadingSession bool
+
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
@@ -291,11 +296,23 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.load")
 	defer span.End()
 
+	// Suppress history replay notifications during load.
+	// ACP agents stream the entire conversation history during session/load.
+	a.mu.Lock()
+	a.isLoadingSession = true
+	a.mu.Unlock()
+
 	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
 		SessionId:  acp.SessionId(sessionID),
 		Cwd:        a.cfg.WorkDir,
 		McpServers: []acp.McpServer{}, // MCPs configured via CLI args; empty satisfies the required field
 	})
+
+	// Clear the loading flag (even on error) before processing response
+	a.mu.Lock()
+	a.isLoadingSession = false
+	a.mu.Unlock()
+
 	if err != nil {
 		span.RecordError(err)
 		return fmt.Errorf("failed to load session: %w", err)
@@ -579,6 +596,22 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	// Log raw event for debugging
 	if len(rawData) > 0 {
 		shared.LogRawEvent(shared.ProtocolACP, a.agentID, "session_notification", rawData)
+	}
+
+	// During session/load, suppress history replay notifications.
+	// ACP agents stream the entire conversation history during load, which should not
+	// be emitted as new message events to avoid duplicating messages in the UI.
+	a.mu.RLock()
+	isLoading := a.isLoadingSession
+	a.mu.RUnlock()
+
+	if isLoading {
+		u := n.Update
+		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil {
+			a.logger.Debug("suppressing history replay notification during session load",
+				zap.String("session_id", string(n.SessionId)))
+			return
+		}
 	}
 
 	event := a.convertNotification(n)

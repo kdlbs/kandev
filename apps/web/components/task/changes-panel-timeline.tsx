@@ -5,7 +5,7 @@ import {
   IconGitPullRequest,
   IconCloudUpload,
   IconChevronDown,
-  IconArrowBackUp,
+  IconLoader2,
 } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -21,6 +21,7 @@ import type { FileInfo } from "@/lib/state/store";
 import { LineStat } from "@/components/diff-stat";
 import { FileStatusIcon } from "./file-status-icon";
 import { FileRow } from "./changes-panel-file-row";
+import { CommitRow, type CommitItem } from "./commit-row";
 
 // --- Timeline visual components ---
 
@@ -53,6 +54,7 @@ function TimelineSection({
   action,
   isLast,
   children,
+  "data-testid": testId,
 }: {
   dotColor: string;
   label?: string;
@@ -60,9 +62,10 @@ function TimelineSection({
   action?: React.ReactNode;
   isLast?: boolean;
   children?: React.ReactNode;
+  "data-testid"?: string;
 }) {
   return (
-    <div className="relative flex gap-2.5">
+    <div className="relative flex gap-2.5" data-testid={testId}>
       {/* Vertical line + dot */}
       <div className="flex flex-col items-center">
         <TimelineDot color={dotColor} />
@@ -93,18 +96,13 @@ function TimelineSection({
 
 // --- Commits section ---
 
-type CommitItem = {
-  commit_sha: string;
-  commit_message: string;
-  insertions: number;
-  deletions: number;
-};
-
 type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
   onOpenCommitDetail?: (sha: string) => void;
   onRevertCommit?: (sha: string) => void;
+  onAmendCommit?: (currentMessage: string) => void;
+  onResetToCommit?: (sha: string) => void;
 };
 
 export function CommitsSection({
@@ -112,6 +110,8 @@ export function CommitsSection({
   isLast,
   onOpenCommitDetail,
   onRevertCommit,
+  onAmendCommit,
+  onResetToCommit,
 }: CommitsSectionProps) {
   return (
     <TimelineSection
@@ -119,42 +119,19 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
+      data-testid="commits-section"
     >
-      <ul className="space-y-0.5">
+      <ul data-testid="commits-list" className="space-y-0.5">
         {commits.map((commit, index) => (
-          <li
+          <CommitRow
             key={`${commit.commit_sha}-${index}`}
-            className="group flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-            onClick={() => onOpenCommitDetail?.(commit.commit_sha)}
-          >
-            <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-            <code className="font-mono text-muted-foreground text-[11px]">
-              {commit.commit_sha.slice(0, 7)}
-            </code>
-            <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-            <span className="shrink-0 text-[11px] flex items-center gap-1">
-              <span className="text-emerald-500">+{commit.insertions}</span>{" "}
-              <span className="text-rose-500">-{commit.deletions}</span>
-              {index === 0 && onRevertCommit && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Revert commit"
-                      className="ml-1 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRevertCommit(commit.commit_sha);
-                      }}
-                    >
-                      <IconArrowBackUp className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Revert commit</TooltipContent>
-                </Tooltip>
-              )}
-            </span>
-          </li>
+            commit={commit}
+            isLatest={index === 0}
+            onOpenCommitDetail={onOpenCommitDetail}
+            onAmendCommit={onAmendCommit}
+            onRevertCommit={onRevertCommit}
+            onResetToCommit={onResetToCommit}
+          />
         ))}
       </ul>
     </TimelineSection>
@@ -168,6 +145,7 @@ type ActionButtonsSectionProps = {
   onPush: () => void;
   onForcePush: () => void;
   isLoading: boolean;
+  loadingOperation: string | null;
   aheadCount: number;
   canPush: boolean;
   canCreatePR: boolean;
@@ -179,14 +157,17 @@ export function ActionButtonsSection({
   onPush,
   onForcePush,
   isLoading,
+  loadingOperation,
   aheadCount,
   canPush,
   canCreatePR,
   existingPrUrl,
 }: ActionButtonsSectionProps) {
   const prExists = !!existingPrUrl;
-  const createPrDisabled = !canCreatePR || prExists;
+  const createPrDisabled = !canCreatePR || prExists || isLoading;
   const pushDisabled = !canPush || isLoading;
+  const isPushing = loadingOperation === "push";
+  const isCreatingPR = loadingOperation === "create_pr";
   let pushTooltip: string | null = null;
   if (isLoading) pushTooltip = "A git operation is in progress";
   else if (!canPush) pushTooltip = "No commits ahead of remote";
@@ -203,7 +184,11 @@ export function ActionButtonsSection({
                 onClick={onOpenPRDialog}
                 disabled={createPrDisabled}
               >
-                <IconGitPullRequest className="h-3 w-3" />
+                {isCreatingPR ? (
+                  <IconLoader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <IconGitPullRequest className="h-3 w-3" />
+                )}
                 Create PR
               </Button>
             </span>
@@ -220,9 +205,13 @@ export function ActionButtonsSection({
                 onClick={onPush}
                 disabled={pushDisabled}
               >
-                <IconCloudUpload className="h-3 w-3" />
+                {isPushing ? (
+                  <IconLoader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <IconCloudUpload className="h-3 w-3" />
+                )}
                 Push
-                {aheadCount > 0 && (
+                {aheadCount > 0 && !isPushing && (
                   <span className="text-muted-foreground">{aheadCount} ahead</span>
                 )}
               </Button>
@@ -261,7 +250,11 @@ type FileListSectionProps = {
   pendingStageFiles: Set<string>;
   isLast: boolean;
   actionLabel: string;
+  isActionLoading?: boolean;
   onAction: () => void;
+  secondaryActionLabel?: string;
+  isSecondaryActionLoading?: boolean;
+  onSecondaryAction?: () => void;
   onOpenDiff: (path: string) => void;
   onEditFile: (path: string) => void;
   onStage: (path: string) => void;
@@ -275,7 +268,11 @@ export function FileListSection({
   pendingStageFiles,
   isLast,
   actionLabel,
+  isActionLoading,
   onAction,
+  secondaryActionLabel,
+  isSecondaryActionLoading,
+  onSecondaryAction,
   onOpenDiff,
   onEditFile,
   onStage,
@@ -286,9 +283,15 @@ export function FileListSection({
   const label = variant === "unstaged" ? "Unstaged" : "Staged";
 
   return (
-    <TimelineSection dotColor={dotColor} label={label} count={files.length} isLast={isLast}>
+    <TimelineSection
+      dotColor={dotColor}
+      label={label}
+      count={files.length}
+      isLast={isLast}
+      data-testid={`${variant}-files-section`}
+    >
       {files.length > 0 && (
-        <ul className="space-y-0.5">
+        <ul data-testid={`${variant}-file-list`} className="space-y-0.5">
           {files.map((file) => (
             <FileRow
               key={file.path}
@@ -304,15 +307,29 @@ export function FileListSection({
         </ul>
       )}
       {files.length > 0 && (
-        <div className="mt-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5">
           <Button
             size="sm"
             variant="outline"
             className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
             onClick={onAction}
+            disabled={isActionLoading}
           >
+            {isActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
             {actionLabel}
           </Button>
+          {onSecondaryAction && secondaryActionLabel && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer"
+              onClick={onSecondaryAction}
+              disabled={isSecondaryActionLoading}
+            >
+              {isSecondaryActionLoading && <IconLoader2 className="h-3 w-3 animate-spin" />}
+              {secondaryActionLabel}
+            </Button>
+          )}
         </div>
       )}
     </TimelineSection>

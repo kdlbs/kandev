@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -336,6 +337,177 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 			t.Fatalf("did not expect %q event on failed restart", events.AgentContextReset)
 		}
 	}
+}
+
+// --- IsAgentRunningForSession tests ---
+
+// mockExecutorWithRunner implements ExecutorBackend and returns a real InteractiveRunner.
+type mockExecutorWithRunner struct {
+	MockExecutor
+	runner *process.InteractiveRunner
+}
+
+func (m *mockExecutorWithRunner) GetInteractiveRunner() *process.InteractiveRunner {
+	return m.runner
+}
+
+func TestIsAgentRunningForSession(t *testing.T) {
+	t.Run("no execution returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		mgr := &Manager{executionStore: store, logger: newTestLogger().WithFields()}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "nonexistent"))
+	})
+
+	t.Run("passthrough with alive process returns true", func(t *testing.T) {
+		log := newTestLogger()
+		runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+
+		// Start a deferred process (pending but alive)
+		info, err := runner.Start(context.Background(), process.InteractiveStartRequest{
+			SessionID: "session-pt",
+			Command:   []string{"cat"},
+		})
+		require.NoError(t, err)
+
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:                   "exec-pt",
+			SessionID:            "session-pt",
+			PassthroughProcessID: info.ID,
+			Status:               v1.AgentStatusRunning,
+		})
+
+		execRegistry := NewExecutorRegistry(log)
+		execRegistry.Register(&mockExecutorWithRunner{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			runner:       runner,
+		})
+
+		mgr := &Manager{
+			executionStore:   store,
+			executorRegistry: execRegistry,
+			logger:           log.WithFields(),
+		}
+		require.True(t, mgr.IsAgentRunningForSession(context.Background(), "session-pt"))
+	})
+
+	t.Run("passthrough with dead process returns false", func(t *testing.T) {
+		log := newTestLogger()
+		runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:                   "exec-dead",
+			SessionID:            "session-dead",
+			PassthroughProcessID: "nonexistent-process-id",
+			Status:               v1.AgentStatusRunning,
+		})
+
+		execRegistry := NewExecutorRegistry(log)
+		execRegistry.Register(&mockExecutorWithRunner{
+			MockExecutor: MockExecutor{name: executor.NameStandalone},
+			runner:       runner,
+		})
+
+		mgr := &Manager{
+			executionStore:   store,
+			executorRegistry: execRegistry,
+			logger:           log.WithFields(),
+		}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "session-dead"))
+	})
+
+	t.Run("passthrough with nil executor registry returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:                   "exec-noreg",
+			SessionID:            "session-noreg",
+			PassthroughProcessID: "some-process-id",
+			Status:               v1.AgentStatusRunning,
+		})
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "session-noreg"))
+	})
+
+	t.Run("ACP execution with nil agentctl returns false", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:        "exec-acp-nil",
+			SessionID: "session-acp-nil",
+			Status:    v1.AgentStatusRunning,
+			// No PassthroughProcessID → ACP path
+			// No agentctl → returns false
+		})
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "session-acp-nil"))
+	})
+
+	t.Run("ACP execution with running agent returns true", func(t *testing.T) {
+		// Mock agentctl server that returns "running" status
+		statusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/status" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"agent_status":"running"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(statusServer.Close)
+
+		client := createTestClient(t, statusServer.URL)
+		t.Cleanup(client.Close)
+
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:        "exec-acp-running",
+			SessionID: "session-acp-running",
+			Status:    v1.AgentStatusRunning,
+			agentctl:  client,
+		})
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.True(t, mgr.IsAgentRunningForSession(context.Background(), "session-acp-running"))
+	})
+
+	t.Run("ACP execution with stopped agent returns false", func(t *testing.T) {
+		statusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/status" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"agent_status":"stopped"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		t.Cleanup(statusServer.Close)
+
+		client := createTestClient(t, statusServer.URL)
+		t.Cleanup(client.Close)
+
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:        "exec-acp-stopped",
+			SessionID: "session-acp-stopped",
+			Status:    v1.AgentStatusRunning,
+			agentctl:  client,
+		})
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "session-acp-stopped"))
+	})
 }
 
 // --- IsRemoteSession tests ---

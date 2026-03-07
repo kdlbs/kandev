@@ -183,6 +183,7 @@ export type ChatInputBodyProps = {
   hasPendingComments: boolean;
   planModeEnabled: boolean;
   showFocusHint: boolean;
+  needsRecovery: boolean;
   contextAreaProps: ChatInputContextAreaProps;
   editorAreaProps: ChatInputEditorAreaProps;
 };
@@ -198,6 +199,7 @@ export function ChatInputBody({
   hasPendingComments,
   planModeEnabled,
   showFocusHint,
+  needsRecovery,
   contextAreaProps,
   editorAreaProps,
 }: ChatInputBodyProps) {
@@ -214,6 +216,7 @@ export function ChatInputBody({
         className={cn(
           "flex flex-col overflow-hidden border rounded ",
           "bg-background border-border",
+          needsRecovery && "opacity-40 pointer-events-none border-red-500/30",
           isStarting && !isAgentBusy && "chat-input-starting",
           isAgentBusy && !planModeEnabled && "chat-input-running",
           isAgentBusy && planModeEnabled && "chat-input-running-plan",

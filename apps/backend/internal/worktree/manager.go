@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout = 8 * time.Second
-	defaultGitPullTimeout  = 8 * time.Second
+	defaultGitFetchTimeout = 60 * time.Second
+	defaultGitPullTimeout  = 60 * time.Second
 )
 
 // repoLockEntry tracks a repository lock and its reference count.
@@ -92,14 +92,24 @@ func NewManager(cfg Config, store Store, log *logger.Logger) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create worktree base directory: %w", err)
 	}
 
+	fetchTimeout := defaultGitFetchTimeout
+	if cfg.FetchTimeoutSeconds > 0 {
+		fetchTimeout = time.Duration(cfg.FetchTimeoutSeconds) * time.Second
+	}
+
+	pullTimeout := defaultGitPullTimeout
+	if cfg.PullTimeoutSeconds > 0 {
+		pullTimeout = time.Duration(cfg.PullTimeoutSeconds) * time.Second
+	}
+
 	return &Manager{
 		config:       cfg,
 		logger:       log.WithFields(zap.String("component", "worktree-manager")),
 		store:        store,
 		worktrees:    make(map[string]*Worktree),
 		repoLocks:    make(map[string]*repoLockEntry),
-		fetchTimeout: defaultGitFetchTimeout,
-		pullTimeout:  defaultGitPullTimeout,
+		fetchTimeout: fetchTimeout,
+		pullTimeout:  pullTimeout,
 	}, nil
 }
 
@@ -226,7 +236,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 	baseRef := req.BaseBranch
 	if req.PullBeforeWorktree {
-		baseRef = m.pullBaseBranch(req.RepositoryPath, req.BaseBranch)
+		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
 	// Check base branch exists
@@ -241,17 +251,40 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
 	worktreeDirName, branchName := m.buildWorktreeNames(req)
 
+	// If a checkout branch is specified (e.g. a PR's head branch), fetch it
+	// and checkout it directly in the worktree instead of creating a new branch.
+	var fetchResult *FetchBranchResult
+	if req.CheckoutBranch != "" {
+		var err error
+		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch)
+		if err != nil {
+			return nil, err
+		}
+		branchName = req.CheckoutBranch
+	}
+
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get worktree path: %w", err)
 	}
 
-	worktreeID, err := m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, baseRef)
+	var worktreeID string
+	if req.CheckoutBranch != "" {
+		// Checkout the existing PR branch directly in the worktree.
+		worktreeID, err = m.gitAddWorktreeExisting(ctx, req.RepositoryPath, branchName, worktreePath)
+	} else {
+		// Create a new branch based on the base ref.
+		worktreeID, err = m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, baseRef)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	if fetchResult != nil {
+		wt.FetchWarning = fetchResult.Warning
+		wt.FetchWarningDetail = fetchResult.WarningDetail
+	}
 
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
@@ -265,15 +298,146 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", req.TaskID),
 		zap.String("path", worktreePath),
-		zap.String("branch", branchName))
+		zap.String("branch", wt.Branch))
 
 	return wt, nil
 }
 
+// FetchBranchResult holds the outcome of a fetchBranchToLocal call.
+type FetchBranchResult struct {
+	Warning       string // User-friendly warning (non-empty when fell back to local)
+	WarningDetail string // Raw git command output for debugging
+}
+
+// fetchBranchToLocal ensures a branch exists locally and is up-to-date.
+// It first tries to fetch from origin to get the latest commits. If the fetch
+// fails (no remote, auth issue, offline), it falls back to the local branch.
+// Returns a FetchBranchResult with warning info and an error if the branch
+// doesn't exist anywhere.
+func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch string) (*FetchBranchResult, error) {
+	m.logger.Info("syncing checkout branch",
+		zap.String("branch", branch),
+		zap.String("repo_path", repoPath))
+
+	// Try to fetch from origin to get the latest version.
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelFetch()
+
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch+":"+branch)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		m.logger.Warn("fetch from origin failed, checking local branch",
+			zap.String("branch", branch),
+			zap.String("output", string(output)),
+			zap.Error(err))
+
+		// Fall back to local branch if it exists.
+		if !m.branchExists(repoPath, branch) {
+			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, string(output))
+		}
+
+		reason := classifyGitFallbackReason(err, string(output), fetchCtx.Err())
+		warning := fmt.Sprintf("Could not fetch latest from origin (%s). Using local version of branch %q which may be outdated.", reason, branch)
+		m.logger.Info("using local branch (fetch failed)",
+			zap.String("branch", branch),
+			zap.String("warning", warning))
+		return &FetchBranchResult{
+			Warning:       warning,
+			WarningDetail: strings.TrimSpace(string(output)),
+		}, nil
+	}
+
+	return &FetchBranchResult{}, nil
+}
+
+// gitAddWorktreeExisting creates a worktree that checks out an existing local branch.
+// If the branch is already checked out in a stale worktree (directory no longer exists),
+// it automatically prunes and retries.
+func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+	worktreeID := uuid.New().String()
+	cmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, branchName)
+	cmd.Dir = repoPath
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return worktreeID, nil
+	}
+
+	outStr := string(output)
+	if !strings.Contains(strings.ToLower(outStr), "is already checked out at") {
+		m.logger.Error("git worktree add (existing branch) failed",
+			zap.String("output", outStr), zap.Error(err))
+		return "", ClassifyGitError(outStr, err)
+	}
+
+	if recoveryErr := m.tryRecoverCheckedOutBranch(ctx, repoPath, branchName, outStr); recoveryErr != nil {
+		m.logger.Error("git worktree add (existing branch) failed",
+			zap.String("output", outStr), zap.Error(err))
+		return "", ClassifyGitError(outStr, err)
+	}
+
+	// Retry after pruning stale worktree.
+	retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, branchName)
+	retryCmd.Dir = repoPath
+	if retryOutput, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+		m.logger.Error("git worktree add retry failed",
+			zap.String("output", string(retryOutput)), zap.Error(retryErr))
+		return "", ClassifyGitError(string(retryOutput), retryErr)
+	}
+	m.logger.Info("recovered from stale worktree checkout", zap.String("branch", branchName))
+	return worktreeID, nil
+}
+
+// tryRecoverCheckedOutBranch attempts to recover from "branch is already checked out"
+// by pruning stale worktrees. Returns nil if recovery succeeded, error otherwise.
+func (m *Manager) tryRecoverCheckedOutBranch(ctx context.Context, repoPath, branchName, gitOutput string) error {
+	// Parse the path from git output: "fatal: 'branch' is already checked out at '/path/to/worktree'"
+	checkedOutPath := parseCheckedOutPath(gitOutput)
+	if checkedOutPath == "" {
+		return fmt.Errorf("could not parse worktree path from git output")
+	}
+
+	// Check if the worktree directory still exists on disk.
+	if _, err := os.Stat(checkedOutPath); err == nil {
+		// Directory exists — worktree is genuinely in use, can't recover.
+		m.logger.Warn("branch checked out in active worktree, cannot recover",
+			zap.String("branch", branchName),
+			zap.String("worktree_path", checkedOutPath))
+		return fmt.Errorf("worktree at %s is still active", checkedOutPath)
+	}
+
+	// Directory is gone — prune stale worktree references.
+	m.logger.Info("pruning stale worktree reference",
+		zap.String("branch", branchName),
+		zap.String("stale_path", checkedOutPath))
+
+	pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	pruneCmd.Dir = repoPath
+	if output, err := pruneCmd.CombinedOutput(); err != nil {
+		m.logger.Error("git worktree prune failed",
+			zap.String("output", string(output)),
+			zap.Error(err))
+		return fmt.Errorf("worktree prune failed: %w", err)
+	}
+	return nil
+}
+
+// parseCheckedOutPath extracts the worktree path from git's
+// "fatal: 'branch' is already checked out at '/path'" error message.
+func parseCheckedOutPath(gitOutput string) string {
+	const marker = "checked out at '"
+	_, after, found := strings.Cut(gitOutput, marker)
+	if !found {
+		return ""
+	}
+	path, _, found := strings.Cut(after, "'")
+	if !found {
+		return ""
+	}
+	return path
+}
+
 // buildWorktreeNames derives the filesystem directory name and git branch name for a new worktree.
 func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName string) {
-	worktreeID := uuid.New().String()
-	dirSuffix := worktreeID[:8] // Use first 8 chars of UUID for worktree dir uniqueness
+	dirSuffix := uuid.New().String()[:8] // Use first 8 chars of UUID for worktree dir uniqueness
 	branchSuffix := SmallSuffix(3)
 	prefix := NormalizeBranchPrefix(req.WorktreeBranchPrefix)
 
@@ -761,12 +925,7 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 		return "timeout"
 	}
 
-	out := strings.ToLower(cmdOutput)
-	if strings.Contains(out, "authentication failed") ||
-		strings.Contains(out, "terminal prompts disabled") ||
-		strings.Contains(out, "could not read username") ||
-		strings.Contains(out, "username for 'https://") ||
-		strings.Contains(out, "askpass") {
+	if containsAuthFailure(strings.ToLower(cmdOutput)) {
 		return "non_interactive_auth_failed"
 	}
 
@@ -781,13 +940,19 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 //  3. baseBranch is a local branch but we're on a different branch: use origin/<branch> instead
 //
 // On fetch/pull failure, errors are logged but the function continues with the best available ref.
-func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
-	// Normalize branch name - strip "origin/" prefix if present
+func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch string, onProgress SyncProgressCallback) string {
 	localBranch := strings.TrimPrefix(baseBranch, "origin/")
 	isRemoteRef := localBranch != baseBranch
+	stepName := "Sync base branch"
+
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName: stepName,
+		Status:   SyncProgressRunning,
+		Output:   fmt.Sprintf("Fetching latest changes for %s", baseBranch),
+	})
 
 	// Fetch branch from origin in non-interactive mode.
-	fetchCtx, cancelFetch := context.WithTimeout(context.Background(), m.fetchTimeout)
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
 	fetchArgs := []string{"fetch", "origin"}
@@ -796,47 +961,81 @@ func (m *Manager) pullBaseBranch(repoPath, baseBranch string) string {
 	}
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, fetchArgs...)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
-			zap.String("branch", baseBranch),
-			zap.String("reason", classifyGitFallbackReason(err, string(output), fetchCtx.Err())),
-			zap.String("fallback_ref", baseBranch),
-			zap.String("output", string(output)),
-			zap.Error(err))
-		return baseBranch
+		return m.handleFetchFallback(baseBranch, stepName, onProgress, fetchCtx.Err(), output, err)
 	}
 
-	// If the original ref was already a remote ref, use it directly
 	if isRemoteRef {
-		return "origin/" + localBranch
+		resolved := "origin/" + localBranch
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", resolved), "")
+		return resolved
 	}
 
-	// For local branches: try to update if we're on that branch, otherwise use origin/<branch>
+	return m.resolveLocalBaseRef(ctx, repoPath, baseBranch, localBranch, stepName, onProgress)
+}
+
+func (m *Manager) reportSyncProgress(cb SyncProgressCallback, event SyncProgressEvent) {
+	if cb != nil {
+		cb(event)
+	}
+}
+
+func (m *Manager) reportSyncCompleted(stepName string, onProgress SyncProgressCallback, output, errOutput string) {
+	m.reportSyncProgress(onProgress, SyncProgressEvent{
+		StepName: stepName,
+		Status:   SyncProgressCompleted,
+		Output:   output,
+		Error:    strings.TrimSpace(errOutput),
+	})
+}
+
+func (m *Manager) handleFetchFallback(baseBranch, stepName string, onProgress SyncProgressCallback, ctxErr error, output []byte, cmdErr error) string {
+	reason := classifyGitFallbackReason(cmdErr, string(output), ctxErr)
+	m.logger.Warn("git fetch failed before worktree creation; continuing with fallback ref",
+		zap.String("branch", baseBranch),
+		zap.String("reason", reason),
+		zap.String("fallback_ref", baseBranch),
+		zap.String("output", string(output)),
+		zap.Error(cmdErr))
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Fetch %s; using fallback ref %s", reason, baseBranch), string(output))
+	return baseBranch
+}
+
+func (m *Manager) resolveLocalBaseRef(
+	ctx context.Context, repoPath, baseBranch, localBranch, stepName string,
+	onProgress SyncProgressCallback,
+) string {
 	remoteRef := "origin/" + localBranch
-	currentBranch := m.currentBranch(repoPath)
-
-	if currentBranch == baseBranch {
-		// We're on the target branch - try to pull (fast-forward only)
-		pullCtx, cancelPull := context.WithTimeout(context.Background(), m.pullTimeout)
-		defer cancelPull()
-
-		pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
-		if output, err := pullCmd.CombinedOutput(); err != nil {
-			m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
-				zap.String("branch", baseBranch),
-				zap.String("reason", classifyGitFallbackReason(err, string(output), pullCtx.Err())),
-				zap.String("remote_ref", remoteRef),
-				zap.String("output", string(output)),
-				zap.Error(err))
-			return remoteRef
-		}
-		return baseBranch
+	if m.currentBranch(repoPath) == baseBranch {
+		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
-
-	// Not on the target branch - use the remote ref if it exists
 	if m.branchExists(repoPath, remoteRef) {
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
 		return remoteRef
 	}
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Remote ref not found; using %s", baseBranch), "")
+	return baseBranch
+}
 
+func (m *Manager) pullCurrentBranchOrFallback(
+	ctx context.Context, repoPath, baseBranch, remoteRef, stepName string,
+	onProgress SyncProgressCallback,
+) string {
+	pullCtx, cancelPull := context.WithTimeout(ctx, m.pullTimeout)
+	defer cancelPull()
+
+	pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
+	if output, err := pullCmd.CombinedOutput(); err != nil {
+		reason := classifyGitFallbackReason(err, string(output), pullCtx.Err())
+		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
+			zap.String("branch", baseBranch),
+			zap.String("reason", reason),
+			zap.String("remote_ref", remoteRef),
+			zap.String("output", string(output)),
+			zap.Error(err))
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, remoteRef), string(output))
+		return remoteRef
+	}
+	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch
 }
 

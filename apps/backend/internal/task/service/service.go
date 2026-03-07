@@ -42,6 +42,14 @@ type TaskExecutionStopper interface {
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
+// GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.
+// This allows preserving the final git state of a session for historical purposes.
+type GitArchiveCapture interface {
+	// CaptureArchiveSnapshot captures the git state for a session before archiving.
+	// Returns nil if capture is not possible (e.g., agent not running).
+	CaptureArchiveSnapshot(ctx context.Context, sessionID string) error
+}
+
 // WorkflowStepCreator creates workflow steps from a template for a workflow.
 type WorkflowStepCreator interface {
 	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
@@ -120,6 +128,7 @@ type Service struct {
 	discoveryConfig     RepositoryDiscoveryConfig
 	worktreeCleanup     WorktreeCleanup
 	executionStopper    TaskExecutionStopper
+	gitArchiveCapture   GitArchiveCapture
 	workflowStepCreator WorkflowStepCreator
 	workflowStepGetter  WorkflowStepGetter
 	startStepResolver   StartStepResolver
@@ -154,6 +163,11 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetGitArchiveCapture wires the git archive capture handler.
+func (s *Service) SetGitArchiveCapture(capture GitArchiveCapture) {
+	s.gitArchiveCapture = capture
 }
 
 // SetWorkflowStepCreator wires the workflow step creator for workflow creation.

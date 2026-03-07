@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
 )
 
 // MCPRequest represents an MCP request to be sent to the backend.
@@ -32,13 +34,20 @@ type ChannelBackendClient struct {
 	requestCh chan *ws.Message
 	pending   map[string]chan *ws.Message
 	pendingMu sync.Mutex
+	logger    *logger.Logger
 }
 
 // NewChannelBackendClient creates a new channel-based backend client.
-func NewChannelBackendClient() *ChannelBackendClient {
+func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
+	clientLogger := logger.Default()
+	if log != nil {
+		clientLogger = log
+	}
+	clientLogger = clientLogger.WithFields(zap.String("component", "mcp-backend-client"))
 	return &ChannelBackendClient{
 		requestCh: make(chan *ws.Message, 100),
 		pending:   make(map[string]chan *ws.Message),
+		logger:    clientLogger,
 	}
 }
 
@@ -58,13 +67,19 @@ func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
 
 	if ok {
 		ch <- msg
+		return
 	}
+	c.logger.Debug("dropping MCP response with no pending request",
+		zap.String("request_id", msg.ID),
+		zap.String("type", string(msg.Type)),
+		zap.String("action", msg.Action))
 }
 
 // RequestPayload sends a request to the backend and unmarshals the response.
 // The request will be cancelled if the context is cancelled or if Reset() is called.
 func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	id := uuid.New().String()
+	start := time.Now()
 
 	msg, err := ws.NewRequest(id, action, payload)
 	if err != nil {
@@ -76,6 +91,11 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	c.pendingMu.Lock()
 	c.pending[id] = respChan
 	c.pendingMu.Unlock()
+
+	c.logger.Debug("sending MCP request through agent stream",
+		zap.String("request_id", id),
+		zap.String("action", action),
+		zap.Any("payload", payload))
 
 	// Ensure cleanup on exit
 	defer func() {
@@ -89,8 +109,17 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	case c.requestCh <- msg:
 		// Request sent
 	case <-ctx.Done():
+		c.logger.Debug("MCP request cancelled before send",
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.Duration("duration", time.Since(start)),
+			zap.Error(ctx.Err()))
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
+		c.logger.Warn("timed out sending MCP request to agent stream",
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.Duration("duration", time.Since(start)))
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
 
@@ -99,8 +128,17 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	case resp, ok := <-respChan:
 		if !ok {
 			// Channel was closed by Reset() - session was cancelled/reset
+			c.logger.Warn("MCP request cancelled by session reset",
+				zap.String("request_id", id),
+				zap.String("action", action),
+				zap.Duration("duration", time.Since(start)))
 			return fmt.Errorf("MCP request cancelled: session reset")
 		}
+		c.logger.Debug("received MCP response from backend",
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.String("type", string(resp.Type)),
+			zap.Duration("duration", time.Since(start)))
 		if resp.Type == ws.MessageTypeError {
 			var ep struct {
 				Code    string `json:"code"`
@@ -118,6 +156,11 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 		}
 		return nil
 	case <-ctx.Done():
+		c.logger.Warn("MCP request context cancelled while waiting for response",
+			zap.String("request_id", id),
+			zap.String("action", action),
+			zap.Duration("duration", time.Since(start)),
+			zap.Error(ctx.Err()))
 		return ctx.Err()
 	}
 }

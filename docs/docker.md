@@ -63,12 +63,13 @@ docker run -p 8080:8080 -p 3000:3000 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `KANDEV_PUBLIC_URL` | (unset) | External URL when behind a reverse proxy (e.g., `https://kandev.example.com`) |
+| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `/data/kandev.db` | SQLite database file path |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | `text` | Log format: `text` or `json` |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (see below) |
-| `KANDEV_WORKTREE_BASEPATH` | `/data/worktrees` | Git worktree storage directory |
 
 ### PostgreSQL
 
@@ -165,6 +166,69 @@ services:
 volumes:
   kandev-data:
   postgres-data:
+```
+
+## Reverse Proxy
+
+When running Kandev behind a reverse proxy (nginx, Traefik, Caddy) that serves both the API and web UI on the same domain, set `KANDEV_PUBLIC_URL` so the frontend routes API calls through the proxy instead of trying to reach port 8080 directly:
+
+```bash
+docker run -p 8080:8080 -p 3000:3000 \
+  -v kandev-data:/data \
+  -e KANDEV_PUBLIC_URL=https://kandev.example.com \
+  ghcr.io/kdlbs/kandev:latest
+```
+
+Your reverse proxy should route:
+- `/api/*` and `/ws` → `http://kandev:8080` (backend)
+- `/*` → `http://kandev:3000` (web UI)
+
+With WebSocket support enabled (for `/ws`).
+
+### Docker Compose with Caddy
+
+```yaml
+services:
+  kandev:
+    image: ghcr.io/kdlbs/kandev:latest
+    volumes:
+      - kandev-data:/data
+    environment:
+      KANDEV_PUBLIC_URL: "https://kandev.example.com"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    restart: unless-stopped
+
+volumes:
+  kandev-data:
+  caddy-data:
+```
+
+Example `Caddyfile`:
+
+```
+kandev.example.com {
+    handle /api/* {
+        reverse_proxy kandev:8080
+    }
+    handle /ws {
+        reverse_proxy kandev:8080
+    }
+    handle /health {
+        reverse_proxy kandev:8080
+    }
+    handle {
+        reverse_proxy kandev:3000
+    }
+}
 ```
 
 ## Docker-in-Docker (Agent Containers)

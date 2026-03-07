@@ -49,6 +49,7 @@ export type FileEditorState = {
   originalHash: string;
   isDirty: boolean;
   isBinary?: boolean;
+  resolvedPath?: string;
   hasRemoteUpdate?: boolean;
   remoteContent?: string;
   remoteOriginalHash?: string;

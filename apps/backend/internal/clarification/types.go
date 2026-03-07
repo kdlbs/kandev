@@ -51,6 +51,7 @@ type Response struct {
 type PendingClarification struct {
 	Request    *Request
 	ResponseCh chan *Response
+	CancelCh   chan struct{} // Closed when session's turn completes (agent moved on)
 	CreatedAt  time.Time
 }
 

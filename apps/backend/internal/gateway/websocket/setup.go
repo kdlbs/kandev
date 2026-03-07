@@ -18,6 +18,7 @@ type Gateway struct {
 	TerminalHandler    *TerminalHandler
 	LSPHandler         *LSPHandler
 	VscodeProxyHandler *VscodeProxyHandler
+	PortProxyHandler   *PortProxyHandler
 	logger             *logger.Logger
 }
 
@@ -54,6 +55,11 @@ func (g *Gateway) SetVscodeProxy(lifecycleMgr *lifecycle.Manager) {
 	g.VscodeProxyHandler = NewVscodeProxyHandler(lifecycleMgr, g.logger)
 }
 
+// SetPortProxy enables the generic port reverse proxy handler.
+func (g *Gateway) SetPortProxy(lifecycleMgr *lifecycle.Manager) {
+	g.PortProxyHandler = NewPortProxyHandler(lifecycleMgr, g.logger)
+}
+
 // SetupRoutes adds the WebSocket routes to the Gin engine
 func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	router.GET("/ws", g.Handler.HandleConnection)
@@ -71,5 +77,11 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 	// Add VS Code reverse proxy routes if configured
 	if g.VscodeProxyHandler != nil {
 		router.Any("/vscode/:sessionId/*path", g.VscodeProxyHandler.HandleVscodeProxy)
+	}
+
+	// Add generic port proxy routes if configured
+	if g.PortProxyHandler != nil {
+		router.Any("/port-proxy/:sessionId/:port", g.PortProxyHandler.HandlePortProxy)
+		router.Any("/port-proxy/:sessionId/:port/*path", g.PortProxyHandler.HandlePortProxy)
 	}
 }

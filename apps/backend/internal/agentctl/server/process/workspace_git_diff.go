@@ -12,14 +12,11 @@ import (
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
 func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *types.GitStatusUpdate) {
-	// Use remote branch if available, otherwise use HEAD
-	baseRef := "HEAD"
-	if update.RemoteBranch != "" {
-		baseRef = update.RemoteBranch
-	}
-
-	wt.enrichWithUnstagedDiff(ctx, update, baseRef)
-	wt.enrichWithStagedDiff(ctx, update, baseRef)
+	// Always diff against HEAD for unstaged/staged content so that files committed
+	// locally (but not yet pushed) show only their uncommitted changes rather than
+	// the entire file as new. The remote branch is only relevant for ahead/behind counts.
+	wt.enrichWithUnstagedDiff(ctx, update, "HEAD")
+	wt.enrichWithStagedDiff(ctx, update, "HEAD")
 	wt.enrichUntrackedFileDiffs(ctx, update)
 }
 

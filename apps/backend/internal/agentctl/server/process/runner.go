@@ -245,6 +245,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdout.Close()
 		return nil, fmt.Errorf("failed to attach stderr: %w", err)
 	}
 
@@ -296,6 +297,8 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 // On failure, marks the process as failed and removes it from tracking.
 func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id string, stdout, stderr io.ReadCloser) error {
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = stderr.Close()
 		proc.mu.Lock()
 		proc.info.Status = types.ProcessStatusFailed
 		proc.info.UpdatedAt = time.Now().UTC()

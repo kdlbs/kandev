@@ -63,8 +63,9 @@ func (e *InferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*P
 	// not from user input. Only the model name (validated above) and prompt are user-provided.
 	args := e.buildCommand(cfg, req.Model)
 
-	// #nosec G204 -- Command comes from agent registry (hardcoded), model is validated above
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	// Command from hardcoded agent registry; model validated with regex `^[a-zA-Z0-9._:/-]*$`;
+	// prompt passed via stdin, not as command arg.
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...) // lgtm[go/command-injection] #nosec G204
 	cmd.Dir = e.workDir
 
 	var stdout, stderr bytes.Buffer

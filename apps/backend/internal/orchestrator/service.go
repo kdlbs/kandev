@@ -105,6 +105,7 @@ type repoStore interface {
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
+	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -182,6 +183,9 @@ type Service struct {
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 
+	// Clarification canceller — cancels pending clarifications when agent's turn completes
+	clarificationCanceller ClarificationCanceller
+
 	// Push tracker: sessionID -> last known ahead count
 	pushTracker sync.Map
 
@@ -191,6 +195,14 @@ type Service struct {
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
+
+	// clarificationWatchdogs tracks active clarification primary-path resume watchdogs.
+	// key: "<session_id>::<pending_id>", value: *clarificationWatchdogEntry
+	clarificationWatchdogs sync.Map
+
+	// clarificationWatchdogTimeout controls how long to wait for post-clarification
+	// activity before triggering fallback resume.
+	clarificationWatchdogTimeout time.Duration
 
 	// Service state
 	mu        sync.RWMutex
@@ -240,16 +252,17 @@ func NewService(
 
 	// Create the service (watcher will be created after we have handlers)
 	s := &Service{
-		config:       cfg,
-		logger:       svcLogger,
-		eventBus:     eventBus,
-		taskRepo:     taskRepo,
-		repo:         repo,
-		agentManager: agentManager,
-		queue:        taskQueue,
-		executor:     exec,
-		scheduler:    sched,
-		messageQueue: msgQueue,
+		config:                       cfg,
+		logger:                       svcLogger,
+		eventBus:                     eventBus,
+		taskRepo:                     taskRepo,
+		repo:                         repo,
+		agentManager:                 agentManager,
+		queue:                        taskQueue,
+		executor:                     exec,
+		scheduler:                    sched,
+		messageQueue:                 msgQueue,
+		clarificationWatchdogTimeout: 2 * time.Minute,
 	}
 
 	// Wire executor state changes through the orchestrator so events are published
@@ -262,6 +275,9 @@ func NewService(
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
+		exec.SetCapabilities(caps)
+	}
 
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
@@ -302,6 +318,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
+// cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
+// for local/worktree execution and have no local path yet.
+func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.RepoUpdater) {
+	s.executor.SetRepoCloner(cloner, updater)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
@@ -332,6 +355,16 @@ func (s *Service) SetTurnService(turnService TurnService) {
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+type ClarificationCanceller interface {
+	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+}
+
+// SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
+func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
+	s.clarificationCanceller = c
 }
 
 // initWorkflowEngine creates the workflow engine with store and callbacks.
@@ -470,6 +503,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
 
+	// Subscribe to clarification events (cancel-and-resume flow)
+	s.subscribeClarificationEvents()
+
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }
@@ -498,6 +534,8 @@ func (s *Service) Stop() error {
 		s.logger.Error("failed to stop watcher", zap.Error(err))
 		errs = append(errs, err)
 	}
+
+	s.cancelAllClarificationWatchdogs()
 
 	if len(errs) > 0 {
 		return errs[0]
@@ -535,7 +573,7 @@ func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 
 	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
-		if isRemoteRuntime(running.Runtime) {
+		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
 			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
 				SessionID:        running.SessionID,
 				Runtime:          running.Runtime,
@@ -621,11 +659,6 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
-// isRemoteRuntime checks if a runtime string corresponds to a remote executor type.
-func isRemoteRuntime(runtime string) bool {
-	return runtime == string(models.ExecutorTypeSprites) || runtime == string(models.ExecutorTypeRemoteDocker)
-}
-
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
@@ -689,7 +722,7 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 	if running.Resumable {
 		return true
 	}
-	return running.Runtime == string(models.ExecutorTypeSprites)
+	return models.IsAlwaysResumableRuntime(running.Runtime)
 }
 
 // IsRunning returns true if the service is running

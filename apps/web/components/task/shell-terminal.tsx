@@ -308,7 +308,9 @@ export function ShellTerminal({
   if (isReadOnlyMode) {
     return (
       <div className="h-full w-full bg-transparent relative">
-        <div ref={terminalRef} className="p-1 absolute inset-0" />
+        <div className="p-1 absolute inset-0">
+          <div ref={terminalRef} className="h-full w-full" />
+        </div>
         {isStopping && (
           <div className="absolute right-3 top-2 text-xs text-muted-foreground">Stopping…</div>
         )}
@@ -323,5 +325,9 @@ export function ShellTerminal({
       </div>
     );
   }
-  return <div ref={terminalRef} className="h-full p-1 w-full overflow-hidden bg-transparent" />;
+  return (
+    <div className="h-full p-1 w-full overflow-hidden bg-transparent">
+      <div ref={terminalRef} className="h-full w-full" />
+    </div>
+  );
 }

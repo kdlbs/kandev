@@ -86,6 +86,7 @@ func NewManager(
 	profileResolver ProfileResolver,
 	mcpProvider McpConfigProvider,
 	fallbackPolicy ExecutorFallbackPolicy,
+	dataDir string,
 	log *logger.Logger,
 ) *Manager {
 	componentLogger := log.WithFields(zap.String("component", "lifecycle-manager"))
@@ -106,7 +107,7 @@ func NewManager(
 	executionStore := NewExecutionStore()
 
 	// Initialize session history manager for fork_session pattern (context injection)
-	historyManager, err := NewSessionHistoryManager("", log)
+	historyManager, err := NewSessionHistoryManager("", dataDir, log)
 	if err != nil {
 		log.Warn("failed to create session history manager, context injection disabled", zap.Error(err))
 	}
@@ -164,6 +165,12 @@ func NewManager(
 // If not set, agents will work directly in the repository's main working directory.
 func (m *Manager) SetWorktreeManager(worktreeMgr *worktree.Manager) {
 	m.worktreeMgr = worktreeMgr
+	// Register the worktree preparer so that executor type "worktree" gets
+	// worktree-specific preparation (create git worktree, checkout PR branch)
+	// instead of the generic local preparer.
+	if m.preparerRegistry != nil {
+		m.preparerRegistry.Register(executor.Name("worktree"), NewWorktreePreparer(worktreeMgr, m.logger))
+	}
 }
 
 // SetMCPHandler sets the MCP request handler for dispatching MCP tool calls.

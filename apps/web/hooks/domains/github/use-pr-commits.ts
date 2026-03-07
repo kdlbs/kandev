@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { PRCommitInfo } from "@/lib/types/github";
 
@@ -48,16 +48,35 @@ async function fetchPRCommits(
  */
 export function usePRCommits(owner: string | null, repo: string | null, prNumber: number | null) {
   const [state, setState] = useState<PRCommitsState>(INITIAL_STATE);
+  const hasParams = !!owner && !!repo && !!prNumber;
+  const paramsKeyRef = useRef<string>("");
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
     if (!owner || !repo || !prNumber) return;
-    void fetchPRCommits(owner, repo, prNumber, setState);
+    const requestId = ++requestIdRef.current;
+    void fetchPRCommits(owner, repo, prNumber, (next) => {
+      if (requestId !== requestIdRef.current) return;
+      setState(next);
+    });
   }, [owner, repo, prNumber]);
 
   useEffect(() => {
-    if (!owner || !repo || !prNumber) return;
-    void fetchPRCommits(owner, repo, prNumber, setState);
-  }, [owner, repo, prNumber]);
+    const key = hasParams ? `${owner}/${repo}/${prNumber}` : "";
+    if (key === paramsKeyRef.current) return;
+    paramsKeyRef.current = key;
+    if (!owner || !repo || !prNumber) {
+      requestIdRef.current++; // invalidate in-flight responses
+      return;
+    }
+    const requestId = ++requestIdRef.current;
+    void fetchPRCommits(owner, repo, prNumber, (next) => {
+      if (requestId !== requestIdRef.current) return;
+      setState(next);
+    });
+  }, [owner, repo, prNumber, hasParams]);
 
+  // Return initial state when params are null to clear stale data
+  if (!hasParams) return { ...INITIAL_STATE, refresh };
   return { ...state, refresh };
 }

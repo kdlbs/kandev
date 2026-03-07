@@ -17,7 +17,29 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 
+const DEFAULT_IMAGE_TAG = "kandev/agent:latest";
+const DEFAULT_DOCKERFILE = "FROM ubuntu:24.04\n";
+
 type BuildStatus = "idle" | "building" | "success" | "failed";
+
+/** Parse a Docker JSON stream line into a human-readable string. */
+function parseDockerLine(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    if (obj.error) return `ERROR: ${obj.error}\n`;
+    if (typeof obj.stream === "string") return obj.stream;
+    if (typeof obj.status === "string") {
+      const id = obj.id ? ` ${obj.id}` : "";
+      return `${obj.status}${id}\n`;
+    }
+    // Skip metadata-only messages (aux, progressDetail, etc.)
+    return null;
+  } catch {
+    return trimmed;
+  }
+}
 
 function BuildStatusBadge({ status }: { status: BuildStatus }) {
   if (status === "idle") return null;
@@ -38,37 +60,69 @@ function BuildStatusBadge({ status }: { status: BuildStatus }) {
   );
 }
 
+async function readDockerStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  appendLog: (text: string) => void,
+): Promise<boolean> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let hasError = false;
+  let done = false;
+  while (!done) {
+    const result = await reader.read();
+    done = result.done;
+    if (!result.value) continue;
+    buffer += decoder.decode(result.value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const parsed = parseDockerLine(line);
+      if (!parsed) continue;
+      if (parsed.startsWith("ERROR:")) hasError = true;
+      appendLog(parsed);
+    }
+  }
+  const tail = parseDockerLine(buffer);
+  if (tail) appendLog(tail);
+  return hasError;
+}
+
 function useBuildStream() {
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
 
-  const runBuild = useCallback(async (dockerfile: string, tag: string) => {
-    setBuildStatus("building");
-    setBuildLog("");
-    try {
-      const response = await buildDockerImage({ dockerfile, tag });
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setBuildStatus("failed");
-        setBuildLog("No response body");
-        return;
-      }
-      const decoder = new TextDecoder();
-      let done = false;
-      while (!done) {
-        const result = await reader.read();
-        done = result.done;
-        if (result.value) {
-          setBuildLog((prev) => prev + decoder.decode(result.value, { stream: true }));
-        }
-      }
-      setBuildStatus("success");
-    } catch (err) {
-      setBuildStatus("failed");
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
-    }
+  const appendLog = useCallback((text: string) => {
+    setBuildLog((prev) => prev + text);
   }, []);
+
+  const runBuild = useCallback(
+    async (dockerfile: string, tag: string) => {
+      setBuildStatus("building");
+      setBuildLog("");
+      try {
+        const response = await buildDockerImage({ dockerfile, tag });
+        if (!response.ok) {
+          const text = await response.text();
+          setBuildStatus("failed");
+          setBuildLog(`Build failed (${response.status}): ${text}`);
+          return;
+        }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          setBuildStatus("failed");
+          setBuildLog("No response body");
+          return;
+        }
+        const hasError = await readDockerStream(reader, appendLog);
+        setBuildStatus(hasError ? "failed" : "success");
+      } catch (err) {
+        setBuildStatus("failed");
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
+      }
+    },
+    [appendLog],
+  );
 
   return { buildStatus, buildLog, runBuild };
 }
@@ -97,11 +151,32 @@ export function DockerfileBuildCard({
     if (dockerfile.trim() && imageTag.trim()) void runBuild(dockerfile, imageTag);
   };
 
+  const canFillDefaults = !dockerfile.trim() || !imageTag.trim();
+
+  const fillDefaults = () => {
+    if (!imageTag.trim()) onImageTagChange(DEFAULT_IMAGE_TAG);
+    if (!dockerfile.trim()) onDockerfileChange(DEFAULT_DOCKERFILE);
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Dockerfile</CardTitle>
-        <CardDescription>Define the Docker image. Build and test it here.</CardDescription>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <CardTitle>Dockerfile</CardTitle>
+            <CardDescription>Define the Docker image. Build and test it here.</CardDescription>
+          </div>
+          {canFillDefaults && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fillDefaults}
+              className="cursor-pointer text-xs text-muted-foreground"
+            >
+              Use defaults
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
@@ -110,7 +185,7 @@ export function DockerfileBuildCard({
             id="image-tag"
             value={imageTag}
             onChange={(e) => onImageTagChange(e.target.value)}
-            placeholder="kandev/custom:latest"
+            placeholder={DEFAULT_IMAGE_TAG}
             className="font-mono text-sm"
           />
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, memo } from "react";
+import { useState, useRef, useCallback, memo, useEffect } from "react";
 import { FileDiff } from "@pierre/diffs/react";
 import { cn } from "@kandev/ui/lib/utils";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
@@ -33,6 +33,10 @@ interface DiffViewerProps {
   enableAcceptReject?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
   wordWrap?: boolean;
+  /** Enable diff expansion (show expand up/down buttons at hunk separators) */
+  enableExpansion?: boolean;
+  /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
+  baseRef?: string;
 }
 
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
@@ -46,6 +50,8 @@ const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "enableAcceptReject",
   "onRevertBlock",
   "wordWrap",
+  "enableExpansion",
+  "baseRef",
 ];
 
 const DATA_KEYS: (keyof FileDiffData)[] = ["filePath", "diff", "oldContent", "newContent"];
@@ -57,6 +63,30 @@ function areCommentsEqual(
   if (prev === next) return true;
   if (!prev || !next || prev.length !== next.length) return false;
   return prev.every((c, i) => c.id === next[i].id && c.text === next[i].text);
+}
+
+/** Auto-load expansion content and return whether expansion can be used. */
+function useAutoLoadExpansion(
+  enableExpansion: boolean,
+  state: ReturnType<typeof useDiffViewerState>,
+): boolean {
+  const { isExpansionContentLoaded, isExpansionLoading, expansionError, loadExpansionContent } =
+    state;
+  useEffect(() => {
+    if (enableExpansion && !isExpansionContentLoaded && !isExpansionLoading && !expansionError) {
+      void loadExpansionContent();
+    }
+  }, [
+    enableExpansion,
+    isExpansionContentLoaded,
+    isExpansionLoading,
+    expansionError,
+    loadExpansionContent,
+  ]);
+  const hasValidData = !!(
+    state.fileDiffMetadata?.oldLines?.length && state.fileDiffMetadata?.newLines?.length
+  );
+  return enableExpansion && isExpansionContentLoaded && hasValidData;
 }
 
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {
@@ -84,9 +114,13 @@ export const DiffViewer = memo(function DiffViewer({
   enableAcceptReject = false,
   onRevertBlock,
   wordWrap: wordWrapProp,
+  enableExpansion = false,
+  baseRef,
 }: DiffViewerProps) {
   const [wordWrapLocal, setWordWrap] = useState(false);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
+  const [expandUnchanged, setExpandUnchanged] = useState(false);
+  const toggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const state = useDiffViewerState({
@@ -98,6 +132,8 @@ export const DiffViewer = memo(function DiffViewer({
     onCommentDelete,
     externalComments,
     onRevertBlock,
+    enableExpansion,
+    baseRef,
   });
 
   const { onLineEnter, onLineLeave, onButtonEnter, onButtonLeave } = useHunkHover({
@@ -119,6 +155,7 @@ export const DiffViewer = memo(function DiffViewer({
   });
 
   const showHeader = !hideHeader && !compact;
+  const canUseExpansion = useAutoLoadExpansion(enableExpansion, state);
 
   const { options, renderHeaderMetadata, renderHoverUtility } = useDiffOptions({
     filePath: data.filePath,
@@ -132,6 +169,9 @@ export const DiffViewer = memo(function DiffViewer({
     onLineLeave,
     onOpenFile,
     onRevert,
+    enableExpansion: canUseExpansion,
+    expandUnchanged,
+    onToggleExpandUnchanged: canUseExpansion ? toggleExpandUnchanged : undefined,
   });
 
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;

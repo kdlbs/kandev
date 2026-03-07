@@ -62,6 +62,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		SavedLayouts:                req.SavedLayouts,
 		DefaultUtilityAgentID:       req.DefaultUtilityAgentID,
 		DefaultUtilityModel:         req.DefaultUtilityModel,
+		KeyboardShortcuts:           req.KeyboardShortcuts,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

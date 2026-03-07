@@ -17,6 +17,16 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// WasSessionInitialized reports whether the execution completed ACP session setup.
+// Returns false if the execution is not found or init hasn't completed.
+func (m *Manager) WasSessionInitialized(executionID string) bool {
+	exec, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return false
+	}
+	return exec.sessionInitialized
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
@@ -90,12 +100,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Bool("force", force),
 		zap.String("runtime", execution.RuntimeName))
 
-	// Try to gracefully stop via agentctl first
-	if execution.agentctl != nil && !force {
-		if err := execution.agentctl.Stop(ctx); err != nil {
-			m.logger.Warn("failed to stop agent via agentctl",
-				zap.String("execution_id", executionID),
-				zap.Error(err))
+	// Try to gracefully stop via agentctl first, then always close connections
+	if execution.agentctl != nil {
+		if !force {
+			if err := execution.agentctl.Stop(ctx); err != nil {
+				m.logger.Warn("failed to stop agent via agentctl",
+					zap.String("execution_id", executionID),
+					zap.Error(err))
+			}
 		}
 		execution.agentctl.Close()
 	}
@@ -136,14 +148,18 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	return m.StopAgent(ctx, execution.ID, force)
 }
 
-// RestartAgentProcess stops the agent subprocess and starts a fresh one with a new ACP session,
-// clearing the agent's conversation context. The execution environment (container/agentctl) is
-// preserved — only the agent process inside agentctl is restarted. Works for both local and remote
-// executors since it operates via the agentctl HTTP API.
+// RestartAgentProcess stops the agent subprocess and starts a fresh one, clearing the agent's
+// conversation context. For ACP agents this restarts via agentctl with a new ACP session.
+// For passthrough (TUI) agents this kills the PTY process and relaunches without --resume.
 func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+
+	// Passthrough agents: kill PTY and relaunch fresh (no --resume).
+	if execution.PassthroughProcessID != "" {
+		return m.restartPassthroughProcess(ctx, execution)
 	}
 
 	if execution.agentctl == nil {
@@ -154,6 +170,12 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
+
+	// Resolve agent config early — needed for both command rebuild and ACP session init
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return fmt.Errorf("failed to get agent config for restart: %w", err)
+	}
 
 	// 1. Close WebSocket streams (updates + workspace)
 	execution.agentctl.Close()
@@ -166,13 +188,17 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		// Continue — the process may already be stopped
 	}
 
-	// 3. Reset execution state for fresh context
+	// 3. Rebuild agent command without resume flags and reset execution state
+	freshCmd, freshContinueCmd := m.buildFreshAgentCommand(ctx, execution, agentConfig)
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		exec.ACPSessionID = ""
 		exec.Status = v1.AgentStatusStarting
 		exec.ErrorMessage = ""
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
+		exec.sessionInitialized = false
+		exec.AgentCommand = freshCmd
+		exec.ContinueCommand = freshContinueCmd
 
 		exec.messageMu.Lock()
 		exec.messageBuffer.Reset()
@@ -208,12 +234,6 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		m.logger.Warn("agent process slow to initialize after restart, continuing",
 			zap.String("execution_id", executionID),
 			zap.Error(err))
-	}
-
-	// 7. Reconnect WebSocket streams and initialize new ACP session
-	agentConfig, err := m.getAgentConfigForExecution(execution)
-	if err != nil {
-		return fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
 
 	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
@@ -330,8 +350,11 @@ func (m *Manager) IsRemoteSession(ctx context.Context, sessionID string) bool {
 	if err != nil || info == nil {
 		return false
 	}
-	return info.RuntimeName == string(executor.NameSprites) || info.ExecutorType == string(models.ExecutorTypeSprites) ||
-		info.ExecutorType == string(models.ExecutorTypeRemoteDocker)
+	if models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return true
+	}
+	// Backwards compatibility: old records may only have RuntimeName set.
+	return info.RuntimeName == string(executor.NameSprites) || info.RuntimeName == string(executor.NameRemoteDocker)
 }
 
 // GetAvailableCommandsForSession returns the available slash commands for a session.
@@ -367,22 +390,33 @@ func (m *Manager) ListExecutions() []*AgentExecution {
 
 // IsAgentRunningForSession checks if an agent process is running or starting for a session.
 //
-// This probes agentctl's status endpoint to verify the agent process state. Returns true if:
+// For passthrough sessions (direct PTY mode), it checks whether the PTY process is alive
+// in the InteractiveRunner. For ACP sessions, it probes agentctl's status endpoint.
+//
+// Returns true if:
+//   - Passthrough process is alive in the InteractiveRunner
 //   - Agent status is "running" (actively processing prompts)
 //   - Agent status is "starting" (process launched but not yet ready)
 //
 // Returns false if:
 //   - No execution exists for this session
+//   - Passthrough process ID is set but process is not alive
 //   - agentctl client is not available
 //   - Status check fails (network/timeout error)
 //   - Agent is in any other state (stopped, failed, etc.)
-//
-// Note: The name "IsAgentRunning" is slightly misleading - it includes "starting" state.
-// Use this to check if an agent subprocess exists for the session, regardless of ready state.
 func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists {
+		return false
+	}
+
+	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
+	// bypassing agentctl's ACP protocol. Check the process directly.
+	if execution.PassthroughProcessID != "" {
+		if runner := m.GetInteractiveRunner(); runner != nil {
+			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID)
+		}
 		return false
 	}
 
@@ -625,4 +659,40 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 	m.logger.Info("passthrough process stopped",
 		zap.String("execution_id", executionID),
 		zap.String("process_id", execution.PassthroughProcessID))
+}
+
+// buildFreshAgentCommand rebuilds the agent command without resume flags by going through
+// the standard BuildCommandString pipeline with an empty SessionID. This works for all
+// agent types because each agent's BuildCommand respects SessionID="" to skip resume flags.
+func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) (initial, continueCmd string) {
+	var profileInfo *AgentProfileInfo
+	if execution.AgentProfileID != "" && m.profileResolver != nil {
+		pi, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
+		if err == nil {
+			profileInfo = pi
+		}
+	}
+
+	model := ""
+	autoApprove := false
+	permissionValues := make(map[string]bool)
+	if profileInfo != nil {
+		model = profileInfo.Model
+		autoApprove = profileInfo.AutoApprove
+		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
+		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
+	}
+	if override, ok := execution.Metadata["model_override"].(string); ok && override != "" {
+		model = override
+	}
+
+	opts := agents.CommandOptions{
+		Model:            model,
+		SessionID:        "", // Fresh start — no resume flags
+		AutoApprove:      autoApprove,
+		PermissionValues: permissionValues,
+	}
+	return m.commandBuilder.BuildCommandString(agentConfig, opts),
+		m.commandBuilder.BuildContinueCommandString(agentConfig, opts)
 }

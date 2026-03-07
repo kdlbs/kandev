@@ -82,6 +82,7 @@ export type KanbanUpdatePayload = {
       on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
+    show_in_command_panel?: boolean;
   }>;
   tasks: Array<{
     id: string;
@@ -200,6 +201,7 @@ export type TaskSessionStateChangedPayload = {
   agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   is_passthrough?: boolean;
+  error_message?: string;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
   workflow_step_id?: string;
@@ -286,6 +288,8 @@ export type PrepareProgressPayload = {
   status: string;
   output?: string;
   error?: string;
+  warning?: string;
+  warning_detail?: string;
   timestamp: string;
 };
 
@@ -297,6 +301,14 @@ export type PrepareCompletedPayload = {
   error_message?: string;
   duration_ms: number;
   workspace_path?: string;
+  steps?: Array<{
+    name: string;
+    status: string;
+    output?: string;
+    error?: string;
+    warning?: string;
+    warning_detail?: string;
+  }>;
   timestamp: string;
 };
 
@@ -354,6 +366,7 @@ export type UserSettingsUpdatedPayload = {
   lsp_auto_install_languages?: string[];
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
+  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   updated_at?: string;
 };
 
@@ -526,6 +539,7 @@ export type FileContentResponse = {
   content: string;
   size: number;
   is_binary?: boolean;
+  resolved_path?: string;
   error?: string;
 };
 

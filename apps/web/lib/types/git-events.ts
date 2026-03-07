@@ -46,22 +46,6 @@ export type GitResetData = {
   deleted_count: number;
 };
 
-// Git snapshot data
-export type GitSnapshotData = {
-  id: string;
-  session_id: string;
-  snapshot_type: string;
-  branch: string;
-  remote_branch: string;
-  head_commit: string;
-  base_commit: string;
-  ahead: number;
-  behind: number;
-  files: Record<string, FileInfo>;
-  triggered_by: string;
-  created_at: string;
-};
-
 // Individual event variants
 export type GitStatusUpdateEvent = GitEventBase & {
   type: "status_update";
@@ -78,14 +62,5 @@ export type GitCommitsResetEvent = GitEventBase & {
   reset: GitResetData;
 };
 
-export type GitSnapshotCreatedEvent = GitEventBase & {
-  type: "snapshot_created";
-  snapshot: GitSnapshotData;
-};
-
 // Discriminated union
-export type GitEventPayload =
-  | GitStatusUpdateEvent
-  | GitCommitCreatedEvent
-  | GitCommitsResetEvent
-  | GitSnapshotCreatedEvent;
+export type GitEventPayload = GitStatusUpdateEvent | GitCommitCreatedEvent | GitCommitsResetEvent;

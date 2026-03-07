@@ -335,6 +335,26 @@ func TestRoundTrip(t *testing.T) {
 	})
 }
 
+func TestShowInCommandPanelExport(t *testing.T) {
+	t.Run("preserves show_in_command_panel in export", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Test"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Backlog", Position: 0, ShowInCommandPanel: false},
+			{ID: "s2", Name: "Active", Position: 1, ShowInCommandPanel: true},
+			{ID: "s3", Name: "Done", Position: 2, ShowInCommandPanel: false},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+		)
+
+		require.Len(t, export.Workflows[0].Steps, 3)
+		assert.False(t, export.Workflows[0].Steps[0].ShowInCommandPanel)
+		assert.True(t, export.Workflows[0].Steps[1].ShowInCommandPanel)
+		assert.False(t, export.Workflows[0].Steps[2].ShowInCommandPanel)
+	})
+}
+
 func TestToInt(t *testing.T) {
 	t.Run("float64", func(t *testing.T) {
 		v, ok := toInt(float64(42))

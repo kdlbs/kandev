@@ -27,11 +27,13 @@ interface UseGitOperationsReturn {
   rebase: (baseBranch: string) => Promise<GitOperationResult>;
   merge: (baseBranch: string) => Promise<GitOperationResult>;
   abort: (operation: "merge" | "rebase") => Promise<GitOperationResult>;
-  commit: (message: string, stageAll?: boolean) => Promise<GitOperationResult>;
+  commit: (message: string, stageAll?: boolean, amend?: boolean) => Promise<GitOperationResult>;
   stage: (paths?: string[]) => Promise<GitOperationResult>;
   unstage: (paths?: string[]) => Promise<GitOperationResult>;
   discard: (paths?: string[]) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
+  renameBranch: (newName: string) => Promise<GitOperationResult>;
+  reset: (commitSHA: string, mode: "soft" | "hard") => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
@@ -41,6 +43,7 @@ interface UseGitOperationsReturn {
 
   // State
   isLoading: boolean;
+  loadingOperation: string | null;
   error: string | null;
   lastResult: GitOperationResult | null;
 }
@@ -69,8 +72,12 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
   const abort = async (operation: "merge" | "rebase") =>
     executeOperation<GitOperationResult>("worktree.abort", { operation });
 
-  const commit = async (message: string, stageAll = true) =>
-    executeOperation<GitOperationResult>("worktree.commit", { message, stage_all: stageAll });
+  const commit = async (message: string, stageAll = true, amend = false) =>
+    executeOperation<GitOperationResult>("worktree.commit", {
+      message,
+      stage_all: stageAll,
+      amend,
+    });
 
   const stage = async (paths?: string[]) =>
     executeOperation<GitOperationResult>("worktree.stage", { paths: paths ?? [] });
@@ -83,6 +90,12 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
 
   const revertCommit = async (commitSHA: string) =>
     executeOperation<GitOperationResult>("worktree.revert_commit", { commit_sha: commitSHA });
+
+  const renameBranch = async (newName: string) =>
+    executeOperation<GitOperationResult>("worktree.rename_branch", { new_name: newName });
+
+  const reset = async (commitSHA: string, mode: "soft" | "hard") =>
+    executeOperation<GitOperationResult>("worktree.reset", { commit_sha: commitSHA, mode });
 
   const createPR = async (
     title: string,
@@ -108,12 +121,15 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
     unstage,
     discard,
     revertCommit,
+    renameBranch,
+    reset,
     createPR,
   };
 }
 
 export function useGitOperations(sessionId: string | null): UseGitOperationsReturn {
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingOperation, setLoadingOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<GitOperationResult | null>(null);
 
@@ -127,6 +143,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
       if (!client) throw new Error("WebSocket not connected");
 
       setIsLoading(true);
+      setLoadingOperation(action.replace("worktree.", ""));
       setError(null);
 
       const timeout = action === "worktree.create_pr" ? 120000 : 60000;
@@ -145,6 +162,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
         throw e;
       } finally {
         setIsLoading(false);
+        setLoadingOperation(null);
       }
     },
     [sessionId],
@@ -155,6 +173,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
   return {
     ...ops,
     isLoading,
+    loadingOperation,
     error,
     lastResult,
   };

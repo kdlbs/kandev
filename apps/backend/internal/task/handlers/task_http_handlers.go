@@ -113,6 +113,8 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			si.executorID,
 			si.executorType,
 			si.executorName,
+			si.agentName,
+			si.workingDirectory,
 			si.sessionState,
 		))
 	}
@@ -120,11 +122,13 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 }
 
 type sessionInfoFields struct {
-	reviewStatus *string
-	sessionState *string
-	executorID   *string
-	executorType *string
-	executorName *string
+	reviewStatus     *string
+	sessionState     *string
+	executorID       *string
+	executorType     *string
+	executorName     *string
+	agentName        *string
+	workingDirectory *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -147,6 +151,16 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		}
 		if n, ok := info.ExecutorSnapshot["executor_name"].(string); ok && n != "" {
 			si.executorName = &n
+		}
+	}
+	if info.AgentProfileSnapshot != nil {
+		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
+			si.agentName = &name
+		}
+	}
+	if info.RepositorySnapshot != nil {
+		if path, ok := info.RepositorySnapshot["path"].(string); ok && path != "" {
+			si.workingDirectory = &path
 		}
 	}
 	return si
@@ -284,11 +298,13 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 }
 
 type httpTaskRepositoryInput struct {
-	RepositoryID  string `json:"repository_id"`
-	BaseBranch    string `json:"base_branch"`
-	LocalPath     string `json:"local_path"`
-	Name          string `json:"name"`
-	DefaultBranch string `json:"default_branch"`
+	RepositoryID   string `json:"repository_id"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch"`
+	LocalPath      string `json:"local_path"`
+	Name           string `json:"name"`
+	DefaultBranch  string `json:"default_branch"`
+	GitHubURL      string `json:"github_url"`
 }
 
 type httpCreateTaskRequest struct {
@@ -371,16 +387,18 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryInput) ([]dto.TaskRepositoryInput, bool) {
 	var repos []dto.TaskRepositoryInput
 	for _, r := range inputs {
-		if r.RepositoryID == "" && r.LocalPath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id or local_path is required"})
+		if r.RepositoryID == "" && r.LocalPath == "" && r.GitHubURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or github_url is required"})
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:  r.RepositoryID,
-			BaseBranch:    r.BaseBranch,
-			LocalPath:     r.LocalPath,
-			Name:          r.Name,
-			DefaultBranch: r.DefaultBranch,
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
+			LocalPath:      r.LocalPath,
+			Name:           r.Name,
+			DefaultBranch:  r.DefaultBranch,
+			GitHubURL:      r.GitHubURL,
 		})
 	}
 	return repos, true

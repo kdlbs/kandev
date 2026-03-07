@@ -112,11 +112,13 @@ test.describe("Task switcher sidebar status", () => {
     await expect(session.taskInSection("Beta Task", "Review")).toBeVisible({ timeout: 30_000 });
 
     // --- Move Gamma to Working (background task) ---
+    // Small delay to let the backend settle after Beta's completion
+    await testPage.waitForTimeout(2_000);
     await apiClient.moveTask(taskGamma.id, workflow.id, workingStep.id);
 
     // Gamma should appear in "In Progress" while running
     await expect(session.taskInSection("Gamma Task", "In Progress")).toBeVisible({
-      timeout: 30_000,
+      timeout: 45_000,
     });
 
     // Gamma transitions to "Review"

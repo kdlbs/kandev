@@ -155,15 +155,16 @@ var workflowTestCases = []workflowTestCase{
 		},
 	},
 	{
-		Name:          "passthrough_skips_auto_start",
+		Name:          "passthrough_auto_start_via_stdin",
 		WorkflowJSON:  developmentWorkflowJSON,
 		StartStep:     "In Progress",
 		IsPassthrough: true,
 		Events: []testEvent{
-			// Passthrough: reset fires but auto_start is skipped
+			// Passthrough: reset fires, auto_start writes prompt to PTY stdin
+			// (not queued via message queue). Session is not set to WaitingForInput
+			// because the agent is processing the stdin prompt.
 			{Trigger: engine.TriggerOnTurnComplete, ExpectStep: "New Context",
-				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1,
-				ExpectState: models.TaskSessionStateWaitingForInput},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
 		},
 	},
 }

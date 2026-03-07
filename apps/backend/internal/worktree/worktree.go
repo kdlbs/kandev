@@ -2,6 +2,25 @@ package worktree
 
 import "time"
 
+// SyncProgressStatus represents the status of a base-branch sync progress event.
+type SyncProgressStatus string
+
+const (
+	SyncProgressRunning   SyncProgressStatus = "running"
+	SyncProgressCompleted SyncProgressStatus = "completed"
+)
+
+// SyncProgressEvent reports pre-worktree base-branch synchronization progress.
+type SyncProgressEvent struct {
+	StepName string
+	Status   SyncProgressStatus
+	Output   string
+	Error    string
+}
+
+// SyncProgressCallback is called when base-branch sync status changes.
+type SyncProgressCallback func(event SyncProgressEvent)
+
 // Worktree represents a Git worktree associated with a task.
 type Worktree struct {
 	// ID is the unique identifier for this worktree record.
@@ -45,6 +64,14 @@ type Worktree struct {
 
 	// DeletedAt is when this worktree was deleted (if applicable).
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+
+	// FetchWarning is a non-fatal warning from fetching the checkout branch.
+	// Set when fetch from origin failed but a local branch was used as fallback.
+	FetchWarning string `json:"fetch_warning,omitempty"`
+
+	// FetchWarningDetail contains the raw git command output for debugging.
+	// Shown as collapsible content alongside the user-friendly FetchWarning.
+	FetchWarningDetail string `json:"fetch_warning_detail,omitempty"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.
@@ -70,6 +97,11 @@ type CreateRequest struct {
 	// Typically "main" or "master".
 	BaseBranch string
 
+	// CheckoutBranch is a branch to fetch from origin and checkout after worktree creation.
+	// Used for PR reviews where the worktree is created from the default branch, then
+	// the PR's head branch is fetched and checked out. Empty means no post-creation checkout.
+	CheckoutBranch string
+
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string
@@ -80,6 +112,9 @@ type CreateRequest struct {
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string
+
+	// OnSyncProgress receives progress updates for pre-worktree branch sync.
+	OnSyncProgress SyncProgressCallback
 }
 
 // Validate validates the create request.

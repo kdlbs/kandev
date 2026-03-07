@@ -240,7 +240,7 @@ type ghReview struct {
 	} `json:"user"`
 	State       string    `json:"state"`
 	Body        string    `json:"body"`
-	SubmittedAt time.Time `json:"submittedAt"`
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 func (c *GHClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error) {
@@ -389,6 +389,26 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 		return fmt.Errorf("submit review on PR #%d: %w", number, err)
 	}
 	return nil
+}
+
+func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/branches", owner, repo),
+		"-X", "GET",
+		"-f", "per_page=100",
+		"--paginate",
+		"--jq", ".[].name")
+	if err != nil {
+		return nil, fmt.Errorf("list repo branches: %w", err)
+	}
+	var branches []RepoBranch
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" {
+			branches = append(branches, RepoBranch{Name: name})
+		}
+	}
+	return branches, nil
 }
 
 // run executes a gh CLI command and returns its stdout output.

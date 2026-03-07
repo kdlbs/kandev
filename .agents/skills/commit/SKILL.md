@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create git commits following Conventional Commits format. Use when committing changes, creating commits, or when the user asks to commit. Ensures commit messages conform to the project's changelog generation conventions.
+description: Stage and commit changes using Conventional Commits. Use when there are dirty/staged files to commit, the user says "commit", or before pushing a PR.
 ---
 
 # Commit

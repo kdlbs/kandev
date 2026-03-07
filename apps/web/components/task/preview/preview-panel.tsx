@@ -9,6 +9,7 @@ import { usePreviewPanel } from "@/hooks/use-preview-panel";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { ShellTerminal } from "@/components/task/shell-terminal";
 import { getLocalStorage } from "@/lib/local-storage";
+import { rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 import type { PreviewViewMode, PreviewStage } from "@/lib/state/slices";
 
 type PreviewContentProps = {
@@ -174,6 +175,7 @@ type PreviewActions = {
   previewUrl: string;
   previewUrlDraft: string;
   devProcessId: string | undefined;
+  isRemote: boolean;
 };
 
 function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
@@ -188,6 +190,7 @@ function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
     previewUrl,
     previewUrlDraft,
     devProcessId,
+    isRemote,
   } = actions;
 
   const handleStopClick = useCallback(async () => {
@@ -214,8 +217,10 @@ function usePreviewActions(sessionId: string | null, actions: PreviewActions) {
   const handleUrlSubmit = useCallback(() => {
     if (!sessionId) return;
     const trimmed = previewUrlDraft.trim();
-    if (trimmed) setPreviewUrl(sessionId, trimmed);
-  }, [sessionId, previewUrlDraft, setPreviewUrl]);
+    if (!trimmed) return;
+    const rewritten = rewritePreviewUrlForProxy(trimmed, sessionId, isRemote);
+    setPreviewUrl(sessionId, rewritten ?? trimmed);
+  }, [sessionId, previewUrlDraft, setPreviewUrl, isRemote]);
 
   const handleOpenInTab = useCallback(() => {
     if (!sessionId || !previewUrl) return;
@@ -406,6 +411,7 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     handleStop,
     detectedUrl,
     isRunning,
+    isRemote,
   } = panelState;
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -431,6 +437,7 @@ export function PreviewPanel({ sessionId, hasDevScript }: PreviewPanelProps) {
     previewUrl,
     previewUrlDraft,
     devProcessId,
+    isRemote: isRemote ?? false,
   });
 
   if (!sessionId) return <PreviewPlaceholder message="Select a session to enable preview." />;

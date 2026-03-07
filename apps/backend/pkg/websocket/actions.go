@@ -75,7 +75,9 @@ const (
 	ActionTaskSessionPrepare = "task.session.prepare"
 
 	// Unified session launch
-	ActionSessionLaunch = "session.launch"
+	ActionSessionLaunch       = "session.launch"
+	ActionSessionRecover      = "session.recover"
+	ActionSessionResetContext = "session.reset_context"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -195,9 +197,11 @@ const (
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
+	ActionWorkspaceFileContentGetRef = "workspace.file.get_at_ref"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
 	ActionWorkspaceFileCreate        = "workspace.file.create"
 	ActionWorkspaceFileDelete        = "workspace.file.delete"
+	ActionWorkspaceFileRename        = "workspace.file.rename"
 	ActionWorkspaceFilesSearch       = "workspace.files.search"
 	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
@@ -242,6 +246,8 @@ const (
 	ActionWorktreeDiscard      = "worktree.discard"       // Discard changes to files
 	ActionWorktreeCreatePR     = "worktree.create_pr"     // Create a pull request
 	ActionWorktreeRevertCommit = "worktree.revert_commit" // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch = "worktree.rename_branch" // Rename the current branch
+	ActionWorktreeReset        = "worktree.reset"         // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet             = "user.get"
@@ -253,6 +259,9 @@ const (
 	ActionVscodeStop     = "vscode.stop"     // Stop code-server for a session
 	ActionVscodeStatus   = "vscode.status"   // Get code-server status for a session
 	ActionVscodeOpenFile = "vscode.openFile" // Open a file in code-server for a session
+
+	// Port actions
+	ActionPortList = "port.list" // List listening ports on a remote executor
 
 	// Secret actions
 	ActionSecretList   = "secrets.list"
@@ -303,6 +312,7 @@ const (
 	ActionGitHubPRFeedbackNotify  = "github.pr_feedback.notify"   // Notification
 	ActionGitHubNewReviewPRNotify = "github.new_review_pr.notify" // Notification
 	ActionGitHubStats             = "github.stats"
+	ActionGitHubCheckSessionPR    = "github.check_session_pr"
 )
 
 // Error codes

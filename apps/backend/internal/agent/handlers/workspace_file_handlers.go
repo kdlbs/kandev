@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	agentctl "github.com/kandev/kandev/internal/agentctl/client"
@@ -29,9 +30,11 @@ func NewWorkspaceFileHandlers(lm *lifecycle.Manager, log *logger.Logger) *Worksp
 func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
+	d.RegisterFunc(ws.ActionWorkspaceFileContentGetRef, h.wsGetFileContentAtRef)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileCreate, h.wsCreateFile)
 	d.RegisterFunc(ws.ActionWorkspaceFileDelete, h.wsDeleteFile)
+	d.RegisterFunc(ws.ActionWorkspaceFileRename, h.wsRenameFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 }
 
@@ -112,13 +115,64 @@ func (h *WorkspaceFileHandlers) wsGetFileContent(ctx context.Context, msg *ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
+// wsGetFileContentAtRef handles workspace.file.get_at_ref action
+func (h *WorkspaceFileHandlers) wsGetFileContentAtRef(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+		Path      string `json:"path"`
+		Ref       string `json:"ref"`
+	}
+
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.Path == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "path is required", nil)
+	}
+	if req.Ref == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "ref is required", nil)
+	}
+
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
+	if !found {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	}
+
+	// Get agentctl client
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+
+	// Request file content at ref from agentctl
+	response, err := client.RequestFileContentAtRef(ctx, req.Path, req.Ref)
+	if err != nil {
+		// "File not found at ref" is expected for new files - log as debug, not error
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "file not found at ref") {
+			h.logger.Debug("file not found at ref (expected for new files)", zap.String("session_id", req.SessionID), zap.String("path", req.Path), zap.String("ref", req.Ref))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errMsg, nil)
+		}
+		h.logger.Error("failed to get file content at ref", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path), zap.String("ref", req.Ref))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to get file content at ref: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
 // wsUpdateFileContent handles workspace.file.update action
 func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID    string `json:"session_id"`
-		Path         string `json:"path"`
-		Diff         string `json:"diff"`
-		OriginalHash string `json:"original_hash"`
+		SessionID      string  `json:"session_id"`
+		Path           string  `json:"path"`
+		Diff           string  `json:"diff"`
+		OriginalHash   string  `json:"original_hash"`
+		DesiredContent *string `json:"desired_content"`
 	}
 
 	if err := msg.ParsePayload(&req); err != nil {
@@ -148,7 +202,7 @@ func (h *WorkspaceFileHandlers) wsUpdateFileContent(ctx context.Context, msg *ws
 	}
 
 	// Apply file diff via agentctl
-	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash)
+	response, err := client.ApplyFileDiff(ctx, req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		h.logger.Error("failed to apply file diff", zap.Error(err), zap.String("session_id", req.SessionID), zap.String("path", req.Path))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to apply file diff: %v", err), nil)
@@ -264,6 +318,53 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	if err != nil {
 		h.logger.Error("failed to search files", zap.Error(err), zap.String("session_id", req.SessionID))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to search files: %v", err), nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsRenameFile handles workspace.file.rename action
+func (h *WorkspaceFileHandlers) wsRenameFile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+		OldPath   string `json:"old_path"`
+		NewPath   string `json:"new_path"`
+	}
+
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.OldPath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "old_path is required", nil)
+	}
+	if req.NewPath == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "new_path is required", nil)
+	}
+
+	// Get agent execution for this session
+	execution, found := h.lifecycle.GetExecutionBySessionID(req.SessionID)
+	if !found {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session", nil)
+	}
+
+	// Get agentctl client
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+
+	// Rename file via agentctl
+	response, err := client.RenameFile(ctx, req.OldPath, req.NewPath)
+	if err != nil {
+		h.logger.Error("failed to rename file", zap.Error(err),
+			zap.String("session_id", req.SessionID),
+			zap.String("old_path", req.OldPath),
+			zap.String("new_path", req.NewPath))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to rename file: %v", err), nil)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)

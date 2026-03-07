@@ -81,14 +81,15 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace_path", req.WorkspacePath))
 
 	overrides := &config.InstanceOverrides{
-		Protocol:     agent.Protocol(req.Protocol),
-		AgentCommand: agentCmd,
-		WorkDir:      req.WorkspacePath,
-		AutoStart:    &autoStart,
-		Env:          config.CollectAgentEnv(req.Env),
-		AgentType:    req.AgentType,
-		McpServers:   mcpServers,
-		SessionID:    req.SessionID,
+		Protocol:           agent.Protocol(req.Protocol),
+		AgentCommand:       agentCmd,
+		WorkDir:            req.WorkspacePath,
+		AutoStart:          &autoStart,
+		Env:                config.CollectAgentEnv(req.Env),
+		AgentType:          req.AgentType,
+		McpServers:         mcpServers,
+		SessionID:          req.SessionID,
+		DisableAskQuestion: req.DisableAskQuestion,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",

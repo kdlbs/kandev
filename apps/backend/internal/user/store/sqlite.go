@@ -129,6 +129,10 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 	if savedLayouts == nil {
 		savedLayouts = []models.SavedLayout{}
 	}
+	keyboardShortcuts := settings.KeyboardShortcuts
+	if keyboardShortcuts == nil {
+		keyboardShortcuts = map[string]interface{}{}
+	}
 	settingsPayload, err := json.Marshal(map[string]interface{}{
 		"workspace_id":                    settings.WorkspaceID,
 		"kanban_view_mode":                settings.KanbanViewMode,
@@ -148,6 +152,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"saved_layouts":                   savedLayouts,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
+		"keyboard_shortcuts":              keyboardShortcuts,
 	})
 	if err != nil {
 		return err
@@ -190,6 +195,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
+		settings.KeyboardShortcuts = map[string]interface{}{}
 		return settings, nil
 	}
 	var payload struct {
@@ -211,6 +217,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
 		DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 		DefaultUtilityModel         string                            `json:"default_utility_model"`
+		KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -255,5 +262,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
+	settings.KeyboardShortcuts = payload.KeyboardShortcuts
+	if settings.KeyboardShortcuts == nil {
+		settings.KeyboardShortcuts = map[string]interface{}{}
+	}
 	return settings, nil
 }

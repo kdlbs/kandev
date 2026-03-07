@@ -68,6 +68,14 @@ type UseDiffOptionsArgs = {
   onLineLeave: () => void;
   onOpenFile?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  /** Enable diff expansion (requires oldLines/newLines in metadata) */
+  enableExpansion?: boolean;
+  /** Number of lines to expand per click (default: 20) */
+  expansionLineCount?: number;
+  /** When true, show all lines (no separators) */
+  expandUnchanged?: boolean;
+  /** Toggle callback for expand-all button */
+  onToggleExpandUnchanged?: () => void;
 };
 
 type UseDiffOptionsResult = {
@@ -90,6 +98,10 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onLineLeave,
     onOpenFile,
     onRevert,
+    enableExpansion = false,
+    expansionLineCount = 20,
+    expandUnchanged,
+    onToggleExpandUnchanged,
   } = args;
 
   const { resolvedTheme } = useTheme();
@@ -111,6 +123,8 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onToggleViewMode: toggleViewMode,
     onOpenFile,
     onRevert,
+    expandUnchanged,
+    onToggleExpandUnchanged,
   });
 
   const renderHoverUtility = useCallback((): ReactNode => {
@@ -125,12 +139,14 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     );
   }, [enableComments]);
 
-  const options = useMemo<FileDiffOptions<AnnotationMetadata>>(
-    () => ({
+  const options = useMemo<FileDiffOptions<AnnotationMetadata>>(() => {
+    return {
       diffStyle: globalViewMode,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
-      hunkSeparators: "simple",
+      // "line-info" shows expand buttons when oldLines/newLines are on metadata;
+      // "simple" is a plain divider without expand controls.
+      hunkSeparators: enableExpansion ? "line-info" : "simple",
       enableHoverUtility: enableComments,
       diffIndicators: "none",
       onLineSelectionEnd: handleLineSelectionEnd,
@@ -139,18 +155,22 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
       disableFileHeader: !showHeader,
       overflow: wordWrap ? "wrap" : "scroll",
       unsafeCSS: DIFF_UNSAFE_CSS,
-    }),
-    [
-      globalViewMode,
-      resolvedTheme,
-      enableComments,
-      showHeader,
-      handleLineSelectionEnd,
-      wordWrap,
-      onLineEnter,
-      onLineLeave,
-    ],
-  );
+      expansionLineCount,
+      expandUnchanged,
+    };
+  }, [
+    globalViewMode,
+    resolvedTheme,
+    enableComments,
+    showHeader,
+    handleLineSelectionEnd,
+    wordWrap,
+    onLineEnter,
+    onLineLeave,
+    enableExpansion,
+    expansionLineCount,
+    expandUnchanged,
+  ]);
 
   return {
     globalViewMode,

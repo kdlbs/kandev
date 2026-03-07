@@ -88,15 +88,6 @@ func shouldUseWorktree(executorType string) bool {
 	return models.ExecutorType(executorType) == models.ExecutorTypeWorktree
 }
 
-func shouldApplyPreferredShell(executorType string) bool {
-	switch models.ExecutorType(executorType) {
-	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
-		return true
-	default:
-		return false
-	}
-}
-
 // repositoryCloneURL builds an HTTPS clone URL from the repository's provider info.
 // Returns an empty string if the repository has no provider owner/name or if the
 // provider is not recognized.
@@ -127,7 +118,7 @@ func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
 }
 
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, executorType string, env map[string]string) map[string]string {
-	if !shouldApplyPreferredShell(executorType) {
+	if e.capabilities == nil || !e.capabilities.ShouldApplyPreferredShell(executorType) {
 		return env
 	}
 	if e.shellPrefs == nil {
@@ -344,6 +335,16 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, err)
 	}
 
+	// Capture the current HEAD commit as the base commit for this session asynchronously.
+	// This allows us to filter git log to only show commits made during the session.
+	// We do this async to avoid delaying session launch while waiting for agentctl to be ready.
+	// Use a bounded timeout context to prevent blocking indefinitely if agentctl never becomes ready.
+	go func(sid string) {
+		captureCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		e.captureBaseCommit(captureCtx, sid)
+	}(sessionID)
+
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, repoInfo, resp, startAgent, execCfg)
 }
 
@@ -370,7 +371,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	now := time.Now().UTC()
 	// On initial launch there is no existing ExecutorRunning record to carry forward.
 	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now, execCfg, nil)
-	e.persistWorktreeAssociation(ctx, task.ID, session.ID, repoInfo.RepositoryID, resp)
+	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
@@ -441,6 +442,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
@@ -451,11 +453,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// Remote Docker needs a clone URL since the remote host has no access to the local filesystem.
-	if models.ExecutorType(execConfig.ExecutorType) == models.ExecutorTypeRemoteDocker && repoInfo.Repository != nil {
+	// Remote executors need a clone URL since the remote host has no access to the local filesystem.
+	if e.capabilities != nil && e.capabilities.RequiresCloneURL(execConfig.ExecutorType) && repoInfo.Repository != nil {
 		cloneURL := repositoryCloneURL(repoInfo.Repository)
 		if cloneURL == "" {
-			return nil, execConfig, ErrRemoteDockerNoRepoURL
+			return nil, execConfig, ErrNoCloneURL
 		}
 		req.RepositoryURL = cloneURL
 	}
@@ -525,4 +527,56 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		zap.String("agent_execution_id", session.AgentExecutionID))
 
 	return execution, nil
+}
+
+// captureBaseCommit retrieves the merge-base commit from agentctl and stores it
+// as the base commit for the session. This allows calculating cumulative diffs
+// that show all changes on the branch relative to the target branch (e.g., main).
+func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
+	// Wait for agentctl to be ready before trying to get git status.
+	// LaunchAgent returns before agentctl is fully ready (waits in goroutine),
+	// so we need to explicitly wait here.
+	if err := e.agentManager.WaitForAgentctlReady(ctx, sessionID); err != nil {
+		e.logger.Warn("agentctl not ready for base commit capture",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	status, err := e.agentManager.GetGitStatus(ctx, sessionID)
+	if err != nil {
+		e.logger.Warn("failed to get git status for base commit capture",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+
+	// Prefer BaseCommit (merge-base with target branch) over HeadCommit.
+	// BaseCommit gives us the common ancestor with main/origin, which is correct
+	// for showing all changes on the feature branch. HeadCommit would only show
+	// changes made after the session started, missing commits already on the branch.
+	baseCommit := status.BaseCommit
+	if baseCommit == "" {
+		// Fallback to HeadCommit if no merge-base is available (e.g., detached HEAD)
+		baseCommit = status.HeadCommit
+	}
+	if baseCommit == "" {
+		e.logger.Debug("no base commit available for capture",
+			zap.String("session_id", sessionID))
+		return
+	}
+
+	// Update the session's base commit in the database
+	if err := e.repo.UpdateTaskSessionBaseCommit(ctx, sessionID, baseCommit); err != nil {
+		e.logger.Warn("failed to update session base commit",
+			zap.String("session_id", sessionID),
+			zap.String("base_commit", baseCommit),
+			zap.Error(err))
+		return
+	}
+
+	e.logger.Info("captured base commit for session",
+		zap.String("session_id", sessionID),
+		zap.String("base_commit", baseCommit),
+		zap.String("head_commit", status.HeadCommit))
 }

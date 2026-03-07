@@ -19,6 +19,10 @@ const (
 	// including cleanup scripts and worktree removal.
 	TaskDeleteTimeout = 2 * time.Minute
 
+	// SessionLoadTimeout is the maximum time for ACP session/load (resume).
+	// Session loading may involve deserializing large conversation histories.
+	SessionLoadTimeout = 2 * time.Minute
+
 	// PromptTimeout is the maximum time to wait for an agent to complete a prompt.
 	// Agent tasks can take a long time (complex code generation, large refactors),
 	// so this is set to a generous value.

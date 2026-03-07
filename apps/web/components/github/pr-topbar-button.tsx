@@ -16,6 +16,14 @@ function prIconColor(state: string): string {
 }
 
 function PRStatusIcon({ pr }: { pr: TaskPR }) {
+  // Terminal states take priority
+  if (pr.state === "merged") {
+    return <IconCheck className="h-3 w-3 text-purple-500" />;
+  }
+  if (pr.state === "closed") {
+    return <IconX className="h-3 w-3 text-muted-foreground" />;
+  }
+  // Review/check states only matter for open PRs
   if (pr.checks_state === "failure" || pr.review_state === "changes_requested") {
     return <IconX className="h-3 w-3 text-red-500" />;
   }
@@ -24,12 +32,6 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   }
   if (pr.checks_state === "pending" || pr.review_state === "pending") {
     return <IconClock className="h-3 w-3 text-yellow-500" />;
-  }
-  if (pr.state === "merged") {
-    return <IconCheck className="h-3 w-3 text-purple-500" />;
-  }
-  if (pr.state === "closed") {
-    return <IconX className="h-3 w-3 text-muted-foreground" />;
   }
   return null;
 }
@@ -47,6 +49,7 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          data-testid="pr-topbar-button"
           size="sm"
           variant="outline"
           className="cursor-pointer gap-1.5 px-2"

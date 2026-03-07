@@ -63,6 +63,12 @@ export type QuickChatState = {
   workspaceId: string | null;
 };
 
+export type SessionFailureNotification = {
+  sessionId: string;
+  taskId: string;
+  message: string;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -74,6 +80,7 @@ export type UISliceState = {
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
   quickChat: QuickChatState;
+  sessionFailureNotification: SessionFailureNotification | null;
 };
 
 export type UISliceActions = {
@@ -98,6 +105,7 @@ export type UISliceActions = {
   openQuickChat: (sessionId: string, workspaceId: string) => void;
   closeQuickChat: () => void;
   clearQuickChatSession: () => void;
+  setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

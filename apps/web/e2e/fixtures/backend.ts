@@ -21,20 +21,41 @@ export type BackendContext = {
   frontendPort: number;
   frontendUrl: string;
   tmpDir: string;
+  /** Kill the backend process and respawn with the same config (DB, ports, tmpDir persist). */
+  restart: () => Promise<void>;
 };
 
-async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
+async function waitForHealth(url: string, timeoutMs: number, proc?: ChildProcess): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      // not ready yet
+
+  // Track process exit so we can fail fast instead of polling for the full timeout.
+  let processExited = false;
+  let processExitCode: number | null = null;
+  const onExit = (code: number | null) => {
+    processExited = true;
+    processExitCode = code;
+  };
+  proc?.once("exit", onExit);
+
+  try {
+    while (Date.now() < deadline) {
+      if (processExited) {
+        throw new Error(
+          `Backend process exited with code ${processExitCode} while waiting for health at ${url}`,
+        );
+      }
+      try {
+        const res = await fetch(url);
+        if (res.ok) return;
+      } catch {
+        // not ready yet
+      }
+      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
     }
-    await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+    throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
+  } finally {
+    proc?.off("exit", onExit);
   }
-  throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
 }
 
 function killProcess(proc: ChildProcess): Promise<void> {
@@ -91,6 +112,41 @@ function killProcessGroup(proc: ChildProcess): Promise<void> {
 }
 
 /**
+ * Spawn a backend process with the given environment. Returns the child process.
+ * The process is spawned with `detached: true` so it becomes a process group leader.
+ */
+function spawnBackendProcess(
+  env: Record<string, string>,
+  debug: boolean,
+  port: number,
+): ChildProcess {
+  const proc = spawn(KANDEV_BIN, [], {
+    env: env as unknown as NodeJS.ProcessEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+
+  const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${port}.log`) : null;
+  proc.once("exit", () => {
+    logFile?.end();
+  });
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    if (debug) {
+      process.stderr.write(`[backend:${port}] ${chunk.toString()}`);
+      logFile?.write(chunk);
+    }
+  });
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    if (debug) {
+      process.stderr.write(`[backend-log:${port}] ${chunk.toString()}`);
+      logFile?.write(chunk);
+    }
+  });
+
+  return proc;
+}
+
+/**
  * Worker-scoped fixture that spawns an isolated backend process and
  * a dedicated Next.js frontend. Each Playwright worker gets its own
  * backend on a unique port with an isolated HOME, database, and data
@@ -131,7 +187,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         KANDEV_DATA_DIR: dataDir,
         KANDEV_SERVER_PORT: String(backendPort),
         KANDEV_DATABASE_PATH: dbPath,
-        KANDEV_MOCK_AGENT: "true",
+        KANDEV_MOCK_AGENT: "only",
         KANDEV_MOCK_GITHUB: "true",
         KANDEV_DOCKER_ENABLED: "false",
         KANDEV_WORKTREE_ENABLED: "false",
@@ -147,29 +203,10 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       };
 
       const debug = !!process.env.E2E_DEBUG;
+      const baseUrl = `http://localhost:${backendPort}`;
 
       // --- Spawn backend ---
-      const backendProc: ChildProcess = spawn(KANDEV_BIN, [], {
-        env: backendEnv as unknown as NodeJS.ProcessEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true, // Own process group so we can kill backend + agentctl together
-      });
-
-      const logFile = debug ? fs.createWriteStream(`/tmp/e2e-backend-${backendPort}.log`) : null;
-      backendProc.stderr?.on("data", (chunk: Buffer) => {
-        if (debug) {
-          process.stderr.write(`[backend:${backendPort}] ${chunk.toString()}`);
-          logFile?.write(chunk);
-        }
-      });
-      backendProc.stdout?.on("data", (chunk: Buffer) => {
-        if (debug) {
-          process.stderr.write(`[backend-log:${backendPort}] ${chunk.toString()}`);
-          logFile?.write(chunk);
-        }
-      });
-
-      const baseUrl = `http://localhost:${backendPort}`;
+      let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
       await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
 
       // Ensure Next.js static assets are available to the standalone server.
@@ -204,8 +241,22 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
       const frontendUrl = `http://localhost:${frontendPort}`;
       await waitForHealth(frontendUrl, HEALTH_TIMEOUT_MS);
 
+      /**
+       * Kill the backend process group and respawn with the same config.
+       * SQLite DB, tmpDir, and all persisted data survive the restart.
+       * Only in-memory execution state (running agents, WS connections) is lost.
+       */
+      const restart = async () => {
+        await killProcessGroup(backendProc);
+        // Wait for OS to release the TCP port — Linux TIME_WAIT can exceed 500ms under load
+        await new Promise((r) => setTimeout(r, 2_000));
+        backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
+        // Pass the process so waitForHealth fails fast if it exits (e.g. port still in use)
+        await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
+      };
+
       try {
-        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir });
+        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir, restart });
       } finally {
         // Shutdown frontend first (simple process), then backend (process group)
         await killProcess(frontendProc);

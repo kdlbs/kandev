@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -34,7 +35,7 @@ func Provide(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, er
 func provideSQLite(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, error) {
 	dbPath := cfg.Database.Path
 	if dbPath == "" {
-		dbPath = "./kandev.db"
+		dbPath = filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
 	}
 
 	// Writer: single connection, owns WAL/journal_mode setup.

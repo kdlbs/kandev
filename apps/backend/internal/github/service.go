@@ -43,6 +43,11 @@ func (s *Service) Client() Client {
 	return s.client
 }
 
+// TestStore returns the store for test/mock use only.
+func (s *Service) TestStore() *Store {
+	return s.store
+}
+
 // IsAuthenticated returns whether the service has a working GitHub client.
 func (s *Service) IsAuthenticated() bool {
 	return s.client != nil
@@ -394,7 +399,15 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, feedback *PRFee
 	return nil
 }
 
-// --- PR feedback (live) ---
+// --- PR info and feedback (live) ---
+
+// GetPR fetches basic PR details from GitHub.
+func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.GetPR(ctx, owner, repo, number)
+}
 
 // GetPRFeedback fetches live PR feedback from GitHub.
 func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
@@ -730,6 +743,14 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 		return nil, fmt.Errorf("github client not available")
 	}
 	return s.client.SearchOrgRepos(ctx, org, query, limit)
+}
+
+// ListRepoBranches lists branches for a repository.
+func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	return s.client.ListRepoBranches(ctx, owner, repo)
 }
 
 // RecordReviewPRTask records that a task was created for a review PR.

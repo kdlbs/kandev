@@ -32,6 +32,7 @@ type UserSettings struct {
 	SavedLayouts                []SavedLayout                     `json:"saved_layouts"`
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel         string                            `json:"default_utility_model"`    // Default model for utility agents
+	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
 }

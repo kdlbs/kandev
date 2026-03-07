@@ -25,7 +25,7 @@ func RegisterMockRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	if !ok {
 		return
 	}
-	ctrl := NewMockController(mock, log)
+	ctrl := NewMockController(mock, svc.TestStore(), log)
 	ctrl.RegisterRoutes(router)
 	log.Info("registered GitHub mock control endpoints")
 }

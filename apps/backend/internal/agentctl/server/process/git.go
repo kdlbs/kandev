@@ -9,13 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
 
@@ -24,27 +24,6 @@ var ErrOperationInProgress = errors.New("git operation already in progress")
 
 // ErrInvalidBranchName is returned when a branch name contains invalid characters.
 var ErrInvalidBranchName = errors.New("invalid branch name")
-
-// validBranchNameRegex matches safe git branch names.
-// Allows alphanumeric, hyphens, underscores, slashes, and dots.
-// Disallows: spaces, shell metacharacters, and control characters.
-var validBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
-
-// isValidBranchName validates that a branch name is safe to use in git commands.
-func isValidBranchName(branch string) bool {
-	if branch == "" || len(branch) > 255 {
-		return false
-	}
-	// Disallow ".." to prevent path traversal
-	if strings.Contains(branch, "..") {
-		return false
-	}
-	// Disallow ending with ".lock"
-	if strings.HasSuffix(branch, ".lock") {
-		return false
-	}
-	return validBranchNameRegex.MatchString(branch)
-}
 
 // GitOperationResult represents the result of a git operation.
 type GitOperationResult struct {
@@ -75,9 +54,81 @@ func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *Worksp
 	}
 }
 
-// runGitCommand executes a git command in the workDir
+// runGitCommand executes a git command in the workDir with defense-in-depth validation.
+// Validates both flags and branch/ref arguments to prevent command injection.
 func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// Validate that user-controlled arguments don't introduce command injection risks
+	// Even though exec.CommandContext doesn't use a shell, we must prevent argument
+	// injection where malicious input like "--help" or "--exec=..." could be passed
+	// as what appears to be a file/branch name but is interpreted as a flag by git.
+	skipNextArg := false
+	afterDoubleDash := false // Track if we've seen "--" separator
+	for i, arg := range args {
+		// Skip git subcommand (first argument)
+		if i == 0 {
+			continue
+		}
+
+		// Skip if this argument is a value for a previous flag
+		if skipNextArg {
+			skipNextArg = false
+			continue
+		}
+
+		// After "--", all arguments are file paths - no validation needed
+		if afterDoubleDash {
+			continue
+		}
+
+		// Validate flags against whitelist
+		if strings.HasPrefix(arg, "-") {
+			if !securityutil.IsKnownSafeGitFlag(arg) {
+				return "", fmt.Errorf("potentially unsafe flag: %s", arg)
+			}
+			// Special handling for "--" separator
+			if arg == "--" {
+				afterDoubleDash = true
+				continue
+			}
+			// Flags that take a value in the next argument
+			if arg == "-m" || arg == "--format" {
+				skipNextArg = true
+			}
+			continue
+		}
+
+		// Skip known safe git literals (HEAD, origin, etc.)
+		if securityutil.IsKnownSafeGitLiteral(arg) {
+			continue
+		}
+
+		// Skip commit SHAs (validated elsewhere via validateCommitSHA)
+		if securityutil.LooksLikeCommitSHA(arg) {
+			continue
+		}
+
+		// Validate branch references (e.g., "origin/branch", "upstream/main")
+		// This provides defense-in-depth even though branches are validated at call sites
+		if strings.Contains(arg, "/") {
+			if err := securityutil.ValidateBranchReference(arg); err != nil {
+				return "", err
+			}
+			continue
+		}
+
+		// Validate standalone branch names
+		if securityutil.IsValidBranchName(arg) {
+			// Standalone arg that matches branch name pattern - validated and safe
+			continue
+		}
+		// If we reach here, it's a non-branch argument (file path, etc.)
+		// which we don't validate as strictly
+	}
+
+	// All args validated: flags in securityutil.IsKnownSafeGitFlag whitelist, branch names via securityutil.IsValidBranchName
+	// regex, commit SHAs via securityutil.LooksLikeCommitSHA pattern, args after "--" separator skipped.
+	// This defense-in-depth validation prevents injection of arbitrary commands.
+	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
 	cmd.Dir = g.workDir
 
 	var stdout, stderr bytes.Buffer
@@ -117,19 +168,12 @@ func filterGitEnv(env []string) []string {
 	return result
 }
 
-// triggerFsNotify creates and removes a temporary file to trigger fsnotify and refresh git status.
-// This is OS-agnostic and reliably triggers filesystem events that the workspace tracker watches.
-// Called after git operations like commit, push, pull, etc. to refresh the UI.
-func (g *GitOperator) triggerFsNotify() {
-	sentinelPath := filepath.Join(g.workDir, ".git-op-complete")
-	f, err := os.Create(sentinelPath)
-	if err != nil {
-		g.logger.Debug("failed to create sentinel file", zap.Error(err))
-		return
-	}
-	_ = f.Close()
-	if err := os.Remove(sentinelPath); err != nil {
-		g.logger.Debug("failed to remove sentinel file", zap.Error(err))
+// triggerRefresh refreshes git status in the workspace tracker immediately.
+// Called after git operations like commit, push, pull, etc. to refresh the UI
+// without waiting for the next poll cycle.
+func (g *GitOperator) triggerRefresh() {
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(context.Background())
 	}
 }
 
@@ -296,7 +340,7 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 // Rebase performs a git rebase onto the specified base branch.
 func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
 	// Validate branch name to prevent command injection
-	if !isValidBranchName(baseBranch) {
+	if !securityutil.IsValidBranchName(baseBranch) {
 		return nil, ErrInvalidBranchName
 	}
 
@@ -343,7 +387,7 @@ func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperat
 // Merge performs a git merge of the specified base branch.
 func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
 	// Validate branch name to prevent command injection
-	if !isValidBranchName(baseBranch) {
+	if !securityutil.IsValidBranchName(baseBranch) {
 		return nil, ErrInvalidBranchName
 	}
 
@@ -383,7 +427,8 @@ func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperati
 
 // Commit creates a git commit with the specified message.
 // If stageAll is true, it stages all changes before committing.
-func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool) (*GitOperationResult, error) {
+// If amend is true, it amends the previous commit instead of creating a new one.
+func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool, amend bool) (*GitOperationResult, error) {
 	if !g.tryLock("commit") {
 		return nil, ErrOperationInProgress
 	}
@@ -393,16 +438,19 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 		Operation: "commit",
 	}
 
-	// Check if there are changes to commit
-	hasChanges, err := g.hasUncommittedChanges(ctx)
-	if err != nil {
-		result.Error = err.Error()
-		return result, nil
-	}
+	// For amend, we don't require staged changes if we're just changing the message
+	if !amend {
+		// Check if there are changes to commit
+		hasChanges, err := g.hasUncommittedChanges(ctx)
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 
-	if !hasChanges {
-		result.Error = "no changes to commit"
-		return result, nil
+		if !hasChanges {
+			result.Error = "no changes to commit"
+			return result, nil
+		}
 	}
 
 	// Stage all changes if requested
@@ -416,8 +464,12 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 		result.Output = stageOutput
 	}
 
-	// Create the commit
-	commitOutput, err := g.runGitCommand(ctx, "commit", "-m", message)
+	// Create the commit (with --amend if requested)
+	args := []string{"commit", "-m", message}
+	if amend {
+		args = append(args, "--amend")
+	}
+	commitOutput, err := g.runGitCommand(ctx, args...)
 	result.Output += commitOutput
 
 	if err != nil {
@@ -426,7 +478,7 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool)
 	}
 
 	result.Success = true
-	g.logger.Info("commit completed", zap.String("message", message))
+	g.logger.Info("commit completed", zap.String("message", message), zap.Bool("amend", amend))
 
 	// Publish commit notification if we have a workspace tracker
 	if g.workspaceTracker != nil {
@@ -610,7 +662,7 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		result.Success = true
 	}
 
-	g.triggerFsNotify()
+	g.triggerRefresh()
 	g.logger.Info("discard completed",
 		zap.Int("total_files", len(paths)),
 		zap.Int("untracked_files", len(untrackedFiles)),
@@ -666,6 +718,126 @@ func (g *GitOperator) RevertCommit(ctx context.Context, commitSHA string) (*GitO
 	g.logger.Info("revert commit completed",
 		zap.String("commit_sha", commitSHA),
 		zap.Bool("success", result.Success))
+	return result, nil
+}
+
+// RenameBranch renames the current branch to a new name.
+// Uses git branch -m <new_name>.
+func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOperationResult, error) {
+	if !securityutil.IsValidBranchName(newName) {
+		return nil, ErrInvalidBranchName
+	}
+
+	if !g.tryLock("rename_branch") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "rename_branch",
+	}
+
+	// Get current branch name for logging
+	currentBranch, err := g.getCurrentBranch(ctx)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
+		return result, nil
+	}
+
+	// Rename the branch
+	output, err := g.runGitCommand(ctx, "branch", "-m", newName)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.logger.Info("branch renamed",
+		zap.String("from", currentBranch),
+		zap.String("to", newName))
+
+	// Refresh git status so the UI reflects the new branch name
+	if g.workspaceTracker != nil {
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
+	return result, nil
+}
+
+// Reset resets HEAD to the specified commit.
+// mode can be "soft" (keep changes staged), "mixed" (keep changes unstaged), or "hard" (discard all changes).
+func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) (*GitOperationResult, error) {
+	if !g.tryLock("reset") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+
+	result := &GitOperationResult{
+		Operation: "reset",
+	}
+
+	// Validate mode
+	validModes := map[string]bool{"soft": true, "mixed": true, "hard": true}
+	if !validModes[mode] {
+		result.Error = fmt.Sprintf("invalid reset mode: %s (must be soft, mixed, or hard)", mode)
+		return result, nil
+	}
+
+	// Validate commit SHA format
+	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
+		result.Error = errMsg
+		return result, nil
+	}
+
+	// Validate commit SHA exists (peel to commit object)
+	if _, err := g.runGitCommand(ctx, "rev-parse", "--verify", commitSHA+"^{commit}"); err != nil {
+		result.Error = fmt.Sprintf("invalid commit: %s", commitSHA)
+		return result, nil
+	}
+
+	// Capture current HEAD for reset notification
+	previousHead, err := g.runGitCommand(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		result.Error = "failed to resolve HEAD: " + err.Error()
+		return result, nil
+	}
+	previousHead = strings.TrimSpace(previousHead)
+
+	// Perform the reset
+	output, err := g.runGitCommand(ctx, "reset", "--"+mode, commitSHA)
+	result.Output = output
+
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+
+	result.Success = true
+	g.logger.Info("reset completed",
+		zap.String("mode", mode),
+		zap.String("commit", commitSHA))
+
+	// Send reset notification and refresh git status
+	if g.workspaceTracker != nil {
+		// Notify about the reset
+		newHead, headErr := g.runGitCommand(ctx, "rev-parse", "HEAD")
+		if headErr != nil {
+			g.logger.Warn("failed to resolve HEAD after reset", zap.Error(headErr))
+		} else {
+			reset := &streams.GitResetNotification{
+				Timestamp:    time.Now().UTC(),
+				PreviousHead: previousHead,
+				CurrentHead:  strings.TrimSpace(newHead),
+			}
+			g.workspaceTracker.NotifyGitReset(reset)
+		}
+
+		// Refresh git status
+		g.workspaceTracker.RefreshGitStatus(ctx)
+	}
+
 	return result, nil
 }
 
@@ -737,168 +909,6 @@ func (g *GitOperator) Abort(ctx context.Context, operation string) (*GitOperatio
 	return result, nil
 }
 
-// CommitDiffResult represents the result of getting a commit's diff.
-type CommitDiffResult struct {
-	Success      bool                   `json:"success"`
-	CommitSHA    string                 `json:"commit_sha"`
-	Message      string                 `json:"message"`
-	Author       string                 `json:"author"`
-	Date         string                 `json:"date"`
-	Files        map[string]interface{} `json:"files"` // FileInfo objects with diff content
-	FilesChanged int                    `json:"files_changed"`
-	Insertions   int                    `json:"insertions"`
-	Deletions    int                    `json:"deletions"`
-	Error        string                 `json:"error,omitempty"`
-}
-
-// isHexChar reports whether r is a valid hexadecimal digit (0-9, a-f, A-F).
-func isHexChar(r rune) bool {
-	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
-}
-
-// validateCommitSHA returns an error string if sha is not a valid hex SHA, or "" if it is valid.
-func validateCommitSHA(sha string) string {
-	if sha == "" || len(sha) > 64 {
-		return "invalid commit SHA"
-	}
-	for _, c := range sha {
-		if !isHexChar(c) {
-			return "invalid commit SHA: must be hexadecimal"
-		}
-	}
-	return ""
-}
-
-// sumFileDiffStats adds up insertions and deletions across all parsed file entries.
-func sumFileDiffStats(files map[string]interface{}) (insertions, deletions int) {
-	for _, fileInfo := range files {
-		fi, ok := fileInfo.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if additions, ok := fi["additions"].(int); ok {
-			insertions += additions
-		}
-		if dels, ok := fi["deletions"].(int); ok {
-			deletions += dels
-		}
-	}
-	return insertions, deletions
-}
-
-// ShowCommit gets the diff for a specific commit using git show.
-func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*CommitDiffResult, error) {
-	result := &CommitDiffResult{
-		CommitSHA: commitSHA,
-	}
-
-	// Validate commit SHA (basic validation - alphanumeric only)
-	if errMsg := validateCommitSHA(commitSHA); errMsg != "" {
-		result.Error = errMsg
-		return result, nil
-	}
-
-	// Get commit metadata
-	formatOutput, err := g.runGitCommand(ctx, "show", "--no-patch", "--format=%H%n%s%n%an <%ae>%n%aI", commitSHA)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to get commit info: %s", err.Error())
-		return result, nil
-	}
-
-	lines := strings.Split(strings.TrimSpace(formatOutput), "\n")
-	if len(lines) >= 4 {
-		result.CommitSHA = lines[0]
-		result.Message = lines[1]
-		result.Author = lines[2]
-		result.Date = lines[3]
-	}
-
-	// Get the diff with stats
-	diffOutput, err := g.runGitCommand(ctx, "show", "--format=", "--stat", "--numstat", "-p", commitSHA)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to get commit diff: %s", err.Error())
-		return result, nil
-	}
-
-	// Parse the diff output into files
-	result.Files = g.parseCommitDiff(diffOutput)
-	result.FilesChanged = len(result.Files)
-	result.Insertions, result.Deletions = sumFileDiffStats(result.Files)
-
-	result.Success = true
-	return result, nil
-}
-
-// parseCommitDiff parses git show output into file info map
-func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
-	files := make(map[string]interface{})
-
-	// Split by "diff --git" to get individual file diffs
-	parts := strings.Split(output, "diff --git ")
-	if len(parts) <= 1 {
-		return files
-	}
-
-	for _, part := range parts[1:] {
-		if part == "" {
-			continue
-		}
-
-		// Re-add the "diff --git " prefix
-		diffContent := "diff --git " + part
-
-		// Extract file path from the diff header
-		// Format: diff --git a/path/to/file b/path/to/file
-		lines := strings.SplitN(diffContent, "\n", 2)
-		if len(lines) == 0 {
-			continue
-		}
-
-		header := lines[0]
-		// Extract path from "diff --git a/path b/path"
-		headerParts := strings.Split(header, " ")
-		if len(headerParts) < 4 {
-			continue
-		}
-
-		// Get the b/path part and remove the "b/" prefix
-		bPath := headerParts[len(headerParts)-1]
-		filePath := strings.TrimPrefix(bPath, "b/")
-
-		// Determine file status from diff content
-		status := fileStatusModified
-		switch {
-		case strings.Contains(diffContent, "new file mode"):
-			status = "added"
-		case strings.Contains(diffContent, "deleted file mode"):
-			status = fileStatusDeleted
-		case strings.Contains(diffContent, "rename from"):
-			status = "renamed"
-		}
-
-		// Count additions and deletions
-		additions := 0
-		deletions := 0
-		for _, line := range strings.Split(diffContent, "\n") {
-			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-				additions++
-			} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-				deletions++
-			}
-		}
-
-		files[filePath] = map[string]interface{}{
-			"status":    status,
-			"staged":    false,
-			"additions": additions,
-			"deletions": deletions,
-			"diff":      diffContent,
-		}
-	}
-
-	return files
-}
-
 // tryLock attempts to acquire the operation lock without blocking.
 // Returns true if the lock was acquired, false if an operation is in progress.
 func (g *GitOperator) tryLock(opName string) bool {
@@ -919,9 +929,9 @@ func (g *GitOperator) unlock() {
 	g.inProgress = false
 	g.currentOp = ""
 
-	// Trigger fsnotify to refresh git status in the workspace tracker.
+	// Refresh git status in the workspace tracker immediately.
 	// This is called after every git operation completes.
-	g.triggerFsNotify()
+	g.triggerRefresh()
 }
 
 // PRCreateResult represents the result of a PR creation operation.

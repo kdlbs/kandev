@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -76,8 +77,15 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
+}
+func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (m *mockAgentManager) MarkPassthroughRunning(_ string) error {
+	return nil
 }
 
 func (m *mockAgentManager) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
@@ -104,6 +112,23 @@ func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID st
 		AgentName:   "Mock Agent",
 		Model:       "mock-model",
 	}, nil
+}
+
+func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int) (*client.GitLogResult, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
+	return nil, nil
+}
+func (m *mockAgentManager) GetGitStatus(_ context.Context, _ string) (*client.GitStatusResult, error) {
+	return &client.GitStatusResult{
+		Success:    true,
+		Branch:     "main",
+		HeadCommit: "test-commit",
+	}, nil
+}
+func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
+	return nil
 }
 
 // testTaskRepository is an in-memory task repository for testing

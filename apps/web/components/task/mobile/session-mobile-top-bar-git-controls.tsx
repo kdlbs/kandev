@@ -191,6 +191,7 @@ export function PRDialog({
   baseBranch,
   isGitLoading,
   taskTitle,
+  firstCommitMessage,
   onCreatePR,
 }: {
   open: boolean;
@@ -199,6 +200,7 @@ export function PRDialog({
   baseBranch: string | undefined;
   isGitLoading: boolean;
   taskTitle: string | undefined;
+  firstCommitMessage?: string;
   onCreatePR: (title: string, body: string, draft: boolean) => void;
 }) {
   const [prTitle, setPrTitle] = useState("");
@@ -207,7 +209,7 @@ export function PRDialog({
 
   const handleOpen = (isOpen: boolean) => {
     if (isOpen) {
-      setPrTitle(taskTitle || "");
+      setPrTitle(firstCommitMessage || taskTitle || "");
       setPrBody("");
     }
     onOpenChange(isOpen);

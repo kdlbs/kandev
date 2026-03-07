@@ -5,25 +5,6 @@ import { useTheme } from "next-themes";
 import { WorkerPoolContextProvider, useWorkerPool } from "@pierre/diffs/react";
 import { PIERRE_THEME } from "@/lib/theme/colors";
 
-const LANGS = [
-  "javascript",
-  "typescript",
-  "jsx",
-  "tsx",
-  "json",
-  "css",
-  "html",
-  "markdown",
-  "python",
-  "go",
-  "rust",
-  "java",
-  "yaml",
-  "toml",
-  "bash",
-  "sql",
-] as const;
-
 const workerFactory = () =>
   new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), { type: "module" });
 
@@ -41,9 +22,13 @@ function ThemeSync() {
 export function DiffWorkerPoolProvider({ children }: { children: ReactNode }) {
   return (
     <WorkerPoolContextProvider
-      poolOptions={{ workerFactory, poolSize: 4 }}
+      poolOptions={{ workerFactory, poolSize: 1 }}
       highlighterOptions={{
-        langs: [...LANGS],
+        // Don't pre-load language grammars at startup — they resolve on-demand per file type
+        // via resolveLanguagesAndExecuteTask. Pre-loading 15 grammars blocks worker pool
+        // initialization on cold CI/Docker starts (can take >60s), causing diff views to
+        // remain empty until all imports complete.
+        langs: [],
         theme: PIERRE_THEME.dark,
         lineDiffType: "word",
       }}

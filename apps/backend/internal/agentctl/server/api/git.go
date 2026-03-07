@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,12 @@ type GitAbortRequest struct {
 type GitCommitRequest struct {
 	Message  string `json:"message"`
 	StageAll bool   `json:"stage_all"`
+	Amend    bool   `json:"amend"`
+}
+
+// GitRenameBranchRequest for POST /api/v1/git/rename-branch
+type GitRenameBranchRequest struct {
+	NewName string `json:"new_name"`
 }
 
 // GitStageRequest for POST /api/v1/git/stage
@@ -72,6 +79,23 @@ type GitCreatePRRequest struct {
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
 	Draft      bool   `json:"draft"`
+}
+
+// GitResetRequest for POST /api/v1/git/reset
+type GitResetRequest struct {
+	CommitSHA string `json:"commit_sha"`
+	Mode      string `json:"mode"` // "soft", "mixed", or "hard"
+}
+
+// GitLogRequest for GET /api/v1/git/log
+type GitLogRequest struct {
+	Since string `form:"since"` // Base commit SHA (exclusive)
+	Limit int    `form:"limit"` // Max commits to return
+}
+
+// GitCumulativeDiffRequest for GET /api/v1/git/cumulative-diff
+type GitCumulativeDiffRequest struct {
+	Base string `form:"base" binding:"required"` // Base commit SHA
 }
 
 // handleGitPull handles POST /api/v1/git/pull
@@ -233,9 +257,40 @@ func (s *Server) handleGitCommit(c *gin.Context) {
 	}
 
 	gitOp := s.procMgr.GitOperator()
-	result, err := gitOp.Commit(c.Request.Context(), req.Message, req.StageAll)
+	result, err := gitOp.Commit(c.Request.Context(), req.Message, req.StageAll, req.Amend)
 	if err != nil {
 		s.handleGitError(c, "commit", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitRenameBranch handles POST /api/v1/git/rename-branch
+func (s *Server) handleGitRenameBranch(c *gin.Context) {
+	var req GitRenameBranchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "rename_branch",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.NewName == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "rename_branch",
+			Error:     "new_name is required",
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	if err != nil {
+		s.handleGitError(c, "rename_branch", err)
 		return
 	}
 
@@ -412,6 +467,180 @@ func (s *Server) handleGitShowCommit(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// handleGitReset handles POST /api/v1/git/reset
+func (s *Server) handleGitReset(c *gin.Context) {
+	var req GitResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.CommitSHA == "" {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     "commit_sha is required",
+		})
+		return
+	}
+
+	if req.Mode == "" {
+		req.Mode = "mixed"
+	}
+	validModes := map[string]bool{"soft": true, "mixed": true, "hard": true}
+	if !validModes[req.Mode] {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success:   false,
+			Operation: "reset",
+			Error:     fmt.Sprintf("invalid reset mode: %s (must be soft, mixed, or hard)", req.Mode),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.Reset(c.Request.Context(), req.CommitSHA, req.Mode)
+	if err != nil {
+		s.handleGitError(c, "reset", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitLog handles GET /api/v1/git/log
+func (s *Server) handleGitLog(c *gin.Context) {
+	var req GitLogRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitLogResult{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	// Bound limit to prevent expensive history scans
+	const (
+		defaultLogLimit = 100
+		maxLogLimit     = 500
+	)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultLogLimit
+	} else if limit > maxLogLimit {
+		c.JSON(http.StatusBadRequest, process.GitLogResult{
+			Success: false,
+			Error:   fmt.Sprintf("limit must be between 1 and %d", maxLogLimit),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.GetLog(c.Request.Context(), req.Since, limit)
+	if err != nil {
+		s.logger.Error("git log failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, process.GitLogResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff
+func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
+	var req GitCumulativeDiffRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.CumulativeDiffResult{
+			Success: false,
+			Error:   "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	gitOp := s.procMgr.GitOperator()
+	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), req.Base)
+	if err != nil {
+		s.logger.Error("git cumulative diff failed", zap.String("base", req.Base), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, process.CumulativeDiffResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// GitStatusResult represents the result of a git status query.
+type GitStatusResult struct {
+	Success      bool                   `json:"success"`
+	Branch       string                 `json:"branch"`
+	RemoteBranch string                 `json:"remote_branch"`
+	HeadCommit   string                 `json:"head_commit"`
+	BaseCommit   string                 `json:"base_commit"` // Merge-base with origin branch
+	Ahead        int                    `json:"ahead"`
+	Behind       int                    `json:"behind"`
+	Modified     []string               `json:"modified"`
+	Added        []string               `json:"added"`
+	Deleted      []string               `json:"deleted"`
+	Untracked    []string               `json:"untracked"`
+	Renamed      []string               `json:"renamed"`
+	Files        map[string]interface{} `json:"files"`
+	Timestamp    string                 `json:"timestamp"`
+	Error        string                 `json:"error,omitempty"`
+}
+
+// handleGitStatus handles GET /api/v1/git/status
+func (s *Server) handleGitStatus(c *gin.Context) {
+	wt := s.procMgr.GetWorkspaceTracker()
+	if wt == nil {
+		c.JSON(http.StatusInternalServerError, GitStatusResult{
+			Success: false,
+			Error:   "workspace tracker not available",
+		})
+		return
+	}
+
+	status, err := wt.GetCurrentGitStatus(c.Request.Context())
+	if err != nil {
+		s.logger.Error("git status failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, GitStatusResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	// Convert Files map to interface{} map for JSON serialization
+	filesMap := make(map[string]interface{}, len(status.Files))
+	for k, v := range status.Files {
+		filesMap[k] = v
+	}
+
+	c.JSON(http.StatusOK, GitStatusResult{
+		Success:      true,
+		Branch:       status.Branch,
+		RemoteBranch: status.RemoteBranch,
+		HeadCommit:   status.HeadCommit,
+		BaseCommit:   status.BaseCommit,
+		Ahead:        status.Ahead,
+		Behind:       status.Behind,
+		Modified:     status.Modified,
+		Added:        status.Added,
+		Deleted:      status.Deleted,
+		Untracked:    status.Untracked,
+		Renamed:      status.Renamed,
+		Files:        filesMap,
+		Timestamp:    status.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+	})
 }
 
 // handleGitError handles errors from git operations.

@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import { getBackendConfig } from "@/lib/config";
 import type {
   Agent,
   ListAgentsResponse,
@@ -44,6 +45,7 @@ export async function updateUserSettings(
     saved_layouts?: SavedLayout[];
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   },
   options?: ApiRequestOptions,
 ) {
@@ -370,7 +372,7 @@ export async function buildDockerImage(
   },
   options?: ApiRequestOptions,
 ): Promise<Response> {
-  const baseUrl = options?.baseUrl ?? "";
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   return fetch(`${baseUrl}/api/v1/docker/build`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -385,7 +387,10 @@ export async function listDockerContainers(
 ): Promise<{ containers: DockerContainer[] }> {
   const params = new URLSearchParams();
   if (filter?.image) params.set("image", filter.image);
-  if (filter?.labels) params.set("labels", JSON.stringify(filter.labels));
+  if (filter?.labels) {
+    const labelPairs = Object.entries(filter.labels).map(([k, v]) => `${k}=${v}`);
+    params.set("labels", labelPairs.join(","));
+  }
   const qs = params.toString();
   return fetchJson<{ containers: DockerContainer[] }>(
     `/api/v1/docker/containers${qs ? `?${qs}` : ""}`,

@@ -184,13 +184,12 @@ export function useFileSaveDelete({
       setSavingFiles((prev) => new Set(prev).add(path));
       try {
         const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
-        const response = await updateFileContent(
-          client,
-          activeSessionId,
+        const response = await updateFileContent(client, activeSessionId, {
           path,
           diff,
-          tab.originalHash,
-        );
+          originalHash: tab.originalHash,
+          desiredContent: tab.content,
+        });
         if (response.success && response.new_hash) {
           setOpenFileTabs((prev) =>
             prev.map((t) =>

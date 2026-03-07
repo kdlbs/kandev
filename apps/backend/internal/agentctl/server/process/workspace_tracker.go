@@ -2,10 +2,13 @@ package process
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -20,10 +23,13 @@ const (
 	fileStatusModified = "modified"
 )
 
-// WorkspaceTracker monitors workspace changes and provides real-time updates
+// WorkspaceTracker monitors workspace changes and provides real-time updates.
+// It uses git status polling instead of fsnotify to avoid file descriptor exhaustion
+// on macOS (where kqueue opens a file descriptor for every watched file).
 type WorkspaceTracker struct {
-	workDir string
-	logger  *logger.Logger
+	workDir      string
+	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
+	logger       *logger.Logger
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -39,16 +45,6 @@ type WorkspaceTracker struct {
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}
 	workspaceSubMu             sync.RWMutex
 
-	// Filesystem watcher
-	watcher *fsnotify.Watcher
-
-	// Debounce channel for filesystem change events
-	fsChangeTrigger chan struct{}
-
-	// Pending file changes accumulated between debounce flushes
-	pendingChanges   []types.FileChangeNotification
-	pendingChangesMu sync.Mutex
-
 	// Git polling interval
 	gitPollInterval time.Duration
 
@@ -62,24 +58,48 @@ type WorkspaceTracker struct {
 // NewWorkspaceTracker creates a new workspace tracker
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	resolvedWorkDir := resolveExistingWorkDir(workDir, log.WithFields(zap.String("component", "workspace-tracker")))
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Error("failed to create filesystem watcher", zap.Error(err))
-		watcher = nil
-	}
+
+	// Cache validated git index path (works with worktrees where .git is a file)
+	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
 
 	return &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
+		gitIndexPath:               gitIndexPath,
 		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
-		watcher:                    watcher,
-		fsChangeTrigger:            make(chan struct{}, 1), // Buffered to avoid blocking
 		gitPollInterval:            DefaultGitPollInterval,
 		stopCh:                     make(chan struct{}),
 	}
 }
 
-// Start begins monitoring the workspace
+// resolveGitIndexPath returns the validated path to the git index file.
+// Returns empty string if the path cannot be resolved or validated.
+// This handles worktrees where .git is a file pointing elsewhere.
+func resolveGitIndexPath(workDir string) string {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	gitDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(workDir, gitDir)
+	}
+	// Clean and construct the index path
+	gitDir = filepath.Clean(gitDir)
+	indexPath := filepath.Join(gitDir, "index")
+	// Validate the index file exists (this proves gitDir is a valid git directory)
+	info, err := os.Stat(indexPath)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return indexPath
+}
+
+// Start begins monitoring the workspace using polling (no fsnotify).
+// File changes are detected via git status polling, which is efficient and
+// doesn't consume file descriptors like fsnotify/kqueue does on macOS.
 func (wt *WorkspaceTracker) Start(ctx context.Context) {
 	wt.mu.Lock()
 	if wt.started {
@@ -90,34 +110,19 @@ func (wt *WorkspaceTracker) Start(ctx context.Context) {
 	wt.started = true
 	wt.mu.Unlock()
 
+	// Start file change monitoring (uses git status polling)
 	wt.wg.Add(1)
 	go wt.monitorLoop(ctx)
 
-	// Start git polling for detecting manual git operations
+	// Start git polling for detecting manual git operations (commits, resets, etc.)
 	wt.wg.Add(1)
 	go wt.pollGitChanges(ctx)
-
-	// Start filesystem watcher if available
-	if wt.watcher != nil {
-		wt.wg.Add(1)
-		go wt.watchFilesystem(ctx)
-
-		// Add workspace root to watcher
-		if err := wt.addDirectoryRecursive(wt.workDir); err != nil {
-			wt.logger.Error("failed to watch workspace directory", zap.Error(err))
-		}
-	}
 }
 
 // Stop stops the workspace tracker
 func (wt *WorkspaceTracker) Stop() {
 	wt.stopOnce.Do(func() {
 		close(wt.stopCh)
-		if wt.watcher != nil {
-			if err := wt.watcher.Close(); err != nil {
-				wt.logger.Debug("failed to close watcher", zap.Error(err))
-			}
-		}
 		wt.wg.Wait()
 		wt.logger.Info("workspace tracker stopped")
 	})

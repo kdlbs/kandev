@@ -33,6 +33,21 @@ func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateGitStatus(ctx)
 }
 
+// GetCurrentGitStatus returns the current cached git status.
+// If no status has been cached yet, it fetches fresh status.
+func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	wt.mu.RLock()
+	status := wt.currentStatus
+	wt.mu.RUnlock()
+
+	// If no status cached yet (timestamp is zero), fetch fresh status
+	if status.Timestamp.IsZero() {
+		return wt.getGitStatus(ctx)
+	}
+
+	return status, nil
+}
+
 // getGitStatus retrieves the current git status
 func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
 	update := types.GitStatusUpdate{
@@ -86,22 +101,29 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 		update.HeadCommit = strings.TrimSpace(string(headOut))
 	}
 
-	// Get base commit SHA (base branch HEAD)
-	// Use remote branch if available, fall back to main/master
+	// Get base commit SHA using merge-base between current branch and origin.
+	// This gives us the common ancestor, which is what we need to filter commits
+	// made during the session.
 	baseBranch := update.RemoteBranch
 	if baseBranch == "" {
-		// Try main first, then master
-		baseBranch = "main"
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "main")
-		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err != nil {
-			baseBranch = "master"
+		// Try origin/main first, then origin/master, then local main/master
+		for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
+			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+			checkCmd.Dir = wt.workDir
+			if err := checkCmd.Run(); err == nil {
+				baseBranch = candidate
+				break
+			}
 		}
 	}
-	baseCmd := exec.CommandContext(ctx, "git", "rev-parse", baseBranch)
-	baseCmd.Dir = wt.workDir
-	if baseOut, err := baseCmd.Output(); err == nil {
-		update.BaseCommit = strings.TrimSpace(string(baseOut))
+	if baseBranch != "" {
+		// Use merge-base to find common ancestor between current branch and base branch.
+		// This is correct even when the branch has diverged from main.
+		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, "HEAD")
+		mergeBaseCmd.Dir = wt.workDir
+		if mergeBaseOut, err := mergeBaseCmd.Output(); err == nil {
+			update.BaseCommit = strings.TrimSpace(string(mergeBaseOut))
+		}
 	}
 
 	return nil

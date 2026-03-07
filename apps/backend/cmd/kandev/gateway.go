@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -43,6 +44,29 @@ func (a *scriptServiceAdapter) GetRepositoryScript(ctx context.Context, id strin
 	}, nil
 }
 
+// sessionReaderAdapter implements agenthandlers.SessionReader using the task repository.
+// This allows git handlers to look up session metadata (like base commit SHA) from the database.
+type sessionReaderAdapter struct {
+	repo   *sqliterepo.Repository
+	logger *logger.Logger
+}
+
+func (a *sessionReaderAdapter) GetSessionBaseCommit(ctx context.Context, sessionID string) string {
+	session, err := a.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("failed to load session for base commit lookup",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return ""
+	}
+	if session == nil {
+		return ""
+	}
+	return session.BaseCommitSHA
+}
+
 func provideGateway(
 	ctx context.Context,
 	log *logger.Logger,
@@ -55,6 +79,7 @@ func provideGateway(
 	notificationRepo notificationstore.Repository,
 	taskRepo *sqliterepo.Repository,
 	githubSvc *github.Service,
+	dataDir string,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -65,8 +90,9 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(log))
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(dataDir, log))
 		gateway.SetVscodeProxy(lifecycleMgr)
+		gateway.SetPortProxy(lifecycleMgr)
 	}
 
 	orchestratorHandlers := orchestratorhandlers.NewHandlers(orchestratorSvc, log)
@@ -87,12 +113,34 @@ func provideGateway(
 		shellHandlers := agenthandlers.NewShellHandlers(lifecycleMgr, scriptSvc, log)
 		shellHandlers.RegisterHandlers(gateway.Dispatcher)
 
-		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, log)
+		gitHandlers := agenthandlers.NewGitHandlers(lifecycleMgr, &sessionReaderAdapter{repo: taskRepo, logger: log}, log)
 		if githubSvc != nil {
 			gitHandlers.SetOnPRCreated(func(ctx context.Context, sessionID, taskID, prURL, branch string) {
 				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, prURL, branch)
 			})
 		}
+		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {
+			if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+				TaskSessionID: sessionID,
+				TaskID:        taskID,
+				Content:       fmt.Sprintf("Git %s failed", operation),
+				AuthorType:    "agent",
+				Type:          "error",
+				Metadata: map[string]interface{}{
+					"git_operation_error": true,
+					"operation":           operation,
+					"error_output":        errorOutput,
+					"session_id":          sessionID,
+					"task_id":             taskID,
+					"variant":             "error",
+				},
+			}); err != nil {
+				log.Error("failed to create git operation error message",
+					zap.String("session_id", sessionID),
+					zap.String("operation", operation),
+					zap.Error(err))
+			}
+		})
 		gitHandlers.RegisterHandlers(gateway.Dispatcher)
 
 		passthroughHandlers := agenthandlers.NewPassthroughHandlers(lifecycleMgr, log)
@@ -100,6 +148,9 @@ func provideGateway(
 
 		vscodeHandlers := agenthandlers.NewVscodeHandlers(lifecycleMgr, gateway.VscodeProxyHandler, log)
 		vscodeHandlers.RegisterHandlers(gateway.Dispatcher)
+
+		portHandlers := agenthandlers.NewPortHandlers(lifecycleMgr, log)
+		portHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
 	go gateway.Hub.Run(ctx)

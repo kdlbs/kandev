@@ -163,6 +163,7 @@ export type ClarificationRequestMetadata = {
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired";
   response?: ClarificationAnswer;
+  agent_disconnected?: boolean;
 };
 
 export type ClarificationAnswer = {

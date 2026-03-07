@@ -23,6 +23,10 @@ interface FileDiffViewerProps {
   enableAcceptReject?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
   wordWrap?: boolean;
+  /** Enable diff expansion (show expand up/down buttons at hunk separators) */
+  enableExpansion?: boolean;
+  /** Base git ref for fetching old content (e.g., "origin/main", "HEAD~1") */
+  baseRef?: string;
 }
 
 /**
@@ -51,6 +55,8 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   enableAcceptReject,
   onRevertBlock,
   wordWrap,
+  enableExpansion,
+  baseRef,
 }: FileDiffViewerProps) {
   const data = useMemo(() => transformGitDiff(filePath, diff, status), [filePath, diff, status]);
 
@@ -70,6 +76,8 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       enableAcceptReject={enableAcceptReject}
       onRevertBlock={onRevertBlock}
       wordWrap={wordWrap}
+      enableExpansion={enableExpansion}
+      baseRef={baseRef}
     />
   );
 });

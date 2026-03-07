@@ -196,13 +196,13 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
 			id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-			repository_id, base_branch,
+			repository_id, base_branch, base_commit_sha,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, workflow_step_id, review_status, is_passthrough
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), session.ID, session.TaskID, session.AgentExecutionID, session.ContainerID, session.AgentProfileID,
-		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch,
+		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
@@ -240,7 +240,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
-		&session.RepositoryID, &session.BaseBranch,
+		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
@@ -294,7 +294,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -307,7 +307,7 @@ func (r *Repository) GetTaskSession(ctx context.Context, id string) (*models.Tas
 func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -320,7 +320,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -359,13 +359,13 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET
 			agent_execution_id = ?, container_id = ?, agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
-			repository_id = ?, base_branch = ?,
+			repository_id = ?, base_branch = ?, base_commit_sha = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, metadata = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, workflow_step_id = ?, review_status = ?, is_passthrough = ?
 		WHERE id = ?
 	`), session.AgentExecutionID, session.ContainerID, session.AgentProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
-		session.RepositoryID, session.BaseBranch,
+		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON), session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.WorkflowStepID, session.ReviewStatus,
@@ -443,13 +443,30 @@ func (r *Repository) ClearSessionExecutionID(ctx context.Context, id string) err
 	return nil
 }
 
+// UpdateTaskSessionBaseCommit updates the base_commit_sha for a session.
+// This is called after agent launch to capture the HEAD commit at session start.
+func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET base_commit_sha = ?, updated_at = ? WHERE id = ?
+	`), baseCommitSHA, now, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", id)
+	}
+	return nil
+}
+
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")
 	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -473,7 +490,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -495,7 +512,7 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 func (r *Repository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -605,7 +622,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &session.AgentProfileID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
-		&session.RepositoryID, &session.BaseBranch,
+		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &workflowStepID, &reviewStatus, &isPassthrough,
@@ -802,7 +819,7 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, agent_execution_id, container_id, agent_profile_id, executor_id, executor_profile_id, environment_id,
-		       repository_id, base_branch,
+		       repository_id, base_branch, base_commit_sha,
 		       agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 		       state, error_message, metadata, started_at, completed_at, updated_at,
 		       is_primary, workflow_step_id, review_status, is_passthrough
@@ -887,7 +904,7 @@ func (r *Repository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []st
 }
 
 // GetPrimarySessionInfoByTaskIDs returns a map of task ID to primary session for the given task IDs.
-// Only returns the review_status field from the session.
+// Returns review_status, executor info, agent profile snapshot, and repository snapshot.
 func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	if len(taskIDs) == 0 {
 		return make(map[string]*models.TaskSession), nil
@@ -902,7 +919,9 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state, e.type, e.name
+		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state,
+		       ts.agent_profile_snapshot, ts.repository_snapshot,
+		       e.type, e.name
 		FROM task_sessions ts
 		LEFT JOIN executors e ON e.id = ts.executor_id
 		WHERE ts.task_id IN (%s) AND ts.is_primary = 1
@@ -920,9 +939,11 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		var reviewStatus sql.NullString
 		var executorID sql.NullString
 		var sessionState sql.NullString
+		var agentProfileSnapshotJSON sql.NullString
+		var repositorySnapshotJSON sql.NullString
 		var executorType sql.NullString
 		var executorName sql.NullString
-		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &executorType, &executorName); err != nil {
+		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
@@ -944,6 +965,16 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 			}
 			if executorName.Valid {
 				session.ExecutorSnapshot["executor_name"] = executorName.String
+			}
+		}
+		if agentProfileSnapshotJSON.Valid && agentProfileSnapshotJSON.String != "" {
+			if err := json.Unmarshal([]byte(agentProfileSnapshotJSON.String), &session.AgentProfileSnapshot); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal agent profile snapshot for task %s: %w", taskID, err)
+			}
+		}
+		if repositorySnapshotJSON.Valid && repositorySnapshotJSON.String != "" {
+			if err := json.Unmarshal([]byte(repositorySnapshotJSON.String), &session.RepositorySnapshot); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal repository snapshot for task %s: %w", taskID, err)
 			}
 		}
 		result[taskID] = session

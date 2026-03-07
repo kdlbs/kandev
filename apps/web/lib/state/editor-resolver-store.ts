@@ -15,7 +15,7 @@ const PIERRE_DIFFS: EditorProvider = "pierre-diffs";
 
 const VALID_PROVIDERS: Record<EditorContext, EditorProvider[]> = {
   "code-editor": [MONACO, "codemirror"],
-  "diff-viewer": [MONACO, PIERRE_DIFFS],
+  "diff-viewer": [MONACO, PIERRE_DIFFS], // NOTE: diff expansion not functional with Monaco
   "chat-code-block": ["shiki", MONACO, "codemirror"],
   "chat-diff": [MONACO, PIERRE_DIFFS],
   "plan-editor": ["tiptap"],

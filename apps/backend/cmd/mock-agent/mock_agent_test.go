@@ -227,3 +227,55 @@ func TestDiscoverFiles(t *testing.T) {
 	// Reset global state for other tests
 	workspaceFiles = nil
 }
+
+func TestParseResumeFromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "no flag returns empty",
+			args: []string{"mock-agent"},
+			want: "",
+		},
+		{
+			name: "separate flag and value",
+			args: []string{"mock-agent", "--resume", "sess-123"},
+			want: "sess-123",
+		},
+		{
+			name: "equals syntax",
+			args: []string{"mock-agent", "--resume=sess-456"},
+			want: "sess-456",
+		},
+		{
+			name: "flag with other args before",
+			args: []string{"mock-agent", "--model", "fast", "--resume", "sess-789"},
+			want: "sess-789",
+		},
+		{
+			name: "flag with other args after",
+			args: []string{"mock-agent", "--resume", "sess-abc", "--verbose"},
+			want: "sess-abc",
+		},
+		{
+			name: "dangling flag without value",
+			args: []string{"mock-agent", "--resume"},
+			want: "",
+		},
+		{
+			name: "flag combined with --tui",
+			args: []string{"mock-agent", "--tui", "--resume", "sess-xyz"},
+			want: "sess-xyz",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseResumeFromArgs(tt.args)
+			if got != tt.want {
+				t.Errorf("parseResumeFromArgs(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}

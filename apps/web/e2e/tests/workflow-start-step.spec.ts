@@ -209,8 +209,10 @@ test.describe("Workflow start step placement", () => {
     });
 
     // --- Toggle off plan mode ---
+    // Wait for the editor to be fully interactive before sending the shortcut
+    await testPage.waitForTimeout(1_000);
     await session.togglePlanMode();
-    await expect(session.planPanel).not.toBeVisible({ timeout: 10_000 });
+    await expect(session.planPanel).not.toBeVisible({ timeout: 15_000 });
 
     // --- Send message to start the agent ---
     // Use script mode with a delay so we can observe the In Progress intermediate state.

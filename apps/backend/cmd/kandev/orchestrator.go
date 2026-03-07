@@ -62,6 +62,7 @@ func provideOrchestrator(
 		zap.Int("agent_standalone_port", cfg.Agent.StandalonePort))
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, log)
 	taskSvc.SetExecutionStopper(orchestratorSvc)
+	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
@@ -84,6 +85,9 @@ func provideOrchestrator(
 			taskSvc:  taskSvc,
 			logger:   log,
 		})
+
+		// Wire repo cloner into executor for provider-backed repos with no local path
+		orchestratorSvc.SetRepoCloner(repoCloner, &repoLocalPathUpdater{svc: taskSvc})
 	}
 
 	return orchestratorSvc, msgCreator, nil
@@ -176,8 +180,9 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 	var repos []taskservice.TaskRepositoryInput
 	for _, r := range req.Repositories {
 		repos = append(repos, taskservice.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:   r.RepositoryID,
+			BaseBranch:     r.BaseBranch,
+			CheckoutBranch: r.CheckoutBranch,
 		})
 	}
 	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
@@ -189,6 +194,21 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+}
+
+// repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.
+type repoLocalPathUpdater struct {
+	svc *taskservice.Service
+}
+
+func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, repositoryID, localPath string) error {
+	if repositoryID == "" || localPath == "" {
+		return fmt.Errorf("UpdateRepositoryLocalPath: repositoryID and localPath must be non-empty")
+	}
+	_, err := u.svc.UpdateRepository(ctx, repositoryID, &taskservice.UpdateRepositoryRequest{
+		LocalPath: &localPath,
+	})
+	return err
 }
 
 // repositoryResolverAdapter resolves GitHub repos by cloning + finding/creating DB records.
