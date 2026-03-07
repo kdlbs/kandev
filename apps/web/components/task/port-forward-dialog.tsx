@@ -18,13 +18,8 @@ import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  listPorts,
-  startTunnel,
-  stopTunnel,
-  listTunnels,
-  type ListeningPort,
-} from "@/lib/api/domains/port-api";
+import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/port-api";
+import { useTunnelActions } from "./use-tunnel-actions";
 import { getBackendConfig } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -52,9 +47,8 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
-function CopyUrlButton({ url }: { url: string }) {
+function UrlActions({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = useCallback(() => {
     navigator.clipboard?.writeText(url);
     setCopied(true);
@@ -62,30 +56,24 @@ function CopyUrlButton({ url }: { url: string }) {
   }, [url]);
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="cursor-pointer h-7 w-7 p-0"
-          onClick={handleCopy}
-        >
-          {copied ? (
-            <IconCheck className="h-3.5 w-3.5 text-green-500" />
-          ) : (
-            <IconCopy className="h-3.5 w-3.5" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Copy URL</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function UrlActions({ url }: { url: string }) {
-  return (
     <div className="flex items-center gap-0.5">
-      <CopyUrlButton url={url} />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="cursor-pointer h-7 w-7 p-0"
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <IconCheck className="h-3.5 w-3.5 text-green-500" />
+            ) : (
+              <IconCopy className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copy URL</TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="sm" variant="ghost" className="cursor-pointer h-7 w-7 p-0" asChild>
@@ -111,75 +99,69 @@ function TunnelToggleButton({
   onStop: () => void;
   onToggleForm: () => void;
 }) {
-  if (isTunnelActive) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="cursor-pointer h-7 w-7 p-0 text-destructive hover:text-destructive"
-            onClick={onStop}
-            disabled={tunnelPending}
-          >
-            {tunnelPending ? (
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <IconPlugConnectedX className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Stop tunnel</TooltipContent>
-      </Tooltip>
-    );
-  }
+  const Icon = isTunnelActive ? IconPlugConnectedX : IconPlugConnected;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           size="sm"
           variant="ghost"
-          className="cursor-pointer h-7 w-7 p-0"
-          onClick={onToggleForm}
+          className={`cursor-pointer h-7 w-7 p-0 ${isTunnelActive ? "text-destructive hover:text-destructive" : ""}`}
+          onClick={isTunnelActive ? onStop : onToggleForm}
           disabled={tunnelPending}
         >
           {tunnelPending ? (
             <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <IconPlugConnected className="h-3.5 w-3.5" />
+            <Icon className="h-3.5 w-3.5" />
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Start tunnel</TooltipContent>
+      <TooltipContent>{isTunnelActive ? "Stop tunnel" : "Start tunnel"}</TooltipContent>
     </Tooltip>
+  );
+}
+
+function PortUrlRow({
+  label,
+  tip,
+  url,
+  variant = "outline",
+}: {
+  label: string;
+  tip: string;
+  url: string;
+  variant?: "outline" | "default";
+}) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <Badge variant={variant} className="text-[10px] px-1.5 py-0 shrink-0">
+        {label}
+      </Badge>
+      <InfoTip text={tip} />
+      <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">{url}</span>
+      <div className="shrink-0">
+        <UrlActions url={url} />
+      </div>
+    </div>
   );
 }
 
 function PortUrlRows({ proxyUrl, tunnelUrl }: { proxyUrl: string; tunnelUrl: string | null }) {
   return (
     <div className="space-y-1 overflow-hidden">
-      <div className="flex items-center gap-2 min-w-0">
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-          Proxy
-        </Badge>
-        <InfoTip text="Path-based proxy. Works for APIs but may break web apps that expect to be served at /." />
-        <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">{proxyUrl}</span>
-        <div className="shrink-0">
-          <UrlActions url={proxyUrl} />
-        </div>
-      </div>
-
+      <PortUrlRow
+        label="Proxy"
+        tip="Path-based proxy. Works for APIs but may break web apps that expect to be served at /."
+        url={proxyUrl}
+      />
       {tunnelUrl && (
-        <div className="flex items-center gap-2 min-w-0">
-          <Badge variant="default" className="text-[10px] px-1.5 py-0 shrink-0">
-            Tunnel
-          </Badge>
-          <InfoTip text="Dedicated port tunnel. App is served at /, so assets and routing work correctly." />
-          <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">{tunnelUrl}</span>
-          <div className="shrink-0">
-            <UrlActions url={tunnelUrl} />
-          </div>
-        </div>
+        <PortUrlRow
+          label="Tunnel"
+          tip="Dedicated port tunnel. App is served at /, so assets and routing work correctly."
+          url={tunnelUrl}
+          variant="default"
+        />
       )}
     </div>
   );
@@ -425,64 +407,9 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
   );
 }
 
-function useTunnelActions(
-  sessionId: string,
-  setActiveTunnels: (updater: (prev: Map<number, number>) => Map<number, number>) => void,
-) {
-  const [pendingTunnels, setPendingTunnels] = useState<Set<number>>(new Set());
-
-  const handleTunnelStart = useCallback(
-    async (port: number, requestedPort?: number) => {
-      setPendingTunnels((prev) => new Set(prev).add(port));
-      try {
-        const tunnelPort = await startTunnel(sessionId, port, requestedPort);
-        setActiveTunnels((prev) => new Map(prev).set(port, tunnelPort));
-        toast.success(`Tunnel started on port ${tunnelPort}`);
-      } catch (err) {
-        toast.error(
-          `Failed to start tunnel: ${err instanceof Error ? err.message : "unknown error"}`,
-        );
-      } finally {
-        setPendingTunnels((prev) => {
-          const next = new Set(prev);
-          next.delete(port);
-          return next;
-        });
-      }
-    },
-    [sessionId, setActiveTunnels],
-  );
-
-  const handleTunnelStop = useCallback(
-    async (port: number) => {
-      setPendingTunnels((prev) => new Set(prev).add(port));
-      try {
-        await stopTunnel(sessionId, port);
-        setActiveTunnels((prev) => {
-          const next = new Map(prev);
-          next.delete(port);
-          return next;
-        });
-        toast.success("Tunnel stopped");
-      } catch (err) {
-        toast.error(
-          `Failed to stop tunnel: ${err instanceof Error ? err.message : "unknown error"}`,
-        );
-      } finally {
-        setPendingTunnels((prev) => {
-          const next = new Set(prev);
-          next.delete(port);
-          return next;
-        });
-      }
-    },
-    [sessionId, setActiveTunnels],
-  );
-
-  return { pendingTunnels, handleTunnelStart, handleTunnelStop };
-}
-
-function PortForwardDialogContent({
+// Inner component that lives inside DialogContent's portal. It remounts each
+// time the dialog opens, so useEffect fires reliably for auto-refresh.
+function PortForwardDialogInner({
   sessionId,
   activeTunnels,
   setActiveTunnels,
@@ -499,13 +426,6 @@ function PortForwardDialogContent({
     sessionId,
     setActiveTunnels,
   );
-
-  // Reset session-scoped state when sessionId changes
-  useEffect(() => {
-    setDetectedPorts([]);
-    setManualPorts([]);
-    setLoaded(false);
-  }, [sessionId]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -528,6 +448,11 @@ function PortForwardDialogContent({
     }
   }, [sessionId, activeTunnels]);
 
+  // Auto-refresh on mount (i.e., each time the dialog opens)
+  useEffect(() => {
+    refresh();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleAddManual = useCallback(
     (port: number) => {
       if (manualPorts.includes(port)) {
@@ -540,11 +465,7 @@ function PortForwardDialogContent({
   );
 
   return (
-    <DialogContent
-      data-testid="port-forward-dialog"
-      className="sm:max-w-2xl overflow-hidden"
-      onOpenAutoFocus={() => !loaded && refresh()}
-    >
+    <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconNetwork className="h-5 w-5" />
@@ -566,6 +487,26 @@ function PortForwardDialogContent({
         />
         <ManualPortInput onAdd={handleAddManual} />
       </div>
+    </>
+  );
+}
+
+function PortForwardDialogContent({
+  sessionId,
+  activeTunnels,
+  setActiveTunnels,
+}: {
+  sessionId: string;
+  activeTunnels: Map<number, number>;
+  setActiveTunnels: (updater: (prev: Map<number, number>) => Map<number, number>) => void;
+}) {
+  return (
+    <DialogContent data-testid="port-forward-dialog" className="sm:max-w-2xl overflow-hidden">
+      <PortForwardDialogInner
+        sessionId={sessionId}
+        activeTunnels={activeTunnels}
+        setActiveTunnels={setActiveTunnels}
+      />
     </DialogContent>
   );
 }
