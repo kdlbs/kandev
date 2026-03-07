@@ -31,7 +31,7 @@ type Config struct {
 
 // ResolvedDataDir returns the base data directory for Kandev.
 // Config.DataDir is populated by Viper from the config file or KANDEV_DATA_DIR env var.
-// If empty, falls back to ~/.kandev.
+// If empty, falls back to ~/.kandev/data.
 func (c *Config) ResolvedDataDir() string {
 	if c.DataDir != "" {
 		if strings.HasPrefix(c.DataDir, "~/") {
@@ -43,9 +43,9 @@ func (c *Config) ResolvedDataDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".kandev"
+		return filepath.Join(".kandev", "data")
 	}
-	return filepath.Join(home, ".kandev")
+	return filepath.Join(home, ".kandev", "data")
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -198,7 +198,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
 
-	// DataDir default — empty means resolve from KANDEV_DATA_DIR env or ~/.kandev
+	// DataDir default — empty means resolve from KANDEV_DATA_DIR env or ~/.kandev/data
 	v.SetDefault("dataDir", "")
 
 	// Database defaults

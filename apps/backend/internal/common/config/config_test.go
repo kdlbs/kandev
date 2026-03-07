@@ -19,7 +19,7 @@ func TestResolvedDataDir_FallbackToHome(t *testing.T) {
 	if err != nil {
 		t.Skip("cannot determine home directory")
 	}
-	want := filepath.Join(home, ".kandev")
+	want := filepath.Join(home, ".kandev", "data")
 	if got := cfg.ResolvedDataDir(); got != want {
 		t.Errorf("ResolvedDataDir() = %q, want %q", got, want)
 	}
