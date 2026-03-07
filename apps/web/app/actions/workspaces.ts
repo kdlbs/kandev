@@ -272,6 +272,8 @@ type BackendTemplateStep = {
   color?: string;
   prompt?: string;
   events?: StepEvents;
+  is_start_step?: boolean;
+  show_in_command_panel?: boolean;
 };
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
@@ -287,6 +289,8 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     color: step.color,
     prompt: step.prompt,
     events: step.events,
+    is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
   }));
   return {
     ...template,
