@@ -449,6 +449,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 			Prompt:                sp.Prompt,
 			Events:                models.ConvertPositionToStepID(sp.Events, posToID),
 			IsStartStep:           sp.IsStartStep,
+			ShowInCommandPanel:    sp.ShowInCommandPanel,
 			AllowManualMove:       sp.AllowManualMove,
 			AutoArchiveAfterHours: sp.AutoArchiveAfterHours,
 		}

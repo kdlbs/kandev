@@ -82,6 +82,7 @@ export type KanbanUpdatePayload = {
       on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
+    show_in_command_panel?: boolean;
   }>;
   tasks: Array<{
     id: string;
@@ -364,6 +365,7 @@ export type UserSettingsUpdatedPayload = {
   lsp_auto_install_languages?: string[];
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
+  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   updated_at?: string;
 };
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -15,8 +16,6 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { CommandPanelView } from "@/components/command-panel-footer";
-
-const MODE_SEARCH_TASKS: CommandPanelMode = "search-tasks";
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
@@ -79,7 +78,7 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
     fileDebounceRef,
   } = opts;
   useEffect(() => {
-    if (mode !== "commands" || !search.trim() || !activeSessionId) {
+    if (mode !== "search-files" || !search.trim() || !activeSessionId) {
       setFileResults([]);
       setIsSearchingFiles(false);
       return;
@@ -121,11 +120,144 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
   ]);
 }
 
+const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+
+function resolveVisibleStepIds(steps: { id: string; show_in_command_panel?: boolean }[]) {
+  if (steps.length === 0) return null; // no steps loaded yet — don't filter
+  return new Set(steps.filter((s) => s.show_in_command_panel !== false).map((s) => s.id));
+}
+
+type InlineTaskSearchOptions = {
+  mode: CommandPanelMode;
+  search: string;
+  open: boolean;
+  workspaceId: string | null;
+  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
+  setTaskResults: (tasks: Task[]) => void;
+  setIsSearching: (searching: boolean) => void;
+};
+
+function useStepMaps(steps: InlineTaskSearchOptions["steps"]) {
+  const visibleStepIds = useMemo(() => resolveVisibleStepIds(steps), [steps]);
+  const stepPositionMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const step of steps) map.set(step.id, step.position);
+    return map;
+  }, [steps]);
+  return { visibleStepIds, stepPositionMap };
+}
+
+function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
+  const { mode, search, open, workspaceId, steps, setTaskResults, setIsSearching } = opts;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const { visibleStepIds, stepPositionMap } = useStepMaps(steps);
+
+  useEffect(() => {
+    if (mode !== "commands") return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+
+    // No search: load active tasks (excluding backlog + done steps)
+    if (!search.trim()) {
+      if (!open || !workspaceId) {
+        setTaskResults([]);
+        setIsSearching(false);
+        return;
+      }
+      setIsSearching(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      listTasksByWorkspace(
+        workspaceId,
+        { page: 1, pageSize: 20 },
+        { init: { signal: controller.signal } },
+      )
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          const tasks = (res.tasks ?? []).filter(
+            (t) =>
+              (!visibleStepIds || visibleStepIds.has(t.workflow_step_id)) &&
+              !ARCHIVED_STATES.has(t.state),
+          );
+          tasks.sort(
+            (a, b) =>
+              (stepPositionMap.get(a.workflow_step_id) ?? 99) -
+              (stepPositionMap.get(b.workflow_step_id) ?? 99),
+          );
+          setTaskResults(tasks);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setTaskResults([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+      return () => {
+        controller.abort();
+      };
+    }
+
+    // Search with < 2 chars: clear results
+    if (search.trim().length < 2) {
+      setTaskResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    // Search: query API including archived
+    setIsSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      if (!workspaceId) {
+        setIsSearching(false);
+        return;
+      }
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const res = await listTasksByWorkspace(
+          workspaceId,
+          { query: search.trim(), page: 1, pageSize: 5, includeArchived: true },
+          { init: { signal: controller.signal } },
+        );
+        if (!controller.signal.aborted) {
+          const tasks = res.tasks ?? [];
+          tasks.sort((a, b) => {
+            const aArchived = ARCHIVED_STATES.has(a.state) ? 1 : 0;
+            const bArchived = ARCHIVED_STATES.has(b.state) ? 1 : 0;
+            return aArchived - bArchived;
+          });
+          setTaskResults(tasks);
+        }
+      } catch {
+        if (!controller.signal.aborted) setTaskResults([]);
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, [
+    mode,
+    search,
+    open,
+    workspaceId,
+    visibleStepIds,
+    stepPositionMap,
+    setTaskResults,
+    setIsSearching,
+  ]);
+}
+
 function useCommandPanelEffects(
   open: boolean,
   state: ReturnType<typeof useCommandPanelState>,
   workspaceId: string | null,
   activeSessionId: string | null,
+  steps: { id: string; position: number; show_in_command_panel?: boolean }[],
 ) {
   const {
     mode,
@@ -139,7 +271,7 @@ function useCommandPanelEffects(
     setIsSearchingFiles,
     setSelectedValue,
   } = state;
-  const { debounceRef, abortRef, fileDebounceRef } = useCommandPanelEffectRefs();
+  const { fileDebounceRef } = useCommandPanelEffectRefs();
   useEffect(() => {
     if (!open) {
       const t = setTimeout(() => {
@@ -153,41 +285,17 @@ function useCommandPanelEffects(
       return () => clearTimeout(t);
     }
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
-  useEffect(() => {
-    if (mode !== MODE_SEARCH_TASKS) return;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    abortRef.current?.abort();
-    if (!search.trim()) {
-      setTaskResults([]);
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
-    debounceRef.current = setTimeout(async () => {
-      if (!workspaceId) {
-        setIsSearching(false);
-        return;
-      }
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const res = await listTasksByWorkspace(
-          workspaceId,
-          { query: search.trim(), page: 1, pageSize: 10 },
-          { init: { signal: controller.signal } },
-        );
-        if (!controller.signal.aborted) setTaskResults(res.tasks ?? []);
-      } catch {
-        if (!controller.signal.aborted) setTaskResults([]);
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      abortRef.current?.abort();
-    };
-  }, [abortRef, debounceRef, mode, search, setIsSearching, setTaskResults, workspaceId]);
+
+  useInlineTaskSearchEffect({
+    mode,
+    search,
+    open,
+    workspaceId,
+    steps,
+    setTaskResults,
+    setIsSearching,
+  });
+
   useFileSearchEffect({
     mode,
     search,
@@ -204,6 +312,7 @@ function useCommandPanelHandlers(
   setOpen: (open: boolean) => void,
   commands: CommandItemType[],
   kanbanSteps: { id: string; title: string; color: string }[],
+  repositories: Array<{ id: string; local_path: string }>,
 ) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
   const router = useRouter();
@@ -227,6 +336,12 @@ function useCommandPanelHandlers(
     for (const step of kanbanSteps) map.set(step.id, { name: step.title, color: step.color });
     return map;
   }, [kanbanSteps]);
+
+  const repoMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const repo of repositories) map.set(repo.id, repo.local_path);
+    return map;
+  }, [repositories]);
 
   const handleSelect = useCallback(
     (cmd: CommandItemType) => {
@@ -288,6 +403,7 @@ function useCommandPanelHandlers(
   return {
     grouped,
     stepMap,
+    repoMap,
     handleSelect,
     handleTaskSelect,
     handleFileSelect,
@@ -302,6 +418,8 @@ export function CommandPanel() {
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
 
   const state = useCommandPanelState();
   const {
@@ -317,26 +435,44 @@ export function CommandPanel() {
     setSearch,
   } = state;
 
-  useCommandPanelEffects(open, state, workspaceId, activeSessionId);
+  useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
 
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
   }, [open]);
-  const toggle = useCallback(() => setOpen(!openRef.current), [setOpen]);
-  useKeyboardShortcut(SHORTCUTS.SEARCH, toggle);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggle);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggle);
+
+  const toggleCommands = useCallback(() => setOpen(!openRef.current), [setOpen]);
+
+  const openFileSearch = useCallback(() => {
+    if (openRef.current && state.mode === "search-files") {
+      setOpen(false);
+    } else {
+      state.setMode("search-files");
+      state.setSearch("");
+      setOpen(true);
+    }
+  }, [setOpen, state]);
+
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const searchShortcut = getShortcut("SEARCH", keyboardShortcuts);
+  const fileSearchShortcut = getShortcut("FILE_SEARCH", keyboardShortcuts);
+
+  useKeyboardShortcut(searchShortcut, toggleCommands);
+  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL, toggleCommands);
+  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggleCommands);
+  useKeyboardShortcut(fileSearchShortcut, openFileSearch);
 
   const {
     grouped,
     stepMap,
+    repoMap,
     handleSelect,
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
     goBack,
-  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps);
+  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
 
   return (
     <CommandPanelView
@@ -359,6 +495,7 @@ export function CommandPanel() {
       isSearching={isSearching}
       taskResults={taskResults}
       stepMap={stepMap}
+      repoMap={repoMap}
       handleTaskSelect={handleTaskSelect}
     />
   );

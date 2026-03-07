@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconArrowRight, IconLoader2, IconSearch } from "@tabler/icons-react";
+import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
   CommandDialog,
@@ -16,11 +16,26 @@ import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { formatShortcut } from "@/lib/keyboard/utils";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-const MODE_SEARCH_TASKS: CommandPanelMode = "search-tasks";
+const MODE_COMMANDS: CommandPanelMode = "commands";
+const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+
+const STEP_COLOR_MAP: Record<string, string> = {
+  "bg-slate-500": "#64748b",
+  "bg-red-500": "#ef4444",
+  "bg-orange-500": "#f97316",
+  "bg-yellow-500": "#eab308",
+  "bg-green-500": "#22c55e",
+  "bg-cyan-500": "#06b6d4",
+  "bg-blue-500": "#3b82f6",
+  "bg-indigo-500": "#6366f1",
+  "bg-purple-500": "#a855f7",
+};
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
@@ -54,38 +69,52 @@ function CommandItemRow({
 type TaskResultItemProps = {
   task: Task;
   stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
   onSelect: (task: Task) => void;
 };
 
-function TaskResultItem({ task, stepMap, onSelect }: TaskResultItemProps) {
+function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
+  const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
+  const rawPath =
+    task.primary_working_directory ??
+    (task.repositories?.[0] ? repoMap.get(task.repositories[0].repository_id) : undefined);
+  const workDir = rawPath ? getFileName(rawPath) : undefined;
+  const details: string[] = [];
+  if (workDir) details.push(workDir);
+  if (task.primary_agent_name) details.push(task.primary_agent_name);
+  if (task.updated_at) {
+    details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
+  }
   return (
     <CommandItem
       key={task.id}
-      value={task.id}
+      value={`__task:${task.id} ${task.title}`}
       onSelect={() => onSelect(task)}
       className={isArchived ? "opacity-60" : ""}
+      forceMount
     >
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <div className="flex items-center gap-2">
-          <IconSearch className="size-3 shrink-0 text-muted-foreground" />
-          <span className="truncate font-medium">{task.title}</span>
-          {step && (
-            <Badge variant="secondary" className="text-[0.6rem] shrink-0">
-              {step.name}
-            </Badge>
-          )}
-          {isArchived && (
-            <Badge variant="outline" className="text-[0.6rem] shrink-0 opacity-70">
-              {task.state}
-            </Badge>
-          )}
-        </div>
-        {task.updated_at && (
-          <div className="flex items-center gap-1.5 text-[0.6rem] text-muted-foreground pl-5">
-            <span>{formatDistanceToNow(new Date(task.updated_at), { addSuffix: true })}</span>
-          </div>
+      <div className="flex items-center gap-2 min-w-0 w-full">
+        {isArchived ? (
+          <IconArchive className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <IconHammer className="size-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="truncate font-medium">{task.title}</span>
+        {step && (
+          <Badge
+            variant="secondary"
+            className="text-[0.6rem] shrink-0"
+            style={stepHex ? { backgroundColor: stepHex + "22", color: stepHex } : undefined}
+          >
+            {step.name}
+          </Badge>
+        )}
+        {details.length > 0 && (
+          <span className="ml-auto text-[0.6rem] text-muted-foreground truncate shrink-0">
+            {details.join(" · ")}
+          </span>
         )}
       </div>
     </CommandItem>
@@ -97,7 +126,11 @@ type CommandsListContentProps = {
   grouped: [string, CommandItemType[]][];
   search: string;
   onSelect: (cmd: CommandItemType) => void;
-  hasFileResults: boolean;
+  taskResults: Task[];
+  isSearching: boolean;
+  stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
+  onTaskSelect: (task: Task) => void;
 };
 
 function CommandsListContent({
@@ -105,13 +138,38 @@ function CommandsListContent({
   grouped,
   search,
   onSelect,
-  hasFileResults,
+  taskResults,
+  isSearching,
+  stepMap,
+  repoMap,
+  onTaskSelect,
 }: CommandsListContentProps) {
+  const hasInlineResults = taskResults.length > 0 || isSearching;
   return (
     <>
-      {!hasFileResults && <CommandEmpty>No commands found.</CommandEmpty>}
+      {!hasInlineResults && !isSearching && <CommandEmpty>No commands found.</CommandEmpty>}
+      {isSearching && taskResults.length === 0 && (
+        <CommandGroup heading="Active Tasks" forceMount>
+          <div className="flex items-center justify-center py-3">
+            <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
+          </div>
+        </CommandGroup>
+      )}
+      {taskResults.length > 0 && (
+        <CommandGroup heading={search.trim() ? "Tasks" : "Active Tasks"} forceMount>
+          {taskResults.map((task) => (
+            <TaskResultItem
+              key={task.id}
+              task={task}
+              stepMap={stepMap}
+              repoMap={repoMap}
+              onSelect={onTaskSelect}
+            />
+          ))}
+        </CommandGroup>
+      )}
       {search.trim() ? (
-        <CommandGroup>
+        <CommandGroup heading="Commands">
           {commands.map((cmd) => (
             <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
           ))}
@@ -129,56 +187,23 @@ function CommandsListContent({
   );
 }
 
-type SearchTasksContentProps = {
+type FileSearchContentProps = {
+  files: string[];
   isSearching: boolean;
   search: string;
-  taskResults: Task[];
-  stepMap: Map<string, { name: string; color: string }>;
-  onTaskSelect: (task: Task) => void;
+  onSelect: (path: string) => void;
 };
 
-function SearchTasksContent({
-  isSearching,
-  search,
-  taskResults,
-  stepMap,
-  onTaskSelect,
-}: SearchTasksContentProps) {
-  if (isSearching)
+function FileSearchContent({ files, isSearching, search, onSelect }: FileSearchContentProps) {
+  if (isSearching && files.length === 0) {
     return (
       <div className="flex items-center justify-center py-6">
         <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
       </div>
     );
-  if (search.trim() && taskResults.length === 0)
-    return <CommandEmpty>No tasks found.</CommandEmpty>;
-  if (!search.trim()) return <CommandEmpty>Type to search tasks...</CommandEmpty>;
-  return (
-    <CommandGroup heading="Results">
-      {taskResults.map((task) => (
-        <TaskResultItem key={task.id} task={task} stepMap={stepMap} onSelect={onTaskSelect} />
-      ))}
-    </CommandGroup>
-  );
-}
-
-type FileSearchResultsProps = {
-  files: string[];
-  isSearching: boolean;
-  onSelect: (path: string) => void;
-};
-
-function FileSearchResults({ files, isSearching, onSelect }: FileSearchResultsProps) {
-  if (isSearching && files.length === 0) {
-    return (
-      <CommandGroup heading="Files" forceMount>
-        <div className="flex items-center justify-center py-3">
-          <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
-        </div>
-      </CommandGroup>
-    );
   }
-  if (files.length === 0) return null;
+  if (search.trim() && files.length === 0) return <CommandEmpty>No files found.</CommandEmpty>;
+  if (!search.trim()) return <CommandEmpty>Type to search files...</CommandEmpty>;
   return (
     <CommandGroup heading="Files" forceMount>
       {files.map((filePath) => {
@@ -204,31 +229,46 @@ function FileSearchResults({ files, isSearching, onSelect }: FileSearchResultsPr
 
 function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
   if (mode === "input") return inputCommand?.inputPlaceholder ?? "Enter value...";
-  if (mode === MODE_SEARCH_TASKS) return "Search for tasks...";
+  if (mode === "search-tasks") return "Search for tasks...";
+  if (mode === MODE_SEARCH_FILES) return "Search for files...";
   return "Type a command...";
 }
 
 function getEnterLabel(mode: CommandPanelMode) {
   if (mode === "input") return "Confirm";
-  if (mode === MODE_SEARCH_TASKS) return "Open";
+  if (mode === "search-tasks" || mode === MODE_SEARCH_FILES) return "Open";
   return "Select";
 }
 
+function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
+  if (mode === "input") return inputCommand?.label;
+  if (mode === "search-tasks") return "Tasks";
+  if (mode === MODE_SEARCH_FILES) return "Files";
+  return null;
+}
+
 function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
+  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   return (
     <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
-      {mode === "commands" && (
-        <KbdGroup>
-          <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd>
-          <span>Navigate</span>
-        </KbdGroup>
+      {mode === MODE_COMMANDS && (
+        <>
+          <KbdGroup>
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd>
+            <span>Navigate</span>
+          </KbdGroup>
+          <KbdGroup>
+            <Kbd>{formatShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts))}</Kbd>
+            <span>File Search</span>
+          </KbdGroup>
+        </>
       )}
       <KbdGroup>
         <Kbd>↵</Kbd>
         <span>{getEnterLabel(mode)}</span>
       </KbdGroup>
-      {mode !== "commands" && (
+      {mode !== MODE_COMMANDS && (
         <KbdGroup>
           <Kbd>⌫</Kbd>
           <span>Back</span>
@@ -262,6 +302,7 @@ export type CommandPanelViewProps = {
   isSearching: boolean;
   taskResults: Task[];
   stepMap: Map<string, { name: string; color: string }>;
+  repoMap: Map<string, string>;
   handleTaskSelect: (task: Task) => void;
 };
 
@@ -285,8 +326,10 @@ export function CommandPanelView({
   isSearching,
   taskResults,
   stepMap,
+  repoMap,
   handleTaskSelect,
 }: CommandPanelViewProps) {
+  const modeLabel = getModeLabel(mode, inputCommand);
   return (
     <CommandDialog
       open={open}
@@ -294,19 +337,20 @@ export function CommandPanelView({
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command
-        shouldFilter={mode === "commands"}
+        shouldFilter={mode === MODE_COMMANDS}
         loop
         value={selectedValue}
         onValueChange={setSelectedValue}
       >
         <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
-          {mode !== "commands" && (
+          {mode !== MODE_COMMANDS && (
             <button
               onClick={goBack}
+              tabIndex={-1}
               className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <span>←</span>
-              <span>{mode === "input" ? inputCommand?.label : "Tasks"}</span>
+              <span>{modeLabel}</span>
               <span className="text-muted-foreground/50">›</span>
             </button>
           )}
@@ -318,31 +362,25 @@ export function CommandPanelView({
           />
         </div>
         <CommandList>
-          {mode === "commands" && (
-            <>
-              {search.trim() && (
-                <FileSearchResults
-                  files={fileResults}
-                  isSearching={isSearchingFiles}
-                  onSelect={handleFileSelect}
-                />
-              )}
-              <CommandsListContent
-                commands={commands}
-                grouped={grouped}
-                search={search}
-                onSelect={handleSelect}
-                hasFileResults={fileResults.length > 0 || isSearchingFiles}
-              />
-            </>
-          )}
-          {mode === MODE_SEARCH_TASKS && (
-            <SearchTasksContent
-              isSearching={isSearching}
+          {mode === MODE_COMMANDS && (
+            <CommandsListContent
+              commands={commands}
+              grouped={grouped}
               search={search}
+              onSelect={handleSelect}
               taskResults={taskResults}
+              isSearching={isSearching}
               stepMap={stepMap}
+              repoMap={repoMap}
               onTaskSelect={handleTaskSelect}
+            />
+          )}
+          {mode === MODE_SEARCH_FILES && (
+            <FileSearchContent
+              files={fileResults}
+              isSearching={isSearchingFiles}
+              search={search}
+              onSelect={handleFileSelect}
             />
           )}
           {mode === "input" &&

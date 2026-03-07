@@ -18,6 +18,7 @@ export type KanbanState = {
     allow_manual_move?: boolean;
     prompt?: string;
     is_start_step?: boolean;
+    show_in_command_panel?: boolean;
   }>;
   tasks: Array<{
     id: string;

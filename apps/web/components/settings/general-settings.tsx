@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTheme } from "next-themes";
-import { IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
+import { IconCommand, IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
+import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { getBackendConfig } from "@/lib/config";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
@@ -159,6 +160,16 @@ export function GeneralSettings() {
         description="Configure chat input behavior"
       >
         <ChatSubmitKeyCard />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconCommand className="h-5 w-5" />}
+        title="Keyboard Shortcuts"
+        description="Customize keyboard shortcuts for the command panel"
+      >
+        <KeyboardShortcutsCard />
       </SettingsSection>
 
       <Separator />

@@ -60,6 +60,7 @@ func (r *Repository) initSchema() error {
 		events TEXT,
 		allow_manual_move INTEGER DEFAULT 1,
 		is_start_step INTEGER DEFAULT 0,
+		show_in_command_panel INTEGER DEFAULT 1,
 		auto_archive_after_hours INTEGER DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -95,6 +96,9 @@ func (r *Repository) initSchema() error {
 	if _, err := r.db.Exec(historySchema); err != nil {
 		return fmt.Errorf("failed to create session_step_history table: %w", err)
 	}
+
+	// Add show_in_command_panel column if it doesn't exist (idempotent migration)
+	_, _ = r.db.Exec(`ALTER TABLE workflow_steps ADD COLUMN show_in_command_panel INTEGER DEFAULT 1`)
 
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
@@ -156,12 +160,12 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 			if _, err := r.db.Exec(r.db.Rebind(`
 				INSERT INTO workflow_steps (
 					id, workflow_id, name, position, color,
-					prompt, events, allow_manual_move, is_start_step, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					prompt, events, allow_manual_move, is_start_step, show_in_command_panel, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), now, now,
 			); err != nil {
 				return err
 			}
@@ -230,12 +234,13 @@ func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate
 				AllowManualMove: true,
 			},
 			{
-				ID:          "plan",
-				Name:        "Plan",
-				Position:    1,
-				Color:       "bg-purple-500",
-				IsStartStep: true,
-				Prompt:      "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
+				ID:                 "plan",
+				Name:               "Plan",
+				Position:           1,
+				Color:              "bg-purple-500",
+				IsStartStep:        true,
+				ShowInCommandPanel: true,
+				Prompt:             "[PLANNING PHASE]\nAnalyze this task and create a detailed implementation plan.\nDo NOT make any code changes yet - only analyze and plan.\n\nBefore creating the plan, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nCreate a plan that includes:\n1. Understanding of the requirements\n2. Files that need to be modified or created\n3. Step-by-step implementation approach\n4. Potential risks or considerations\n\nWhen including diagrams in your plan (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterEnablePlanMode},
@@ -245,11 +250,12 @@ func (r *Repository) getStandardTemplate(now time.Time) *models.WorkflowTemplate
 				AllowManualMove: true,
 			},
 			{
-				ID:       "implementation",
-				Name:     "Implementation",
-				Position: 2,
-				Color:    "bg-blue-500",
-				Prompt:   "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.\n\n{{task_prompt}}",
+				ID:                 "implementation",
+				Name:               "Implementation",
+				Position:           2,
+				Color:              "bg-blue-500",
+				ShowInCommandPanel: true,
+				Prompt:             "[IMPLEMENTATION PHASE]\nBefore starting implementation, retrieve the task plan using get_task_plan_kandev with the task_id from the session context.\nReview the plan carefully, including any edits the user may have made.\nAcknowledge the plan and any user modifications before proceeding.\n\nThen implement the task following the plan step-by-step.\nYou can update the plan during implementation using update_task_plan_kandev if needed.\n\n{{task_prompt}}",
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterAutoStartAgent},
@@ -291,12 +297,13 @@ func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemp
 				AllowManualMove: true,
 			},
 			{
-				ID:          "planning",
-				Name:        "Planning",
-				Position:    1,
-				Color:       "bg-purple-500",
-				IsStartStep: true,
-				Prompt:      "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
+				ID:                 "planning",
+				Name:               "Planning",
+				Position:           1,
+				Color:              "bg-purple-500",
+				IsStartStep:        true,
+				ShowInCommandPanel: true,
+				Prompt:             "[ARCHITECTURE PHASE]\nAnalyze and design the architecture for this task.\n\nBefore creating the design, ask the user clarifying questions if anything is unclear or ambiguous about the requirements. Use the ask_user_question_kandev tool to get answers before proceeding.\n\nWhen including diagrams in your design (architecture, sequence, flowcharts, etc.), always use mermaid syntax in code blocks.\n\nIMPORTANT: Save your design using the create_task_plan_kandev MCP tool with the task_id provided in the session context.\nAfter saving the plan, STOP and wait for user review. The user will review your design in the UI and may edit it.\nDo not create any other files during this phase - only use the MCP tool to save the plan.\n\n{{task_prompt}}",
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterEnablePlanMode},
@@ -310,10 +317,11 @@ func (r *Repository) getArchitectureTemplate(now time.Time) *models.WorkflowTemp
 				AllowManualMove: true,
 			},
 			{
-				ID:       "review",
-				Name:     "Review",
-				Position: 2,
-				Color:    "bg-yellow-500",
+				ID:                 "review",
+				Name:               "Review",
+				Position:           2,
+				Color:              "bg-yellow-500",
+				ShowInCommandPanel: true,
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterEnablePlanMode},
@@ -362,10 +370,11 @@ func (r *Repository) getKanbanTemplate(now time.Time) *models.WorkflowTemplate {
 				AllowManualMove: true,
 			},
 			{
-				ID:       "in-progress",
-				Name:     "In Progress",
-				Position: 1,
-				Color:    "bg-blue-500",
+				ID:                 "in-progress",
+				Name:               "In Progress",
+				Position:           1,
+				Color:              "bg-blue-500",
+				ShowInCommandPanel: true,
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterAutoStartAgent},
@@ -378,10 +387,11 @@ func (r *Repository) getKanbanTemplate(now time.Time) *models.WorkflowTemplate {
 				IsStartStep:     true,
 			},
 			{
-				ID:       "review",
-				Name:     "Review",
-				Position: 2,
-				Color:    "bg-yellow-500",
+				ID:                 "review",
+				Name:               "Review",
+				Position:           2,
+				Color:              "bg-yellow-500",
+				ShowInCommandPanel: true,
 				Events: models.StepEvents{
 					OnTurnStart: []models.OnTurnStartAction{
 						{Type: models.OnTurnStartMoveToPrevious},
@@ -429,11 +439,12 @@ func (r *Repository) getPRReviewTemplate(now time.Time) *models.WorkflowTemplate
 				AllowManualMove: true,
 			},
 			{
-				ID:       "review",
-				Name:     "Review",
-				Position: 1,
-				Color:    "bg-yellow-500",
-				Prompt:   "Please review the changed files in the current git worktree.\n\nSTEP 1: Determine what to review\n- First, check if there are any uncommitted changes (dirty working directory)\n- If there are uncommitted/staged changes: review those files\n- If the working directory is clean: review the commits that have diverged from the master/main branch\n\nSTEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.\n\nRules:\n- Each section is OPTIONAL — only include it if you have findings for that category\n- If a section has no findings, omit it entirely\n- Format each finding as: filename:line_number - Description\n- Be specific and reference exact line numbers\n- Keep descriptions concise but actionable\n\n{{task_prompt}}",
+				ID:                 "review",
+				Name:               "Review",
+				Position:           1,
+				Color:              "bg-yellow-500",
+				ShowInCommandPanel: true,
+				Prompt:             "Please review the changed files in the current git worktree.\n\nSTEP 1: Determine what to review\n- First, check if there are any uncommitted changes (dirty working directory)\n- If there are uncommitted/staged changes: review those files\n- If the working directory is clean: review the commits that have diverged from the master/main branch\n\nSTEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.\n\nRules:\n- Each section is OPTIONAL — only include it if you have findings for that category\n- If a section has no findings, omit it entirely\n- Format each finding as: filename:line_number - Description\n- Be specific and reference exact line numbers\n- Keep descriptions concise but actionable\n\n{{task_prompt}}",
 				Events: models.StepEvents{
 					OnEnter: []models.OnEnterAction{
 						{Type: models.OnEnterAutoStartAgent},
@@ -627,11 +638,11 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, auto_archive_after_hours, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -641,12 +652,12 @@ func (r *Repository) scanStep(row interface {
 	Scan(dest ...interface{}) error
 }) (*models.WorkflowStep, error) {
 	step := &models.WorkflowStep{}
-	var allowManualMove, isStartStep int
+	var allowManualMove, isStartStep, showInCommandPanel int
 	var autoArchiveAfterHours sql.NullInt64
 	var color, prompt, eventsJSON sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &autoArchiveAfterHours, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -654,6 +665,7 @@ func (r *Repository) scanStep(row interface {
 
 	step.AllowManualMove = allowManualMove == 1
 	step.IsStartStep = isStartStep == 1
+	step.ShowInCommandPanel = showInCommandPanel == 1
 	if autoArchiveAfterHours.Valid {
 		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
 	}
@@ -672,7 +684,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, auto_archive_after_hours, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -704,11 +716,11 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, auto_archive_after_hours = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -811,7 +823,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.auto_archive_after_hours, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

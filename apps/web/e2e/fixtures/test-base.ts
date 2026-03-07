@@ -89,6 +89,7 @@ export const test = backendFixture.extend<
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      keyboard_shortcuts: {},
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,

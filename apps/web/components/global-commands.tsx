@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
-  IconSearch,
   IconHome,
   IconList,
   IconSettings,
@@ -24,15 +23,6 @@ type PushFn = ReturnType<typeof useRouter>["push"];
 
 function buildNavigationCommands(push: PushFn): CommandItem[] {
   return [
-    {
-      id: "search-tasks",
-      label: "Search Tasks",
-      group: "Search",
-      icon: <IconSearch className="size-3.5" />,
-      keywords: ["find", "search", "task"],
-      enterMode: "search-tasks",
-      priority: 50,
-    },
     {
       id: "nav-home",
       label: "Go to Home",

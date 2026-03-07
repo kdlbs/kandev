@@ -37,6 +37,7 @@ export const defaultSettingsState: SettingsSliceState = {
     lspServerConfigs: {},
     savedLayouts: [],
     defaultUtilityAgentId: null,
+    keyboardShortcuts: {},
     loaded: false,
   },
 };

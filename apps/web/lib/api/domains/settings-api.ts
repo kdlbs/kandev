@@ -45,6 +45,7 @@ export async function updateUserSettings(
     saved_layouts?: SavedLayout[];
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   },
   options?: ApiRequestOptions,
 ) {

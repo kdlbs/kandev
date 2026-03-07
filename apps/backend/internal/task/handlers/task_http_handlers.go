@@ -113,6 +113,8 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			si.executorID,
 			si.executorType,
 			si.executorName,
+			si.agentName,
+			si.workingDirectory,
 			si.sessionState,
 		))
 	}
@@ -120,11 +122,13 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 }
 
 type sessionInfoFields struct {
-	reviewStatus *string
-	sessionState *string
-	executorID   *string
-	executorType *string
-	executorName *string
+	reviewStatus     *string
+	sessionState     *string
+	executorID       *string
+	executorType     *string
+	executorName     *string
+	agentName        *string
+	workingDirectory *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -147,6 +151,16 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		}
 		if n, ok := info.ExecutorSnapshot["executor_name"].(string); ok && n != "" {
 			si.executorName = &n
+		}
+	}
+	if info.AgentProfileSnapshot != nil {
+		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
+			si.agentName = &name
+		}
+	}
+	if info.RepositorySnapshot != nil {
+		if path, ok := info.RepositorySnapshot["path"].(string); ok && path != "" {
+			si.workingDirectory = &path
 		}
 	}
 	return si

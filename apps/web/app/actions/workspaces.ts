@@ -272,6 +272,8 @@ type BackendTemplateStep = {
   color?: string;
   prompt?: string;
   events?: StepEvents;
+  is_start_step?: boolean;
+  show_in_command_panel?: boolean;
 };
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
@@ -287,6 +289,8 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     color: step.color,
     prompt: step.prompt,
     events: step.events,
+    is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
   }));
   return {
     ...template,
@@ -317,6 +321,7 @@ type BackendWorkflowStep = {
   events?: StepEvents;
   allow_manual_move?: boolean;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   created_at: string;
   updated_at: string;
@@ -332,6 +337,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   events: step.events,
   allow_manual_move: step.allow_manual_move,
   is_start_step: step.is_start_step,
+  show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   created_at: step.created_at,
   updated_at: step.updated_at,
@@ -402,6 +408,7 @@ export async function updateWorkflowStepAction(
       | "events"
       | "allow_manual_move"
       | "is_start_step"
+      | "show_in_command_panel"
       | "auto_archive_after_hours"
     >
   >,
@@ -414,6 +421,8 @@ export async function updateWorkflowStepAction(
   if (payload.events !== undefined) body.events = payload.events;
   if (payload.allow_manual_move !== undefined) body.allow_manual_move = payload.allow_manual_move;
   if (payload.is_start_step !== undefined) body.is_start_step = payload.is_start_step;
+  if (payload.show_in_command_panel !== undefined)
+    body.show_in_command_panel = payload.show_in_command_panel;
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
   const response = await fetchJson<BackendWorkflowStep>(

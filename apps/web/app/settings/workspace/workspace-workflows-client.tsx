@@ -64,6 +64,7 @@ function buildWorkflowSteps(workflow: Workflow, definitions: StepDefinition[]): 
     prompt: step.prompt,
     events: step.events,
     is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
     allow_manual_move: true,
     created_at: "",
     updated_at: "",

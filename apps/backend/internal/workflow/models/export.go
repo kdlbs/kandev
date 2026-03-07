@@ -34,6 +34,7 @@ type StepPortable struct {
 	Prompt                string     `json:"prompt,omitempty"`
 	Events                StepEvents `json:"events"`
 	IsStartStep           bool       `json:"is_start_step"`
+	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AllowManualMove       bool       `json:"allow_manual_move"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 }
@@ -68,6 +69,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep) Workf
 			Prompt:                s.Prompt,
 			Events:                convertStepIDToPosition(s.Events, idToPos),
 			IsStartStep:           s.IsStartStep,
+			ShowInCommandPanel:    s.ShowInCommandPanel,
 			AllowManualMove:       s.AllowManualMove,
 			AutoArchiveAfterHours: s.AutoArchiveAfterHours,
 		})

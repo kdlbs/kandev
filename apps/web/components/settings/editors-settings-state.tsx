@@ -237,6 +237,7 @@ function buildUserSettingsFromResponse(
     defaultEditorId: s.default_editor_id || null,
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
+    keyboardShortcuts: s.keyboard_shortcuts ?? {},
     ...mapEditorSettingsFields(s),
   };
 }

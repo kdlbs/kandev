@@ -904,7 +904,7 @@ func (r *Repository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []st
 }
 
 // GetPrimarySessionInfoByTaskIDs returns a map of task ID to primary session for the given task IDs.
-// Only returns the review_status field from the session.
+// Returns review_status, executor info, agent profile snapshot, and repository snapshot.
 func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	if len(taskIDs) == 0 {
 		return make(map[string]*models.TaskSession), nil
@@ -919,7 +919,9 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	query := fmt.Sprintf(`
-		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state, e.type, e.name
+		SELECT ts.task_id, ts.review_status, ts.executor_id, ts.state,
+		       ts.agent_profile_snapshot, ts.repository_snapshot,
+		       e.type, e.name
 		FROM task_sessions ts
 		LEFT JOIN executors e ON e.id = ts.executor_id
 		WHERE ts.task_id IN (%s) AND ts.is_primary = 1
@@ -937,9 +939,11 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 		var reviewStatus sql.NullString
 		var executorID sql.NullString
 		var sessionState sql.NullString
+		var agentProfileSnapshotJSON sql.NullString
+		var repositorySnapshotJSON sql.NullString
 		var executorType sql.NullString
 		var executorName sql.NullString
-		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &executorType, &executorName); err != nil {
+		if err := rows.Scan(&taskID, &reviewStatus, &executorID, &sessionState, &agentProfileSnapshotJSON, &repositorySnapshotJSON, &executorType, &executorName); err != nil {
 			return nil, err
 		}
 		session := &models.TaskSession{
@@ -961,6 +965,16 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 			}
 			if executorName.Valid {
 				session.ExecutorSnapshot["executor_name"] = executorName.String
+			}
+		}
+		if agentProfileSnapshotJSON.Valid && agentProfileSnapshotJSON.String != "" {
+			if err := json.Unmarshal([]byte(agentProfileSnapshotJSON.String), &session.AgentProfileSnapshot); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal agent profile snapshot for task %s: %w", taskID, err)
+			}
+		}
+		if repositorySnapshotJSON.Valid && repositorySnapshotJSON.String != "" {
+			if err := json.Unmarshal([]byte(repositorySnapshotJSON.String), &session.RepositorySnapshot); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal repository snapshot for task %s: %w", taskID, err)
 			}
 		}
 		result[taskID] = session

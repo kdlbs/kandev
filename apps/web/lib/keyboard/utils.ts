@@ -47,11 +47,10 @@ function collectModifierNames(
 
   if (modifiers.ctrlOrCmd) {
     parts.push(currentPlatform === "mac" ? "Cmd" : "Ctrl");
-    return parts;
+  } else {
+    if (modifiers.ctrl) parts.push("Ctrl");
+    if (modifiers.cmd && currentPlatform === "mac") parts.push("Cmd");
   }
-
-  if (modifiers.ctrl) parts.push("Ctrl");
-  if (modifiers.cmd && currentPlatform === "mac") parts.push("Cmd");
   if (modifiers.alt) parts.push(currentPlatform === "mac" ? "Option" : "Alt");
   if (modifiers.shift) parts.push("Shift");
   return parts;
@@ -148,9 +147,9 @@ export function shortcutToCodeMirrorKeybinding(shortcut: KeyboardShortcut): stri
     } else {
       if (shortcut.modifiers.ctrl) parts.push("Ctrl");
       if (shortcut.modifiers.cmd) parts.push("Mod");
-      if (shortcut.modifiers.alt) parts.push("Alt");
-      if (shortcut.modifiers.shift) parts.push("Shift");
     }
+    if (shortcut.modifiers.alt) parts.push("Alt");
+    if (shortcut.modifiers.shift) parts.push("Shift");
   }
 
   parts.push(shortcut.key);

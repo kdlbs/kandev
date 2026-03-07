@@ -75,6 +75,7 @@ export type StepDefinition = {
   prompt?: string;
   events?: StepEvents;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
 };
 
 // Workflow Step - instance of a step on a workflow
@@ -88,6 +89,7 @@ export type WorkflowStep = {
   events?: StepEvents;
   allow_manual_move?: boolean;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   created_at: string;
   updated_at: string;
@@ -233,6 +235,8 @@ export type Task = {
   primary_executor_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
+  primary_agent_name?: string | null;
+  primary_working_directory?: string | null;
   is_remote_executor?: boolean;
   archived_at?: string | null;
   created_at: string;
@@ -256,6 +260,7 @@ export type WorkflowStepDTO = {
   events?: StepEvents;
   allow_manual_move: boolean;
   is_start_step?: boolean;
+  show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   created_at?: string;
   updated_at?: string;
@@ -367,6 +372,7 @@ export type UserSettings = {
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
   default_utility_model?: string;
+  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   updated_at: string;
 };
 

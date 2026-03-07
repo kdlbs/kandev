@@ -570,6 +570,38 @@ func TestImportWorkflows(t *testing.T) {
 		assert.Nil(t, stepB.Events.OnTurnComplete[0].Config["step_position"])
 	})
 
+	t.Run("preserves show_in_command_panel on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name: "CmdPanel WF",
+					Steps: []models.StepPortable{
+						{Name: "Backlog", Position: 0, Color: "gray", ShowInCommandPanel: false},
+						{Name: "Active", Position: 1, Color: "blue", ShowInCommandPanel: true},
+						{Name: "Done", Position: 2, Color: "green", ShowInCommandPanel: false},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-CmdPanel WF")
+		require.NoError(t, err)
+		require.Len(t, steps, 3)
+
+		assert.False(t, steps[0].ShowInCommandPanel, "Backlog should not show in command panel")
+		assert.True(t, steps[1].ShowInCommandPanel, "Active should show in command panel")
+		assert.False(t, steps[2].ShowInCommandPanel, "Done should not show in command panel")
+	})
+
 	t.Run("rejects invalid export data", func(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()
