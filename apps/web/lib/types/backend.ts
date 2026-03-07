@@ -74,6 +74,11 @@ import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { TaskPR } from "@/lib/types/github";
 import type { FileChangeNotificationPayload } from "./workspace-files";
+import type {
+  AgentCapabilitiesPayload,
+  SessionModelsPayload,
+  SessionTodosPayload,
+} from "./session-runtime-payloads";
 
 export type KanbanUpdatePayload = {
   workflowId: string;
@@ -419,67 +424,15 @@ export type SessionModeChangedPayload = {
   timestamp?: string;
 };
 
-export type AuthMethodInfoPayload = {
-  id: string;
-  name: string;
-  description?: string;
-  terminal_auth?: {
-    command: string;
-    args?: string[];
-    label?: string;
-  };
-  meta?: Record<string, unknown>;
-};
-
-export type AgentCapabilitiesPayload = {
-  task_id: string;
-  session_id: string;
-  agent_id: string;
-  supports_image: boolean;
-  supports_audio: boolean;
-  supports_embedded_context: boolean;
-  auth_methods: AuthMethodInfoPayload[];
-  timestamp: string;
-};
-
-export type SessionModelInfoPayload = {
-  model_id: string;
-  name: string;
-  description?: string;
-  usage_multiplier?: string;
-  meta?: Record<string, unknown>;
-};
-
-export type ConfigOptionPayload = {
-  type: string;
-  id: string;
-  name: string;
-  current_value: string;
-  category?: string;
-  options?: { value: string; name: string }[];
-};
-
-export type SessionModelsPayload = {
-  task_id: string;
-  session_id: string;
-  agent_id: string;
-  current_model_id: string;
-  models: SessionModelInfoPayload[];
-  config_options?: ConfigOptionPayload[];
-  timestamp: string;
-};
-
-export type SessionTodosPayload = {
-  task_id: string;
-  session_id: string;
-  agent_id: string;
-  entries: Array<{
-    description: string;
-    status: string;
-    priority: string;
-  }>;
-  timestamp: string;
-};
+// Session runtime payload types (extracted to reduce file size)
+export {
+  type AuthMethodInfoPayload,
+  type AgentCapabilitiesPayload,
+  type SessionModelInfoPayload,
+  type ConfigOptionPayload,
+  type SessionModelsPayload,
+  type SessionTodosPayload,
+} from "./session-runtime-payloads";
 
 export type TaskPlanEventPayload = {
   id: string;

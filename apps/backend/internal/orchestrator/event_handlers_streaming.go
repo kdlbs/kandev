@@ -592,7 +592,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 // handleSessionTodosEvent broadcasts plan/todo entries to the WebSocket for the frontend.
 func (s *Service) handleSessionTodosEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil || len(payload.Data.PlanEntries) == 0 {
+	if sessionID == "" || s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.SessionTodosEventPayload{

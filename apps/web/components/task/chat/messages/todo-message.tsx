@@ -55,10 +55,10 @@ export function TodoMessage({
         onToggle={() => setIsExpanded((prev) => !prev)}
       >
         <div className="space-y-1.5 pb-2">
-          {todoItems.map((todo) => {
+          {todoItems.map((todo, idx) => {
             const s = resolveStatus(todo);
             return (
-              <div key={todo.text} className="flex items-start gap-2">
+              <div key={idx} className="flex items-start gap-2">
                 <StatusIcon status={s} className="mt-0.5 shrink-0 h-3.5 w-3.5" />
                 <span className={cn(s === "completed" && "line-through text-muted-foreground")}>
                   {todo.text}
