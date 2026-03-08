@@ -340,7 +340,7 @@ type ExternalProvidersSectionProps = {
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
   onDeleteProvider: (id: string) => void;
-  onTestProvider: (id: string) => void;
+  onTestProvider: (id: string) => Promise<void>;
   onTextareaInput: (e: FormEvent<HTMLTextAreaElement>) => void;
   onCreateAppriseProvider: () => Promise<void>;
 };
