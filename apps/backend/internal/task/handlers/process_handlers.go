@@ -59,6 +59,12 @@ func RegisterProcessRoutes(
 	processes.POST("/:processId/stop", handlers.httpStopProcessByID)
 	processes.GET("", handlers.httpListProcesses)
 	processes.GET("/:processId", handlers.httpGetProcess)
+
+	// Session-level ACP operations (mode/model switching)
+	session := api.Group("/task-sessions/:id")
+	session.POST("/set-mode", handlers.httpSetSessionMode)
+	session.POST("/set-model", handlers.httpSetSessionModel)
+	session.POST("/authenticate", handlers.httpAuthenticate)
 }
 
 type httpStartProcessRequest struct {
@@ -469,4 +475,67 @@ func resolveScriptCommand(
 	default:
 		return "", "", "", fmt.Errorf("invalid script kind")
 	}
+}
+
+// httpSetSessionMode sets the session mode for a running agent.
+func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
+	sessionID := c.Param("id")
+	var req struct {
+		ModeID string `json:"mode_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID); err != nil {
+		h.logger.Error("failed to set session mode",
+			zap.String("session_id", sessionID),
+			zap.String("mode_id", req.ModeID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}
+
+// httpSetSessionModel sets the session model for a running agent.
+func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
+	sessionID := c.Param("id")
+	var req struct {
+		ModelID string `json:"model_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID); err != nil {
+		h.logger.Error("failed to set session model",
+			zap.String("session_id", sessionID),
+			zap.String("model_id", req.ModelID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}
+
+// httpAuthenticate triggers authentication for a given auth method on a running agent.
+func (h *ProcessHandlers) httpAuthenticate(c *gin.Context) {
+	sessionID := c.Param("id")
+	var req struct {
+		MethodID string `json:"method_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.lifecycleMgr.AuthenticateBySessionID(c.Request.Context(), sessionID, req.MethodID); err != nil {
+		h.logger.Error("failed to authenticate",
+			zap.String("session_id", sessionID),
+			zap.String("method_id", req.MethodID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
 }

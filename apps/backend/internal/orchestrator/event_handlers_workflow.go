@@ -662,7 +662,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	s.setSessionResetInProgress(sessionID, true)
 	defer s.setSessionResetInProgress(sessionID, false)
 
-	if err := s.agentManager.RestartAgentProcess(ctx, session.AgentExecutionID); err != nil {
+	if err := s.agentManager.ResetAgentContext(ctx, session.AgentExecutionID); err != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

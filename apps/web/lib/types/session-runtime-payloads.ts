@@ -48,6 +48,20 @@ export type SessionModelsPayload = {
   timestamp: string;
 };
 
+export type SessionPromptUsagePayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cached_read_tokens?: number;
+    cached_write_tokens?: number;
+    total_tokens: number;
+  };
+  timestamp: string;
+};
+
 export type SessionTodosPayload = {
   task_id: string;
   session_id: string;

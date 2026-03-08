@@ -94,6 +94,25 @@ type ModeSettableAdapter interface {
 	SetMode(ctx context.Context, modeID string) error
 }
 
+// ModelSettableAdapter is an optional interface implemented by adapters that
+// support changing the session model (e.g., ACP adapters with session/set_model).
+type ModelSettableAdapter interface {
+	SetModel(ctx context.Context, modelID string) error
+}
+
+// AuthenticatableAdapter is an optional interface implemented by adapters that
+// support ACP authentication (session/authenticate).
+type AuthenticatableAdapter interface {
+	Authenticate(ctx context.Context, methodID string) error
+}
+
+// SessionResettableAdapter is an optional interface implemented by adapters that
+// can reset context by creating a new session on the same connection, without
+// restarting the agent subprocess. Only ACP adapters support this.
+type SessionResettableAdapter interface {
+	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`

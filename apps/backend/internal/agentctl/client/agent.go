@@ -77,34 +77,46 @@ type NewSessionResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// NewSession creates a new ACP session via the agent WebSocket stream.
-func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
+// createSessionRequest sends a session creation request and parses the response.
+// Used by both NewSession and ResetSession which share the same payload/response format.
+func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (string, error) {
 	payload := struct {
 		Cwd        string            `json:"cwd"`
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{Cwd: cwd, McpServers: mcpServers}
 
-	resp, err := c.sendStreamRequest(ctx, "agent.session.new", payload)
+	resp, err := c.sendStreamRequest(ctx, action, payload)
 	if err != nil {
-		return "", fmt.Errorf("new session request failed: %w", err)
+		return "", fmt.Errorf("%s request failed: %w", action, err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return "", fmt.Errorf("new session failed: unable to parse error")
+			return "", fmt.Errorf("%s failed: unable to parse error", action)
 		}
-		return "", fmt.Errorf("new session failed: %s", errPayload.Message)
+		return "", fmt.Errorf("%s failed: %s", action, errPayload.Message)
 	}
 
 	var result NewSessionResponse
 	if err := resp.ParsePayload(&result); err != nil {
-		return "", fmt.Errorf("failed to parse new session response: %w", err)
+		return "", fmt.Errorf("failed to parse %s response: %w", action, err)
 	}
 	if !result.Success {
-		return "", fmt.Errorf("new session failed: %s", result.Error)
+		return "", fmt.Errorf("%s failed: %s", action, result.Error)
 	}
 	return result.SessionID, nil
+}
+
+// NewSession creates a new ACP session via the agent WebSocket stream.
+func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers)
+}
+
+// ResetSession creates a new session on the same connection, resetting context without
+// restarting the subprocess. Returns the new session ID or an error if not supported.
+func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
@@ -157,6 +169,50 @@ func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
 			return fmt.Errorf("set mode failed: unable to parse error")
 		}
 		return fmt.Errorf("set mode failed: %s", errPayload.Message)
+	}
+
+	return nil
+}
+
+// SetModel changes the agent's model via the agent WebSocket stream.
+func (c *Client) SetModel(ctx context.Context, modelID string) error {
+	payload := struct {
+		ModelID string `json:"model_id"`
+	}{ModelID: modelID}
+
+	resp, err := c.sendStreamRequest(ctx, "agent.session.set_model", payload)
+	if err != nil {
+		return fmt.Errorf("set model request failed: %w", err)
+	}
+
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("set model failed: unable to parse error")
+		}
+		return fmt.Errorf("set model failed: %s", errPayload.Message)
+	}
+
+	return nil
+}
+
+// Authenticate triggers authentication for a given auth method via the agent WebSocket stream.
+func (c *Client) Authenticate(ctx context.Context, methodID string) error {
+	payload := struct {
+		MethodID string `json:"method_id"`
+	}{MethodID: methodID}
+
+	resp, err := c.sendStreamRequest(ctx, "agent.session.authenticate", payload)
+	if err != nil {
+		return fmt.Errorf("authenticate request failed: %w", err)
+	}
+
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return fmt.Errorf("authenticate failed: unable to parse error")
+		}
+		return fmt.Errorf("authenticate failed: %s", errPayload.Message)
 	}
 
 	return nil

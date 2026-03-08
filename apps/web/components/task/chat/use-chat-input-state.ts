@@ -8,13 +8,13 @@ import {
   restoreAttachmentPreview,
 } from "@/lib/local-storage";
 import {
-  processImageFile,
+  processFile,
   formatBytes,
-  MAX_IMAGES,
+  MAX_FILES,
   MAX_TOTAL_SIZE,
-  type ImageAttachment,
-} from "./image-attachment-preview";
-import type { ContextItem, ImageContextItem } from "@/lib/types/context";
+  type FileAttachment,
+} from "./file-attachment";
+import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { MessageAttachment } from "./chat-input-container";
@@ -47,12 +47,12 @@ function collectComments(
   return allComments;
 }
 
-function toMessageAttachments(attachments: ImageAttachment[]): MessageAttachment[] {
-  return attachments.map((att) => ({
-    type: "image" as const,
-    data: att.data,
-    mime_type: att.mimeType,
-  }));
+function toMessageAttachments(attachments: FileAttachment[]): MessageAttachment[] {
+  return attachments.map((att) =>
+    att.isImage
+      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
+      : { type: "resource" as const, data: att.data, mime_type: att.mimeType, name: att.fileName },
+  );
 }
 
 function clearDraft(sessionId: string | null) {
@@ -63,7 +63,7 @@ function clearDraft(sessionId: string | null) {
 }
 
 function useAttachments(sessionId: string | null) {
-  const [attachments, setAttachments] = useState<ImageAttachment[]>(() =>
+  const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
     sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
   );
   const attachmentsRef = useRef(attachments);
@@ -75,20 +75,20 @@ function useAttachments(sessionId: string | null) {
       setChatDraftAttachments(sessionId, attachments);
   }, [attachments, sessionId]);
 
-  const handleImagePaste = useCallback(
+  const addFiles = useCallback(
     async (files: File[]) => {
-      if (attachments.length >= MAX_IMAGES) {
-        console.warn(`Maximum ${MAX_IMAGES} images allowed`);
+      if (attachments.length >= MAX_FILES) {
+        console.warn(`Maximum ${MAX_FILES} files allowed`);
         return;
       }
       const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       for (const file of files) {
-        if (attachments.length >= MAX_IMAGES) break;
+        if (attachments.length >= MAX_FILES) break;
         if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
           console.warn("Total attachment size limit exceeded");
           break;
         }
-        const attachment = await processImageFile(file);
+        const attachment = await processFile(file);
         if (attachment) setAttachments((prev) => [...prev, attachment]);
       }
     },
@@ -104,7 +104,7 @@ function useAttachments(sessionId: string | null) {
     attachmentsRef,
     prevSessionIdRef,
     setAttachments,
-    handleImagePaste,
+    addFiles,
     handleRemoveAttachment,
   };
 }
@@ -130,7 +130,7 @@ export function useChatInputState({
     attachmentsRef,
     prevSessionIdRef,
     setAttachments,
-    handleImagePaste,
+    addFiles,
     handleRemoveAttachment,
   } = useAttachments(sessionId);
 
@@ -188,15 +188,26 @@ export function useChatInputState({
   );
 
   const allItems = useMemo((): ContextItem[] => {
-    const imageItems: ImageContextItem[] = attachments.map((att) => ({
-      kind: "image" as const,
-      id: `image:${att.id}`,
-      label: `Image (${formatBytes(att.size)})`,
-      attachment: att,
-      onRemove: () => handleRemoveAttachment(att.id),
-    }));
-    return [...contextItems, ...imageItems];
+    const attachmentItems: (ImageContextItem | FileAttachmentContextItem)[] = attachments.map(
+      (att) =>
+        att.isImage
+          ? ({
+              kind: "image" as const,
+              id: `image:${att.id}`,
+              label: `Image (${formatBytes(att.size)})`,
+              attachment: att,
+              onRemove: () => handleRemoveAttachment(att.id),
+            } as ImageContextItem)
+          : ({
+              kind: "file-attachment" as const,
+              id: `file:${att.id}`,
+              label: att.fileName,
+              attachment: att,
+              onRemove: () => handleRemoveAttachment(att.id),
+            } as FileAttachmentContextItem),
+    );
+    return [...contextItems, ...attachmentItems];
   }, [contextItems, attachments, handleRemoveAttachment]);
 
-  return { value, attachments, inputRef, handleImagePaste, handleChange, handleSubmit, allItems };
+  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems };
 }

@@ -460,6 +460,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
+	s.publishPromptUsage(ctx, payload)
 	s.completeTurnForSession(ctx, payload.SessionID)
 
 	// Cancel any pending clarifications for this session so WaitForResponse
@@ -509,6 +510,23 @@ func (s *Service) publishAgentPlanIfPresent(ctx context.Context, payload *lifecy
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// publishPromptUsage broadcasts prompt token usage to the WebSocket for the frontend.
+func (s *Service) publishPromptUsage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || s.eventBus == nil || payload.Data.Usage == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionPromptUsageEventPayload{
+		TaskID:    payload.TaskID,
+		SessionID: sessionID,
+		AgentID:   payload.AgentID,
+		Usage:     payload.Data.Usage,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionPromptUsageSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
 }
 
 // handleAvailableCommandsEvent broadcasts available_commands events to the WebSocket for the frontend.

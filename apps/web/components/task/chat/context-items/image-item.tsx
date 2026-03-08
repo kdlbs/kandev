@@ -20,9 +20,6 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
         alt="Preview"
         className="max-w-full max-h-48 rounded object-contain"
       />
-      <div className="text-xs text-muted-foreground">
-        {item.attachment.width} &times; {item.attachment.height}
-      </div>
     </div>
   );
 

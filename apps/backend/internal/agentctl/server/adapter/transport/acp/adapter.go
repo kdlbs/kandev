@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/coder/acp-go-sdk"
@@ -29,6 +30,13 @@ type (
 	PermissionHandler  = types.PermissionHandler
 	AgentEvent         = streams.AgentEvent
 	PlanEntry          = streams.PlanEntry
+)
+
+// Content block type constants.
+const (
+	contentTypeImage    = "image"
+	contentTypeAudio    = "audio"
+	contentTypeResource = "resource"
 )
 
 // AgentInfo contains information about the connected agent.
@@ -219,9 +227,10 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
 
+	filteredServers := filterMcpServersByCapabilities(mcpServers, a.capabilities.McpCapabilities, a.logger)
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(mcpServers),
+		McpServers: toACPMcpServers(filteredServers),
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -259,6 +268,28 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 
 	return sessionID, nil
+}
+
+// filterMcpServersByCapabilities removes MCP servers that the agent doesn't support.
+// Stdio servers are always allowed; SSE/HTTP servers require the corresponding capability.
+func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapabilities, logger *logger.Logger) []types.McpServer {
+	filtered := make([]types.McpServer, 0, len(servers))
+	for _, s := range servers {
+		switch s.Type {
+		case "sse":
+			if !caps.Sse {
+				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
+				continue
+			}
+		case "http":
+			if !caps.Http {
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name))
+				continue
+			}
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
 }
 
 func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
@@ -361,6 +392,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// ResetSession creates a new session on the existing connection, effectively resetting
+// the agent's conversation context without restarting the subprocess. This is much faster
+// than a full process restart since the ACP protocol supports multiple sessions per connection.
+func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.NewSession(ctx, mcpServers)
+}
+
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
 // Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
@@ -389,10 +427,15 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	// Build content blocks: text first, then images
 	contentBlocks := []acp.ContentBlock{acp.TextBlock(finalMessage)}
 
-	// Add image attachments as ImageBlocks
+	// Add media attachments as typed content blocks
 	for _, att := range attachments {
-		if att.Type == "image" {
+		switch att.Type {
+		case contentTypeImage:
 			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
+		case contentTypeAudio:
+			contentBlocks = append(contentBlocks, acp.AudioBlock(att.Data, att.MimeType))
+		case contentTypeResource:
+			contentBlocks = append(contentBlocks, buildResourceBlock(att))
 		}
 	}
 
@@ -826,12 +869,88 @@ func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
 	return nil
 }
 
+// SetModel changes the agent's model via ACP session/set_model (unstable SDK method).
+func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
+	a.mu.RLock()
+	conn := a.acpConn
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("adapter not initialized")
+	}
+
+	_, err := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{
+		SessionId: acp.SessionId(sessionID),
+		ModelId:   acp.ModelId(modelID),
+	})
+	if err != nil {
+		return fmt.Errorf("set session model failed: %w", err)
+	}
+	return nil
+}
+
+// Authenticate triggers ACP session/authenticate for a given auth method.
+func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
+	a.mu.RLock()
+	conn := a.acpConn
+	a.mu.RUnlock()
+
+	if conn == nil {
+		return fmt.Errorf("adapter not initialized")
+	}
+
+	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(methodID),
+	})
+	if err != nil {
+		return fmt.Errorf("authenticate failed: %w", err)
+	}
+	return nil
+}
+
 // derefStr safely dereferences a string pointer, returning empty string if nil.
 func derefStr(s *string) string {
 	if s != nil {
 		return *s
 	}
 	return ""
+}
+
+// buildResourceBlock constructs an ACP ResourceBlock from a MessageAttachment.
+// Text-based MIME types use TextResourceContents; everything else uses BlobResourceContents.
+func buildResourceBlock(att v1.MessageAttachment) acp.ContentBlock {
+	uri := att.Name // Use filename as URI if no explicit URI
+	if isTextMimeType(att.MimeType) {
+		return acp.ResourceBlock(acp.EmbeddedResourceResource{
+			TextResourceContents: &acp.TextResourceContents{
+				Uri:      uri,
+				Text:     att.Data,
+				MimeType: acp.Ptr(att.MimeType),
+			},
+		})
+	}
+	return acp.ResourceBlock(acp.EmbeddedResourceResource{
+		BlobResourceContents: &acp.BlobResourceContents{
+			Uri:      uri,
+			Blob:     att.Data,
+			MimeType: acp.Ptr(att.MimeType),
+		},
+	})
+}
+
+// isTextMimeType returns true for MIME types that represent text content.
+func isTextMimeType(mimeType string) bool {
+	if strings.HasPrefix(mimeType, "text/") {
+		return true
+	}
+	switch mimeType {
+	case "application/json", "application/xml", "application/javascript",
+		"application/typescript", "application/x-yaml", "application/toml",
+		"application/x-sh", "application/sql":
+		return true
+	}
+	return false
 }
 
 // convertToolCallContents converts ACP ToolCallContent items to our protocol-agnostic type.
@@ -876,9 +995,9 @@ func (a *Adapter) convertContentBlockToStreams(cb acp.ContentBlock) *streams.Con
 	case cb.Text != nil:
 		return &streams.ContentBlock{Type: "text", Text: cb.Text.Text}
 	case cb.Image != nil:
-		return &streams.ContentBlock{Type: "image", Data: cb.Image.Data, MimeType: cb.Image.MimeType, URI: derefStr(cb.Image.Uri)}
+		return &streams.ContentBlock{Type: contentTypeImage, Data: cb.Image.Data, MimeType: cb.Image.MimeType, URI: derefStr(cb.Image.Uri)}
 	case cb.Audio != nil:
-		return &streams.ContentBlock{Type: "audio", Data: cb.Audio.Data, MimeType: cb.Audio.MimeType}
+		return &streams.ContentBlock{Type: contentTypeAudio, Data: cb.Audio.Data, MimeType: cb.Audio.MimeType}
 	case cb.ResourceLink != nil:
 		return &streams.ContentBlock{
 			Type: "resource_link", URI: cb.ResourceLink.Uri, Name: cb.ResourceLink.Name,

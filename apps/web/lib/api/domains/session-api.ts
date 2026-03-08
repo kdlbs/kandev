@@ -58,6 +58,24 @@ export async function openSessionFolder(sessionId: string, options?: ApiRequestO
   });
 }
 
+export async function setSessionMode(sessionId: string, modeId: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-mode`, {
+    init: { method: "POST", body: JSON.stringify({ mode_id: modeId }) },
+  });
+}
+
+export async function setSessionModel(sessionId: string, modelId: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
+    init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
+  });
+}
+
+export async function authenticateSession(sessionId: string, methodId: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/authenticate`, {
+    init: { method: "POST", body: JSON.stringify({ method_id: methodId }) },
+  });
+}
+
 export { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 export {
   buildPRPrepareRequest,

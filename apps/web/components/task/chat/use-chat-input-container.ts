@@ -137,17 +137,17 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     sessionId ?? undefined,
     getContentElement,
   );
-  const { value, inputRef, handleImagePaste, handleChange, handleSubmit, allItems } =
-    useChatInputState({
-      sessionId,
-      isSending,
-      contextItems,
-      pendingCommentsByFile,
-      hasContextComments: params.hasContextComments,
-      showRequestChangesTooltip,
-      onRequestChangesTooltipDismiss,
-      onSubmit,
-    });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { value, inputRef, addFiles, handleChange, handleSubmit, allItems } = useChatInputState({
+    sessionId,
+    isSending,
+    contextItems,
+    pendingCommentsByFile,
+    hasContextComments: params.hasContextComments,
+    showRequestChangesTooltip,
+    onRequestChangesTooltipDismiss,
+    onSubmit,
+  });
 
   useEffect(() => {
     tiptapRef.current = inputRef.current;
@@ -206,7 +206,8 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     resizeHandleProps,
     value,
     inputRef,
-    handleImagePaste,
+    addFiles,
+    fileInputRef,
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
     handleAgentCommand,

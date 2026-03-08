@@ -22,9 +22,10 @@ export type { ImageAttachment } from "./image-attachment-preview";
 
 // Type for message attachments sent to backend
 export type MessageAttachment = {
-  type: "image";
+  type: "image" | "audio" | "resource";
   data: string;
   mime_type: string;
+  name?: string;
 };
 
 export type ChatInputContainerHandle = {
@@ -163,7 +164,8 @@ function buildEditorAreaProps(
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled ?? false,
     handleAgentCommand: s.handleAgentCommand,
-    handleImagePaste: s.handleImagePaste,
+    addFiles: s.addFiles,
+    fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip ?? false,
     isAgentBusy: p.isAgentBusy,
     onPlanModeChange: p.onPlanModeChange,
@@ -267,6 +269,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         planModeEnabled={props.planModeEnabled}
         showFocusHint={s.showFocusHint}
         needsRecovery={props.needsRecovery ?? false}
+        addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
         editorAreaProps={buildEditorAreaProps(
           s,

@@ -213,6 +213,11 @@ func (a *lifecycleAdapter) RestartAgentProcess(ctx context.Context, agentExecuti
 	return a.mgr.RestartAgentProcess(ctx, agentExecutionID)
 }
 
+// ResetAgentContext resets the agent's context using the fastest available strategy.
+func (a *lifecycleAdapter) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
+	return a.mgr.ResetAgentContext(ctx, agentExecutionID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)

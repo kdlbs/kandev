@@ -27,6 +27,7 @@ type PermissionRequestHandler func(ctx context.Context, req *types.PermissionReq
 type Client struct {
 	logger        *zap.Logger
 	workspaceRoot string
+	terminals     *TerminalManager
 
 	mu                sync.RWMutex
 	updateHandler     UpdateHandler
@@ -73,6 +74,7 @@ func NewClient(opts ...ClientOption) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.terminals = NewTerminalManager(c.logger)
 	return c
 }
 
@@ -363,55 +365,98 @@ func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) 
 	return acp.WriteTextFileResponse{}, err
 }
 
-// CreateTerminal creates a new terminal
+// CreateTerminal starts a command in a new terminal.
 func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.create_terminal")
 	defer span.End()
 	span.SetAttributes(attribute.String("command", p.Command))
 
-	c.logger.Debug("create terminal request", zap.String("command", p.Command))
-	return acp.CreateTerminalResponse{TerminalId: "t-1"}, nil
+	c.logger.Debug("create terminal request",
+		zap.String("command", p.Command),
+		zap.Strings("args", p.Args),
+	)
+
+	cwd := c.workspaceRoot
+	if p.Cwd != nil {
+		cwd = *p.Cwd
+	}
+	env := make(map[string]string, len(p.Env))
+	for _, e := range p.Env {
+		env[e.Name] = e.Value
+	}
+	limit := 0
+	if p.OutputByteLimit != nil {
+		limit = *p.OutputByteLimit
+	}
+
+	id, err := c.terminals.Create(p.Command, p.Args, cwd, env, limit)
+	if err != nil {
+		span.RecordError(err)
+		return acp.CreateTerminalResponse{}, err
+	}
+	return acp.CreateTerminalResponse{TerminalId: id}, nil
 }
 
-// KillTerminalCommand kills a terminal command
+// KillTerminalCommand sends SIGTERM to a terminal's process.
 func (c *Client) KillTerminalCommand(ctx context.Context, p acp.KillTerminalCommandRequest) (acp.KillTerminalCommandResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal_command")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
-	c.logger.Debug("kill terminal request", zap.String("terminal_id", p.TerminalId))
+	if err := c.terminals.Kill(p.TerminalId); err != nil {
+		span.RecordError(err)
+		return acp.KillTerminalCommandResponse{}, err
+	}
 	return acp.KillTerminalCommandResponse{}, nil
 }
 
-// TerminalOutput gets terminal output
+// TerminalOutput returns the current output of a terminal.
 func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.terminal_output")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
-	c.logger.Debug("terminal output request", zap.String("terminal_id", p.TerminalId))
-	return acp.TerminalOutputResponse{Output: "ok", Truncated: false}, nil
+	output, truncated, exitCode, signal, err := c.terminals.Output(p.TerminalId)
+	if err != nil {
+		span.RecordError(err)
+		return acp.TerminalOutputResponse{}, err
+	}
+
+	resp := acp.TerminalOutputResponse{
+		Output:    output,
+		Truncated: truncated,
+	}
+	if exitCode != nil || signal != nil {
+		resp.ExitStatus = &acp.TerminalExitStatus{
+			ExitCode: exitCode,
+			Signal:   signal,
+		}
+	}
+	return resp, nil
 }
 
-// ReleaseTerminal releases a terminal
+// ReleaseTerminal kills (if running) and releases a terminal.
 func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.release_terminal")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
-	c.logger.Debug("release terminal request", zap.String("terminal_id", p.TerminalId))
+	_ = c.terminals.Release(p.TerminalId)
 	return acp.ReleaseTerminalResponse{}, nil
 }
 
-// WaitForTerminalExit waits for terminal to exit
+// WaitForTerminalExit blocks until the terminal's command exits.
 func (c *Client) WaitForTerminalExit(ctx context.Context, p acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.wait_for_terminal_exit")
 	defer span.End()
 	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
 
-	c.logger.Debug("wait for terminal exit request", zap.String("terminal_id", p.TerminalId))
-	exitCode := 0
-	return acp.WaitForTerminalExitResponse{ExitCode: &exitCode}, nil
+	exitCode, signal, err := c.terminals.WaitForExit(p.TerminalId)
+	if err != nil {
+		span.RecordError(err)
+		return acp.WaitForTerminalExitResponse{}, err
+	}
+	return acp.WaitForTerminalExitResponse{ExitCode: exitCode, Signal: signal}, nil
 }
 
 // Verify interface implementation

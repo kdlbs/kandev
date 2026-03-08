@@ -36,6 +36,7 @@ export type BackendMessageType =
   | "session.agent_capabilities"
   | "session.models_updated"
   | "session.todos_updated"
+  | "session.prompt_usage"
   | "executor.created"
   | "executor.updated"
   | "executor.deleted"
@@ -77,6 +78,7 @@ import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
   SessionModelsPayload,
+  SessionPromptUsagePayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
 
@@ -512,6 +514,7 @@ export type BackendMessageMap = {
   >;
   "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
+  "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
   "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
   "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
   "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;

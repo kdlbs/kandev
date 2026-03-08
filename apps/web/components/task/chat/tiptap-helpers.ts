@@ -120,10 +120,10 @@ export function parseCodeFences(text: string): FenceSegment[] {
 
 // ── Paste handler ───────────────────────────────────────────────────
 
-function extractImageFiles(items: DataTransferItemList): File[] {
+function extractFiles(items: DataTransferItemList): File[] {
   const files: File[] = [];
   for (const item of items) {
-    if (item.type.startsWith("image/")) {
+    if (item.kind === "file") {
       const file = item.getAsFile();
       if (file) files.push(file);
     }
@@ -167,13 +167,13 @@ export function handleEditorPaste(
   event: ClipboardEvent,
   onImagePasteRef: React.RefObject<((files: File[]) => void) | undefined>,
 ): boolean {
-  // 1. Image paste
+  // 1. File paste (images and other files)
   const items = event.clipboardData?.items;
   if (items) {
-    const imageFiles = extractImageFiles(items);
-    if (imageFiles.length > 0) {
+    const files = extractFiles(items);
+    if (files.length > 0) {
       event.preventDefault();
-      onImagePasteRef.current?.(imageFiles);
+      onImagePasteRef.current?.(files);
       return true;
     }
   }

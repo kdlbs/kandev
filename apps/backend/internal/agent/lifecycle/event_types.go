@@ -443,3 +443,17 @@ type SessionTodosEventPayload struct {
 func (p SessionTodosEventPayload) GetSessionID() string {
 	return p.SessionID
 }
+
+// SessionPromptUsageEventPayload is the payload for prompt usage events.
+type SessionPromptUsageEventPayload struct {
+	TaskID    string               `json:"task_id"`
+	SessionID string               `json:"session_id"`
+	AgentID   string               `json:"agent_id"`
+	Usage     *streams.PromptUsage `json:"usage"`
+	Timestamp string               `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionPromptUsageEventPayload) GetSessionID() string {
+	return p.SessionID
+}

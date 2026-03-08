@@ -175,6 +175,10 @@ const (
 	SessionTodosUpdated = "session_todos.updated" // Agent plan/todo entries updated
 )
 
+const (
+	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
+)
+
 // Event types for GitHub integration
 const (
 	GitHubPRFeedback     = "github.pr_feedback"      // PR has new feedback (UI notification only)
@@ -333,4 +337,14 @@ func BuildSessionTodosSubject(sessionID string) string {
 // BuildSessionTodosWildcardSubject creates a wildcard subscription for all session todos events
 func BuildSessionTodosWildcardSubject() string {
 	return SessionTodosUpdated + ".*"
+}
+
+// BuildSessionPromptUsageSubject creates a prompt usage subject for a specific session
+func BuildSessionPromptUsageSubject(sessionID string) string {
+	return SessionPromptUsageUpdated + "." + sessionID
+}
+
+// BuildSessionPromptUsageWildcardSubject creates a wildcard subscription for all prompt usage events
+func BuildSessionPromptUsageWildcardSubject() string {
+	return SessionPromptUsageUpdated + ".*"
 }

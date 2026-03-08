@@ -171,6 +171,7 @@ const (
 	ActionSessionModelsUpdated     = "session.models_updated"
 	ActionSessionSetMode           = "session.set_mode"
 	ActionSessionTodosUpdated      = "session.todos_updated"
+	ActionSessionPromptUsage       = "session.prompt_usage"
 	ActionInputRequested           = "input.requested"
 	ActionRepositoryCreated        = "repository.created"
 	ActionRepositoryUpdated        = "repository.updated"

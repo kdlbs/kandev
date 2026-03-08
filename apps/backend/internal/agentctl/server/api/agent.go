@@ -250,6 +250,12 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSStderr(ctx, msg)
 	case "agent.session.set_mode":
 		return s.handleWSSetMode(ctx, msg)
+	case "agent.session.set_model":
+		return s.handleWSSetModel(ctx, msg)
+	case "agent.session.authenticate":
+		return s.handleWSAuthenticate(ctx, msg)
+	case "agent.session.reset":
+		return s.handleWSResetSession(ctx, msg)
 	default:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
@@ -484,6 +490,72 @@ func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Messa
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}
+	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		ms, ok := a.(adapter.ModeSettableAdapter)
+		if !ok {
+			return fmt.Errorf("agent does not support mode switching")
+		}
+		return ms.SetMode(ctx, req.ModeID)
+	})
+}
+
+// adapterAction extracts common boilerplate for WS handlers that operate on the agent adapter:
+// parse payload, get adapter, assert interface, call action.
+func (s *Server) adapterAction(
+	ctx context.Context,
+	msg *ws.Message,
+	payload any,
+	action func(agentAdapter adapter.AgentAdapter) error,
+) *ws.Message {
+	if err := msg.ParsePayload(payload); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+
+	if err := action(agentAdapter); err != nil {
+		s.logger.Error(msg.Action+" failed", zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return resp
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
+	return resp
+}
+
+func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req struct {
+		ModelID string `json:"model_id"`
+	}
+	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		ms, ok := a.(adapter.ModelSettableAdapter)
+		if !ok {
+			return fmt.Errorf("agent does not support model switching")
+		}
+		return ms.SetModel(ctx, req.ModelID)
+	})
+}
+
+func (s *Server) handleWSAuthenticate(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req struct {
+		MethodID string `json:"method_id"`
+	}
+	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		aa, ok := a.(adapter.AuthenticatableAdapter)
+		if !ok {
+			return fmt.Errorf("agent does not support authenticate")
+		}
+		return aa.Authenticate(ctx, req.MethodID)
+	})
+}
+
+func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req NewSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
 		return resp
@@ -495,18 +567,22 @@ func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Messa
 		return resp
 	}
 
-	ms, ok := agentAdapter.(adapter.ModeSettableAdapter)
+	sr, ok := agentAdapter.(adapter.SessionResettableAdapter)
 	if !ok {
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support mode switching", nil)
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support session reset", nil)
 		return resp
 	}
 
-	if err := ms.SetMode(ctx, req.ModeID); err != nil {
-		s.logger.Error("set mode failed", zap.Error(err))
+	sessionID, err := sr.ResetSession(ctx, req.McpServers)
+	if err != nil {
+		s.logger.Error("session reset failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
 	}
 
-	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
+		Success:   true,
+		SessionID: sessionID,
+	})
 	return resp
 }

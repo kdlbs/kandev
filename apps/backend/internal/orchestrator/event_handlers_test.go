@@ -165,6 +165,9 @@ func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecution
 	m.restartProcessCalls = append(m.restartProcessCalls, agentExecutionID)
 	return m.restartProcessErr
 }
+func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
+	return m.RestartAgentProcess(ctx, agentExecutionID)
+}
 func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
 	return nil
 }

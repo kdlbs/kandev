@@ -490,14 +490,14 @@ const CHAT_DRAFT_CONTENT_KEY = "kandev.chatDraft.content";
 const CHAT_DRAFT_ATTACHMENTS_KEY = "kandev.chatDraft.attachments";
 const CHAT_INPUT_HEIGHT_KEY = "kandev.chatInput.height";
 
-/** Stored attachment — same as ImageAttachment but without `preview` (reconstructed on load) */
-type StoredImageAttachment = {
+/** Stored attachment — same as FileAttachment but without `preview` (reconstructed on load) */
+type StoredFileAttachment = {
   id: string;
   data: string;
   mimeType: string;
+  fileName: string;
   size: number;
-  width: number;
-  height: number;
+  isImage: boolean;
 };
 
 export function getChatDraftText(sessionId: string): string {
@@ -525,8 +525,8 @@ export function setChatDraftContent(sessionId: string, content: unknown): void {
   }
 }
 
-export function getChatDraftAttachments(sessionId: string): StoredImageAttachment[] {
-  return getSessionStorage<StoredImageAttachment[]>(
+export function getChatDraftAttachments(sessionId: string): StoredFileAttachment[] {
+  return getSessionStorage<StoredFileAttachment[]>(
     `${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`,
     [],
   );
@@ -538,24 +538,24 @@ export function setChatDraftAttachments(
     id: string;
     data: string;
     mimeType: string;
+    fileName: string;
     size: number;
-    width: number;
-    height: number;
+    isImage: boolean;
     preview?: string;
   }>,
 ): void {
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
   } else {
-    // Strip `preview` to halve storage cost — reconstructed on load
-    const stored: StoredImageAttachment[] = attachments.map(
-      ({ id, data, mimeType, size, width, height }) => ({
+    // Strip `preview` to halve storage cost — reconstructed on load for images
+    const stored: StoredFileAttachment[] = attachments.map(
+      ({ id, data, mimeType, fileName, size, isImage }) => ({
         id,
         data,
         mimeType,
+        fileName,
         size,
-        width,
-        height,
+        isImage,
       }),
     );
     setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
@@ -563,12 +563,15 @@ export function setChatDraftAttachments(
 }
 
 /**
- * Reconstruct the `preview` data URL from stored attachment data.
+ * Reconstruct the `preview` data URL from stored attachment data (images only).
  */
 export function restoreAttachmentPreview(
-  att: StoredImageAttachment,
-): StoredImageAttachment & { preview: string } {
-  return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
+  att: StoredFileAttachment,
+): StoredFileAttachment & { preview?: string } {
+  if (att.isImage) {
+    return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
+  }
+  return att;
 }
 
 export function getChatInputHeight(sessionId: string): number | null {
