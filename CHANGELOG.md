@@ -2,6 +2,25 @@
 
 All notable changes to Kandev.
 
+## 0.18 - 2026-03-08
+
+### Features
+
+- seamless session switching without dockview layout flash ([#395](https://github.com/kdlbs/kandev/pull/395))
+- single-port architecture and browser warning fixes ([#390](https://github.com/kdlbs/kandev/pull/390))
+- improve port forwarding, remote executor setup, and CLI port config ([#388](https://github.com/kdlbs/kandev/pull/388))
+- add port proxy, symlink file save fix, and remote executor improvements ([#358](https://github.com/kdlbs/kandev/pull/358))
+- split file search from command panel, add inline task search & configurable shortcuts ([#383](https://github.com/kdlbs/kandev/pull/383))
+- improve git checkout with error classification and warning propagation ([#386](https://github.com/kdlbs/kandev/pull/386))
+
+### Bug Fixes
+
+- persist template step edits on workflow save and add step delete confirmation ([#394](https://github.com/kdlbs/kandev/pull/394))
+- system notifications, test buttons, apprise in Docker, and logo icon ([#391](https://github.com/kdlbs/kandev/pull/391))
+- prevent duplicate messages when resuming ACP sessions ([#392](https://github.com/kdlbs/kandev/pull/392))
+- correct default data directory to ~/.kandev/data ([#389](https://github.com/kdlbs/kandev/pull/389))
+- stabilize flaky e2e tests and increase CI parallelism ([#384](https://github.com/kdlbs/kandev/pull/384))
+
 ## 0.17 - 2026-03-06
 
 ### Features
