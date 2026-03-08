@@ -659,8 +659,9 @@ func (s *Service) handleSessionTodosEvent(ctx context.Context, payload *lifecycl
 }
 
 // persistTodoMessage creates a "todo" message with the todo entries as metadata.
+// Empty entries are persisted too — they represent the agent clearing all todos.
 func (s *Service) persistTodoMessage(ctx context.Context, taskID, sessionID string, entries []streams.PlanEntry) {
-	if s.messageCreator == nil || len(entries) == 0 {
+	if s.messageCreator == nil {
 		return
 	}
 	todos := make([]map[string]interface{}, len(entries))
