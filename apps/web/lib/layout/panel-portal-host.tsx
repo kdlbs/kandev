@@ -92,8 +92,11 @@ export function usePortalSlot(
         container.removeChild(entry.element);
       }
     };
+    // sessionId in deps: when session changes, session-scoped panels re-acquire
+    // fresh portals (old ones were released by releaseBySession in the store action).
+    // Global panels pass sessionId=undefined so this is a no-op for them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelId]);
+  }, [panelId, sessionId]);
 
   return containerRef;
 }

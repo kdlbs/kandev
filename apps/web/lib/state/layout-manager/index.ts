@@ -45,6 +45,9 @@ export type { LayoutGroupIds } from "./applier";
 // Merger
 export { mergeCurrentPanelsIntoPreset } from "./merger";
 
+// Comparator
+export { layoutStructuresMatch, savedLayoutMatchesLive } from "./comparator";
+
 // Intent
 export {
   INTENT_PLAN,
