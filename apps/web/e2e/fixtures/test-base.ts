@@ -106,11 +106,11 @@ export { expect } from "@playwright/test";
 async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
   await page.addInitScript(
     ({
-      backendUrl,
+      backendPort,
       repositoryId,
       agentProfileId,
     }: {
-      backendUrl: string;
+      backendPort: string;
       repositoryId: string;
       agentProfileId: string;
     }) => {
@@ -121,10 +121,11 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
       localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
       localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
       // Set the window global that getBackendConfig() reads for API/WS connections
-      window.__KANDEV_API_BASE_URL = backendUrl;
+      // (e2e tests run frontend and backend on separate ports, like dev mode)
+      window.__KANDEV_API_PORT = backendPort;
     },
     {
-      backendUrl: backend.baseUrl,
+      backendPort: String(backend.port),
       repositoryId: seedData.repositoryId,
       agentProfileId: seedData.agentProfileId,
     },

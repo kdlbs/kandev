@@ -5,7 +5,7 @@
 #   docker build -t kandev:latest .
 #
 # Run:
-#   docker run -p 8080:8080 -p 3000:3000 -v kandev-data:/data kandev:latest
+#   docker run -p 8080:8080 -v kandev-data:/data kandev:latest
 
 # ---------------------------------------------------------------------------
 # Stage 1: Go builder — compile kandev + agentctl binaries
@@ -110,7 +110,7 @@ RUN chown -R kandev:kandev /app /data
 
 WORKDIR /app
 
-EXPOSE 8080 3000
+EXPOSE 8080
 
 # tini as PID 1 for signal handling; entrypoint handles privilege drop
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]

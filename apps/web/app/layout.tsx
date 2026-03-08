@@ -24,31 +24,15 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-/**
- * Extract port from URL string (e.g., "http://localhost:8080" -> "8080")
- */
-function extractPort(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    return parsed.port || null;
-  } catch {
-    return null;
-  }
-}
-
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Runtime URL configuration for the browser client.
-  // KANDEV_PUBLIC_URL: full external URL when behind a reverse proxy / ingress
-  //   (e.g., "https://kandev.example.com") — injected as window.__KANDEV_API_BASE_URL.
-  // Otherwise: extract ports so client builds URLs from window.location.hostname,
-  //   allowing access from any device (iPhone, Tailscale, etc.)
-  const publicUrl = process.env.KANDEV_PUBLIC_URL?.replace(/\/$/, "") || null;
-  const apiPort = publicUrl ? null : extractPort(process.env.KANDEV_API_BASE_URL ?? "");
-  const mcpPort = extractPort(process.env.KANDEV_MCP_SERVER_URL ?? "");
+  // API port injection for dev mode (browser opens at web port, API on backend port).
+  // In production single-port mode, this is not needed — the client uses
+  // window.location.origin (same-origin, works for any domain / reverse proxy).
+  const apiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT ?? null;
   const debugMode = process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
 
   return (
@@ -57,16 +41,11 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="KanDev" />
       </head>
       <body className="antialiased font-sans">
-        {publicUrl || apiPort || mcpPort || debugMode ? (
-          // Inject runtime config for production bundles.
-          // publicUrl: full base URL for reverse-proxy deployments (same-origin API)
-          // ports: client builds URLs using window.location.hostname + port
+        {apiPort || debugMode ? (
           <script
             dangerouslySetInnerHTML={{
               __html: [
-                publicUrl ? `window.__KANDEV_API_BASE_URL = ${JSON.stringify(publicUrl)};` : "",
                 apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
-                mcpPort ? `window.__KANDEV_MCP_PORT = ${JSON.stringify(mcpPort)};` : "",
                 debugMode ? `window.__KANDEV_DEBUG = true;` : "",
               ]
                 .filter(Boolean)

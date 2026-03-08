@@ -24,9 +24,6 @@ spec:
             - name: backend
               containerPort: 8080
               protocol: TCP
-            - name: web
-              containerPort: 3000
-              protocol: TCP
           envFrom:
             - configMapRef:
                 name: kandev-config

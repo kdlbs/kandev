@@ -174,6 +174,7 @@ async function prepareReleaseBundle({
   const backendEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(actualBackendPort),
+    KANDEV_WEB_INTERNAL_URL: `http://localhost:${actualWebPort}`,
     KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
     KANDEV_DATABASE_PATH: dbPath,
     KANDEV_LOG_LEVEL: logLevel,
@@ -182,7 +183,6 @@ async function prepareReleaseBundle({
   const webEnv: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_API_BASE_URL: backendUrl,
-    NEXT_PUBLIC_KANDEV_API_BASE_URL: backendUrl,
     PORT: String(actualWebPort),
   };
   (webEnv as Record<string, string>).NODE_ENV = "production";
@@ -264,6 +264,6 @@ export async function runRelease({ version, backendPort, webPort }: RunOptions):
     quiet: true,
   });
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log(`[kandev] web ready at ${webUrl}`);
-  openBrowser(webUrl);
+  console.log("[kandev] ready at " + prepared.backendUrl);
+  openBrowser(prepared.backendUrl);
 }

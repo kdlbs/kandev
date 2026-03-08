@@ -8,7 +8,6 @@ import {
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({
     apiBaseUrl: "http://localhost:8080",
-    mcpServerUrl: "http://localhost:9090/sse",
   }),
 }));
 

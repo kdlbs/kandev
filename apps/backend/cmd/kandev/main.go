@@ -432,6 +432,7 @@ func buildHTTPServer(
 		msgCreator:              msgCreator,
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,
+		webInternalURL:          cfg.Server.WebInternalURL,
 		log:                     log,
 	})
 

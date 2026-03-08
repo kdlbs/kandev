@@ -121,13 +121,12 @@ export async function runStart({
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true" } : {}),
     },
   });
-  const webEnv = buildWebEnv({ ports, includeMcp: true, production: true, debug });
+  const webEnv = buildWebEnv({ ports, production: true, debug });
 
   logStartupInfo({
     header: "start mode: using local build",
     ports,
     dbPath,
-    includeMcp: true,
     logLevel,
   });
 
@@ -168,6 +167,6 @@ export async function runStart({
   });
 
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
-  console.log(`[kandev] web ready at ${webUrl}`);
-  openBrowser(webUrl);
+  console.log("[kandev] ready at " + ports.backendUrl);
+  openBrowser(ports.backendUrl);
 }

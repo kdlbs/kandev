@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -383,6 +385,7 @@ type routeParams struct {
 	msgCreator              *messageCreatorAdapter
 	secretsSvc              *secrets.Service
 	secretStore             secrets.SecretStore
+	webInternalURL          string
 	log                     *logger.Logger
 }
 
@@ -401,6 +404,26 @@ func registerRoutes(p routeParams) {
 	p.router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
 	})
+
+	if p.webInternalURL != "" {
+		target, err := url.Parse(p.webInternalURL)
+		if err != nil {
+			p.log.Error("Invalid web internal URL, skipping reverse proxy", zap.String("url", p.webInternalURL), zap.Error(err))
+		} else {
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			proxy.FlushInterval = -1
+			// Custom error handler to prevent the default behavior of panicking
+			// with http.ErrAbortHandler when the upstream connection fails or the
+			// client disconnects. Without this, Gin's recovery middleware catches
+			// the panic and logs a full (harmless but noisy) stack trace.
+			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
+				p.log.Debug("Web proxy error", zap.Error(err))
+				w.WriteHeader(http.StatusBadGateway)
+			}
+			p.router.NoRoute(gin.WrapH(proxy))
+			p.log.Info("Web reverse proxy enabled", zap.String("target", p.webInternalURL))
+		}
+	}
 }
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.

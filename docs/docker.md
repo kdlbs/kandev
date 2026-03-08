@@ -5,10 +5,10 @@ Run Kandev in a Docker container. For Kubernetes deployment, see [k8s.md](k8s.md
 ## Quick Start
 
 ```bash
-docker run -p 8080:8080 -p 3000:3000 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
+docker run -p 8080:8080 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 ```
 
-Open `http://localhost:3000` in your browser.
+Open `http://localhost:8080` in your browser.
 
 ## Using the Pre-built Image
 
@@ -53,7 +53,7 @@ Without a volume, data is lost when the container is removed.
 Configuration is done via `KANDEV_`-prefixed environment variables:
 
 ```bash
-docker run -p 8080:8080 -p 3000:3000 \
+docker run -p 8080:8080 \
   -v kandev-data:/data \
   -e KANDEV_LOG_LEVEL=debug \
   ghcr.io/kdlbs/kandev:latest
@@ -63,7 +63,6 @@ docker run -p 8080:8080 -p 3000:3000 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KANDEV_PUBLIC_URL` | (unset) | External URL when behind a reverse proxy (e.g., `https://kandev.example.com`) |
 | `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
@@ -76,7 +75,7 @@ docker run -p 8080:8080 -p 3000:3000 \
 To use PostgreSQL instead of SQLite:
 
 ```bash
-docker run -p 8080:8080 -p 3000:3000 \
+docker run -p 8080:8080 \
   -e KANDEV_DATABASE_DRIVER=postgres \
   -e KANDEV_DATABASE_HOST=host.docker.internal \
   -e KANDEV_DATABASE_PORT=5432 \
@@ -86,20 +85,21 @@ docker run -p 8080:8080 -p 3000:3000 \
   ghcr.io/kdlbs/kandev:latest
 ```
 
-## Ports
+## Port
+
+Kandev exposes a single port. The Go backend serves the API, WebSocket, and reverse-proxies the Next.js frontend — all on one port:
 
 | Port | Service |
 |------|---------|
-| `8080` | Backend API + WebSocket |
-| `3000` | Web UI |
+| `8080` | API + WebSocket + Web UI |
 
-Override ports by changing the published ports and passing CLI flags:
+Override the port:
 
 ```bash
-docker run -p 9080:9080 -p 4000:4000 \
+docker run -p 9080:9080 \
   -v kandev-data:/data \
   ghcr.io/kdlbs/kandev:latest \
-  kandev start --backend-port 9080 --web-port 4000
+  kandev start --backend-port 9080
 ```
 
 ## Docker Compose
@@ -112,7 +112,6 @@ services:
     image: ghcr.io/kdlbs/kandev:latest
     ports:
       - "8080:8080"
-      - "3000:3000"
     volumes:
       - kandev-data:/data
     restart: unless-stopped
@@ -133,7 +132,6 @@ services:
     image: ghcr.io/kdlbs/kandev:latest
     ports:
       - "8080:8080"
-      - "3000:3000"
     volumes:
       - kandev-data:/data
     environment:
@@ -170,20 +168,7 @@ volumes:
 
 ## Reverse Proxy
 
-When running Kandev behind a reverse proxy (nginx, Traefik, Caddy) that serves both the API and web UI on the same domain, set `KANDEV_PUBLIC_URL` so the frontend routes API calls through the proxy instead of trying to reach port 8080 directly:
-
-```bash
-docker run -p 8080:8080 -p 3000:3000 \
-  -v kandev-data:/data \
-  -e KANDEV_PUBLIC_URL=https://kandev.example.com \
-  ghcr.io/kdlbs/kandev:latest
-```
-
-Your reverse proxy should route:
-- `/api/*` and `/ws` → `http://kandev:8080` (backend)
-- `/*` → `http://kandev:3000` (web UI)
-
-With WebSocket support enabled (for `/ws`).
+Since Kandev serves everything on a single port, a reverse proxy only needs to forward all traffic to port 8080. No extra environment variables are needed — the frontend automatically uses `window.location.origin` to reach the API.
 
 ### Docker Compose with Caddy
 
@@ -193,8 +178,6 @@ services:
     image: ghcr.io/kdlbs/kandev:latest
     volumes:
       - kandev-data:/data
-    environment:
-      KANDEV_PUBLIC_URL: "https://kandev.example.com"
     restart: unless-stopped
 
   caddy:
@@ -216,18 +199,7 @@ Example `Caddyfile`:
 
 ```
 kandev.example.com {
-    handle /api/* {
-        reverse_proxy kandev:8080
-    }
-    handle /ws {
-        reverse_proxy kandev:8080
-    }
-    handle /health {
-        reverse_proxy kandev:8080
-    }
-    handle {
-        reverse_proxy kandev:3000
-    }
+    reverse_proxy kandev:8080
 }
 ```
 
@@ -236,7 +208,7 @@ kandev.example.com {
 By default, `KANDEV_DOCKER_ENABLED=false` inside the container. To enable Docker-based agent execution, mount the Docker socket:
 
 ```bash
-docker run -p 8080:8080 -p 3000:3000 \
+docker run -p 8080:8080 \
   -v kandev-data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -e KANDEV_DOCKER_ENABLED=true \

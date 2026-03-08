@@ -9,11 +9,7 @@ spec:
   selector:
     app: kandev
   ports:
-    - name: backend
+    - name: http
       port: 8080
       targetPort: backend
-      protocol: TCP
-    - name: web
-      port: 3000
-      targetPort: web
       protocol: TCP

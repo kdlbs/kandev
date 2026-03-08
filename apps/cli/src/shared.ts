@@ -67,6 +67,7 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
   return {
     ...process.env,
     KANDEV_SERVER_PORT: String(ports.backendPort),
+    KANDEV_WEB_INTERNAL_URL: `http://localhost:${ports.webPort}`,
     KANDEV_AGENT_STANDALONE_PORT: String(ports.agentctlPort),
     KANDEV_AGENT_MCP_SERVER_PORT: String(ports.mcpPort),
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
@@ -76,8 +77,6 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
 
 export type WebEnvOptions = {
   ports: PortConfig;
-  /** Include MCP URL environment variables (used in dev/start modes) */
-  includeMcp?: boolean;
   /** Set NODE_ENV to production */
   production?: boolean;
   /** Enable debug mode (NEXT_PUBLIC_KANDEV_DEBUG) */
@@ -91,24 +90,17 @@ export type WebEnvOptions = {
  * @returns Environment object for the web process
  */
 export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
-  const { ports, includeMcp = false, production = false, debug = false } = options;
+  const { ports, production = false, debug = false } = options;
 
-  // Server-side env vars use localhost (SSR runs on same machine as backend)
-  // Client-side uses NEXT_PUBLIC_*_PORT to build URLs dynamically from window.location.hostname
-  // This allows accessing the app from any device (iPhone, Tailscale, etc.)
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    // Server-side: full localhost URL for SSR
+    // Server-side: full localhost URL for SSR fetches (Next.js SSR → Go backend)
     KANDEV_API_BASE_URL: ports.backendUrl,
-    // Client-side: only pass ports, client builds URL from current hostname
+    // Client-side: port injection for dev mode (browser on :3000, API on :8080).
+    // In production, the backend reverse-proxies Next.js so the client uses same-origin.
     NEXT_PUBLIC_KANDEV_API_PORT: String(ports.backendPort),
     PORT: String(ports.webPort),
   };
-
-  if (includeMcp) {
-    env.KANDEV_MCP_SERVER_URL = ports.mcpUrl;
-    env.NEXT_PUBLIC_KANDEV_MCP_PORT = String(ports.mcpPort);
-  }
 
   if (production) {
     (env as Record<string, string>).NODE_ENV = "production";
@@ -127,8 +119,6 @@ export type StartupInfoOptions = {
   ports: PortConfig;
   /** Database file path */
   dbPath?: string;
-  /** Whether to log MCP-related ports */
-  includeMcp?: boolean;
   /** Log level being used */
   logLevel?: string;
 };
@@ -137,15 +127,12 @@ export type StartupInfoOptions = {
  * Logs a unified startup info block to the console.
  */
 export function logStartupInfo(options: StartupInfoOptions): void {
-  const { header, ports, dbPath, includeMcp = false, logLevel } = options;
+  const { header, ports, dbPath, logLevel } = options;
   console.log(`[kandev] ${header}`);
-  console.log("[kandev] backend port:", ports.backendPort);
-  console.log("[kandev] web port:", ports.webPort);
+  console.log("[kandev] url: http://localhost:" + ports.backendPort);
   console.log("[kandev] agentctl port:", ports.agentctlPort);
-  if (includeMcp) {
-    console.log("[kandev] mcp port:", ports.mcpPort);
-    console.log("[kandev] mcp url:", ports.mcpUrl);
-  }
+  console.log("[kandev] mcp port:", ports.mcpPort);
+  console.log("[kandev] mcp url:", ports.mcpUrl);
   if (dbPath) {
     console.log("[kandev] db path:", dbPath);
   }

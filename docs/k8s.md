@@ -56,7 +56,7 @@ kubectl logs -l app=kandev -f
 | Resource | File | Purpose |
 |----------|------|---------|
 | Deployment | `deployment.yaml` | Single-replica pod running backend + web |
-| Service | `service.yaml` | ClusterIP exposing ports 8080 (API) and 3000 (UI) |
+| Service | `service.yaml` | ClusterIP exposing port 8080 |
 | ConfigMap | `configmap.yaml` | Non-sensitive environment configuration |
 | PVC | `pvc.yaml` | 10Gi persistent volume for SQLite + worktrees |
 | Ingress | `ingress.yaml` | Example ingress with WebSocket support |
@@ -66,22 +66,15 @@ kubectl logs -l app=kandev -f
 **Port-forward** (quickest for testing):
 
 ```bash
-kubectl port-forward svc/kandev 3000:3000 8080:8080
-# Open http://localhost:3000
+kubectl port-forward svc/kandev 8080:8080
+# Open http://localhost:8080
 ```
 
-**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes `/api` and `/ws` to the backend (port 8080) and everything else to the web UI (port 3000).
+**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 8080 (the Go backend reverse-proxies the Next.js frontend internally).
 
 ### Custom Domain / Reverse Proxy
 
-When serving Kandev behind an ingress with a custom domain (e.g., `https://kandev.example.com`), set `KANDEV_PUBLIC_URL` so the frontend knows to use the ingress URL instead of trying to reach the backend on port 8080 directly:
-
-```yaml
-# In k8s/configmap.yaml
-KANDEV_PUBLIC_URL: "https://kandev.example.com"
-```
-
-Without this, the browser tries to connect to `https://kandev.example.com:8080/api/...` which doesn't exist — only the ingress port (443) is exposed externally.
+No extra configuration is needed. The frontend automatically uses `window.location.origin` to reach the API, which works with any domain, reverse proxy, or ingress setup.
 
 ## Configuration
 
@@ -91,8 +84,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `KANDEV_PUBLIC_URL` | (unset) | External URL when behind a reverse proxy (e.g., `https://kandev.example.com`) |
-| `KANDEV_SERVER_PORT` | `8080` | Backend API port |
+| `KANDEV_SERVER_PORT` | `8080` | Server port (API + WebSocket + Web UI) |
 | `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
@@ -155,7 +147,7 @@ spec:
 
 ## Health Checks
 
-The deployment includes both probes on the backend `/health` endpoint:
+The deployment includes both probes on the `/health` endpoint:
 
 - **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures)
 - **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures)

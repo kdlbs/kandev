@@ -18,33 +18,10 @@ spec:
     - host: kandev.example.com
       http:
         paths:
-          # Backend API + WebSocket
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: kandev
-                port:
-                  name: backend
-          - path: /ws
-            pathType: Prefix
-            backend:
-              service:
-                name: kandev
-                port:
-                  name: backend
-          - path: /health
-            pathType: Exact
-            backend:
-              service:
-                name: kandev
-                port:
-                  name: backend
-          # Web UI (catch-all)
           - path: /
             pathType: Prefix
             backend:
               service:
                 name: kandev
                 port:
-                  name: web
+                  name: http

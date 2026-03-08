@@ -1,5 +1,5 @@
 /**
- * Convert HTTP URL to WebSocket URL
+ * Convert HTTP URL to WebSocket URL.
  * http://localhost:8080 → ws://localhost:8080/ws
  * https://api.example.com → wss://api.example.com/ws
  */

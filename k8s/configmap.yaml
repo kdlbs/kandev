@@ -16,8 +16,3 @@ data:
 
   # Logging — auto-detects K8s and uses JSON format
   KANDEV_LOG_LEVEL: info
-
-  # Public URL — set when behind a reverse proxy / ingress that serves both
-  # web and API on the same domain. Without this, the UI tries to reach the
-  # backend API on port 8080 directly, which fails behind a proxy.
-  # KANDEV_PUBLIC_URL: "https://kandev.example.com"

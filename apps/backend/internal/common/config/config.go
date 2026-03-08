@@ -50,10 +50,11 @@ func (c *Config) ResolvedDataDir() string {
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	ReadTimeout  int    `mapstructure:"readTimeout"`  // in seconds
-	WriteTimeout int    `mapstructure:"writeTimeout"` // in seconds
+	Host           string `mapstructure:"host"`
+	Port           int    `mapstructure:"port"`
+	ReadTimeout    int    `mapstructure:"readTimeout"`  // in seconds
+	WriteTimeout   int    `mapstructure:"writeTimeout"` // in seconds
+	WebInternalURL string `mapstructure:"webInternalUrl"`
 }
 
 // DatabaseConfig holds database connection configuration.
@@ -197,6 +198,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)
+	v.SetDefault("server.webInternalUrl", "")
 
 	// DataDir default — empty means resolve from KANDEV_DATA_DIR env or ~/.kandev
 	v.SetDefault("dataDir", "")
@@ -312,6 +314,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.standaloneHost", "KANDEV_AGENT_STANDALONE_HOST")
 	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
+	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
 	_ = v.BindEnv("dataDir", "KANDEV_DATA_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")

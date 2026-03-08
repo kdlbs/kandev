@@ -124,7 +124,7 @@ Extends the backend fixture with:
 - **`seedData`** (worker-scoped) — creates a workspace, discovers the default workflow and its steps
 - **`testPage`** (per-test) — Playwright page with a browser context whose `baseURL` points to the worker's frontend, plus `localStorage` pre-configured:
   - `kandev.onboarding.completed = "true"` — skips onboarding
-  - `window.__KANDEV_API_BASE_URL` — points to the worker's backend (client-side override)
+  - `window.__KANDEV_API_PORT` — points to the worker's backend port (client-side override)
 
 ### API client (`helpers/api-client.ts`)
 

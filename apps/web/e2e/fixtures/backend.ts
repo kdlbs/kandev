@@ -227,6 +227,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         env: {
           ...(process.env as unknown as Record<string, string>),
           KANDEV_API_BASE_URL: baseUrl,
+          NEXT_PUBLIC_KANDEV_API_PORT: String(backendPort),
           PORT: String(frontendPort),
           HOSTNAME: "localhost",
           NODE_ENV: "production",
