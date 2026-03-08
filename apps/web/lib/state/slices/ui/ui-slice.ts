@@ -98,7 +98,6 @@ function buildMobileActions(set: ImmerSet) {
 
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
-  get,
 ) => ({
   ...defaultUIState,
   ...buildPreviewActions(set),

@@ -50,55 +50,23 @@ export type ChatInputEditorAreaProps = {
   isEnhancingPrompt?: boolean;
 };
 
-export function ChatInputEditorArea({
-  inputRef,
-  value,
-  handleChange,
-  handleSubmitWithReset,
-  inputPlaceholder,
-  isDisabled,
-  hasClarification,
-  planModeEnabled,
-  planModeAvailable,
-  mcpServers,
-  submitKey,
-  setIsInputFocused,
-  sessionId,
-  taskId,
-  onAddContextFile,
-  onToggleContextFile,
-  planContextEnabled,
-  handleAgentCommand,
-  handleImagePaste,
-  showRequestChangesTooltip,
-  isAgentBusy,
-  onPlanModeChange,
-  taskTitle,
-  taskDescription,
-  isSending,
-  onCancel,
-  contextCount,
-  hideSessionsDropdown,
-  contextPopoverOpen,
-  setContextPopoverOpen,
-  contextFiles,
-  onImplementPlan,
-  onEnhancePrompt,
-  isEnhancingPrompt,
-}: ChatInputEditorAreaProps) {
-  // Block submit while enhancing prompt, but keep editor editable for programmatic updates
+export function ChatInputEditorArea(props: ChatInputEditorAreaProps) {
+  const {
+    inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder,
+    isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers,
+    submitKey, setIsInputFocused, sessionId, taskId, onAddContextFile, onToggleContextFile,
+    planContextEnabled, handleAgentCommand, handleImagePaste, showRequestChangesTooltip,
+    isAgentBusy, onPlanModeChange, taskTitle, taskDescription, isSending, onCancel,
+    contextCount, hideSessionsDropdown, contextPopoverOpen, setContextPopoverOpen,
+    contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt,
+  } = props;
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <Tooltip open={showRequestChangesTooltip}>
         <TooltipTrigger asChild>
-          <div
-            className={cn(
-              "flex-1 min-h-0 transition-opacity",
-              isEnhancingPrompt && "opacity-50 pointer-events-none",
-            )}
-          >
+          <div className={cn("flex-1 min-h-0 transition-opacity", isEnhancingPrompt && "opacity-50 pointer-events-none")}>
             <TipTapInput
               ref={inputRef}
               value={value}

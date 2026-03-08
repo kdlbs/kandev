@@ -1,23 +1,13 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
 import { IconMessageCircle, IconPlus, IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
-import { startQuickChat } from "@/lib/api/domains/workspace-api";
 import { QuickChatContent } from "./quick-chat-content";
+import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
+import { useQuickChatModal } from "./use-quick-chat-modal";
 
 type QuickChatModalProps = {
   workspaceId: string;
@@ -116,139 +106,11 @@ function AgentPickerView({ onSelectAgent }: { onSelectAgent: (agentId: string) =
 }
 
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
-  const { toast } = useToast();
-  const isOpen = useAppStore((s) => s.quickChat.isOpen);
-  const sessions = useAppStore((s) => s.quickChat.sessions);
-  const activeSessionId = useAppStore((s) => s.quickChat.activeSessionId);
-  const closeQuickChat = useAppStore((s) => s.closeQuickChat);
-  const closeQuickChatSession = useAppStore((s) => s.closeQuickChatSession);
-  const setActiveQuickChatSession = useAppStore((s) => s.setActiveQuickChatSession);
-  const renameQuickChatSession = useAppStore((s) => s.renameQuickChatSession);
-  const openQuickChat = useAppStore((s) => s.openQuickChat);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
-  const taskSessions = useAppStore((s) => s.taskSessions.items || {});
-  const [isCreating, setIsCreating] = useState(false);
-  const [showAgentPicker, setShowAgentPicker] = useState(false);
-  const [sessionToClose, setSessionToClose] = useState<string | null>(null);
-
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        closeQuickChat();
-        setShowAgentPicker(false);
-      }
-    },
-    [closeQuickChat],
-  );
-
-  const handleNewChat = useCallback(() => {
-    // Create a new tab with empty session ID (will show agent picker)
-    openQuickChat("", workspaceId);
-  }, [openQuickChat, workspaceId]);
-
-  const handleSelectAgent = useCallback(
-    async (agentId: string) => {
-      if (isCreating) return;
-
-      setIsCreating(true);
-      try {
-        // Get agent name for tab label
-        const agent = agentProfiles.find((p) => p.id === agentId);
-        const agentName = agent?.label || "Agent";
-
-        // Generate initial tab name with agent name
-        const sessionCount = sessions.filter((s) => s.sessionId !== "").length + 1;
-        const initialName = `${agentName} - Chat ${sessionCount}`;
-
-        // Create new session with selected agent and title
-        const response = await startQuickChat(workspaceId, {
-          agent_profile_id: agentId,
-          title: initialName,
-        });
-
-        // Remove the empty placeholder tab if it exists
-        if (activeSessionId === "") {
-          closeQuickChatSession("");
-        }
-
-        // Open the new session
-        openQuickChat(response.session_id, workspaceId);
-
-        // Add session to state with the name
-        renameQuickChatSession(response.session_id, initialName);
-
-        setShowAgentPicker(false);
-      } catch (error) {
-        toast({
-          title: "Failed to start quick chat",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      } finally {
-        setIsCreating(false);
-      }
-    },
-    [
-      workspaceId,
-      isCreating,
-      activeSessionId,
-      closeQuickChatSession,
-      openQuickChat,
-      toast,
-      agentProfiles,
-      sessions,
-      renameQuickChatSession,
-    ],
-  );
-
-  const handleCloseTab = useCallback(
-    (sessionId: string) => {
-      // Skip confirmation for empty sessions (agent picker tabs)
-      if (sessionId === "") {
-        closeQuickChatSession(sessionId);
-        return;
-      }
-      // Show confirmation dialog
-      setSessionToClose(sessionId);
-    },
-    [closeQuickChatSession],
-  );
-
-  const handleConfirmClose = useCallback(async () => {
-    if (!sessionToClose) return;
-
-    const sessionId = sessionToClose;
-    setSessionToClose(null);
-
-    // Get the task ID for this session before closing
-    const session = taskSessions[sessionId];
-    const taskId = session?.task_id;
-
-    // Close the session in the UI first (immediate feedback)
-    closeQuickChatSession(sessionId);
-
-    // Delete the task (this will stop the agent and clean up)
-    // The backend will:
-    // 1. Stop the agent execution
-    // 2. Delete the task from database
-    // 3. Clean up the worktree
-    if (taskId) {
-      try {
-        const { deleteTask } = await import("@/lib/api/domains/kanban-api");
-        await deleteTask(taskId);
-      } catch (error) {
-        console.error("Failed to delete quick chat task:", error);
-        toast({
-          title: "Failed to delete quick chat",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      }
-    }
-  }, [sessionToClose, closeQuickChatSession, taskSessions, toast]);
-
-  // Check if active session needs agent picker (empty session ID means new tab)
-  const activeSessionNeedsAgent = activeSessionId === "" || showAgentPicker;
+  const {
+    isOpen, sessions, activeSessionId, sessionToClose, activeSessionNeedsAgent,
+    setActiveQuickChatSession, setSessionToClose, handleOpenChange,
+    handleNewChat, handleSelectAgent, handleCloseTab, handleConfirmClose,
+  } = useQuickChatModal(workspaceId);
 
   return (
     <>
@@ -273,36 +135,11 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
-        open={!!sessionToClose}
+      <QuickChatDeleteDialog
+        sessionToDelete={sessionToClose}
         onOpenChange={(open) => !open && setSessionToClose(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Quick Chat?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p>This will permanently delete this quick chat session, including:</p>
-                <ul className="list-disc list-inside mt-2 space-y-1">
-                  <li>All conversation history</li>
-                  <li>The task and its data</li>
-                  <li>The associated worktree</li>
-                </ul>
-                <p className="mt-2">This action cannot be undone.</p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmClose}
-              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={handleConfirmClose}
+      />
     </>
   );
 });

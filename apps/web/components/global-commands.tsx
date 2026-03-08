@@ -19,8 +19,6 @@ import {
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
-import { startQuickChat } from "@/lib/api/domains/workspace-api";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { CommandItem } from "@/lib/commands/types";
 

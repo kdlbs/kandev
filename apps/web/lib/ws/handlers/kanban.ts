@@ -19,7 +19,6 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         events: step.events,
         show_in_command_panel: step.show_in_command_panel,
       }));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tasks: KanbanTask[] = message.payload.tasks
         // Filter out ephemeral tasks (e.g., quick chat)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

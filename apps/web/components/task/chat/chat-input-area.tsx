@@ -292,6 +292,19 @@ function PRMergedBanner({ taskId }: { taskId: string }) {
   );
 }
 
+function AgentModeIndicator({ sessionId }: { sessionId: string | null }) {
+  const agentMode = useAppStore((state) =>
+    sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
+  );
+  if (!agentMode || agentMode === "default") return null;
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
+      <IconBrain className="h-3 w-3" />
+      <span className="capitalize">{agentMode} mode</span>
+    </div>
+  );
+}
+
 type ChatInputAreaProps = {
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
   clarificationKey: number;
@@ -351,10 +364,6 @@ export function ChatInputArea({
     chatInputRef,
   );
 
-  const agentMode = useAppStore((state) =>
-    resolvedSessionId ? state.sessionMode.bySessionId[resolvedSessionId] : undefined,
-  );
-
   const hasClarification = !!panelState.pendingClarification;
   const placeholder = resolveInputPlaceholder(
     isAgentBusy,
@@ -365,12 +374,7 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      {agentMode && agentMode !== "default" && (
-        <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
-          <IconBrain className="h-3 w-3" />
-          <span className="capitalize">{agentMode} mode</span>
-        </div>
-      )}
+      <AgentModeIndicator sessionId={resolvedSessionId} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       <ChatInputContainer
         ref={chatInputRef}

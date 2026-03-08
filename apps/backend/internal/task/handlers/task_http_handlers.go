@@ -622,6 +622,66 @@ type httpStartQuickChatResponse struct {
 	SessionID string `json:"session_id"`
 }
 
+// quickChatParams holds resolved parameters for creating a quick chat session.
+type quickChatParams struct {
+	workflowID     string
+	agentProfileID string
+	executorID     string
+	title          string
+	repos          []service.TaskRepositoryInput
+	metadata       map[string]interface{}
+}
+
+// buildQuickChatRepositories builds the repository input list from the request.
+func (body *httpStartQuickChatRequest) buildRepositories() []service.TaskRepositoryInput {
+	if body.RepositoryID == "" && body.LocalPath == "" {
+		return nil
+	}
+	return []service.TaskRepositoryInput{{
+		RepositoryID:  body.RepositoryID,
+		LocalPath:     body.LocalPath,
+		Name:          body.RepositoryName,
+		DefaultBranch: body.DefaultBranch,
+		BaseBranch:    body.BaseBranch,
+	}}
+}
+
+// resolveQuickChatParams resolves agent/executor IDs and builds metadata.
+func (body *httpStartQuickChatRequest) resolveParams(
+	workspace *models.Workspace, workflowID string,
+) quickChatParams {
+	agentProfileID := body.AgentProfileID
+	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
+		agentProfileID = *workspace.DefaultAgentProfileID
+	}
+	executorID := body.ExecutorID
+	if executorID == "" && workspace.DefaultExecutorID != nil {
+		executorID = *workspace.DefaultExecutorID
+	}
+
+	metadata := make(map[string]interface{})
+	if agentProfileID != "" {
+		metadata["agent_profile_id"] = agentProfileID
+	}
+	if executorID != "" {
+		metadata["executor_id"] = executorID
+	}
+
+	title := body.Title
+	if title == "" {
+		title = "Quick Chat"
+	}
+
+	return quickChatParams{
+		workflowID:     workflowID,
+		agentProfileID: agentProfileID,
+		executorID:     executorID,
+		title:          title,
+		repos:          body.buildRepositories(),
+		metadata:       metadata,
+	}
+}
+
 // httpStartQuickChat creates an ephemeral task and prepares a session for quick chat.
 func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	workspaceID := c.Param("id")
@@ -633,76 +693,33 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	// Get workspace to use defaults
 	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
 
-	// Get default workflow for the workspace
 	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
 	if err != nil || len(workflows) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
 		return
 	}
-	workflowID := workflows[0].ID
 
-	// Build repository input if provided
-	var repos []service.TaskRepositoryInput
-	if body.RepositoryID != "" || body.LocalPath != "" {
-		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID:  body.RepositoryID,
-			LocalPath:     body.LocalPath,
-			Name:          body.RepositoryName,
-			DefaultBranch: body.DefaultBranch,
-			BaseBranch:    body.BaseBranch,
-		})
-	}
-
-	// Resolve agent and executor from request or workspace defaults
-	agentProfileID := body.AgentProfileID
-	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
-		agentProfileID = *workspace.DefaultAgentProfileID
-	}
-	executorID := body.ExecutorID
-	if executorID == "" && workspace.DefaultExecutorID != nil {
-		executorID = *workspace.DefaultExecutorID
-	}
-
-	// Quick chat requires an agent profile
-	if agentProfileID == "" {
-		h.logger.Error("no agent profile configured for quick chat",
-			zap.String("workspace_id", workspaceID),
-			zap.Bool("has_default", workspace.DefaultAgentProfileID != nil))
+	params := body.resolveParams(workspace, workflows[0].ID)
+	if params.agentProfileID == "" {
+		h.logger.Error("no agent profile configured for quick chat", zap.String("workspace_id", workspaceID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no default agent profile configured"})
 		return
 	}
 
-	// Store agent/executor in task metadata so PrepareTaskSession can find them
-	metadata := make(map[string]interface{})
-	if agentProfileID != "" {
-		metadata["agent_profile_id"] = agentProfileID
-	}
-	if executorID != "" {
-		metadata["executor_id"] = executorID
-	}
-
-	// Use provided title or default to "Quick Chat"
-	title := body.Title
-	if title == "" {
-		title = "Quick Chat"
-	}
-
-	// Create ephemeral task
 	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:  workspaceID,
-		WorkflowID:   workflowID,
-		Title:        title,
+		WorkflowID:   params.workflowID,
+		Title:        params.title,
 		Description:  body.Prompt,
-		Repositories: repos,
+		Repositories: params.repos,
 		IsEphemeral:  true,
-		Metadata:     metadata,
+		Metadata:     params.metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create ephemeral task", zap.Error(err))
@@ -710,12 +727,11 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		return
 	}
 
-	// Prepare session
 	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:          task.ID,
 		Intent:          orchestrator.IntentPrepare,
-		AgentProfileID:  agentProfileID,
-		ExecutorID:      executorID,
+		AgentProfileID:  params.agentProfileID,
+		ExecutorID:      params.executorID,
 		LaunchWorkspace: true,
 	})
 	if err != nil {
