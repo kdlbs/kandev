@@ -24,6 +24,16 @@ import {
   IconRosetteNumber1,
 } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@kandev/ui/alert-dialog";
 import { ScrollArea, ScrollBar } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
@@ -199,11 +209,45 @@ function PipelineArea({
         type="button"
         onClick={readOnly ? undefined : onAddStep}
         disabled={readOnly}
+        data-testid="add-step-button"
         className="shrink-0 h-10 w-10 rounded-lg border border-dashed border-border text-muted-foreground hover:border-primary/50 hover:text-foreground flex items-center justify-center cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         <IconPlus className="h-4 w-4" />
       </button>
     </div>
+  );
+}
+
+// --- Step Delete Confirmation ---
+
+function StepDeleteConfirmation({
+  stepName,
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  stepName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent data-testid="step-delete-confirm-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete step &ldquo;{stepName}&rdquo;?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently remove the step from this workflow. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm} className="cursor-pointer">
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -219,6 +263,7 @@ export function WorkflowPipelineEditor({
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [prevStepCount, setPrevStepCount] = useState(steps.length);
+  const [stepToConfirmDelete, setStepToConfirmDelete] = useState<string | null>(null);
 
   if (steps.length !== prevStepCount) {
     if (steps.length > prevStepCount && steps.length > 0)
@@ -250,10 +295,18 @@ export function WorkflowPipelineEditor({
   const handleSelectStep = (stepId: string) =>
     setSelectedStepId((prev) => (prev === stepId ? null : stepId));
 
-  const handleRemoveStep = (stepId: string) => {
-    onRemoveStep(stepId);
-    if (selectedStepId === stepId) setSelectedStepId(null);
+  const requestRemoveStep = (stepId: string) => setStepToConfirmDelete(stepId);
+
+  const confirmRemoveStep = () => {
+    if (!stepToConfirmDelete) return;
+    onRemoveStep(stepToConfirmDelete);
+    if (selectedStepId === stepToConfirmDelete) setSelectedStepId(null);
+    setStepToConfirmDelete(null);
   };
+
+  const stepToDeleteName = stepToConfirmDelete
+    ? (steps.find((s) => s.id === stepToConfirmDelete)?.name ?? "this step")
+    : "";
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const pipelineArea = (
@@ -261,7 +314,7 @@ export function WorkflowPipelineEditor({
       steps={steps}
       selectedStepId={selectedStepId}
       onSelectStep={handleSelectStep}
-      onRemoveStep={handleRemoveStep}
+      onRemoveStep={requestRemoveStep}
       onAddStep={onAddStep}
       readOnly={readOnly}
     />
@@ -291,13 +344,18 @@ export function WorkflowPipelineEditor({
           step={selectedStep}
           steps={steps}
           onUpdate={(updates) => onUpdateStep(selectedStep.id, updates)}
-          onRemove={() => {
-            onRemoveStep(selectedStep.id);
-            setSelectedStepId(null);
-          }}
+          onRemove={() => requestRemoveStep(selectedStep.id)}
           readOnly={readOnly}
         />
       )}
+      <StepDeleteConfirmation
+        stepName={stepToDeleteName}
+        open={!!stepToConfirmDelete}
+        onOpenChange={(open) => {
+          if (!open) setStepToConfirmDelete(null);
+        }}
+        onConfirm={confirmRemoveStep}
+      />
     </div>
   );
 }

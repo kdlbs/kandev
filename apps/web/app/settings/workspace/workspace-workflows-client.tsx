@@ -261,7 +261,12 @@ function WorkflowSectionActions({ onExport, onImport, onAdd }: WorkflowSectionAc
         <IconUpload className="h-4 w-4 mr-2" />
         Import
       </Button>
-      <Button size="sm" onClick={onAdd} className="cursor-pointer">
+      <Button
+        size="sm"
+        onClick={onAdd}
+        className="cursor-pointer"
+        data-testid="add-workflow-button"
+      >
         <IconPlus className="h-4 w-4 mr-2" />
         Add Workflow
       </Button>
@@ -306,6 +311,7 @@ function WorkflowList({
             workflow={workflow}
             isWorkflowDirty={isWorkflowDirty(workflow)}
             initialWorkflowSteps={initialWorkflowSteps}
+            templateStepCount={isTempWorkflow ? templateSteps.length : 0}
             otherWorkflows={workflowItems.filter(
               (w) => w.id !== workflow.id && !w.id.startsWith("temp-"),
             )}

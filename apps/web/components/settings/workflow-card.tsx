@@ -26,6 +26,7 @@ type WorkflowCardProps = {
   workflow: Workflow;
   isWorkflowDirty: boolean;
   initialWorkflowSteps?: WorkflowStep[];
+  templateStepCount?: number;
   otherWorkflows?: Workflow[];
   onUpdateWorkflow: (updates: { name?: string; description?: string }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
@@ -192,6 +193,7 @@ function WorkflowCardActions({
         onClick={onDeleteClick}
         disabled={deleteDisabled}
         className="cursor-pointer"
+        data-testid="delete-workflow-button"
       >
         <IconTrash className="h-4 w-4 mr-2" />
         Delete Workflow
@@ -339,6 +341,7 @@ export function WorkflowCard({
   workflow,
   isWorkflowDirty,
   initialWorkflowSteps,
+  templateStepCount = 0,
   otherWorkflows = [],
   onUpdateWorkflow,
   onDeleteWorkflow,
@@ -370,6 +373,7 @@ export function WorkflowCard({
     workflow,
     isNewWorkflow,
     workflowSteps,
+    templateStepCount,
     onSaveWorkflow,
     onWorkflowCreated,
     toast,
@@ -393,7 +397,7 @@ export function WorkflowCard({
     : [];
 
   return (
-    <Card>
+    <Card data-testid={`workflow-card-${workflow.id}`}>
       <CardContent className="pt-6">
         <div className="space-y-4">
           <WorkflowCardBody

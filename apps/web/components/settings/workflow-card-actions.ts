@@ -377,10 +377,58 @@ export function useStepDeleteHandlers({
   return { handleMigrateAndDeleteStep, handleDeleteStepAndTasks };
 }
 
+function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Partial<WorkflowStep> {
+  const updates: Partial<WorkflowStep> = {};
+  if (userStep.name !== backendStep.name) updates.name = userStep.name;
+  if (userStep.color !== backendStep.color) updates.color = userStep.color;
+  if (userStep.prompt !== backendStep.prompt) updates.prompt = userStep.prompt;
+  if (userStep.is_start_step !== backendStep.is_start_step)
+    updates.is_start_step = userStep.is_start_step;
+  if (userStep.allow_manual_move !== backendStep.allow_manual_move)
+    updates.allow_manual_move = userStep.allow_manual_move;
+  if (JSON.stringify(userStep.events) !== JSON.stringify(backendStep.events))
+    updates.events = userStep.events;
+  return updates;
+}
+
+function stepPayload(workflowId: string, step: WorkflowStep) {
+  return {
+    workflow_id: workflowId,
+    name: step.name,
+    position: step.position,
+    color: step.color,
+    prompt: step.prompt,
+    events: step.events,
+    is_start_step: step.is_start_step,
+    allow_manual_move: step.allow_manual_move,
+  };
+}
+
+async function reconcileTemplateSteps(
+  createdId: string,
+  userSteps: WorkflowStep[],
+  templateStepCount: number,
+) {
+  const { steps: backendSteps = [] } = await listWorkflowStepsAction(createdId);
+
+  for (const backendStep of backendSteps) {
+    const userStep = userSteps.find((s) => s.position === backendStep.position);
+    if (!userStep) continue;
+    const updates = diffStepUpdates(userStep, backendStep);
+    if (Object.keys(updates).length > 0) await updateWorkflowStepAction(backendStep.id, updates);
+  }
+
+  for (const step of userSteps) {
+    if (step.position >= templateStepCount)
+      await createWorkflowStepAction(stepPayload(createdId, step));
+  }
+}
+
 type WorkflowSaveActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
   workflowSteps: WorkflowStep[];
+  templateStepCount: number;
   onSaveWorkflow: () => Promise<unknown>;
   onWorkflowCreated?: (created: Workflow) => void;
   toast: ReturnType<typeof useToast>["toast"];
@@ -390,6 +438,7 @@ export function useWorkflowSaveActions({
   workflow,
   isNewWorkflow,
   workflowSteps,
+  templateStepCount,
   onSaveWorkflow,
   onWorkflowCreated,
   toast,
@@ -403,23 +452,17 @@ export function useWorkflowSaveActions({
       name: workflow.name.trim() || "New Workflow",
       workflow_template_id: templateId || undefined,
     });
-    // When a template is used, the backend creates steps with properly
-    // remapped step_id references (template aliases → real UUIDs).
-    // Only create steps manually when there's no template.
-    if (!templateId) {
+
+    if (templateId) {
+      // Backend creates template steps with remapped step_id references.
+      // Reconcile user edits and additions on top.
+      await reconcileTemplateSteps(created.id, workflowSteps, templateStepCount);
+    } else {
       for (const step of workflowSteps) {
-        await createWorkflowStepAction({
-          workflow_id: created.id,
-          name: step.name,
-          position: step.position,
-          color: step.color,
-          prompt: step.prompt,
-          events: step.events,
-          is_start_step: step.is_start_step,
-          allow_manual_move: step.allow_manual_move,
-        });
+        await createWorkflowStepAction(stepPayload(created.id, step));
       }
     }
+
     onWorkflowCreated?.(created);
   });
 
