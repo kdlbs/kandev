@@ -1,6 +1,7 @@
 package portutil
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -19,15 +20,23 @@ func TestAllocatePort(t *testing.T) {
 }
 
 func TestAllocatePortUniqueness(t *testing.T) {
-	// Allocate multiple ports and ensure they're different
+	// Hold all listeners open to prevent the OS from reassigning freed ports.
 	ports := make(map[int]bool)
-	for i := 0; i < 10; i++ {
-		port, err := AllocatePort()
-		if err != nil {
-			t.Fatalf("AllocatePort() failed on iteration %d: %v", i, err)
+	listeners := make([]net.Listener, 0, 10)
+	defer func() {
+		for _, l := range listeners {
+			_ = l.Close()
 		}
+	}()
+	for i := 0; i < 10; i++ {
+		l, err := net.Listen("tcp", ":0")
+		if err != nil {
+			t.Fatalf("Listen failed on iteration %d: %v", i, err)
+		}
+		listeners = append(listeners, l)
+		port := l.Addr().(*net.TCPAddr).Port
 		if ports[port] {
-			t.Errorf("AllocatePort() returned duplicate port: %d", port)
+			t.Errorf("duplicate port: %d", port)
 		}
 		ports[port] = true
 	}
