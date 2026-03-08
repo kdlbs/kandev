@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -279,6 +280,13 @@ func startAgentInfrastructure(
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
+
+	// Configure quick-chat workspace cleanup
+	if dataDir := cfg.ResolvedDataDir(); dataDir != "" {
+		quickChatDir := filepath.Join(dataDir, "quick-chat")
+		services.Task.SetQuickChatDir(quickChatDir)
+		log.Info("Quick-chat workspace cleanup configured", zap.String("quick_chat_dir", quickChatDir))
+	}
 
 	// ============================================
 	// REPO CLONER

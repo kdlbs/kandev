@@ -120,9 +120,7 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 		workspacePath = req.RepositoryPath
 	}
 	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
-	// TODO: These directories need cleanup when the task is deleted. Currently they are orphaned.
-	// Consider adding a cleanup hook in the task service's performTaskCleanup or implementing
-	// a periodic cleanup job for ~/.kandev/quick-chat/ directories without active tasks.
+	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
 	if workspacePath == "" && req.SessionID != "" && m.dataDir != "" {
 		quickChatDir := filepath.Join(m.dataDir, "quick-chat")
 		if err := os.MkdirAll(quickChatDir, 0755); err != nil {
