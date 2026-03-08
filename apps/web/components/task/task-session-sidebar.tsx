@@ -119,13 +119,8 @@ function useSidebarData(workspaceId: string | null) {
       for (const step of snapshot.steps) {
         if (!stepMap.has(step.id)) stepMap.set(step.id, step);
       }
-      // Filter out ephemeral tasks (e.g., quick chat) from the session sidebar
-      const nonEphemeralTasks = snapshot.tasks.filter((task) => {
-        // Check if task has is_ephemeral metadata
-        const metadata = (task as { metadata?: Record<string, unknown> }).metadata;
-        return !metadata?.is_ephemeral;
-      });
-      tasks.push(...nonEphemeralTasks);
+      // Ephemeral tasks are already filtered out by useAllWorkflowSnapshots
+      tasks.push(...snapshot.tasks);
     }
     const sortedSteps = [...stepMap.values()].sort((a, b) => a.position - b.position);
     return { allTasks: tasks, allSteps: sortedSteps };
