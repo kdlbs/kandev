@@ -110,12 +110,14 @@ type NotificationEventsTableProps = {
   tableProviders: NotificationProvider[];
   tableEvents: string[];
   onToggleEvent: (provider: NotificationProvider, eventType: string) => void;
+  onTestProvider: (providerId: string) => void;
 };
 
 function NotificationEventsTable({
   tableProviders,
   tableEvents,
   onToggleEvent,
+  onTestProvider,
 }: NotificationEventsTableProps) {
   if (tableProviders.length === 0) {
     return <p className="text-sm text-muted-foreground">No providers configured yet.</p>;
@@ -129,7 +131,26 @@ function NotificationEventsTable({
             <th className="px-4 py-3 text-left font-medium">Notification type</th>
             {tableProviders.map((provider) => (
               <th key={provider.id} className="px-4 py-3 text-center font-medium">
-                {provider.name}
+                <div className="flex items-center justify-center gap-1.5">
+                  <span>{provider.name}</span>
+                  {provider.type !== "local" && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 cursor-pointer"
+                            onClick={() => onTestProvider(provider.id)}
+                          >
+                            <IconBell className="h-3.5 w-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Send test notification</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
+                </div>
               </th>
             ))}
           </tr>
@@ -165,6 +186,54 @@ function NotificationEventsTable({
   );
 }
 
+function AppriseProviderCardActions({
+  provider,
+  onOpenForm,
+  onDeleteProvider,
+  onTestProvider,
+}: {
+  provider: NotificationProvider;
+  onOpenForm: (mode: AppriseFormMode, provider: NotificationProvider) => void;
+  onDeleteProvider: (providerId: string) => void;
+  onTestProvider: (providerId: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 cursor-pointer"
+              onClick={() => onTestProvider(provider.id)}
+            >
+              <IconBell className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Send test notification</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <Button
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        onClick={() => onOpenForm("edit", provider)}
+      >
+        Edit
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        onClick={() => onDeleteProvider(provider.id)}
+      >
+        Remove
+      </Button>
+    </div>
+  );
+}
+
 function AppriseProviderList({
   providers,
   appriseFormMode,
@@ -178,6 +247,7 @@ function AppriseProviderList({
   onOpenForm,
   onCloseForm,
   onDeleteProvider,
+  onTestProvider,
   onTextareaInput,
 }: {
   providers: NotificationProvider[];
@@ -192,6 +262,7 @@ function AppriseProviderList({
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
   onDeleteProvider: (providerId: string) => void;
+  onTestProvider: (providerId: string) => void;
   onTextareaInput: (event: FormEvent<HTMLTextAreaElement>) => void;
 }) {
   return (
@@ -223,24 +294,12 @@ function AppriseProviderList({
                   <div className="font-medium">{provider.name}</div>
                   <div className="text-xs text-muted-foreground">Apprise</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="cursor-pointer"
-                    onClick={() => onOpenForm("edit", provider)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="cursor-pointer"
-                    onClick={() => onDeleteProvider(provider.id)}
-                  >
-                    Remove
-                  </Button>
-                </div>
+                <AppriseProviderCardActions
+                  provider={provider}
+                  onOpenForm={onOpenForm}
+                  onDeleteProvider={onDeleteProvider}
+                  onTestProvider={onTestProvider}
+                />
               </div>
             )}
           </div>
@@ -279,6 +338,7 @@ type ExternalProvidersSectionProps = {
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
   onDeleteProvider: (id: string) => void;
+  onTestProvider: (id: string) => void;
   onTextareaInput: (e: FormEvent<HTMLTextAreaElement>) => void;
   onCreateAppriseProvider: () => Promise<void>;
 };
@@ -298,6 +358,7 @@ function ExternalProvidersSection({
   onOpenForm,
   onCloseForm,
   onDeleteProvider,
+  onTestProvider,
   onTextareaInput,
   onCreateAppriseProvider,
 }: ExternalProvidersSectionProps) {
@@ -339,6 +400,7 @@ function ExternalProvidersSection({
         onOpenForm={onOpenForm}
         onCloseForm={onCloseForm}
         onDeleteProvider={onDeleteProvider}
+        onTestProvider={onTestProvider}
         onTextareaInput={onTextareaInput}
       />
       {appriseAvailable && (
@@ -448,6 +510,7 @@ export function NotificationsSettings() {
         onOpenForm={actions.openAppriseForm}
         onCloseForm={actions.closeAppriseForm}
         onDeleteProvider={actions.handleDeleteProvider}
+        onTestProvider={actions.handleTestProvider}
         onTextareaInput={handleTextareaInput}
         onCreateAppriseProvider={actions.handleCreateAppriseProvider}
       />
@@ -464,6 +527,7 @@ export function NotificationsSettings() {
             tableProviders={tableProviders}
             tableEvents={tableEvents}
             onToggleEvent={actions.handleToggleEvent}
+            onTestProvider={actions.handleTestProvider}
           />
         )}
       </div>

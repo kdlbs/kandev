@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   createNotificationProvider,
   deleteNotificationProvider,
+  testNotificationProvider,
   updateNotificationProvider,
 } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
@@ -346,11 +347,20 @@ export function useNotificationsActions(state: NotificationsState, bumpPermissio
     });
   };
 
+  const handleTestProvider = async (providerId: string) => {
+    try {
+      await testNotificationProvider(providerId);
+    } catch (error) {
+      console.error("[NotificationsSettings] Test notification failed", error);
+    }
+  };
+
   return {
     handleToggleEvent,
     handleRequestPermission,
     handleRefreshPermission,
     handleTestNotification,
+    handleTestProvider,
     ...appriseActions,
   };
 }

@@ -301,6 +301,23 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{EventTaskSessionWaitingForInput})
 }
 
+func (s *Service) TestProvider(ctx context.Context, providerID string) error {
+	provider, err := s.repo.GetProvider(ctx, providerID)
+	if err != nil {
+		return ErrProviderNotFound
+	}
+	adapter := s.providers[provider.Type]
+	if adapter == nil {
+		return fmt.Errorf("unknown provider type: %s", provider.Type)
+	}
+	return adapter.Send(ctx, providers.Message{
+		EventType: EventTaskSessionWaitingForInput,
+		Title:     "Test notification",
+		Body:      "If you can read this, notifications are working.",
+		Config:    provider.Config,
+	})
+}
+
 func (s *Service) validateProvider(providerType models.ProviderType, config map[string]interface{}) error {
 	adapter := s.providers[providerType]
 	if adapter == nil {

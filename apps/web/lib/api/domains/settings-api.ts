@@ -331,6 +331,13 @@ export async function updateNotificationProvider(
   });
 }
 
+export async function testNotificationProvider(providerId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/notification-providers/${providerId}/test`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export async function deleteNotificationProvider(providerId: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`/api/v1/notification-providers/${providerId}`, {
     ...options,

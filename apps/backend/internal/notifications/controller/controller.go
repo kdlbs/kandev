@@ -84,6 +84,10 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) erro
 	return c.service.DeleteProvider(ctx, providerID)
 }
 
+func (c *Controller) TestProvider(ctx context.Context, providerID string) error {
+	return c.service.TestProvider(ctx, providerID)
+}
+
 func defaultNameForType(providerType string) string {
 	switch providerType {
 	case string(models.ProviderTypeApprise):

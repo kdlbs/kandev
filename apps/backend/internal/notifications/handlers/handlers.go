@@ -26,6 +26,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	api.POST("/notification-providers", h.httpCreateProvider)
 	api.PATCH("/notification-providers/:id", h.httpUpdateProvider)
 	api.DELETE("/notification-providers/:id", h.httpDeleteProvider)
+	api.POST("/notification-providers/:id/test", h.httpTestProvider)
 }
 
 func (h *Handlers) httpListProviders(c *gin.Context) {
@@ -67,6 +68,16 @@ func (h *Handlers) httpUpdateProvider(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpTestProvider(c *gin.Context) {
+	providerID := c.Param("id")
+	if err := h.controller.TestProvider(c.Request.Context(), providerID); err != nil {
+		h.logger.Error("test notification failed", zap.String("provider_id", providerID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func (h *Handlers) httpDeleteProvider(c *gin.Context) {

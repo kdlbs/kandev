@@ -194,19 +194,35 @@ func parseTimeoutMS(cfg *systemConfig, raw map[string]interface{}) error {
 }
 
 func (p *SystemProvider) sendNotification(ctx context.Context, cfg systemConfig, title, body string) error {
+	if cfg.IconPath == "" {
+		if iconPath, err := p.assets.ensureIcon(); err == nil {
+			cfg.IconPath = iconPath
+		}
+	}
 	switch runtime.GOOS {
 	case osDarwin:
-		return runCommand(ctx, "osascript", "-e", buildAppleScript(title, body))
+		return p.sendDarwinNotification(ctx, cfg, title, body)
 	case osLinux:
 		if isWSL() {
 			return p.sendWindowsNotification(ctx, cfg, title, body)
 		}
-		return sendLinuxNotification(ctx, cfg, title, body)
+		return p.sendLinuxNotification(ctx, cfg, title, body)
 	case osWindows:
 		return p.sendWindowsNotification(ctx, cfg, title, body)
 	default:
 		return fmt.Errorf("system notifications not supported on %s", runtime.GOOS)
 	}
+}
+
+func (p *SystemProvider) sendDarwinNotification(ctx context.Context, cfg systemConfig, title, body string) error {
+	if _, err := exec.LookPath("terminal-notifier"); err == nil {
+		args := []string{"-title", title, "-message", body, "-group", "kandev"}
+		if cfg.IconPath != "" {
+			args = append(args, "-contentImage", cfg.IconPath)
+		}
+		return runCommand(ctx, "terminal-notifier", args...)
+	}
+	return runCommand(ctx, "osascript", "-e", buildAppleScript(title, body))
 }
 
 func (p *SystemProvider) sendWindowsNotification(ctx context.Context, cfg systemConfig, title, body string) error {
@@ -247,13 +263,22 @@ func (p *SystemProvider) sendWindowsNotification(ctx context.Context, cfg system
 	return runCommand(ctx, "powershell.exe", args...)
 }
 
-func sendLinuxNotification(ctx context.Context, cfg systemConfig, title, body string) error {
+func (p *SystemProvider) sendLinuxNotification(ctx context.Context, cfg systemConfig, title, body string) error {
 	if _, err := exec.LookPath("notify-send"); err == nil {
-		return runCommand(ctx, "notify-send", "-t", strconv.Itoa(cfg.TimeoutMS), title, body)
+		args := []string{"-t", strconv.Itoa(cfg.TimeoutMS)}
+		if cfg.IconPath != "" {
+			args = append(args, "-i", cfg.IconPath)
+		}
+		args = append(args, title, body)
+		return runCommand(ctx, "notify-send", args...)
 	}
 	if _, err := exec.LookPath("zenity"); err == nil {
 		message := strings.TrimSpace(fmt.Sprintf("%s\n%s", title, body))
-		return runCommand(ctx, "zenity", "--notification", "--text", message)
+		args := []string{"--notification", "--text", message}
+		if cfg.IconPath != "" {
+			args = append(args, "--window-icon="+cfg.IconPath)
+		}
+		return runCommand(ctx, "zenity", args...)
 	}
 	return fmt.Errorf("notify-send or zenity is required for system notifications")
 }
@@ -321,7 +346,7 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
-	return cmd.Start()
+	return cmd.Run()
 }
 
 func isWSL() bool {

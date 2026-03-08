@@ -61,8 +61,13 @@ RUN apt-get update && \
         git \
         ca-certificates \
         gosu \
-        tini && \
-    rm -rf /var/lib/apt/lists/*
+        tini \
+        python3 \
+        python3-pip \
+        python3-venv \
+        pipx && \
+    rm -rf /var/lib/apt/lists/* && \
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
 # Replace the node base image's default user so we own uid 1000
 RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -m kandev
