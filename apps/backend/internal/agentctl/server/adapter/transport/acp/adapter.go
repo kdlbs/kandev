@@ -297,7 +297,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	defer span.End()
 
 	// Suppress history replay notifications during load.
-	// ACP agents stream the entire conversation history during session/load.
+	// ACP session/load replays the entire conversation history asynchronously.
+	// We set a flag to suppress these notifications to avoid duplicating messages in the database.
+	// The flag will be cleared when we send the next prompt (see Prompt method).
 	a.mu.Lock()
 	a.isLoadingSession = true
 	a.mu.Unlock()
@@ -307,11 +309,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 		Cwd:        a.cfg.WorkDir,
 		McpServers: []acp.McpServer{}, // MCPs configured via CLI args; empty satisfies the required field
 	})
-
-	// Clear the loading flag (even on error) before processing response
-	a.mu.Lock()
-	a.isLoadingSession = false
-	a.mu.Unlock()
 
 	if err != nil {
 		span.RecordError(err)
@@ -388,6 +385,18 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		attribute.Int("image_count", len(attachments)),
 	)
 	a.setPromptTraceCtx(promptCtx)
+
+	// Clear the loading flag before sending the prompt.
+	// If we're resuming a session, history replay is complete by the time we send a new prompt.
+	a.mu.Lock()
+	wasLoading := a.isLoadingSession
+	a.isLoadingSession = false
+	a.mu.Unlock()
+
+	if wasLoading {
+		a.logger.Info("cleared session load suppression flag before sending new prompt",
+			zap.String("session_id", sessionID))
+	}
 
 	a.logger.Info("sending prompt",
 		zap.String("session_id", sessionID),
@@ -601,15 +610,22 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	// During session/load, suppress history replay notifications.
 	// ACP agents stream the entire conversation history during load, which should not
 	// be emitted as new message events to avoid duplicating messages in the UI.
+	// We suppress: message chunks, thinking chunks, tool calls, and tool updates.
 	a.mu.RLock()
 	isLoading := a.isLoadingSession
 	a.mu.RUnlock()
 
 	if isLoading {
 		u := n.Update
-		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil {
+		// Suppress all conversation history events during load
+		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
+			u.ToolCall != nil || u.ToolCallUpdate != nil {
 			a.logger.Debug("suppressing history replay notification during session load",
-				zap.String("session_id", string(n.SessionId)))
+				zap.String("session_id", string(n.SessionId)),
+				zap.Bool("is_message", u.AgentMessageChunk != nil || u.UserMessageChunk != nil),
+				zap.Bool("is_thinking", u.AgentThoughtChunk != nil),
+				zap.Bool("is_tool_call", u.ToolCall != nil),
+				zap.Bool("is_tool_update", u.ToolCallUpdate != nil))
 			return
 		}
 	}
