@@ -530,5 +530,6 @@ func (t *Task) ToAPI() *v1.Task {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 		Metadata:     t.Metadata,
+		IsEphemeral:  t.IsEphemeral,
 	}
 }

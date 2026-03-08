@@ -700,7 +700,12 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	}
 
 	workflows, err := h.service.ListWorkflows(ctx, workspaceID)
-	if err != nil || len(workflows) == 0 {
+	if err != nil {
+		h.logger.Error("failed to list workflows", zap.Error(err), zap.String("workspace_id", workspaceID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workflows"})
+		return
+	}
+	if len(workflows) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no workflows"})
 		return
 	}
@@ -735,6 +740,12 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		LaunchWorkspace: true,
 	})
 	if err != nil {
+		// Rollback: delete the ephemeral task to prevent orphans
+		if deleteErr := h.service.DeleteTask(ctx, task.ID); deleteErr != nil {
+			h.logger.Error("failed to rollback quick chat task",
+				zap.String("task_id", task.ID),
+				zap.Error(deleteErr))
+		}
 		h.logger.Error("failed to prepare quick chat session", zap.Error(err), zap.String("task_id", task.ID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare session"})
 		return
