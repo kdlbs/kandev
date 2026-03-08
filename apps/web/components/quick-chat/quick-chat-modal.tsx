@@ -107,9 +107,18 @@ function AgentPickerView({ onSelectAgent }: { onSelectAgent: (agentId: string) =
 
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
   const {
-    isOpen, sessions, activeSessionId, sessionToClose, activeSessionNeedsAgent,
-    setActiveQuickChatSession, setSessionToClose, handleOpenChange,
-    handleNewChat, handleSelectAgent, handleCloseTab, handleConfirmClose,
+    isOpen,
+    sessions,
+    activeSessionId,
+    sessionToClose,
+    activeSessionNeedsAgent,
+    setActiveQuickChatSession,
+    setSessionToClose,
+    handleOpenChange,
+    handleNewChat,
+    handleSelectAgent,
+    handleCloseTab,
+    handleConfirmClose,
   } = useQuickChatModal(workspaceId);
 
   return (
