@@ -13,7 +13,6 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconMessageCircle, IconPlus, IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -294,10 +293,10 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmClose}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
             </AlertDialogAction>
