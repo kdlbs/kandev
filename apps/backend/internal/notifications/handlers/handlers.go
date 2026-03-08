@@ -80,7 +80,7 @@ func (h *Handlers) httpTestProvider(c *gin.Context) {
 			return
 		}
 		h.logger.Error("test notification failed", zap.String("provider_id", providerID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send test notification"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
