@@ -1,35 +1,42 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { QuickChatModal } from "./quick-chat-modal";
-import { QuickChatPickerDialog } from "./quick-chat-dialog";
 
 /**
  * Global provider for Quick Chat functionality.
- * Renders the picker dialog and modal that can be opened from anywhere in the app.
+ * Renders the modal that can be opened from anywhere in the app.
+ * Preloads agent profiles so they're available when quick chat is opened.
  */
 export function QuickChatProvider({ children }: { children: React.ReactNode }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const quickChatWorkspaceId = useAppStore((s) => s.quickChat.workspaceId);
+  const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
+  const isOpen = useAppStore((s) => s.quickChat.isOpen);
+  const activeWorkspace = useAppStore((s) => s.workspaces.activeId);
+  const [mounted, setMounted] = useState(false);
 
-  const handleOpenPicker = useCallback(() => {
-    setPickerOpen(true);
+  // Preload agent profiles so they're available when quick chat is opened
+  useSettingsData(true);
+
+  // Only render modal on client side to avoid hydration errors
+  useEffect(() => {
+    setMounted(true);
   }, []);
+
+  // Get workspace ID from first session, or use active workspace if modal is open
+  const workspaceId =
+    quickChatSessions.length > 0
+      ? quickChatSessions[0].workspaceId
+      : isOpen
+        ? activeWorkspace
+        : null;
 
   return (
     <>
       {children}
-      {/* Only render picker if we have a workspace ID (from opening quick chat modal or picker) */}
-      {quickChatWorkspaceId && (
-        <QuickChatPickerDialog
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          workspaceId={quickChatWorkspaceId}
-        />
-      )}
-      <QuickChatModal onNewChat={handleOpenPicker} />
+      {/* Only render modal on client side and if we have a workspace */}
+      {mounted && workspaceId && <QuickChatModal workspaceId={workspaceId} />}
     </>
   );
 }
-

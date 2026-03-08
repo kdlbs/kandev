@@ -177,8 +177,9 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded
-// Ephemeral tasks are always excluded from this listing
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
+// If includeEphemeral is false, ephemeral tasks are excluded
+// If onlyEphemeral is true, only ephemeral tasks are returned
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -187,10 +188,19 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		offset = 0
 	}
 
-	// Always exclude ephemeral tasks from workspace listings
-	archiveFilter := " AND is_ephemeral = 0"
+	// Build filter conditions
+	filter := ""
+	if onlyEphemeral {
+		// Only ephemeral tasks
+		filter += " AND is_ephemeral = 1"
+	} else if !includeEphemeral {
+		// Exclude ephemeral tasks
+		filter += " AND is_ephemeral = 0"
+	}
+	// If includeEphemeral is true and onlyEphemeral is false, include both
+
 	if !includeArchived {
-		archiveFilter += " AND archived_at IS NULL"
+		filter += " AND archived_at IS NULL"
 	}
 
 	var rows *sql.Rows
@@ -198,9 +208,9 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, archiveFilter, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, pageSize, offset)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, archiveFilter, pageSize, offset, includeArchived)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral)
 	}
 
 	if err != nil {
@@ -234,13 +244,17 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilt
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-// Always excludes ephemeral tasks.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiveFilter string, pageSize, offset int, includeArchived bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
-	// Always exclude ephemeral tasks from search
-	tFilter := " AND t.is_ephemeral = 0"
+	// Build task filter
+	tFilter := ""
+	if onlyEphemeral {
+		tFilter += " AND t.is_ephemeral = 1"
+	} else if !includeEphemeral {
+		tFilter += " AND t.is_ephemeral = 0"
+	}
 	if !includeArchived {
 		tFilter += " AND t.archived_at IS NULL"
 	}

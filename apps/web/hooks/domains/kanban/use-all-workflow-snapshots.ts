@@ -81,6 +81,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
           const stepIds = new Set(steps.map((s) => s.id));
 
           const tasks: KanbanTask[] = snapshot.tasks
+            .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
             .map((task) => mapSnapshotTask(task, stepIds))
             .filter((t): t is KanbanTask => t !== null);
 

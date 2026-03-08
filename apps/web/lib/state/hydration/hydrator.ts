@@ -183,6 +183,12 @@ function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
+  if (state.quickChat) {
+    // Merge quick chat sessions, preserving isOpen and activeSessionId from client
+    if (state.quickChat.sessions) {
+      draft.quickChat.sessions = state.quickChat.sessions;
+    }
+  }
   if (state.connection) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { status: _status, ...rest } = state.connection || {};

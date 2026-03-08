@@ -9,7 +9,6 @@ import {
   IconCheck,
   IconHome,
   IconSettings,
-  IconMessageCircle,
   IconPencil,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -35,7 +34,7 @@ import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -540,35 +539,6 @@ function GitAheadBehindBadges({
         </Tooltip>
       )}
     </div>
-  );
-}
-
-/** Quick Chat button that opens the quick chat modal */
-function QuickChatButton({ workspaceId }: { workspaceId?: string | null }) {
-  const quickChatSessionId = useAppStore((state) => state.quickChat.sessionId);
-  const openQuickChat = useAppStore((state) => state.openQuickChat);
-
-  // Only show if we have an active quick chat session to resume
-  if (!quickChatSessionId || !workspaceId) return null;
-
-  const handleClick = () => {
-    openQuickChat(quickChatSessionId, workspaceId);
-  };
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="cursor-pointer px-2"
-          onClick={handleClick}
-        >
-          <IconMessageCircle className="h-4 w-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Open Quick Chat</TooltipContent>
-    </Tooltip>
   );
 }
 

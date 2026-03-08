@@ -19,7 +19,7 @@ export const defaultUIState: UISliceState = {
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
-  quickChat: { isOpen: false, sessionId: null, workspaceId: null },
+  quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
 };
 
@@ -38,17 +38,26 @@ function buildPreviewActions(set: ImmerSet) {
         draft.previewPanel.openBySessionId[sessionId] = !current;
         setLocalStorage(`preview-open-${sessionId}`, !current);
       }),
-    setPreviewView: (sessionId: string, view: UISliceState["previewPanel"]["viewBySessionId"][string]) =>
+    setPreviewView: (
+      sessionId: string,
+      view: UISliceState["previewPanel"]["viewBySessionId"][string],
+    ) =>
       set((draft) => {
         draft.previewPanel.viewBySessionId[sessionId] = view;
         setLocalStorage(`preview-view-${sessionId}`, view);
       }),
-    setPreviewDevice: (sessionId: string, device: UISliceState["previewPanel"]["deviceBySessionId"][string]) =>
+    setPreviewDevice: (
+      sessionId: string,
+      device: UISliceState["previewPanel"]["deviceBySessionId"][string],
+    ) =>
       set((draft) => {
         draft.previewPanel.deviceBySessionId[sessionId] = device;
         setLocalStorage(`preview-device-${sessionId}`, device);
       }),
-    setPreviewStage: (sessionId: string, stage: UISliceState["previewPanel"]["stageBySessionId"][string]) =>
+    setPreviewStage: (
+      sessionId: string,
+      stage: UISliceState["previewPanel"]["stageBySessionId"][string],
+    ) =>
       set((draft) => {
         draft.previewPanel.stageBySessionId[sessionId] = stage;
       }),
@@ -73,7 +82,10 @@ function buildMobileActions(set: ImmerSet) {
       set((draft) => {
         draft.mobileKanban.isMenuOpen = open;
       }),
-    setMobileSessionPanel: (sessionId: string, panel: UISliceState["mobileSession"]["activePanelBySessionId"][string]) =>
+    setMobileSessionPanel: (
+      sessionId: string,
+      panel: UISliceState["mobileSession"]["activePanelBySessionId"][string],
+    ) =>
       set((draft) => {
         draft.mobileSession.activePanelBySessionId[sessionId] = panel;
       }),
@@ -86,6 +98,7 @@ function buildMobileActions(set: ImmerSet) {
 
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
+  get,
 ) => ({
   ...defaultUIState,
   ...buildPreviewActions(set),
@@ -126,18 +139,51 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   openQuickChat: (sessionId, workspaceId) =>
     set((draft) => {
       draft.quickChat.isOpen = true;
-      draft.quickChat.sessionId = sessionId;
-      draft.quickChat.workspaceId = workspaceId;
+      // If sessionId is empty, create a placeholder tab for agent selection
+      if (!sessionId) {
+        // Check if there's already an empty tab
+        const emptyTabExists = draft.quickChat.sessions.some((s) => s.sessionId === "");
+        if (!emptyTabExists) {
+          draft.quickChat.sessions.push({ sessionId: "", workspaceId });
+        }
+        draft.quickChat.activeSessionId = "";
+        return;
+      }
+      // Add session if not already in list
+      const exists = draft.quickChat.sessions.some((s) => s.sessionId === sessionId);
+      if (!exists) {
+        draft.quickChat.sessions.push({ sessionId, workspaceId });
+      }
+      draft.quickChat.activeSessionId = sessionId;
     }),
   closeQuickChat: () =>
     set((draft) => {
       draft.quickChat.isOpen = false;
     }),
-  clearQuickChatSession: () =>
+  closeQuickChatSession: (sessionId) =>
     set((draft) => {
-      draft.quickChat.sessionId = null;
-      draft.quickChat.workspaceId = null;
-      draft.quickChat.isOpen = false;
+      // Remove session from list
+      draft.quickChat.sessions = draft.quickChat.sessions.filter((s) => s.sessionId !== sessionId);
+      // If closing active session, switch to another or close modal
+      if (draft.quickChat.activeSessionId === sessionId) {
+        if (draft.quickChat.sessions.length > 0) {
+          draft.quickChat.activeSessionId = draft.quickChat.sessions[0].sessionId;
+        } else {
+          draft.quickChat.activeSessionId = null;
+          draft.quickChat.isOpen = false;
+        }
+      }
+    }),
+  setActiveQuickChatSession: (sessionId) =>
+    set((draft) => {
+      draft.quickChat.activeSessionId = sessionId;
+    }),
+  renameQuickChatSession: (sessionId, name) =>
+    set((draft) => {
+      const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
+      if (session) {
+        session.name = name;
+      }
     }),
   setSessionFailureNotification: (n) =>
     set((draft) => {

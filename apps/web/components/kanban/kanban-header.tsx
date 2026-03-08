@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
@@ -21,8 +20,8 @@ import { RefreshReviewsButton } from "../github/refresh-reviews-button";
 import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
-import { QuickChatPickerDialog } from "../quick-chat/quick-chat-dialog";
 import { TaskSearchInput } from "./task-search-input";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { linkToTasks } from "@/lib/links";
@@ -307,22 +306,9 @@ export function KanbanHeader({
   const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
-  const [quickChatPickerOpen, setQuickChatPickerOpen] = useState(false);
-  const quickChatSessionId = useAppStore((state) => state.quickChat.sessionId);
-  const openQuickChat = useAppStore((state) => state.openQuickChat);
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
   const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
-
-  // When clicking the quick chat button:
-  // - If there's an existing quick chat session, open the modal with that session
-  // - Otherwise, show the picker dialog to start a new one
-  const handleOpenQuickChat = () => {
-    if (quickChatSessionId && workspaceId) {
-      openQuickChat(quickChatSessionId, workspaceId);
-    } else {
-      setQuickChatPickerOpen(true);
-    }
-  };
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
 
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
@@ -335,33 +321,63 @@ export function KanbanHeader({
 
   const renderHeader = () => {
     if (isMobile) {
-      return <KanbanHeaderMobile workspaceId={workspaceId} currentPage={currentPage} {...sharedSearch} {...indicatorProps} />;
+      return (
+        <KanbanHeaderMobile
+          workspaceId={workspaceId}
+          currentPage={currentPage}
+          {...sharedSearch}
+          {...indicatorProps}
+        />
+      );
     }
     if (isTablet) {
       return (
         <>
-          <TabletHeader {...sharedActions} {...sharedSearch} toggleValue={toggleValue} handleViewChange={handleViewChange} setMenuOpen={setMenuOpen} {...indicatorProps} />
-          <MobileMenuSheet open={isMenuOpen} onOpenChange={setMenuOpen} workspaceId={workspaceId} currentPage={currentPage} {...sharedSearch} />
+          <TabletHeader
+            {...sharedActions}
+            {...sharedSearch}
+            toggleValue={toggleValue}
+            handleViewChange={handleViewChange}
+            setMenuOpen={setMenuOpen}
+            {...indicatorProps}
+          />
+          <MobileMenuSheet
+            open={isMenuOpen}
+            onOpenChange={setMenuOpen}
+            workspaceId={workspaceId}
+            currentPage={currentPage}
+            {...sharedSearch}
+          />
         </>
       );
     }
-    return <DesktopHeader {...sharedActions} {...sharedSearch} toggleValue={toggleValue} handleViewChange={handleViewChange} {...indicatorProps} />;
+    return (
+      <DesktopHeader
+        {...sharedActions}
+        {...sharedSearch}
+        toggleValue={toggleValue}
+        handleViewChange={handleViewChange}
+        {...indicatorProps}
+      />
+    );
   };
 
   return (
     <>
       {renderHeader()}
       {releaseNotes.hasNotes && (
-        <ReleaseNotesDialog open={releaseNotes.dialogOpen} onOpenChange={releaseNotes.closeDialog} entries={releaseNotes.unseenEntries} latestVersion={releaseNotes.latestVersion} />
-      )}
-      <HealthIssuesDialog open={healthIndicator.dialogOpen} onOpenChange={healthIndicator.closeDialog} issues={healthIndicator.issues} />
-      {workspaceId && (
-        <QuickChatPickerDialog
-          open={quickChatPickerOpen}
-          onOpenChange={setQuickChatPickerOpen}
-          workspaceId={workspaceId}
+        <ReleaseNotesDialog
+          open={releaseNotes.dialogOpen}
+          onOpenChange={releaseNotes.closeDialog}
+          entries={releaseNotes.unseenEntries}
+          latestVersion={releaseNotes.latestVersion}
         />
       )}
+      <HealthIssuesDialog
+        open={healthIndicator.dialogOpen}
+        onOpenChange={healthIndicator.closeDialog}
+        issues={healthIndicator.issues}
+      />
     </>
   );
 }

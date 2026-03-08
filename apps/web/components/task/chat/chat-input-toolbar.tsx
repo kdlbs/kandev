@@ -62,6 +62,8 @@ export type ChatInputToolbarProps = {
   onEnhancePrompt?: () => void;
   /** Whether prompt enhancement is in progress */
   isEnhancingPrompt?: boolean;
+  /** Hide the sessions dropdown (for quick chat) */
+  hideSessionsDropdown?: boolean;
 };
 
 type SubmitButtonProps = {
@@ -302,6 +304,7 @@ type ToolbarRightSectionProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   onImplementPlan?: () => void;
+  hideSessionsDropdown?: boolean;
 };
 
 function ToolbarRightSection({
@@ -319,6 +322,7 @@ function ToolbarRightSection({
   onEnhancePrompt,
   isEnhancingPrompt,
   onImplementPlan,
+  hideSessionsDropdown,
 }: ToolbarRightSectionProps) {
   const showEnhance = onEnhancePrompt && !isAgentBusy;
   const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
@@ -326,12 +330,14 @@ function ToolbarRightSection({
   return (
     <div className="flex items-center gap-0.5 shrink-0">
       {showResetContext && <ResetContextButton sessionId={sessionId} />}
-      <SessionsDropdown
-        taskId={taskId}
-        activeSessionId={sessionId}
-        taskTitle={taskTitle}
-        taskDescription={taskDescription}
-      />
+      {!hideSessionsDropdown && (
+        <SessionsDropdown
+          taskId={taskId}
+          activeSessionId={sessionId}
+          taskTitle={taskTitle}
+          taskDescription={taskDescription}
+        />
+      )}
       <TokenUsageDisplay sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />
       {showEnhance && (
@@ -377,6 +383,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   onImplementPlan,
   onEnhancePrompt,
   isEnhancingPrompt = false,
+  hideSessionsDropdown,
 }: ChatInputToolbarProps) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
@@ -433,6 +440,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
         onImplementPlan={onImplementPlan}
+        hideSessionsDropdown={hideSessionsDropdown}
       />
     </div>
   );

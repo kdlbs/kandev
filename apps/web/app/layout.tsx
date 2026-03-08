@@ -85,9 +85,7 @@ export default function RootLayout({
                     <WebSocketConnector />
                     <GlobalCommands />
                     <CommandPanel />
-                    <QuickChatProvider>
-                      {children}
-                    </QuickChatProvider>
+                    <QuickChatProvider>{children}</QuickChatProvider>
                   </CommandRegistryProvider>
                 </ToastProvider>
               </TooltipProvider>

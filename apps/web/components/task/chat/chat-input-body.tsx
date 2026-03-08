@@ -34,6 +34,7 @@ export type ChatInputEditorAreaProps = {
   handleAgentCommand: (command: string) => void;
   handleImagePaste: (files: File[]) => Promise<void>;
   showRequestChangesTooltip: boolean;
+  hideSessionsDropdown?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -77,6 +78,7 @@ export function ChatInputEditorArea({
   isSending,
   onCancel,
   contextCount,
+  hideSessionsDropdown,
   contextPopoverOpen,
   setContextPopoverOpen,
   contextFiles,
@@ -147,6 +149,7 @@ export function ChatInputEditorArea({
         onImplementPlan={onImplementPlan}
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
+        hideSessionsDropdown={hideSessionsDropdown}
       />
     </div>
   );

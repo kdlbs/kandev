@@ -307,6 +307,7 @@ type ChatInputAreaProps = {
   onRequestChangesTooltipDismiss?: () => void;
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
+  hideSessionsDropdown?: boolean;
 };
 
 export function ChatInputArea({
@@ -319,6 +320,7 @@ export function ChatInputArea({
   onRequestChangesTooltipDismiss,
   panelState,
   isSending,
+  hideSessionsDropdown,
 }: ChatInputAreaProps) {
   const {
     resolvedSessionId,
@@ -406,6 +408,7 @@ export function ChatInputArea({
         onAddContextFile={handleAddContextFile}
         todoItems={todoItems}
         onImplementPlan={handleImplementPlan}
+        hideSessionsDropdown={hideSessionsDropdown}
       />
     </div>
   );

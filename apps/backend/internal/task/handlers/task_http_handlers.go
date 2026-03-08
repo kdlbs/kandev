@@ -50,9 +50,11 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 
 	query := c.Query("query")
 	includeArchived := c.Query("include_archived") == queryValueTrue
+	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
+	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 
 	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), query, page, pageSize, includeArchived,
+		c.Request.Context(), c.Param("id"), query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -602,6 +604,7 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 
 // httpStartQuickChatRequest is the request body for starting a quick chat session.
 type httpStartQuickChatRequest struct {
+	Title             string `json:"title,omitempty"`
 	RepositoryID      string `json:"repository_id,omitempty"`
 	AgentProfileID    string `json:"agent_profile_id,omitempty"`
 	ExecutorID        string `json:"executor_id,omitempty"`
@@ -657,21 +660,6 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		})
 	}
 
-	// Create ephemeral task
-	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:  workspaceID,
-		WorkflowID:   workflowID,
-		Title:        "Quick Chat",
-		Description:  body.Prompt,
-		Repositories: repos,
-		IsEphemeral:  true,
-	})
-	if err != nil {
-		h.logger.Error("failed to create ephemeral task", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
-		return
-	}
-
 	// Resolve agent and executor from request or workspace defaults
 	agentProfileID := body.AgentProfileID
 	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
@@ -680,6 +668,46 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	executorID := body.ExecutorID
 	if executorID == "" && workspace.DefaultExecutorID != nil {
 		executorID = *workspace.DefaultExecutorID
+	}
+
+	// Quick chat requires an agent profile
+	if agentProfileID == "" {
+		h.logger.Error("no agent profile configured for quick chat",
+			zap.String("workspace_id", workspaceID),
+			zap.Bool("has_default", workspace.DefaultAgentProfileID != nil))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace has no default agent profile configured"})
+		return
+	}
+
+	// Store agent/executor in task metadata so PrepareTaskSession can find them
+	metadata := make(map[string]interface{})
+	if agentProfileID != "" {
+		metadata["agent_profile_id"] = agentProfileID
+	}
+	if executorID != "" {
+		metadata["executor_id"] = executorID
+	}
+
+	// Use provided title or default to "Quick Chat"
+	title := body.Title
+	if title == "" {
+		title = "Quick Chat"
+	}
+
+	// Create ephemeral task
+	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  workspaceID,
+		WorkflowID:   workflowID,
+		Title:        title,
+		Description:  body.Prompt,
+		Repositories: repos,
+		IsEphemeral:  true,
+		Metadata:     metadata,
+	})
+	if err != nil {
+		h.logger.Error("failed to create ephemeral task", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create quick chat"})
+		return
 	}
 
 	// Prepare session

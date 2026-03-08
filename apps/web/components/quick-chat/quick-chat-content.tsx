@@ -5,7 +5,11 @@ import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
-import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "@/components/task/chat/chat-input-area";
+import {
+  ChatInputArea,
+  useSubmitHandler,
+  useChatPanelHandlers,
+} from "@/components/task/chat/chat-input-area";
 import { ClarificationInputOverlay } from "@/components/task/chat/clarification-input-overlay";
 
 type QuickChatContentProps = {
@@ -19,7 +23,11 @@ export const QuickChatContent = memo(function QuickChatContent({
   const [clarificationKey, setClarificationKey] = useState(0);
 
   useSettingsData(true);
-  const panelState = useChatPanelState({ sessionId, onOpenFile: undefined, onOpenFileAtLine: undefined });
+  const panelState = useChatPanelState({
+    sessionId,
+    onOpenFile: undefined,
+    onOpenFileAtLine: undefined,
+  });
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
   const {
     resolvedSessionId,
@@ -35,11 +43,7 @@ export const QuickChatContent = memo(function QuickChatContent({
     cancelQueue,
     pendingClarification,
   } = panelState;
-  const { handleCancelTurn } = useChatPanelHandlers(
-    resolvedSessionId,
-    cancelQueue,
-    chatInputRef,
-  );
+  const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, cancelQueue, chatInputRef);
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
 
@@ -79,8 +83,8 @@ export const QuickChatContent = memo(function QuickChatContent({
         onRequestChangesTooltipDismiss={undefined}
         panelState={panelState}
         isSending={isSending}
+        hideSessionsDropdown={true}
       />
     </div>
   );
 });
-

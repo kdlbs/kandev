@@ -58,9 +58,8 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}
 
-	if task.IsEphemeral {
-		data["is_ephemeral"] = true
-	}
+	// Always include is_ephemeral field so frontend filters work correctly
+	data["is_ephemeral"] = task.IsEphemeral
 
 	if len(task.Repositories) > 0 {
 		data["repository_id"] = task.Repositories[0].RepositoryID

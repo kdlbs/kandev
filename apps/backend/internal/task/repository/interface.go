@@ -24,7 +24,7 @@ type TaskRepository interface {
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
-	ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)

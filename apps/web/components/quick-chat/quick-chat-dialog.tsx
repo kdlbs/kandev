@@ -4,13 +4,7 @@ import { memo, useCallback, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconX, IconRocket } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -108,7 +102,15 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
     } finally {
       setIsStarting(false);
     }
-  }, [workspaceId, selectedRepoId, selectedAgentId, isStarting, onOpenChange, openQuickChat, toast]);
+  }, [
+    workspaceId,
+    selectedRepoId,
+    selectedAgentId,
+    isStarting,
+    onOpenChange,
+    openQuickChat,
+    toast,
+  ]);
 
   const formState: FormState = {
     selectedRepoId,

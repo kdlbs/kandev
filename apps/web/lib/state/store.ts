@@ -294,7 +294,9 @@ export type AppState = {
   invalidateSystemHealth: () => void;
   openQuickChat: (sessionId: string, workspaceId: string) => void;
   closeQuickChat: () => void;
-  clearQuickChatSession: () => void;
+  closeQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string) => void;
+  renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;
@@ -497,7 +499,8 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
     quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
-    sessionFailureNotification: initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
+    sessionFailureNotification:
+      initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
   };
 }
 

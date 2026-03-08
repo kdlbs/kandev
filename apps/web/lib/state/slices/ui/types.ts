@@ -59,8 +59,8 @@ export type SystemHealthState = {
 
 export type QuickChatState = {
   isOpen: boolean;
-  sessionId: string | null;
-  workspaceId: string | null;
+  sessions: Array<{ sessionId: string; workspaceId: string; name?: string }>;
+  activeSessionId: string | null;
 };
 
 export type SessionFailureNotification = {
@@ -104,7 +104,9 @@ export type UISliceActions = {
   invalidateSystemHealth: () => void;
   openQuickChat: (sessionId: string, workspaceId: string) => void;
   closeQuickChat: () => void;
-  clearQuickChatSession: () => void;
+  closeQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string) => void;
+  renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
 };
 
