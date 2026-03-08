@@ -63,7 +63,6 @@ RUN apt-get update && \
         gosu \
         tini \
         python3 \
-        python3-pip \
         python3-venv \
         pipx && \
     rm -rf /var/lib/apt/lists/* && \

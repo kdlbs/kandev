@@ -110,7 +110,7 @@ type NotificationEventsTableProps = {
   tableProviders: NotificationProvider[];
   tableEvents: string[];
   onToggleEvent: (provider: NotificationProvider, eventType: string) => void;
-  onTestProvider: (providerId: string) => void;
+  onTestProvider: (providerId: string) => Promise<void>;
 };
 
 function NotificationEventsTable({
@@ -141,7 +141,8 @@ function NotificationEventsTable({
                             variant="ghost"
                             size="icon"
                             className="h-6 w-6 cursor-pointer"
-                            onClick={() => onTestProvider(provider.id)}
+                            aria-label={`Send test notification for ${provider.name}`}
+                            onClick={() => void onTestProvider(provider.id)}
                           >
                             <IconBell className="h-3.5 w-3.5" />
                           </Button>
@@ -195,7 +196,7 @@ function AppriseProviderCardActions({
   provider: NotificationProvider;
   onOpenForm: (mode: AppriseFormMode, provider: NotificationProvider) => void;
   onDeleteProvider: (providerId: string) => void;
-  onTestProvider: (providerId: string) => void;
+  onTestProvider: (providerId: string) => Promise<void>;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -206,7 +207,8 @@ function AppriseProviderCardActions({
               variant="outline"
               size="icon"
               className="h-8 w-8 cursor-pointer"
-              onClick={() => onTestProvider(provider.id)}
+              aria-label={`Send test notification for ${provider.name}`}
+              onClick={() => void onTestProvider(provider.id)}
             >
               <IconBell className="h-4 w-4" />
             </Button>
@@ -262,7 +264,7 @@ function AppriseProviderList({
   onOpenForm: (mode: AppriseFormMode, provider?: NotificationProvider) => void;
   onCloseForm: () => void;
   onDeleteProvider: (providerId: string) => void;
-  onTestProvider: (providerId: string) => void;
+  onTestProvider: (providerId: string) => Promise<void>;
   onTextareaInput: (event: FormEvent<HTMLTextAreaElement>) => void;
 }) {
   return (
