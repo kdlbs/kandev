@@ -70,7 +70,7 @@ function QuickChatTabs({
 }
 
 function AgentPickerView({ onSelectAgent }: { onSelectAgent: (agentId: string) => void }) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const agentProfiles = useAppStore((s) => s.agentProfiles.items) ?? [];
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
