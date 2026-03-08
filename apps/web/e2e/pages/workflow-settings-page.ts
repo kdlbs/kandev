@@ -17,7 +17,9 @@ export class WorkflowSettingsPage {
 
   async goto(workspaceId: string) {
     await this.page.goto(`/settings/workspace/${workspaceId}/workflows`);
-    await this.page.waitForLoadState("networkidle");
+    // Wait for a client-rendered element to confirm hydration is complete
+    // (networkidle is unreliable with persistent WebSocket connections)
+    await expect(this.addWorkflowButton).toBeVisible();
   }
 
   /** Returns the card container for a workflow by matching text in the card's name input. */
@@ -41,7 +43,7 @@ export class WorkflowSettingsPage {
       }
     }
     // Return a locator that won't match so assertions can fail with a good message
-    return this.page.locator(`[data-testid="workflow-card-not-found-${name}"]`);
+    return this.page.getByTestId(`workflow-card-not-found-${name}`);
   }
 
   /** The pipeline step nodes within a specific workflow card. */
