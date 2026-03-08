@@ -72,6 +72,34 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 	}
 }
 
+func TestManager_MarkCompleted_Idempotent(t *testing.T) {
+	mgr := newTestManager()
+
+	execution := &AgentExecution{
+		ID:             "test-execution-id",
+		TaskID:         "test-task-id",
+		AgentProfileID: "test-agent",
+		Status:         v1.AgentStatusFailed,
+		StartedAt:      time.Now(),
+	}
+	exitCode := 1
+	execution.ExitCode = &exitCode
+	execution.ErrorMessage = "first error"
+
+	mgr.executionStore.Add(execution)
+
+	// Second MarkCompleted should be a no-op (already terminal)
+	err := mgr.MarkCompleted("test-execution-id", 1, "second error")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, _ := mgr.GetExecution("test-execution-id")
+	if got.ErrorMessage != "first error" {
+		t.Errorf("expected original error message preserved, got %q", got.ErrorMessage)
+	}
+}
+
 func TestManager_MarkCompleted_NotFound(t *testing.T) {
 	mgr := newTestManager()
 

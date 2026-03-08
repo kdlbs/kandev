@@ -646,6 +646,16 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 
+	// Guard against duplicate completion (e.g. ACP prompt error + process exit error).
+	// MarkCompleted is a terminal transition — once in Completed/Failed, skip re-publishing.
+	if execution.Status == v1.AgentStatusCompleted || execution.Status == v1.AgentStatusFailed {
+		m.logger.Warn("ignoring duplicate MarkCompleted for already-terminal execution",
+			zap.String("execution_id", executionID),
+			zap.String("current_status", string(execution.Status)),
+			zap.Int("exit_code", exitCode))
+		return nil
+	}
+
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
 		exec.FinishedAt = &now
