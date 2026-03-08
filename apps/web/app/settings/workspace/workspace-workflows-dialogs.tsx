@@ -136,7 +136,7 @@ export function CreateWorkflowDialog({
 }: CreateWorkflowDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:w-[900px] sm:max-w-none">
+      <DialogContent className="sm:w-[900px] sm:max-w-none" data-testid="create-workflow-dialog">
         <DialogHeader>
           <DialogTitle>Add Workflow</DialogTitle>
         </DialogHeader>
@@ -148,6 +148,7 @@ export function CreateWorkflowDialog({
               placeholder="My Project Workflow"
               value={workflowName}
               onChange={(e) => onWorkflowNameChange(e.target.value)}
+              data-testid="workflow-name-input"
             />
           </div>
           {workflowTemplates.length > 0 && (
@@ -191,7 +192,11 @@ export function CreateWorkflowDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Cancel
           </Button>
-          <Button onClick={onCreate} className="cursor-pointer">
+          <Button
+            onClick={onCreate}
+            className="cursor-pointer"
+            data-testid="confirm-create-workflow"
+          >
             Add Workflow
           </Button>
         </DialogFooter>

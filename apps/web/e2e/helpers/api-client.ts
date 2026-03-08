@@ -284,6 +284,20 @@ export class ApiClient {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
   }
 
+  async deleteWorkflow(workflowId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/workflows/${workflowId}`);
+  }
+
+  async deleteWorkflowStep(stepId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/workflow/steps/${stepId}`);
+  }
+
+  async listWorkflowTemplates(): Promise<{
+    templates: Array<{ id: string; name: string; default_steps?: Array<{ name: string }> }>;
+  }> {
+    return this.request("GET", "/api/v1/workflow/templates");
+  }
+
   // --- E2E Test Reset ---
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
