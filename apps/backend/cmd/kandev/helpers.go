@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -420,7 +421,14 @@ func registerRoutes(p routeParams) {
 				p.log.Debug("Web proxy error", zap.Error(err))
 				w.WriteHeader(http.StatusBadGateway)
 			}
-			p.router.NoRoute(gin.WrapH(proxy))
+			p.router.NoRoute(func(c *gin.Context) {
+				path := c.Request.URL.Path
+				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" {
+					c.AbortWithStatus(http.StatusNotFound)
+					return
+				}
+				proxy.ServeHTTP(c.Writer, c.Request)
+			})
 			p.log.Info("Web reverse proxy enabled", zap.String("target", p.webInternalURL))
 		}
 	}

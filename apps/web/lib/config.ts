@@ -23,8 +23,10 @@ export function getBackendConfig(): AppConfig {
   //    Works for any hosting scenario: localhost, custom domain, Tailscale, etc.
   if (window.__KANDEV_API_PORT) {
     const port = parseInt(window.__KANDEV_API_PORT, 10);
-    const protocol = window.location.protocol;
-    return { apiBaseUrl: `${protocol}//${window.location.hostname}:${port}` };
+    if (Number.isInteger(port) && port > 0 && port <= 65535) {
+      const protocol = window.location.protocol;
+      return { apiBaseUrl: `${protocol}//${window.location.hostname}:${port}` };
+    }
   }
 
   return { apiBaseUrl: window.location.origin };

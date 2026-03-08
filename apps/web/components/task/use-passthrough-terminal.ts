@@ -75,7 +75,8 @@ function initTerminalInstance(
   // synchronous work (Terminal + FitAddon + open) stays within the browser's
   // frame budget and avoids "Violation: 'setTimeout' handler took Xms" warnings.
   requestAnimationFrame(() => {
-    if (!refs.xtermRef.current || refs.webglAddonRef.current) return;
+    const term = refs.xtermRef.current;
+    if (!term || refs.webglAddonRef.current) return;
     try {
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => {
@@ -83,7 +84,7 @@ function initTerminalInstance(
         webglAddon.dispose();
         refs.webglAddonRef.current = null;
       });
-      terminal.loadAddon(webglAddon);
+      term.loadAddon(webglAddon);
       refs.webglAddonRef.current = webglAddon;
       log("WebGL addon loaded");
     } catch (e) {
