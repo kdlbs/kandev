@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,12 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 				zap.String("session_id", req.SessionID),
 				zap.String("quick_chat_dir", quickChatDir),
 				zap.Error(err))
+			return "", "", "", ""
+		}
+		// Validate SessionID doesn't contain path separators (security: prevent path traversal)
+		if strings.ContainsAny(req.SessionID, `/\`) {
+			m.logger.Warn("session ID contains path separator, rejecting",
+				zap.String("session_id", req.SessionID))
 			return "", "", "", ""
 		}
 		// Use session ID as directory name for easy cleanup
@@ -603,8 +610,13 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 	// Check if git repository already exists (idempotent)
 	gitDir := filepath.Join(workspacePath, ".git")
-	if _, err := os.Stat(gitDir); err == nil {
-		return nil // Already initialized
+	if info, err := os.Stat(gitDir); err == nil {
+		if info.IsDir() {
+			return nil // Already initialized
+		}
+	} else if !os.IsNotExist(err) {
+		// Non-ENOENT error (permissions, I/O, etc.) - fail explicitly
+		return fmt.Errorf("failed to check for .git directory: %w", err)
 	}
 
 	// Initialize git repository

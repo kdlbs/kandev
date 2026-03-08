@@ -68,6 +68,7 @@ function QuickChatTabs({
         variant="ghost"
         className="h-6 w-6 p-0 cursor-pointer shrink-0"
         onClick={onNewChat}
+        aria-label="Start new chat"
       >
         <IconPlus className="h-3.5 w-3.5" />
       </Button>
