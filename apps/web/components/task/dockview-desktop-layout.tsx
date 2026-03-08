@@ -706,8 +706,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   return (
     <div
       className="flex-1 min-h-0"
+      aria-busy={isRestoringLayout}
       style={{
         opacity: isRestoringLayout ? 0 : 1,
+        pointerEvents: isRestoringLayout ? "none" : undefined,
         transition: isRestoringLayout ? "none" : "opacity 60ms ease-out",
       }}
     >

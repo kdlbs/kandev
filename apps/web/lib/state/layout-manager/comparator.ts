@@ -50,57 +50,55 @@ export function layoutStructuresMatch(a: LayoutState, b: LayoutState): boolean {
 }
 
 /**
- * Extract the set of structural component names from a SerializedDockview.
- *
- * Used for lightweight comparison: if the current live layout has the same
- * structural components as a saved layout, we can skip `fromJSON`.
+ * Build a component-count fingerprint from a SerializedDockview.
+ * Returns a sorted "component:count" string for structural comparison.
+ * Counts preserve multiplicity (e.g. two terminals ≠ one terminal).
  */
-export function structuralComponentsFromSerialized(serialized: SerializedDockview): Set<string> {
-  const components = new Set<string>();
+function componentCountsFromSerialized(serialized: SerializedDockview): string {
+  const counts = new Map<string, number>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const panels = (serialized as any).panels as
     | Record<string, { contentComponent?: string }>
     | undefined;
-  if (!panels) return components;
+  if (!panels) return "";
   for (const p of Object.values(panels)) {
     if (p.contentComponent && STRUCTURAL_COMPONENTS.has(p.contentComponent)) {
-      components.add(p.contentComponent);
+      counts.set(p.contentComponent, (counts.get(p.contentComponent) ?? 0) + 1);
     }
   }
-  return components;
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",");
 }
 
-/** Extract structural component names from a LayoutState (filtered). */
-export function structuralComponentsFromLayout(state: LayoutState): Set<string> {
-  const components = new Set<string>();
+/** Build a component-count fingerprint from a LayoutState (filtered). */
+function componentCountsFromLayout(state: LayoutState): string {
+  const counts = new Map<string, number>();
   const filtered = filterEphemeral(state);
   for (const col of filtered.columns) {
     for (const group of col.groups) {
       for (const panel of group.panels) {
         if (STRUCTURAL_COMPONENTS.has(panel.component)) {
-          components.add(panel.component);
+          counts.set(panel.component, (counts.get(panel.component) ?? 0) + 1);
         }
       }
     }
   }
-  return components;
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",");
 }
 
 /**
  * Quick check: do a live LayoutState and a saved SerializedDockview have
- * the same set of structural panels?
+ * the same structural panels (including multiplicity)?
  *
  * This is a weaker check than `layoutStructuresMatch` (doesn't verify
  * column arrangement) but works without deserializing the grid tree.
- * False positives are safe — worst case we skip `fromJSON` when the grid
- * arrangement differs, but the same panels are present.
+ * Counts are compared so two terminals ≠ one terminal.
  */
 export function savedLayoutMatchesLive(live: LayoutState, saved: SerializedDockview): boolean {
-  const liveSet = structuralComponentsFromLayout(live);
-  const savedSet = structuralComponentsFromSerialized(saved);
-  if (liveSet.size !== savedSet.size) return false;
-  for (const c of liveSet) {
-    if (!savedSet.has(c)) return false;
-  }
-  return true;
+  return componentCountsFromLayout(live) === componentCountsFromSerialized(saved);
 }
