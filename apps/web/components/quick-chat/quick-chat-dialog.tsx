@@ -27,6 +27,8 @@ type FormState = {
   agentProfiles: AgentProfileOption[];
 };
 
+const NONE_VALUE = "__none__";
+
 function QuickChatFormBody({ state }: { state: FormState }) {
   const { selectedRepoId, setSelectedRepoId, selectedAgentId, setSelectedAgentId } = state;
   return (
@@ -36,11 +38,15 @@ function QuickChatFormBody({ state }: { state: FormState }) {
       </p>
       <div className="space-y-2">
         <Label htmlFor="repository">Repository (optional)</Label>
-        <Select value={selectedRepoId} onValueChange={setSelectedRepoId}>
+        <Select
+          value={selectedRepoId || NONE_VALUE}
+          onValueChange={(v) => setSelectedRepoId(v === NONE_VALUE ? "" : v)}
+        >
           <SelectTrigger id="repository" className="w-full">
             <SelectValue placeholder="Select a repository..." />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={NONE_VALUE}>No repository</SelectItem>
             {state.repositories.map((repo) => (
               <SelectItem key={repo.id} value={repo.id}>
                 {repo.name}
@@ -51,11 +57,15 @@ function QuickChatFormBody({ state }: { state: FormState }) {
       </div>
       <div className="space-y-2">
         <Label htmlFor="agent">Agent (optional)</Label>
-        <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+        <Select
+          value={selectedAgentId || NONE_VALUE}
+          onValueChange={(v) => setSelectedAgentId(v === NONE_VALUE ? "" : v)}
+        >
           <SelectTrigger id="agent" className="w-full">
             <SelectValue placeholder="Use workspace default..." />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={NONE_VALUE}>Use workspace default</SelectItem>
             {state.agentProfiles.map((profile) => (
               <SelectItem key={profile.id} value={profile.id}>
                 {profile.label}

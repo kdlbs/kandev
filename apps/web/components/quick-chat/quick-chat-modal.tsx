@@ -36,24 +36,30 @@ function QuickChatTabs({
           // Show "New Chat" for empty session IDs (agent picker tabs)
           const tabName = s.sessionId === "" ? "New Chat" : s.name || `Chat ${index + 1}`;
           return (
-            <button
+            <div
               key={s.sessionId || `new-${index}`}
-              onClick={() => onTabChange(s.sessionId)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
                 isActive
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:bg-muted"
               }`}
             >
-              <span className="truncate max-w-[100px]">{tabName}</span>
-              <IconX
-                className="h-3 w-3 opacity-60 hover:opacity-100 cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTabClose(s.sessionId);
-                }}
-              />
-            </button>
+              <button
+                type="button"
+                onClick={() => onTabChange(s.sessionId)}
+                className="flex items-center px-2.5 py-1 text-xs cursor-pointer"
+              >
+                <span className="truncate max-w-[100px]">{tabName}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${tabName}`}
+                className="p-1 cursor-pointer opacity-60 hover:opacity-100"
+                onClick={() => onTabClose(s.sessionId)}
+              >
+                <IconX className="h-3 w-3" />
+              </button>
+            </div>
           );
         })}
       </div>

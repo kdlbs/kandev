@@ -142,8 +142,8 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 			return "", "", "", ""
 		}
 
-		// Initialize git repository in the workspace
-		if err := m.initGitRepo(workspacePath); err != nil {
+		// Initialize git repository in the workspace (if not already initialized)
+		if err := m.initGitRepo(ctx, workspacePath); err != nil {
 			m.logger.Warn("failed to initialize git repository in quick chat workspace",
 				zap.String("session_id", req.SessionID),
 				zap.String("workspace_path", workspacePath),
@@ -601,20 +601,27 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 // initGitRepo initializes a git repository in the given directory.
 // Creates an initial commit so the workspace has a clean git state.
-func (m *Manager) initGitRepo(workspacePath string) error {
+// This function is idempotent - it skips initialization if .git already exists.
+func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
+	// Check if git repository already exists (idempotent)
+	gitDir := filepath.Join(workspacePath, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
+		return nil // Already initialized
+	}
+
 	// Initialize git repository
-	cmd := exec.Command("git", "init")
+	cmd := exec.CommandContext(ctx, "git", "init")
 	cmd.Dir = workspacePath
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git init failed: %w (output: %s)", err, string(output))
 	}
 
 	// Configure git user (required for initial commit)
-	configName := exec.Command("git", "config", "user.name", "Kandev Quick Chat")
+	configName := exec.CommandContext(ctx, "git", "config", "user.name", "Kandev Quick Chat")
 	configName.Dir = workspacePath
 	_ = configName.Run() // Ignore error - might already be configured globally
 
-	configEmail := exec.Command("git", "config", "user.email", "quickchat@kandev.local")
+	configEmail := exec.CommandContext(ctx, "git", "config", "user.email", "quickchat@kandev.local")
 	configEmail.Dir = workspacePath
 	_ = configEmail.Run() // Ignore error - might already be configured globally
 
@@ -624,13 +631,13 @@ func (m *Manager) initGitRepo(workspacePath string) error {
 		return fmt.Errorf("failed to create .gitkeep: %w", err)
 	}
 
-	addCmd := exec.Command("git", "add", ".gitkeep")
+	addCmd := exec.CommandContext(ctx, "git", "add", ".gitkeep")
 	addCmd.Dir = workspacePath
 	if output, err := addCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
 	}
 
-	commitCmd := exec.Command("git", "commit", "-m", "Initial commit")
+	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", "Initial commit")
 	commitCmd.Dir = workspacePath
 	if output, err := commitCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
