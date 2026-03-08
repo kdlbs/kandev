@@ -71,6 +71,9 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
+
+	// Quick chat endpoint - creates ephemeral task with prepared session
+	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
 }
 
 func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {

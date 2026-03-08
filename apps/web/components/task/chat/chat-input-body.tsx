@@ -34,6 +34,7 @@ export type ChatInputEditorAreaProps = {
   handleAgentCommand: (command: string) => void;
   handleImagePaste: (files: File[]) => Promise<void>;
   showRequestChangesTooltip: boolean;
+  hideSessionsDropdown?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -49,73 +50,39 @@ export type ChatInputEditorAreaProps = {
   isEnhancingPrompt?: boolean;
 };
 
-export function ChatInputEditorArea({
-  inputRef,
-  value,
-  handleChange,
-  handleSubmitWithReset,
-  inputPlaceholder,
-  isDisabled,
-  hasClarification,
-  planModeEnabled,
-  planModeAvailable,
-  mcpServers,
-  submitKey,
-  setIsInputFocused,
-  sessionId,
-  taskId,
-  onAddContextFile,
-  onToggleContextFile,
-  planContextEnabled,
-  handleAgentCommand,
-  handleImagePaste,
-  showRequestChangesTooltip,
-  isAgentBusy,
-  onPlanModeChange,
-  taskTitle,
-  taskDescription,
-  isSending,
-  onCancel,
-  contextCount,
-  contextPopoverOpen,
-  setContextPopoverOpen,
-  contextFiles,
-  onImplementPlan,
-  onEnhancePrompt,
-  isEnhancingPrompt,
-}: ChatInputEditorAreaProps) {
-  // Block submit while enhancing prompt, but keep editor editable for programmatic updates
-  const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
+export function ChatInputEditorArea({ inputRef, ...p }: ChatInputEditorAreaProps) {
+  const wrappedSubmit = p.isEnhancingPrompt ? () => {} : p.handleSubmitWithReset;
+  const inputDisabled = p.isDisabled || p.hasClarification;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <Tooltip open={showRequestChangesTooltip}>
+      <Tooltip open={p.showRequestChangesTooltip}>
         <TooltipTrigger asChild>
           <div
             className={cn(
               "flex-1 min-h-0 transition-opacity",
-              isEnhancingPrompt && "opacity-50 pointer-events-none",
+              p.isEnhancingPrompt && "opacity-50 pointer-events-none",
             )}
           >
             <TipTapInput
               ref={inputRef}
-              value={value}
-              onChange={handleChange}
+              value={p.value}
+              onChange={p.handleChange}
               onSubmit={wrappedSubmit}
-              placeholder={inputPlaceholder}
-              disabled={isDisabled || hasClarification}
-              planModeEnabled={planModeEnabled}
-              submitKey={submitKey}
-              onFocus={() => setIsInputFocused(true)}
-              onBlur={() => setIsInputFocused(false)}
-              sessionId={sessionId}
-              taskId={taskId}
-              onAddContextFile={onAddContextFile}
-              onToggleContextFile={onToggleContextFile}
-              planContextEnabled={planContextEnabled}
-              onAgentCommand={handleAgentCommand}
-              onImagePaste={handleImagePaste}
-              onPlanModeChange={onPlanModeChange}
+              placeholder={p.inputPlaceholder}
+              disabled={inputDisabled}
+              planModeEnabled={p.planModeEnabled}
+              submitKey={p.submitKey}
+              onFocus={() => p.setIsInputFocused(true)}
+              onBlur={() => p.setIsInputFocused(false)}
+              sessionId={p.sessionId}
+              taskId={p.taskId}
+              onAddContextFile={p.onAddContextFile}
+              onToggleContextFile={p.onToggleContextFile}
+              planContextEnabled={p.planContextEnabled}
+              onAgentCommand={p.handleAgentCommand}
+              onImagePaste={p.handleImagePaste}
+              onPlanModeChange={p.onPlanModeChange}
             />
           </div>
         </TooltipTrigger>
@@ -124,29 +91,30 @@ export function ChatInputEditorArea({
         </TooltipContent>
       </Tooltip>
       <ChatInputToolbar
-        planModeEnabled={planModeEnabled}
-        planModeAvailable={planModeAvailable}
-        mcpServers={mcpServers}
-        onPlanModeChange={onPlanModeChange}
-        sessionId={sessionId}
-        taskId={taskId}
-        taskTitle={taskTitle}
-        taskDescription={taskDescription}
-        isAgentBusy={isAgentBusy}
-        isDisabled={isDisabled}
-        isSending={isSending}
-        onCancel={onCancel}
+        planModeEnabled={p.planModeEnabled}
+        planModeAvailable={p.planModeAvailable}
+        mcpServers={p.mcpServers}
+        onPlanModeChange={p.onPlanModeChange}
+        sessionId={p.sessionId}
+        taskId={p.taskId}
+        taskTitle={p.taskTitle}
+        taskDescription={p.taskDescription}
+        isAgentBusy={p.isAgentBusy}
+        isDisabled={p.isDisabled}
+        isSending={p.isSending}
+        onCancel={p.onCancel}
         onSubmit={wrappedSubmit}
-        submitKey={submitKey}
-        contextCount={contextCount}
-        contextPopoverOpen={contextPopoverOpen}
-        onContextPopoverOpenChange={setContextPopoverOpen}
-        planContextEnabled={planContextEnabled}
-        contextFiles={contextFiles}
-        onToggleFile={onToggleContextFile}
-        onImplementPlan={onImplementPlan}
-        onEnhancePrompt={onEnhancePrompt}
-        isEnhancingPrompt={isEnhancingPrompt}
+        submitKey={p.submitKey}
+        contextCount={p.contextCount}
+        contextPopoverOpen={p.contextPopoverOpen}
+        onContextPopoverOpenChange={p.setContextPopoverOpen}
+        planContextEnabled={p.planContextEnabled}
+        contextFiles={p.contextFiles}
+        onToggleFile={p.onToggleContextFile}
+        onImplementPlan={p.onImplementPlan}
+        onEnhancePrompt={p.onEnhancePrompt}
+        isEnhancingPrompt={p.isEnhancingPrompt}
+        hideSessionsDropdown={p.hideSessionsDropdown}
       />
     </div>
   );

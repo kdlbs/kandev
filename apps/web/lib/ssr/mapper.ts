@@ -5,6 +5,7 @@ type KanbanTask = KanbanState["tasks"][number];
 
 export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
   const tasks = snapshot.tasks
+    .filter((task) => !task.is_ephemeral) // Filter out ephemeral tasks (e.g., quick chat)
     .map((task) => {
       const workflowStepId = task.workflow_step_id;
       if (!workflowStepId) return null;

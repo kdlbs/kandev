@@ -32,6 +32,7 @@ type CreateTaskRequest struct {
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
+	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
 }
 
 // UpdateTaskRequest contains the data for updating a task

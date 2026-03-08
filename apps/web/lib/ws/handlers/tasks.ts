@@ -61,6 +61,11 @@ function upsertMultiTask(state: AppState, workflowId: string, task: KanbanTask):
 /** Upsert a task in both single-kanban and multi-kanban snapshots. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function upsertTaskInBothKanbans(state: AppState, wfId: string, payload: any): AppState {
+  // Skip ephemeral tasks - they should never be added to kanban
+  if (payload.is_ephemeral) {
+    return state;
+  }
+
   let next = state;
 
   if (state.kanban.workflowId === wfId) {
@@ -107,11 +112,16 @@ function removeTaskFromBothKanbans(state: AppState, wfId: string, taskId: string
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
+      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+      if (message.payload.is_ephemeral) return;
       store.setState((state) =>
         upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
       );
     },
     "task.updated": (message) => {
+      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+      if (message.payload.is_ephemeral) return;
+
       store.setState((state) => {
         const wfId = message.payload.workflow_id;
         const taskId = message.payload.task_id;
@@ -150,6 +160,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       });
     },
     "task.state_changed": (message) => {
+      // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
+      if (message.payload.is_ephemeral) return;
+
       store.setState((state) =>
         upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
       );

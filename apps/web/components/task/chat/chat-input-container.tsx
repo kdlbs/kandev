@@ -75,6 +75,7 @@ type ChatInputContainerProps = {
   onAddContextFile?: (file: ContextFile) => void;
   todoItems?: TodoItem[];
   onImplementPlan?: () => void;
+  hideSessionsDropdown?: boolean;
 };
 
 function FailedSessionBanner({
@@ -183,6 +184,7 @@ function buildEditorAreaProps(
     onImplementPlan: p.onImplementPlan,
     onEnhancePrompt: extras.onEnhancePrompt,
     isEnhancingPrompt: extras.isEnhancingPrompt,
+    hideSessionsDropdown: p.hideSessionsDropdown,
   };
 }
 

@@ -57,6 +57,12 @@ export type SystemHealthState = {
   loading: boolean;
 };
 
+export type QuickChatState = {
+  isOpen: boolean;
+  sessions: Array<{ sessionId: string; workspaceId: string; name?: string }>;
+  activeSessionId: string | null;
+};
+
 export type SessionFailureNotification = {
   sessionId: string;
   taskId: string;
@@ -73,6 +79,7 @@ export type UISliceState = {
   chatInput: ChatInputState;
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
+  quickChat: QuickChatState;
   sessionFailureNotification: SessionFailureNotification | null;
 };
 
@@ -95,6 +102,11 @@ export type UISliceActions = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  openQuickChat: (sessionId: string, workspaceId: string) => void;
+  closeQuickChat: () => void;
+  closeQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string) => void;
+  renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
 };
 

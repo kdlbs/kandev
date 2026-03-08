@@ -273,6 +273,7 @@ function buildTaskTopBarProps(params: {
     workflowSteps,
     currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
+    workspaceId: taskProps.workspaceId,
     isArchived: taskProps.isArchived,
     isRemoteExecutor: params.remote.isRemoteExecutor,
     isAgentctlReady: params.agentctlReady,

@@ -19,48 +19,89 @@ export const defaultUIState: UISliceState = {
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
+  quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
 };
 
+type ImmerSet = Parameters<typeof createUISlice>[0];
+
+function buildPreviewActions(set: ImmerSet) {
+  return {
+    setPreviewOpen: (sessionId: string, open: boolean) =>
+      set((draft) => {
+        draft.previewPanel.openBySessionId[sessionId] = open;
+        setLocalStorage(`preview-open-${sessionId}`, open);
+      }),
+    togglePreviewOpen: (sessionId: string) =>
+      set((draft) => {
+        const current = draft.previewPanel.openBySessionId[sessionId] ?? false;
+        draft.previewPanel.openBySessionId[sessionId] = !current;
+        setLocalStorage(`preview-open-${sessionId}`, !current);
+      }),
+    setPreviewView: (
+      sessionId: string,
+      view: UISliceState["previewPanel"]["viewBySessionId"][string],
+    ) =>
+      set((draft) => {
+        draft.previewPanel.viewBySessionId[sessionId] = view;
+        setLocalStorage(`preview-view-${sessionId}`, view);
+      }),
+    setPreviewDevice: (
+      sessionId: string,
+      device: UISliceState["previewPanel"]["deviceBySessionId"][string],
+    ) =>
+      set((draft) => {
+        draft.previewPanel.deviceBySessionId[sessionId] = device;
+        setLocalStorage(`preview-device-${sessionId}`, device);
+      }),
+    setPreviewStage: (
+      sessionId: string,
+      stage: UISliceState["previewPanel"]["stageBySessionId"][string],
+    ) =>
+      set((draft) => {
+        draft.previewPanel.stageBySessionId[sessionId] = stage;
+      }),
+    setPreviewUrl: (sessionId: string, url: string) =>
+      set((draft) => {
+        draft.previewPanel.urlBySessionId[sessionId] = url;
+      }),
+    setPreviewUrlDraft: (sessionId: string, url: string) =>
+      set((draft) => {
+        draft.previewPanel.urlDraftBySessionId[sessionId] = url;
+      }),
+  };
+}
+
+function buildMobileActions(set: ImmerSet) {
+  return {
+    setMobileKanbanColumnIndex: (index: number) =>
+      set((draft) => {
+        draft.mobileKanban.activeColumnIndex = index;
+      }),
+    setMobileKanbanMenuOpen: (open: boolean) =>
+      set((draft) => {
+        draft.mobileKanban.isMenuOpen = open;
+      }),
+    setMobileSessionPanel: (
+      sessionId: string,
+      panel: UISliceState["mobileSession"]["activePanelBySessionId"][string],
+    ) =>
+      set((draft) => {
+        draft.mobileSession.activePanelBySessionId[sessionId] = panel;
+      }),
+    setMobileSessionTaskSwitcherOpen: (open: boolean) =>
+      set((draft) => {
+        draft.mobileSession.isTaskSwitcherOpen = open;
+      }),
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _get,
 ) => ({
   ...defaultUIState,
-  setPreviewOpen: (sessionId, open) =>
-    set((draft) => {
-      draft.previewPanel.openBySessionId[sessionId] = open;
-      setLocalStorage(`preview-open-${sessionId}`, open);
-    }),
-  togglePreviewOpen: (sessionId) =>
-    set((draft) => {
-      const current = draft.previewPanel.openBySessionId[sessionId] ?? false;
-      draft.previewPanel.openBySessionId[sessionId] = !current;
-      setLocalStorage(`preview-open-${sessionId}`, !current);
-    }),
-  setPreviewView: (sessionId, view) =>
-    set((draft) => {
-      draft.previewPanel.viewBySessionId[sessionId] = view;
-      setLocalStorage(`preview-view-${sessionId}`, view);
-    }),
-  setPreviewDevice: (sessionId, device) =>
-    set((draft) => {
-      draft.previewPanel.deviceBySessionId[sessionId] = device;
-      setLocalStorage(`preview-device-${sessionId}`, device);
-    }),
-  setPreviewStage: (sessionId, stage) =>
-    set((draft) => {
-      draft.previewPanel.stageBySessionId[sessionId] = stage;
-    }),
-  setPreviewUrl: (sessionId, url) =>
-    set((draft) => {
-      draft.previewPanel.urlBySessionId[sessionId] = url;
-    }),
-  setPreviewUrlDraft: (sessionId, url) =>
-    set((draft) => {
-      draft.previewPanel.urlDraftBySessionId[sessionId] = url;
-    }),
+  ...buildPreviewActions(set),
+  ...buildMobileActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -69,22 +110,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.connection.status = status;
       draft.connection.error = error ?? null;
-    }),
-  setMobileKanbanColumnIndex: (index) =>
-    set((draft) => {
-      draft.mobileKanban.activeColumnIndex = index;
-    }),
-  setMobileKanbanMenuOpen: (open) =>
-    set((draft) => {
-      draft.mobileKanban.isMenuOpen = open;
-    }),
-  setMobileSessionPanel: (sessionId, panel) =>
-    set((draft) => {
-      draft.mobileSession.activePanelBySessionId[sessionId] = panel;
-    }),
-  setMobileSessionTaskSwitcherOpen: (open) =>
-    set((draft) => {
-      draft.mobileSession.isTaskSwitcherOpen = open;
     }),
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
@@ -109,6 +134,55 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   invalidateSystemHealth: () =>
     set((draft) => {
       draft.systemHealth.loaded = false;
+    }),
+  openQuickChat: (sessionId, workspaceId) =>
+    set((draft) => {
+      draft.quickChat.isOpen = true;
+      // If sessionId is empty, create a placeholder tab for agent selection
+      if (!sessionId) {
+        // Check if there's already an empty tab
+        const emptyTabExists = draft.quickChat.sessions.some((s) => s.sessionId === "");
+        if (!emptyTabExists) {
+          draft.quickChat.sessions.push({ sessionId: "", workspaceId });
+        }
+        draft.quickChat.activeSessionId = "";
+        return;
+      }
+      // Add session if not already in list
+      const exists = draft.quickChat.sessions.some((s) => s.sessionId === sessionId);
+      if (!exists) {
+        draft.quickChat.sessions.push({ sessionId, workspaceId });
+      }
+      draft.quickChat.activeSessionId = sessionId;
+    }),
+  closeQuickChat: () =>
+    set((draft) => {
+      draft.quickChat.isOpen = false;
+    }),
+  closeQuickChatSession: (sessionId) =>
+    set((draft) => {
+      // Remove session from list
+      draft.quickChat.sessions = draft.quickChat.sessions.filter((s) => s.sessionId !== sessionId);
+      // If closing active session, switch to another or close modal
+      if (draft.quickChat.activeSessionId === sessionId) {
+        if (draft.quickChat.sessions.length > 0) {
+          draft.quickChat.activeSessionId = draft.quickChat.sessions[0].sessionId;
+        } else {
+          draft.quickChat.activeSessionId = null;
+          draft.quickChat.isOpen = false;
+        }
+      }
+    }),
+  setActiveQuickChatSession: (sessionId) =>
+    set((draft) => {
+      draft.quickChat.activeSessionId = sessionId;
+    }),
+  renameQuickChatSession: (sessionId, name) =>
+    set((draft) => {
+      const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
+      if (session) {
+        session.name = name;
+      }
     }),
   setSessionFailureNotification: (n) =>
     set((draft) => {

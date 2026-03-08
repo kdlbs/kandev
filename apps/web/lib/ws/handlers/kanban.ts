@@ -19,15 +19,19 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         events: step.events,
         show_in_command_panel: step.show_in_command_panel,
       }));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tasks: KanbanTask[] = message.payload.tasks.map((task: any) => ({
-        id: task.id,
-        workflowStepId: task.workflowStepId,
-        title: task.title,
-        description: task.description,
-        position: task.position ?? 0,
-        state: task.state,
-      }));
+      const tasks: KanbanTask[] = message.payload.tasks
+        // Filter out ephemeral tasks (e.g., quick chat)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((task: any) => !task.is_ephemeral)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((task: any) => ({
+          id: task.id,
+          workflowStepId: task.workflowStepId,
+          title: task.title,
+          description: task.description,
+          position: task.position ?? 0,
+          state: task.state,
+        }));
 
       store.setState((state) => {
         const next = {

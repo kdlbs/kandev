@@ -13,6 +13,7 @@ import {
   IconMenu2,
   IconChartBar,
   IconTimeline,
+  IconMessageCircle,
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { RefreshReviewsButton } from "../github/refresh-reviews-button";
@@ -20,6 +21,7 @@ import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { linkToTasks } from "@/lib/links";
@@ -97,6 +99,7 @@ function getToggleValue(currentPage: string, kanbanViewMode: string | null): str
 
 function TabletHeader({
   onCreateTask,
+  onOpenQuickChat,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -109,6 +112,7 @@ function TabletHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
+  onOpenQuickChat: () => void;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -145,6 +149,19 @@ function TabletHeader({
           <span className="hidden sm:inline ml-1">Add task</span>
         </Button>
         <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon-lg"
+                onClick={onOpenQuickChat}
+                className="cursor-pointer h-8 w-8"
+              >
+                <IconMessageCircle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Quick Chat</TooltipContent>
+          </Tooltip>
           <ViewToggleGroup
             toggleValue={toggleValue}
             onValueChange={handleViewChange}
@@ -170,6 +187,7 @@ function TabletHeader({
 
 function DesktopHeader({
   onCreateTask,
+  onOpenQuickChat,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -181,6 +199,7 @@ function DesktopHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
+  onOpenQuickChat: () => void;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -214,6 +233,19 @@ function DesktopHeader({
           Add task
         </Button>
         <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onOpenQuickChat}
+                className="cursor-pointer"
+              >
+                <IconMessageCircle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Quick Chat</TooltipContent>
+          </Tooltip>
           <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -241,23 +273,13 @@ function DesktopHeader({
   );
 }
 
-export function KanbanHeader({
-  onCreateTask,
-  workspaceId,
-  currentPage = "kanban",
-  searchQuery = "",
-  onSearchChange,
-  isSearchLoading = false,
-}: KanbanHeaderProps) {
+function useHeaderViewChange(
+  currentPage: string,
+  workspaceId: string | undefined,
+  onViewModeChange: (mode: string) => void,
+) {
   const router = useRouter();
-  const { isMobile, isTablet } = useResponsiveBreakpoint();
-  const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
-  const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
-  const releaseNotes = useReleaseNotes();
-  const healthIndicator = useSystemHealthIndicator();
-  const toggleValue = getToggleValue(currentPage, kanbanViewMode);
-  const handleViewChange = (value: string) => {
+  return (value: string) => {
     if (value === "list") {
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
@@ -268,6 +290,26 @@ export function KanbanHeader({
       onViewModeChange("graph2");
     }
   };
+}
+
+export function KanbanHeader({
+  onCreateTask,
+  workspaceId,
+  currentPage = "kanban",
+  searchQuery = "",
+  onSearchChange,
+  isSearchLoading = false,
+}: KanbanHeaderProps) {
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
+  const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
+  const { kanbanViewMode, onViewModeChange } = useKanbanDisplaySettings();
+  const releaseNotes = useReleaseNotes();
+  const healthIndicator = useSystemHealthIndicator();
+  const toggleValue = getToggleValue(currentPage, kanbanViewMode);
+  const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
     onOpenReleaseNotes: releaseNotes.openDialog,
@@ -275,50 +317,54 @@ export function KanbanHeader({
     onOpenHealthDialog: healthIndicator.openDialog,
   };
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
-  let header: React.ReactNode;
-  if (isMobile) {
-    header = (
-      <KanbanHeaderMobile
-        workspaceId={workspaceId}
-        currentPage={currentPage}
-        {...sharedSearch}
-        {...indicatorProps}
-      />
-    );
-  } else if (isTablet) {
-    header = (
-      <>
-        <TabletHeader
-          onCreateTask={onCreateTask}
-          {...sharedSearch}
-          toggleValue={toggleValue}
-          handleViewChange={handleViewChange}
-          setMenuOpen={setMenuOpen}
-          {...indicatorProps}
-        />
-        <MobileMenuSheet
-          open={isMenuOpen}
-          onOpenChange={setMenuOpen}
+  const sharedActions = { onCreateTask, onOpenQuickChat: handleOpenQuickChat };
+
+  const renderHeader = () => {
+    if (isMobile) {
+      return (
+        <KanbanHeaderMobile
           workspaceId={workspaceId}
           currentPage={currentPage}
           {...sharedSearch}
+          {...indicatorProps}
         />
-      </>
-    );
-  } else {
-    header = (
+      );
+    }
+    if (isTablet) {
+      return (
+        <>
+          <TabletHeader
+            {...sharedActions}
+            {...sharedSearch}
+            toggleValue={toggleValue}
+            handleViewChange={handleViewChange}
+            setMenuOpen={setMenuOpen}
+            {...indicatorProps}
+          />
+          <MobileMenuSheet
+            open={isMenuOpen}
+            onOpenChange={setMenuOpen}
+            workspaceId={workspaceId}
+            currentPage={currentPage}
+            {...sharedSearch}
+          />
+        </>
+      );
+    }
+    return (
       <DesktopHeader
-        onCreateTask={onCreateTask}
+        {...sharedActions}
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}
         {...indicatorProps}
       />
     );
-  }
+  };
+
   return (
     <>
-      {header}
+      {renderHeader()}
       {releaseNotes.hasNotes && (
         <ReleaseNotesDialog
           open={releaseNotes.dialogOpen}

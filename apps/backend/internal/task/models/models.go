@@ -29,6 +29,7 @@ type Task struct {
 	Position       int                    `json:"position"` // Order within workflow step
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
+	IsEphemeral    bool                   `json:"is_ephemeral"` // Ephemeral tasks are not shown in kanban, used for quick chat
 	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
@@ -529,5 +530,6 @@ func (t *Task) ToAPI() *v1.Task {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 		Metadata:     t.Metadata,
+		IsEphemeral:  t.IsEphemeral,
 	}
 }

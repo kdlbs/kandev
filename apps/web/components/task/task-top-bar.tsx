@@ -34,6 +34,7 @@ import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { DEBUG_UI } from "@/lib/config";
 import { toast } from "sonner";
 
@@ -55,6 +56,7 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  workspaceId?: string | null;
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
@@ -80,6 +82,7 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  workspaceId,
   isArchived,
   isRemoteExecutor,
   isAgentctlReady,
@@ -144,6 +147,7 @@ const TaskTopBar = memo(function TaskTopBar({
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
+        workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
       />
@@ -546,6 +550,7 @@ function TopBarRight({
   showDebugOverlay,
   onToggleDebugOverlay,
   isArchived,
+  workspaceId,
   isRemoteExecutor,
   isAgentctlReady,
 }: {
@@ -555,6 +560,7 @@ function TopBarRight({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
+  workspaceId?: string | null;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
 }) {
@@ -592,6 +598,7 @@ function TopBarRight({
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
+      <QuickChatButton workspaceId={workspaceId} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="sm" variant="outline" className="cursor-pointer px-2" asChild>

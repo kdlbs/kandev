@@ -114,7 +114,10 @@ export function matchesShortcut(
   event: KeyboardEvent | React.KeyboardEvent,
   shortcut: KeyboardShortcut,
 ): boolean {
-  if (event.key !== shortcut.key) return false;
+  // Case-insensitive comparison for letter keys
+  const eventKey = event.key.toLowerCase();
+  const shortcutKey = shortcut.key.toLowerCase();
+  if (eventKey !== shortcutKey) return false;
 
   if (!shortcut.modifiers) {
     return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
