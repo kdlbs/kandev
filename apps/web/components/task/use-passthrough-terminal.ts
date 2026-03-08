@@ -69,21 +69,27 @@ function initTerminalInstance(
   } catch (e) {
     log("Initial fit failed:", e);
   }
-  try {
-    const webglAddon = new WebglAddon();
-    webglAddon.onContextLoss(() => {
-      log("WebGL context lost");
-      webglAddon.dispose();
-      refs.webglAddonRef.current = null;
-    });
-    terminal.loadAddon(webglAddon);
-    refs.webglAddonRef.current = webglAddon;
-    log("WebGL addon loaded");
-  } catch (e) {
-    log("WebGL failed, using canvas:", e);
-  }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
+  // Defer WebGL addon loading to the next animation frame so the initial
+  // synchronous work (Terminal + FitAddon + open) stays within the browser's
+  // frame budget and avoids "Violation: 'setTimeout' handler took Xms" warnings.
+  requestAnimationFrame(() => {
+    if (!refs.xtermRef.current || refs.webglAddonRef.current) return;
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        log("WebGL context lost");
+        webglAddon.dispose();
+        refs.webglAddonRef.current = null;
+      });
+      terminal.loadAddon(webglAddon);
+      refs.webglAddonRef.current = webglAddon;
+      log("WebGL addon loaded");
+    } catch (e) {
+      log("WebGL failed, using canvas:", e);
+    }
+  });
   // Expose buffer reader on the container for e2e tests (xterm renders to
   // canvas so text isn't accessible in the DOM).
   (termContainer as HTMLDivElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer =
@@ -278,7 +284,12 @@ function connectWebSocket({
     attachAddonRef.current = null;
   }
   if (wsRef.current) {
-    wsRef.current.close();
+    if (
+      wsRef.current.readyState === WebSocket.OPEN ||
+      wsRef.current.readyState === WebSocket.CLOSING
+    ) {
+      wsRef.current.close();
+    }
     wsRef.current = null;
   }
   const wsUrl = buildWsUrl(wsBaseUrl, sessionId, mode, terminalId, label);
@@ -402,7 +413,15 @@ export function useWebSocketConnection({
         attachAddonRef.current = null;
       }
       if (wsRef.current) {
-        wsRef.current.close();
+        // Only close if the connection is actually open or has completed
+        // opening. Closing a CONNECTING WebSocket triggers a browser warning
+        // ("WebSocket is closed before the connection is established").
+        if (
+          wsRef.current.readyState === WebSocket.OPEN ||
+          wsRef.current.readyState === WebSocket.CLOSING
+        ) {
+          wsRef.current.close();
+        }
         wsRef.current = null;
       }
     };
