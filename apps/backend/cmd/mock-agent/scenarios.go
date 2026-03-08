@@ -1,86 +1,56 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
 
+// scenarioRegistry maps scenario names to their handler functions.
+var scenarioRegistry = map[string]func(e *emitter){
+	"simple-message":        scenarioSimpleMessage,
+	"read-and-edit":         scenarioReadAndEdit,
+	"permission-flow":       scenarioPermissionFlow,
+	"error":                 scenarioError,
+	"subagent":              scenarioSubagent,
+	"all-tools":             scenarioAllTools,
+	"multi-turn":            scenarioMultiTurn,
+	"diff-expansion-setup":  scenarioDiffExpansionSetup,
+	"diff-update-setup":     scenarioDiffUpdateSetup,
+	"diff-update-modify":    scenarioDiffUpdateModify,
+	"untracked-file-setup":  scenarioUntrackedFileSetup,
+	"untracked-file-modify": scenarioUntrackedFileModify,
+	"clarification":         scenarioClarification,
+	"clarification-timeout": scenarioClarificationTimeout,
+}
+
 // emitPredefinedScenario dispatches to a named e2e scenario.
-func emitPredefinedScenario(enc *json.Encoder, scanner *bufio.Scanner, name string) {
-	switch name {
-	case "simple-message":
-		scenarioSimpleMessage(enc)
-	case "read-and-edit":
-		scenarioReadAndEdit(enc, scanner)
-	case "permission-flow":
-		scenarioPermissionFlow(enc, scanner)
-	case "error":
-		scenarioError(enc)
-	case "subagent":
-		scenarioSubagent(enc, scanner)
-	case "all-tools":
-		scenarioAllTools(enc, scanner)
-	case "multi-turn":
-		scenarioMultiTurn(enc)
-	case "diff-expansion-setup":
-		scenarioDiffExpansionSetup(enc)
-	case "diff-update-setup":
-		scenarioDiffUpdateSetup(enc)
-	case "diff-update-modify":
-		scenarioDiffUpdateModify(enc)
-	case "untracked-file-setup":
-		scenarioUntrackedFileSetup(enc)
-	case "untracked-file-modify":
-		scenarioUntrackedFileModify(enc)
-	case "clarification":
-		scenarioClarification(enc)
-	case "clarification-timeout":
-		scenarioClarificationTimeout(enc)
-	default:
-		emitTextBlock(enc, "Unknown e2e scenario: "+name+". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, untracked-file-setup, untracked-file-modify, clarification, clarification-timeout", "")
+func emitPredefinedScenario(e *emitter, name string) {
+	if fn, ok := scenarioRegistry[name]; ok {
+		fn(e)
+	} else {
+		e.text("Unknown e2e scenario: " + name + ". Available: simple-message, read-and-edit, permission-flow, error, subagent, all-tools, multi-turn, diff-expansion-setup, diff-update-setup, diff-update-modify, untracked-file-setup, untracked-file-modify, clarification, clarification-timeout")
 	}
 }
 
 // scenarioSimpleMessage: text only with fixed 100ms delays.
-func scenarioSimpleMessage(enc *json.Encoder) {
+func scenarioSimpleMessage(e *emitter) {
 	fixedDelay(100)
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockThinking, Thinking: "Processing the request..."},
-			},
-			Model: "mock-default",
-			Usage: defaultUsage(),
-		},
-	})
+	e.thought("Processing the request...")
 
 	fixedDelay(100)
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockText, Text: "This is a simple mock response for e2e testing."},
-			},
-			Model:      "mock-default",
-			StopReason: "end_turn",
-			Usage:      defaultUsage(),
-		},
-	})
+	e.text("This is a simple mock response for e2e testing.")
 }
 
 // scenarioReadAndEdit: read -> edit -> text with fixed delays, using real files.
-func scenarioReadAndEdit(enc *json.Encoder, scanner *bufio.Scanner) {
+func scenarioReadAndEdit(e *emitter) {
 	f := randomFile()
 	snippet := readFileSnippet(f.absPath, 20)
 	oldStr, newStr := pickEditableFragment(f.absPath)
@@ -88,29 +58,11 @@ func scenarioReadAndEdit(enc *json.Encoder, scanner *bufio.Scanner) {
 
 	// Read file
 	readID := nextToolID()
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockToolUse, ID: readID, Name: ToolRead, Input: map[string]any{"file_path": f.absPath}},
-			},
-			Model:      "mock-default",
-			StopReason: "tool_use",
-			Usage:      defaultUsage(),
-		},
-	})
-
+	e.startTool(readID, "Read "+f.relPath, acp.ToolKindRead,
+		map[string]any{"file_path": f.absPath},
+		acp.ToolCallLocation{Path: f.absPath})
 	fixedDelay(50)
-	_ = enc.Encode(UserMsg{
-		Type: TypeUser,
-		Message: UserMsgBody{
-			Role: "user",
-			Content: []ContentBlock{
-				{Type: BlockToolResult, ToolUseID: readID, Content: snippet},
-			},
-		},
-	})
+	e.completeTool(readID, map[string]any{"content": snippet})
 
 	fixedDelay(50)
 
@@ -121,42 +73,25 @@ func scenarioReadAndEdit(enc *json.Encoder, scanner *bufio.Scanner) {
 		"old_string": oldStr,
 		"new_string": newStr,
 	}
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockToolUse, ID: editID, Name: ToolEdit, Input: editInput},
-			},
-			Model:      "mock-default",
-			StopReason: "tool_use",
-			Usage:      defaultUsage(),
-		},
-	})
+	e.startTool(editID, "Edit "+f.relPath, acp.ToolKindEdit, editInput,
+		acp.ToolCallLocation{Path: f.absPath})
 
-	allowed := requestPermission(enc, scanner, ToolEdit, editID, editInput)
+	allowed := e.requestPermission(editID, "Edit "+f.relPath, acp.ToolKindEdit, editInput)
 
 	fixedDelay(50)
 	if allowed {
-		_ = enc.Encode(UserMsg{
-			Type: TypeUser,
-			Message: UserMsgBody{
-				Role: "user",
-				Content: []ContentBlock{
-					{Type: BlockToolResult, ToolUseID: editID, Content: "File edited successfully: " + f.absPath},
-				},
-			},
-		})
+		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + f.absPath})
 	} else {
-		emitTextBlock(enc, "Edit was denied.", "")
+		e.completeTool(editID, map[string]any{"result": "Edit was denied"})
+		e.text("Edit was denied.")
 	}
 
 	fixedDelay(50)
-	emitTextBlock(enc, "Read and edit scenario complete.", "")
+	e.text("Read and edit scenario complete.")
 }
 
 // scenarioPermissionFlow: tool requiring permission with fixed delays.
-func scenarioPermissionFlow(enc *json.Encoder, scanner *bufio.Scanner) {
+func scenarioPermissionFlow(e *emitter) {
 	fixedDelay(50)
 
 	bashID := nextToolID()
@@ -165,90 +100,51 @@ func scenarioPermissionFlow(enc *json.Encoder, scanner *bufio.Scanner) {
 		"description": "Test permission flow",
 	}
 
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockToolUse, ID: bashID, Name: ToolBash, Input: bashInput},
-			},
-			Model:      "mock-default",
-			StopReason: "tool_use",
-			Usage:      defaultUsage(),
-		},
-	})
+	e.startTool(bashID, "Test permissions", acp.ToolKindExecute, bashInput)
 
-	allowed := requestPermission(enc, scanner, ToolBash, bashID, bashInput)
+	allowed := e.requestPermission(bashID, "Test permissions", acp.ToolKindExecute, bashInput)
 
 	fixedDelay(50)
 	if allowed {
-		_ = enc.Encode(UserMsg{
-			Type: TypeUser,
-			Message: UserMsgBody{
-				Role: "user",
-				Content: []ContentBlock{
-					{Type: BlockToolResult, ToolUseID: bashID, Content: "testing permissions"},
-				},
-			},
-		})
-		emitTextBlock(enc, "Permission was granted and command executed.", "")
+		e.completeTool(bashID, map[string]any{"output": "testing permissions"})
+		e.text("Permission was granted and command executed.")
 	} else {
-		emitTextBlock(enc, "Permission was denied.", "")
+		e.completeTool(bashID, map[string]any{"output": "Permission denied"})
+		e.text("Permission was denied.")
 	}
 }
 
 // scenarioError: error result with fixed delays.
-func scenarioError(enc *json.Encoder) {
+func scenarioError(e *emitter) {
 	fixedDelay(100)
-	emitTextBlock(enc, "About to encounter an error...", "")
+	e.text("About to encounter an error...")
 	fixedDelay(100)
-	emitResult(enc, true, "E2E test error: simulated failure")
+	e.text("E2E test error: simulated failure")
 }
 
 // scenarioSubagent: subagent with child messages and fixed delays.
-func scenarioSubagent(enc *json.Encoder, scanner *bufio.Scanner) {
+func scenarioSubagent(e *emitter) {
 	taskToolID := nextToolID()
 	fixedDelay(50)
 
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role: "assistant",
-			Content: []ContentBlock{
-				{Type: BlockToolUse, ID: taskToolID, Name: ToolTask, Input: map[string]any{
-					"description": "E2E subagent test",
-					"prompt":      "Run e2e subagent scenario",
-				}},
-			},
-			Model:      "mock-default",
-			StopReason: "tool_use",
-			Usage:      defaultUsage(),
-		},
-	})
+	e.startTool(taskToolID, "E2E subagent test", acp.ToolKindOther,
+		map[string]any{
+			"description": "E2E subagent test",
+			"prompt":      "Run e2e subagent scenario",
+		})
 
 	fixedDelay(50)
-	_ = enc.Encode(SystemMsg{Type: TypeSystem, SessionID: sessionID, SessionStatus: "active"})
+	e.text("Subagent working on the task...")
 
 	fixedDelay(50)
-	emitTextBlock(enc, "Subagent working on the task...", taskToolID)
+	e.completeTool(taskToolID, map[string]any{"result": "E2E subagent completed"})
 
 	fixedDelay(50)
-	_ = enc.Encode(UserMsg{
-		Type: TypeUser,
-		Message: UserMsgBody{
-			Role: "user",
-			Content: []ContentBlock{
-				{Type: BlockToolResult, ToolUseID: taskToolID, Content: "E2E subagent completed"},
-			},
-		},
-	})
-
-	fixedDelay(50)
-	emitTextBlock(enc, "Subagent scenario complete.", "")
+	e.text("Subagent scenario complete.")
 }
 
 // scenarioAllTools: one of each tool type with fixed delays, using real files.
-func scenarioAllTools(enc *json.Encoder, scanner *bufio.Scanner) {
+func scenarioAllTools(e *emitter) {
 	used := map[string]bool{}
 	readFile := randomFile()
 	used[readFile.absPath] = true
@@ -257,131 +153,97 @@ func scenarioAllTools(enc *json.Encoder, scanner *bufio.Scanner) {
 	editFile := randomFileExcluding(used)
 
 	fixedDelay(50)
-	emitThinkingBlock(enc, "Running all tools...", "")
+	e.thought("Running all tools...")
 
-	scenarioAllToolsReadGrep(enc, readFile, grepFile)
-	scenarioAllToolsEditBash(enc, scanner, editFile)
+	scenarioAllToolsReadGrep(e, readFile, grepFile)
+	scenarioAllToolsEditBash(e, editFile)
 
 	// WebFetch
 	fixedDelay(50)
 	webID := nextToolID()
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: webID, Name: ToolWebFetch, Input: map[string]any{"url": "https://example.com", "prompt": "Summarize"}}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
+	e.startTool(webID, "Fetch example.com", acp.ToolKindFetch,
+		map[string]any{"url": "https://example.com", "prompt": "Summarize"})
 	fixedDelay(50)
-	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: webID, Content: "Example page content"}}}})
+	e.completeTool(webID, map[string]any{"content": "Example page content"})
 
 	fixedDelay(50)
-	emitTextBlock(enc, "All tools scenario complete.", "")
+	e.text("All tools scenario complete.")
 }
 
-func scenarioAllToolsReadGrep(enc *json.Encoder, readFile, grepFile fileInfo) {
+func scenarioAllToolsReadGrep(e *emitter, readFile, grepFile fileInfo) {
 	// Read
 	fixedDelay(50)
 	readID := nextToolID()
 	snippet := readFileSnippet(readFile.absPath, 20)
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: readID, Name: ToolRead, Input: map[string]any{"file_path": readFile.absPath}}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
+	e.startTool(readID, "Read "+readFile.relPath, acp.ToolKindRead,
+		map[string]any{"file_path": readFile.absPath},
+		acp.ToolCallLocation{Path: readFile.absPath})
 	fixedDelay(50)
-	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: readID, Content: snippet}}}})
+	e.completeTool(readID, map[string]any{"content": snippet})
 
 	// Grep
 	fixedDelay(50)
 	grepID := nextToolID()
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: grepID, Name: ToolGrep, Input: map[string]any{"pattern": "func ", "path": grepFile.absPath}}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
+	e.startTool(grepID, "Search for \"func \"", acp.ToolKindSearch,
+		map[string]any{"pattern": "func ", "path": grepFile.absPath})
 	fixedDelay(50)
 	paths := randomFilePaths(3)
 	var grepResults []string
 	for i, p := range paths {
 		grepResults = append(grepResults, fmt.Sprintf("%s:%d: func found here", p, (i+1)*10))
 	}
-	_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: grepID, Content: strings.Join(grepResults, "\n")}}}})
+	e.completeTool(grepID, map[string]any{"matches": strings.Join(grepResults, "\n")})
 }
 
-func scenarioAllToolsEditBash(enc *json.Encoder, scanner *bufio.Scanner, editFile fileInfo) {
+func scenarioAllToolsEditBash(e *emitter, editFile fileInfo) {
 	// Edit (with permission)
 	fixedDelay(50)
 	editID := nextToolID()
 	oldStr, newStr := pickEditableFragment(editFile.absPath)
 	editInput := map[string]any{"file_path": editFile.absPath, "old_string": oldStr, "new_string": newStr}
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: editID, Name: ToolEdit, Input: editInput}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
-	allowed := requestPermission(enc, scanner, ToolEdit, editID, editInput)
+	e.startTool(editID, "Edit "+editFile.relPath, acp.ToolKindEdit, editInput,
+		acp.ToolCallLocation{Path: editFile.absPath})
+	allowed := e.requestPermission(editID, "Edit "+editFile.relPath, acp.ToolKindEdit, editInput)
 	fixedDelay(50)
 	if allowed {
-		_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: editID, Content: "File edited successfully: " + editFile.absPath}}}})
+		e.completeTool(editID, map[string]any{"result": "File edited successfully: " + editFile.absPath})
 	} else {
-		emitTextBlock(enc, "Edit denied.", "")
+		e.completeTool(editID, map[string]any{"result": "Edit denied"})
+		e.text("Edit denied.")
 	}
 
 	// Bash (with permission)
 	fixedDelay(50)
 	bashID := nextToolID()
 	bashInput := map[string]any{"command": "echo done", "description": "Print done"}
-	_ = enc.Encode(AssistantMsg{
-		Type: TypeAssistant,
-		Message: AssistantBody{
-			Role:    "assistant",
-			Content: []ContentBlock{{Type: BlockToolUse, ID: bashID, Name: ToolBash, Input: bashInput}},
-			Model:   "mock-default", StopReason: "tool_use", Usage: defaultUsage(),
-		},
-	})
-	allowed = requestPermission(enc, scanner, ToolBash, bashID, bashInput)
+	e.startTool(bashID, "Print done", acp.ToolKindExecute, bashInput)
+	allowed = e.requestPermission(bashID, "Print done", acp.ToolKindExecute, bashInput)
 	fixedDelay(50)
 	if allowed {
-		_ = enc.Encode(UserMsg{Type: TypeUser, Message: UserMsgBody{Role: "user", Content: []ContentBlock{{Type: BlockToolResult, ToolUseID: bashID, Content: "done"}}}})
+		e.completeTool(bashID, map[string]any{"output": "done"})
 	} else {
-		emitTextBlock(enc, "Bash denied.", "")
+		e.completeTool(bashID, map[string]any{"output": "Permission denied"})
+		e.text("Bash denied.")
 	}
 }
 
 // scenarioMultiTurn: minimal response for multi-turn test.
-func scenarioMultiTurn(enc *json.Encoder) {
+func scenarioMultiTurn(e *emitter) {
 	fixedDelay(50)
-	emitTextBlock(enc, "Multi-turn response ready. Send another message to continue.", "")
+	e.text("Multi-turn response ready. Send another message to continue.")
 }
 
 // scenarioDiffExpansionSetup: creates a committed file and then modifies it,
 // leaving an uncommitted diff that the UI can display with expansion enabled.
-//
-// Uses 200 lines with hunks at lines 50 (mid-top) and 150 (mid-bottom), so the
-// diff viewer collapses ~90 lines between hunks and ~45 lines at each end.
-// This gives three separate expand handles for the e2e test to interact with.
-func scenarioDiffExpansionSetup(enc *json.Encoder) {
+func scenarioDiffExpansionSetup(e *emitter) {
 	fixedDelay(50)
 
 	wd, err := os.Getwd()
 	if err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: getwd failed: "+err.Error(), "")
+		e.text("diff-expansion-setup: getwd failed: " + err.Error())
 		return
 	}
 
-	// Build a 200-line file with distinct content per line so assertions can
-	// target specific line text after expanding collapsed regions.
 	const totalLines = 200
 	originalLines := make([]string, totalLines)
 	for i := 0; i < totalLines; i++ {
@@ -391,58 +253,28 @@ func scenarioDiffExpansionSetup(enc *json.Encoder) {
 
 	filePath := "expansion_test.go"
 	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: write failed: "+err.Error(), "")
+		e.text("diff-expansion-setup: write failed: " + err.Error())
 		return
 	}
 
-	gitEnv := append(os.Environ(),
-		"GIT_AUTHOR_NAME=Mock Agent",
-		"GIT_AUTHOR_EMAIL=mock@test.local",
-		"GIT_COMMITTER_NAME=Mock Agent",
-		"GIT_COMMITTER_EMAIL=mock@test.local",
-	)
-
-	runGitCmd := func(args ...string) error {
-		cmd := exec.Command("git", append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := cmd.CombinedOutput()
-		if cmdErr != nil {
-			fmt.Fprintf(os.Stderr, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
-		}
-		return cmdErr
-	}
-
-	// Clean up from any previous test run so the add+commit is never a no-op.
-	// git rm --force removes the file from both the index and worktree;
-	// the commit records the deletion. Errors are ignored (file may not exist).
+	runGitCmd := makeGitRunner(wd)
 	_ = runGitCmd("rm", "--force", filePath)
 	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
 
-	// Re-write the original content (git rm deleted it from the worktree).
 	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: re-write failed: "+err.Error(), "")
+		e.text("diff-expansion-setup: re-write failed: " + err.Error())
 		return
 	}
 
 	if err := runGitCmd("add", filePath); err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: git add failed", "")
+		e.text("diff-expansion-setup: git add failed")
 		return
 	}
 	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: git commit failed", "")
+		e.text("diff-expansion-setup: git commit failed")
 		return
 	}
 
-	// Modify line 50 (mid-top, index 49) and line 150 (mid-bottom, index 149).
-	// With 3 lines of context per hunk, the diff collapses:
-	//   - lines 1-46   (~46 lines) above the first hunk
-	//   - lines 54-146 (~93 lines) between the two hunks
-	//   - lines 154-200 (~47 lines) below the second hunk
-	// Each collapsed region gets its own expand handle in the diff viewer.
 	modifiedLines := make([]string, totalLines)
 	copy(modifiedLines, originalLines)
 	modifiedLines[49] = "func modified_mid_top() { /* HUNK_TOP - modified line 50 */ }"
@@ -450,141 +282,107 @@ func scenarioDiffExpansionSetup(enc *json.Encoder) {
 	modified := strings.Join(modifiedLines, "\n") + "\n"
 
 	if err := os.WriteFile(filePath, []byte(modified), 0o644); err != nil {
-		emitTextBlock(enc, "diff-expansion-setup: write modified failed: "+err.Error(), "")
+		e.text("diff-expansion-setup: write modified failed: " + err.Error())
 		return
 	}
 
 	fixedDelay(100)
-	emitTextBlock(enc, "diff-expansion-setup complete: expansion_test.go has two-hunk uncommitted diff (lines 50 and 150 of 200).", "")
+	e.text("diff-expansion-setup complete: expansion_test.go has two-hunk uncommitted diff (lines 50 and 150 of 200).")
 }
 
-// scenarioDiffUpdateSetup creates a simple file, commits it, then modifies it
-// to leave an uncommitted diff. This is the first step of the diff-update test.
-// The file content is simple so assertions can verify exact diff content.
-func scenarioDiffUpdateSetup(enc *json.Encoder) {
+// scenarioDiffUpdateSetup creates a simple file, commits it, then modifies it.
+func scenarioDiffUpdateSetup(e *emitter) {
 	fixedDelay(50)
 
 	wd, err := os.Getwd()
 	if err != nil {
-		emitTextBlock(enc, "diff-update-setup: getwd failed: "+err.Error(), "")
+		e.text("diff-update-setup: getwd failed: " + err.Error())
 		return
 	}
 
 	filePath := "diff_update_test.txt"
 	originalContent := "line 1: original\nline 2: unchanged\nline 3: original\n"
 
-	// Write original content
 	if err := os.WriteFile(filePath, []byte(originalContent), 0o644); err != nil {
-		emitTextBlock(enc, "diff-update-setup: write failed: "+err.Error(), "")
+		e.text("diff-update-setup: write failed: " + err.Error())
 		return
 	}
 
-	gitEnv := append(os.Environ(),
-		"GIT_AUTHOR_NAME=Mock Agent",
-		"GIT_AUTHOR_EMAIL=mock@test.local",
-		"GIT_COMMITTER_NAME=Mock Agent",
-		"GIT_COMMITTER_EMAIL=mock@test.local",
-	)
-
-	runGitCmd := func(args ...string) error {
-		cmd := exec.Command("git", append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := cmd.CombinedOutput()
-		if cmdErr != nil {
-			fmt.Fprintf(os.Stderr, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
-		}
-		return cmdErr
-	}
-
-	// Clean up from any previous test run
+	runGitCmd := makeGitRunner(wd)
 	_ = runGitCmd("rm", "--force", filePath)
 	_ = runGitCmd("commit", "-m", "cleanup diff_update_test.txt")
 
-	// Re-write and commit original content
 	if err := os.WriteFile(filePath, []byte(originalContent), 0o644); err != nil {
-		emitTextBlock(enc, "diff-update-setup: re-write failed: "+err.Error(), "")
+		e.text("diff-update-setup: re-write failed: " + err.Error())
 		return
 	}
 
 	if err := runGitCmd("add", filePath); err != nil {
-		emitTextBlock(enc, "diff-update-setup: git add failed", "")
+		e.text("diff-update-setup: git add failed")
 		return
 	}
 	if err := runGitCmd("commit", "-m", "add diff_update_test.txt"); err != nil {
-		emitTextBlock(enc, "diff-update-setup: git commit failed", "")
+		e.text("diff-update-setup: git commit failed")
 		return
 	}
 
-	// Modify the file to create an uncommitted diff
 	modifiedContent := "line 1: FIRST_MODIFICATION\nline 2: unchanged\nline 3: original\n"
 	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
-		emitTextBlock(enc, "diff-update-setup: write modified failed: "+err.Error(), "")
+		e.text("diff-update-setup: write modified failed: " + err.Error())
 		return
 	}
 
 	fixedDelay(100)
-	emitTextBlock(enc, "diff-update-setup complete: diff_update_test.txt has FIRST_MODIFICATION", "")
+	e.text("diff-update-setup complete: diff_update_test.txt has FIRST_MODIFICATION")
 }
 
-// scenarioDiffUpdateModify modifies the diff_update_test.txt file again,
-// changing the diff content. This tests that the UI updates the diff display
-// when files change after the initial diff was shown.
-func scenarioDiffUpdateModify(enc *json.Encoder) {
+// scenarioDiffUpdateModify modifies the diff_update_test.txt file again.
+func scenarioDiffUpdateModify(e *emitter) {
 	fixedDelay(50)
 
 	filePath := "diff_update_test.txt"
-
-	// Modify the file again with different content
 	modifiedContent := "line 1: SECOND_MODIFICATION\nline 2: unchanged\nline 3: ALSO_CHANGED\n"
 	if err := os.WriteFile(filePath, []byte(modifiedContent), 0o644); err != nil {
-		emitTextBlock(enc, "diff-update-modify: write failed: "+err.Error(), "")
+		e.text("diff-update-modify: write failed: " + err.Error())
 		return
 	}
 
 	fixedDelay(100)
-	emitTextBlock(enc, "diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION", "")
+	e.text("diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION")
 }
 
-// scenarioUntrackedFileSetup creates a new untracked file (not staged, not committed).
-// This tests that the UI shows diffs for untracked files.
-func scenarioUntrackedFileSetup(enc *json.Encoder) {
+// scenarioUntrackedFileSetup creates a new untracked file.
+func scenarioUntrackedFileSetup(e *emitter) {
 	fixedDelay(50)
 
 	filePath := "untracked_test.txt"
 	content := "line 1: INITIAL_CONTENT\nline 2: some text\n"
 
-	// Remove any existing file first
 	_ = os.Remove(filePath)
 
-	// Write new untracked file
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		emitTextBlock(enc, "untracked-file-setup: write failed: "+err.Error(), "")
+		e.text("untracked-file-setup: write failed: " + err.Error())
 		return
 	}
 
 	fixedDelay(100)
-	emitTextBlock(enc, "untracked-file-setup complete: untracked_test.txt has INITIAL_CONTENT", "")
+	e.text("untracked-file-setup complete: untracked_test.txt has INITIAL_CONTENT")
 }
 
-// scenarioUntrackedFileModify modifies the untracked file created by untracked-file-setup.
-// This tests that the UI updates the diff when an untracked file is modified.
-func scenarioUntrackedFileModify(enc *json.Encoder) {
+// scenarioUntrackedFileModify modifies the untracked file.
+func scenarioUntrackedFileModify(e *emitter) {
 	fixedDelay(50)
 
 	filePath := "untracked_test.txt"
 	content := "line 1: MODIFIED_CONTENT\nline 2: some text\nline 3: NEW_LINE\n"
 
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
-		emitTextBlock(enc, "untracked-file-modify: write failed: "+err.Error(), "")
+		e.text("untracked-file-modify: write failed: " + err.Error())
 		return
 	}
 
 	fixedDelay(100)
-	emitTextBlock(enc, "untracked-file-modify complete: untracked_test.txt now has MODIFIED_CONTENT", "")
+	e.text("untracked-file-modify complete: untracked_test.txt now has MODIFIED_CONTENT")
 }
 
 // clarificationQuestionArgs returns the MCP arguments for the clarification question.
@@ -600,41 +398,67 @@ func clarificationQuestionArgs() map[string]any {
 }
 
 // scenarioClarification: happy path — ask a question via MCP and wait for the answer.
-func scenarioClarification(enc *json.Encoder) {
+func scenarioClarification(e *emitter) {
 	fixedDelay(100)
-	emitTextBlock(enc, "Let me ask you a question about the project setup.", "")
+	e.text("Let me ask you a question about the project setup.")
 
 	result, err := callMCPTool("kandev", "ask_user_question", clarificationQuestionArgs())
 	if err != nil {
-		emitTextBlock(enc, fmt.Sprintf("Question failed: %s", err), "")
+		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
 	}
 
 	fixedDelay(50)
-	emitTextBlock(enc, fmt.Sprintf("You answered: %s", result), "")
+	e.text(fmt.Sprintf("You answered: %s", result))
 }
 
 // scenarioClarificationTimeout: ask a question with a short timeout, then continue.
-// The MCP call times out after 5s so the agent's turn completes. The user can still
-// answer later, which triggers the event fallback path (new turn).
-func scenarioClarificationTimeout(enc *json.Encoder) {
+func scenarioClarificationTimeout(e *emitter) {
 	fixedDelay(100)
-	emitTextBlock(enc, "Let me ask you a question about the project setup.", "")
+	e.text("Let me ask you a question about the project setup.")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := contextWithTimeout(5)
 	defer cancel()
 
 	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question", clarificationQuestionArgs())
 	if err != nil {
 		fixedDelay(50)
 		if ctx.Err() != nil {
-			emitTextBlock(enc, "Question timed out, continuing without answer.", "")
+			e.text("Question timed out, continuing without answer.")
 		} else {
-			emitTextBlock(enc, fmt.Sprintf("Question failed: %s", err), "")
+			e.text(fmt.Sprintf("Question failed: %s", err))
 		}
 		return
 	}
 
 	fixedDelay(50)
-	emitTextBlock(enc, fmt.Sprintf("You answered: %s", result), "")
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+// makeGitRunner returns a function that runs git commands in the given directory.
+func makeGitRunner(wd string) func(args ...string) error {
+	gitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=Mock Agent",
+		"GIT_AUTHOR_EMAIL=mock@test.local",
+		"GIT_COMMITTER_NAME=Mock Agent",
+		"GIT_COMMITTER_EMAIL=mock@test.local",
+	)
+	return func(args ...string) error {
+		cmd := exec.Command("git", append([]string{
+			"-c", "commit.gpgsign=false",
+			"-c", "tag.gpgsign=false",
+		}, args...)...)
+		cmd.Dir = wd
+		cmd.Env = gitEnv
+		out, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		}
+		return cmdErr
+	}
+}
+
+// contextWithTimeout creates a context with timeout in seconds.
+func contextWithTimeout(seconds int) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
 }

@@ -1,21 +1,23 @@
-// Package main implements a mock agent binary that speaks the claude-code
-// stream-json protocol over stdin/stdout. It generates simulated responses
-// for rapid feature testing and e2e web app tests.
+// Package main implements a mock agent binary that speaks the ACP
+// (Agent Client Protocol) over stdin/stdout. It generates simulated
+// responses for rapid feature testing and e2e web app tests.
 package main
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
+	"sync"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
-// sessionID is a unique identifier for this mock-agent process instance.
-// Each session spawns its own process, so using PID ensures uniqueness
-// across parallel sessions.
-var sessionID = fmt.Sprintf("mock-session-%d", os.Getpid())
+// logOutput is the writer for log messages (stderr). Tests can override this.
+var logOutput io.Writer = os.Stderr
 
 // mcpServerDef describes an MCP server endpoint parsed from --mcp-config.
 type mcpServerDef struct {
@@ -26,18 +28,20 @@ type mcpServerDef struct {
 // mcpServers holds MCP server definitions from --mcp-config.
 var mcpServers map[string]mcpServerDef
 
+// mockAgent implements the acp.Agent interface for the mock agent.
+type mockAgent struct {
+	conn     *acp.AgentSideConnection
+	model    string
+	sessions map[acp.SessionId]bool
+	mu       sync.Mutex
+}
+
 func main() {
 	model := parseModelFlag()
 
-	// Override sessionID when resuming a previous session.
-	resumeID := parseResumeFlag()
-	if resumeID != "" {
-		sessionID = resumeID
-		fmt.Fprintf(os.Stderr, "mock-agent[%d]: resuming session %s\n", os.Getpid(), resumeID)
-	}
-
 	// TUI mode: simple terminal UI for passthrough/PTY testing
 	if parseTUIFlag() {
+		resumeID := parseResumeFlag()
 		resumed := resumeID != "" || parseContinueFlag()
 		runTUI(model, parsePromptFlag(), resumed)
 		return
@@ -46,40 +50,75 @@ func main() {
 	mcpServers = parseMCPConfigFlag()
 	defer closeMCPClients()
 
-	scanner := bufio.NewScanner(os.Stdin)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	enc := json.NewEncoder(os.Stdout)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var msg IncomingMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintf(os.Stderr, "mock-agent[%d]: unmarshal error: %v (line=%s)\n", os.Getpid(), err, string(line[:min(200, len(line))]))
-			continue
-		}
-
-		switch msg.Type {
-		case TypeControlRequest:
-			fmt.Fprintf(os.Stderr, "mock-agent[%d]: control_request (request_id=%s)\n", os.Getpid(), msg.RequestID)
-			handleControlRequest(enc, msg)
-		case TypeUser:
-			if msg.Message != nil {
-				handleUserPrompt(enc, scanner, msg.Message.Content, model)
-			}
-		}
+	ag := &mockAgent{
+		model:    model,
+		sessions: make(map[acp.SessionId]bool),
 	}
+	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
+	ag.conn = asc
 
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "mock-agent: scanner error: %v\n", err)
-		os.Exit(1)
-	}
+	<-asc.Done()
 }
+
+// Initialize handles the ACP initialize request, returning agent capabilities.
+func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	return acp.InitializeResponse{
+		ProtocolVersion:   acp.ProtocolVersionNumber,
+		AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+	}, nil
+}
+
+// NewSession creates a new conversation session.
+func (a *mockAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
+	a.mu.Lock()
+	a.sessions[sid] = true
+	a.mu.Unlock()
+	return acp.NewSessionResponse{SessionId: sid}, nil
+}
+
+// LoadSession restores a previous session for resume.
+func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	a.mu.Lock()
+	a.sessions[req.SessionId] = true
+	a.mu.Unlock()
+	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
+	return acp.LoadSessionResponse{}, nil
+}
+
+// Prompt processes a user message and streams responses via SessionUpdate.
+func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
+	prompt := extractPromptText(req.Prompt)
+	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
+	handlePrompt(e, prompt, a.model)
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+// Cancel handles session cancellation.
+func (a *mockAgent) Cancel(_ context.Context, _ acp.CancelNotification) error { return nil }
+
+// Authenticate handles auth requests (no-op for mock).
+func (a *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
+	return acp.AuthenticateResponse{}, nil
+}
+
+// SetSessionMode handles mode changes (no-op for mock).
+func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	return acp.SetSessionModeResponse{}, nil
+}
+
+// extractPromptText concatenates text content blocks from the prompt.
+func extractPromptText(blocks []acp.ContentBlock) string {
+	var parts []string
+	for _, b := range blocks {
+		if b.Text != nil {
+			parts = append(parts, b.Text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// --- Flag parsing (unchanged) ---
 
 // parseModelFlag extracts --model value from command line args.
 func parseModelFlag() string {
@@ -137,7 +176,7 @@ func parseMCPConfigFlag() map[string]mcpServerDef {
 	}
 	var payload mcpConfigPayload
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		fmt.Fprintf(os.Stderr, "mock-agent: failed to parse --mcp-config: %v\n", err)
+		_, _ = fmt.Fprintf(logOutput, "mock-agent: failed to parse --mcp-config: %v\n", err)
 		return nil
 	}
 	return payload.MCPServers
@@ -154,46 +193,4 @@ func parseMCPConfigFromArgs(args []string) string {
 		}
 	}
 	return ""
-}
-
-// handleControlRequest responds to control requests from the backend.
-func handleControlRequest(enc *json.Encoder, msg IncomingMessage) {
-	// We only handle the initialize request from the backend
-	if msg.RequestID != "" {
-		resp := ControlResponseMsg{
-			Type: TypeControlResponse,
-			Response: ControlResponseBody{
-				Subtype:   "success",
-				RequestID: msg.RequestID,
-				Response: &InitializeResponse{
-					Commands: []Command{
-						{Name: "all", Description: "Demo all message types"},
-						{Name: "error", Description: "Simulate an error result"},
-						{Name: "slow", Description: "Random response with slow delays", ArgumentHint: "<duration e.g. 5s, 30s, 2m>"},
-						{Name: "thinking", Description: "Extended thinking/reasoning blocks"},
-						{Name: "tool:read", Description: "Single file read"},
-						{Name: "tool:edit", Description: "Single file edit (with permission)"},
-						{Name: "tool:exec", Description: "Single shell command (with permission)"},
-						{Name: "tool:search", Description: "Single code search"},
-						{Name: "tool:webfetch", Description: "Single web fetch"},
-						{Name: "subagent", Description: "Subagent Task with nested child messages"},
-						{Name: "todo", Description: "Todo management sequence"},
-						{Name: "mermaid", Description: "Rich markdown with mermaid diagrams"},
-						{Name: "e2e:simple-message", Description: "E2E: text only, fixed timing"},
-						{Name: "e2e:read-and-edit", Description: "E2E: read + edit + text"},
-						{Name: "e2e:permission-flow", Description: "E2E: tool requiring permission"},
-						{Name: "e2e:error", Description: "E2E: error result"},
-						{Name: "e2e:subagent", Description: "E2E: subagent with child messages"},
-						{Name: "e2e:all-tools", Description: "E2E: one of each tool type"},
-						{Name: "e2e:multi-turn", Description: "E2E: minimal multi-turn response"},
-						{Name: "e2e:clarification", Description: "E2E: ask clarification question via MCP (happy path)"},
-						{Name: "e2e:clarification-timeout", Description: "E2E: ask clarification with 5s timeout (fallback path)"},
-						{Name: "e2e:*", Description: "E2E: scripted commands (e2e:message, e2e:mcp:*, etc.)"},
-					},
-					Agents: []string{"Bash", "Read", "Edit", "Grep", "Glob", "Task"},
-				},
-			},
-		}
-		_ = enc.Encode(resp)
-	}
 }

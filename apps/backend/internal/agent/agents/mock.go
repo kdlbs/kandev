@@ -97,7 +97,6 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	}
 	return Cmd(binary).
 		Model(NewParam("--model", "{model}"), opts.Model).
-		Resume(NewParam("--resume"), opts.SessionID, false).
 		Build()
 }
 
@@ -108,10 +107,9 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		WorkingDir:     "{workspace}",
 		Env:            map[string]string{},
 		ResourceLimits: ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
-		Protocol:       agent.ProtocolClaudeCode,
+		Protocol:       agent.ProtocolACP,
 		ModelFlag:      NewParam("--model", "{model}"),
 		SessionConfig: SessionConfig{
-			ResumeFlag: NewParam("--resume"),
 			CanRecover: &canRecover,
 		},
 	}

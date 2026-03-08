@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -45,129 +43,68 @@ func stripKandevSystem(prompt string) string {
 	return strings.TrimSpace(prompt[idx+len(endTag):])
 }
 
-// handleUserPrompt routes a user prompt to the appropriate sequence generator.
-func handleUserPrompt(enc *json.Encoder, scanner *bufio.Scanner, prompt, model string) {
+// handlePrompt routes a user prompt to the appropriate sequence generator.
+func handlePrompt(e *emitter, prompt, model string) {
 	prompt = strings.TrimSpace(prompt)
 
 	// Extract the user-facing content for command routing.
-	// The backend wraps prompts with <kandev-system>...</kandev-system> context;
-	// routing should match the user's actual command regardless of that wrapper.
-	// The full prompt (including any kandev-system content) is kept available via
-	// the outer variable so future scenarios can inspect it if needed.
 	cmd := stripKandevSystem(prompt)
-
-	// Emit system message at the start of every turn
-	emitSystemMessage(enc)
 
 	// Script mode: each line is a command (e2e:message, e2e:mcp:*, etc.)
 	if isScriptMode(cmd) {
-		executeScript(enc, prompt, cmd)
-		emitResult(enc, false, "")
+		executeScript(e, prompt, cmd)
 		return
 	}
 
-	// Some commands emit their own result; track whether we need the default one.
-	customResult := false
-
 	switch {
 	case strings.EqualFold(cmd, "all") || strings.EqualFold(cmd, "/all"):
-		emitAllTypes(enc, scanner, model)
+		emitAllTypes(e, model)
 	case strings.EqualFold(cmd, "/error"):
-		emitError(enc, model)
-		customResult = true
+		emitError(e, model)
 	case strings.EqualFold(cmd, "/slow") || strings.HasPrefix(strings.ToLower(cmd), "/slow "):
-		emitSlowResponse(enc, scanner, cmd, model)
+		emitSlowResponse(e, cmd, model)
 	case strings.EqualFold(cmd, "/thinking"):
-		emitThinkingSequence(enc, model)
+		emitThinkingSequence(e, model)
 	case strings.HasPrefix(cmd, "/tool:"):
 		toolName := strings.TrimPrefix(cmd, "/tool:")
-		emitSpecificTool(enc, scanner, strings.TrimSpace(toolName), model)
+		emitSpecificTool(e, strings.TrimSpace(toolName), model)
 	case strings.HasPrefix(cmd, "/subagent"):
-		emitSubagentSequence(enc, scanner, model)
+		emitSubagentSequence(e, model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
-		emitPredefinedScenario(enc, scanner, scenarioName)
-		// e2e:error emits its own result
-		if strings.TrimSpace(scenarioName) == "error" {
-			customResult = true
-		}
+		emitPredefinedScenario(e, scenarioName)
 	case strings.EqualFold(cmd, "/crash"):
-		emitCrash(enc, model)
-		return // process exits, no result needed
+		emitCrash(e, model)
 	case strings.HasPrefix(cmd, "/todo"):
-		emitTodoSequence(enc, model)
+		emitTodoSequence(e, model)
 	case strings.EqualFold(cmd, "/mermaid"):
-		emitMermaidSequence(enc, model)
+		emitMermaidSequence(e, model)
 	default:
-		emitRandomResponse(enc, scanner, cmd, model)
-	}
-
-	if !customResult {
-		emitResult(enc, false, "")
+		emitRandomResponse(e, cmd, model)
 	}
 }
 
-// emitSystemMessage writes the system message to stdout.
-func emitSystemMessage(enc *json.Encoder) {
-	_ = enc.Encode(SystemMsg{
-		Type:          TypeSystem,
-		SessionID:     sessionID,
-		SessionStatus: "active",
-	})
-}
-
-// emitResult writes the final result message to stdout.
-func emitResult(enc *json.Encoder, isError bool, errText string) {
-	var resultJSON json.RawMessage
-	if isError {
-		resultJSON, _ = json.Marshal(errText)
-	} else {
-		resultJSON, _ = json.Marshal(ResultData{
-			Text:      "Mock agent completed successfully.",
-			SessionID: sessionID,
-		})
-	}
-
-	_ = enc.Encode(ResultMsg{
-		Type:              TypeResult,
-		Result:            resultJSON,
-		CostUSD:           0.0042,
-		DurationMS:        1500,
-		DurationAPIMS:     1200,
-		IsError:           isError,
-		NumTurns:          1,
-		TotalInputTokens:  1500,
-		TotalOutputTokens: 500,
-		ModelUsage: map[string]ModelUsageStats{
-			"mock-default": {ContextWindow: 200000},
-		},
-	})
-}
-
-// emitError emits an error result.
-func emitError(enc *json.Encoder, model string) {
+// emitError emits an error message.
+func emitError(e *emitter, model string) {
 	randomDelay(model)
-	emitTextBlock(enc, "Simulating an error condition...", "")
+	e.text("Simulating an error condition...")
 	randomDelay(model)
-	emitResult(enc, true, "Mock error: something went wrong during processing")
-	// Return without emitting the normal result (handler skips the final emitResult
-	// because we already emitted one). We handle this by making the caller check.
+	e.text("Mock error: something went wrong during processing")
 }
 
 // emitCrash simulates an agent crash by exiting with code 1 after emitting
 // some output. Useful for testing recovery flows.
-func emitCrash(enc *json.Encoder, model string) {
+func emitCrash(e *emitter, model string) {
 	randomDelay(model)
-	emitTextBlock(enc, "Processing your request...", "")
+	e.text("Processing your request...")
 	randomDelay(model)
 	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
 	os.Exit(1)
 }
 
 // emitSlowResponse generates a response with configurable total duration.
-// Accepts "/slow" (defaults to 5s) or "/slow <duration>" (e.g. "/slow 60s", "/slow 2m").
-func emitSlowResponse(enc *json.Encoder, _ *bufio.Scanner, prompt, model string) {
+func emitSlowResponse(e *emitter, prompt, model string) {
 	totalDuration := 5 * time.Second
 	parts := strings.Fields(prompt)
 	if len(parts) >= 2 {
@@ -176,38 +113,37 @@ func emitSlowResponse(enc *json.Encoder, _ *bufio.Scanner, prompt, model string)
 		}
 	}
 
-	// Divide total duration into steps
 	steps := 5
 	stepDelay := totalDuration / time.Duration(steps)
 
-	emitThinking(enc, model)
+	emitThinking(e, model)
 	time.Sleep(stepDelay)
 
-	emitTextBlock(enc, fmt.Sprintf("Running slow response (%s total)...", totalDuration), "")
+	e.text(fmt.Sprintf("Running slow response (%s total)...", totalDuration))
 	time.Sleep(stepDelay)
 
-	emitReadFile(enc, model)
+	emitReadFile(e, model)
 	time.Sleep(stepDelay)
 
-	emitCodeSearch(enc, model)
+	emitCodeSearch(e, model)
 	time.Sleep(stepDelay)
 
-	emitTextBlock(enc, fmt.Sprintf("Slow response complete after %s.", totalDuration), "")
+	e.text(fmt.Sprintf("Slow response complete after %s.", totalDuration))
 	time.Sleep(stepDelay)
 }
 
 // emitRandomResponse generates a random mix of 2-5 events.
-func emitRandomResponse(enc *json.Encoder, _ *bufio.Scanner, prompt, model string) {
+func emitRandomResponse(e *emitter, prompt, model string) {
 	generators := []func(){
-		func() { emitThinking(enc, model) },
-		func() { emitTextBlock(enc, "I'll help you with that. Let me look into it.", "") },
-		func() { emitReadFile(enc, model) },
-		func() { emitCodeSearch(enc, model) },
-		func() { emitWebFetch(enc, model) },
+		func() { emitThinking(e, model) },
+		func() { e.text("I'll help you with that. Let me look into it.") },
+		func() { emitReadFile(e, model) },
+		func() { emitCodeSearch(e, model) },
+		func() { emitWebFetch(e, model) },
 	}
 
 	// Always start with thinking
-	emitThinking(enc, model)
+	emitThinking(e, model)
 	randomDelay(model)
 
 	// Pick 1-4 more random events
@@ -219,34 +155,34 @@ func emitRandomResponse(enc *json.Encoder, _ *bufio.Scanner, prompt, model strin
 	}
 
 	// End with a text summary
-	emitTextBlock(enc, "I've completed the analysis of your request: \""+prompt+"\". Everything looks good!", "")
+	e.text("I've completed the analysis of your request: \"" + prompt + "\". Everything looks good!")
 }
 
 // emitAllTypes emits one of every message type.
-func emitAllTypes(enc *json.Encoder, scanner *bufio.Scanner, model string) {
-	emitThinking(enc, model)
+func emitAllTypes(e *emitter, model string) {
+	emitThinking(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "Starting comprehensive demonstration of all message types...", "")
+	e.text("Starting comprehensive demonstration of all message types...")
 	randomDelay(model)
-	emitReadFile(enc, model)
+	emitReadFile(e, model)
 	randomDelay(model)
-	emitEditFile(enc, scanner, model)
+	emitEditFile(e, model)
 	randomDelay(model)
-	emitShellExec(enc, scanner, model)
+	emitShellExec(e, model)
 	randomDelay(model)
-	emitCodeSearch(enc, model)
+	emitCodeSearch(e, model)
 	randomDelay(model)
-	emitSubagent(enc, scanner, model)
+	emitSubagent(e, model)
 	randomDelay(model)
-	emitTodo(enc, model)
+	emitTodo(e, model)
 	randomDelay(model)
-	emitWebFetch(enc, model)
+	emitWebFetch(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "All message types demonstrated successfully!", "")
+	e.text("All message types demonstrated successfully!")
 }
 
 // emitThinkingSequence emits extended thinking/reasoning blocks.
-func emitThinkingSequence(enc *json.Encoder, model string) {
+func emitThinkingSequence(e *emitter, model string) {
 	thoughts := []string{
 		"Let me analyze this problem step by step...",
 		"First, I need to consider the architecture and how the components interact.",
@@ -257,49 +193,49 @@ func emitThinkingSequence(enc *json.Encoder, model string) {
 
 	for _, thought := range thoughts {
 		randomDelay(model)
-		emitThinkingBlock(enc, thought, "")
+		e.thought(thought)
 	}
 
 	randomDelay(model)
-	emitTextBlock(enc, "After careful reasoning, here is my analysis:\n\n1. The architecture is sound\n2. Error handling covers edge cases\n3. The implementation follows Go best practices", "")
+	e.text("After careful reasoning, here is my analysis:\n\n1. The architecture is sound\n2. Error handling covers edge cases\n3. The implementation follows Go best practices")
 }
 
 // emitSpecificTool emits a single specific tool call.
-func emitSpecificTool(enc *json.Encoder, scanner *bufio.Scanner, toolName, model string) {
+func emitSpecificTool(e *emitter, toolName, model string) {
 	switch strings.ToLower(toolName) {
 	case "read":
-		emitReadFile(enc, model)
+		emitReadFile(e, model)
 	case "edit":
-		emitEditFile(enc, scanner, model)
+		emitEditFile(e, model)
 	case "exec", "bash":
-		emitShellExec(enc, scanner, model)
+		emitShellExec(e, model)
 	case "search", "grep":
-		emitCodeSearch(enc, model)
+		emitCodeSearch(e, model)
 	case "webfetch", "web":
-		emitWebFetch(enc, model)
+		emitWebFetch(e, model)
 	default:
-		emitTextBlock(enc, "Unknown tool: "+toolName+". Available: read, edit, exec, search, webfetch", "")
+		e.text("Unknown tool: " + toolName + ". Available: read, edit, exec, search, webfetch")
 	}
 }
 
 // emitTodoSequence emits a todo management sequence.
-func emitTodoSequence(enc *json.Encoder, model string) {
-	emitThinking(enc, model)
+func emitTodoSequence(e *emitter, model string) {
+	emitThinking(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "I'll create a task list for this work.", "")
+	e.text("I'll create a task list for this work.")
 	randomDelay(model)
-	emitTodo(enc, model)
+	emitTodo(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "Task list has been updated.", "")
+	e.text("Task list has been updated.")
 }
 
 // emitSubagentSequence emits a subagent Task sequence.
-func emitSubagentSequence(enc *json.Encoder, scanner *bufio.Scanner, model string) {
-	emitThinking(enc, model)
+func emitSubagentSequence(e *emitter, model string) {
+	emitThinking(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "I'll delegate this to a subagent for parallel processing.", "")
+	e.text("I'll delegate this to a subagent for parallel processing.")
 	randomDelay(model)
-	emitSubagent(enc, scanner, model)
+	emitSubagent(e, model)
 	randomDelay(model)
-	emitTextBlock(enc, "Subagent task completed successfully.", "")
+	e.text("Subagent task completed successfully.")
 }

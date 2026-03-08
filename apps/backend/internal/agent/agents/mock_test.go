@@ -2,63 +2,36 @@ package agents
 
 import (
 	"testing"
+
+	"github.com/kandev/kandev/pkg/agent"
 )
 
-func TestMockAgent_BuildCommand_WithSessionID(t *testing.T) {
-	a := NewMockAgent()
-	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast", SessionID: "sess-123"})
-	args := cmd.Args()
-
-	foundResume := false
-	for i, arg := range args {
-		if arg == "--resume" {
-			foundResume = true
-			if i+1 >= len(args) {
-				t.Fatal("--resume flag has no value")
-			}
-			if args[i+1] != "sess-123" {
-				t.Errorf("--resume value = %q, want %q", args[i+1], "sess-123")
-			}
-			break
-		}
-	}
-	if !foundResume {
-		t.Errorf("expected --resume flag in args %v", args)
-	}
-}
-
-func TestMockAgent_BuildCommand_WithoutSessionID(t *testing.T) {
+func TestMockAgent_BuildCommand_WithModel(t *testing.T) {
 	a := NewMockAgent()
 	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast"})
 	args := cmd.Args()
 
-	for _, arg := range args {
-		if arg == "--resume" {
-			t.Errorf("--resume flag should not be present without SessionID, got args %v", args)
-		}
-	}
-}
-
-func TestMockAgent_BuildCommand_WithModel(t *testing.T) {
-	a := NewMockAgent()
-	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast", SessionID: "sess-456"})
-	args := cmd.Args()
-
 	foundModel := false
-	foundResume := false
 	for i, arg := range args {
 		if arg == "--model" && i+1 < len(args) && args[i+1] == "mock-fast" {
 			foundModel = true
-		}
-		if arg == "--resume" && i+1 < len(args) && args[i+1] == "sess-456" {
-			foundResume = true
 		}
 	}
 	if !foundModel {
 		t.Errorf("expected --model mock-fast in args %v", args)
 	}
-	if !foundResume {
-		t.Errorf("expected --resume sess-456 in args %v", args)
+}
+
+func TestMockAgent_BuildCommand_NoResumeFlag(t *testing.T) {
+	a := NewMockAgent()
+	// ACP handles resume via session/load, so --resume should not appear.
+	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast", SessionID: "sess-123"})
+	args := cmd.Args()
+
+	for _, arg := range args {
+		if arg == "--resume" {
+			t.Errorf("--resume flag should not be present for ACP agent, got args %v", args)
+		}
 	}
 }
 
@@ -71,16 +44,22 @@ func TestMockAgent_Runtime_CanRecover(t *testing.T) {
 	}
 }
 
-func TestMockAgent_Runtime_ResumeFlag(t *testing.T) {
+func TestMockAgent_Runtime_ProtocolACP(t *testing.T) {
 	a := NewMockAgent()
 	rt := a.Runtime()
 
-	if rt.SessionConfig.ResumeFlag.IsEmpty() {
-		t.Error("expected ResumeFlag to be set on mock agent RuntimeConfig")
+	if rt.Protocol != agent.ProtocolACP {
+		t.Errorf("expected Protocol = %q, got %q", agent.ProtocolACP, rt.Protocol)
 	}
-	flagArgs := rt.SessionConfig.ResumeFlag.Args()
-	if len(flagArgs) == 0 || flagArgs[0] != "--resume" {
-		t.Errorf("expected ResumeFlag args to start with --resume, got %v", flagArgs)
+}
+
+func TestMockAgent_Runtime_NoResumeFlag(t *testing.T) {
+	a := NewMockAgent()
+	rt := a.Runtime()
+
+	// ACP agents handle resume via session/load, not CLI flags.
+	if !rt.SessionConfig.ResumeFlag.IsEmpty() {
+		t.Error("expected ResumeFlag to be empty for ACP agent")
 	}
 }
 
@@ -88,7 +67,7 @@ func TestMockAgent_PassthroughConfig_ResumeFlags(t *testing.T) {
 	a := NewMockAgent()
 	pt := a.PassthroughConfig()
 
-	// Generic resume flag (-c)
+	// Generic resume flag (-c) — still used for TUI passthrough mode
 	if pt.ResumeFlag.IsEmpty() {
 		t.Error("expected ResumeFlag to be set on PassthroughConfig")
 	}
@@ -97,7 +76,7 @@ func TestMockAgent_PassthroughConfig_ResumeFlags(t *testing.T) {
 		t.Errorf("expected ResumeFlag = -c, got %v", resumeArgs)
 	}
 
-	// Session-specific resume flag (--resume)
+	// Session-specific resume flag (--resume) — TUI passthrough mode
 	if pt.SessionResumeFlag.IsEmpty() {
 		t.Error("expected SessionResumeFlag to be set on PassthroughConfig")
 	}

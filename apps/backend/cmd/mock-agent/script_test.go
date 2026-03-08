@@ -1,11 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"strings"
+	"sync"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -39,48 +40,13 @@ func TestExtractStringArg(t *testing.T) {
 		prefix string
 		want   string
 	}{
-		{
-			name:   "simple string",
-			line:   `e2e:message("hello world")`,
-			prefix: "e2e:message(",
-			want:   "hello world",
-		},
-		{
-			name:   "string with escaped quotes",
-			line:   `e2e:message("say \"hi\"")`,
-			prefix: "e2e:message(",
-			want:   `say "hi"`,
-		},
-		{
-			name:   "string with newline escape",
-			line:   `e2e:message("line1\nline2")`,
-			prefix: "e2e:message(",
-			want:   "line1\nline2",
-		},
-		{
-			name:   "string with tab escape",
-			line:   `e2e:message("col1\tcol2")`,
-			prefix: "e2e:message(",
-			want:   "col1\tcol2",
-		},
-		{
-			name:   "string with escaped backslash",
-			line:   `e2e:message("path\\file")`,
-			prefix: "e2e:message(",
-			want:   `path\file`,
-		},
-		{
-			name:   "thinking command",
-			line:   `e2e:thinking("deep thought")`,
-			prefix: "e2e:thinking(",
-			want:   "deep thought",
-		},
-		{
-			name:   "tool_result command",
-			line:   `e2e:tool_result("success")`,
-			prefix: "e2e:tool_result(",
-			want:   "success",
-		},
+		{"simple string", `e2e:message("hello world")`, "e2e:message(", "hello world"},
+		{"escaped quotes", `e2e:message("say \"hi\"")`, "e2e:message(", `say "hi"`},
+		{"newline escape", `e2e:message("line1\nline2")`, "e2e:message(", "line1\nline2"},
+		{"tab escape", `e2e:message("col1\tcol2")`, "e2e:message(", "col1\tcol2"},
+		{"escaped backslash", `e2e:message("path\\file")`, "e2e:message(", `path\file`},
+		{"thinking command", `e2e:thinking("deep thought")`, "e2e:thinking(", "deep thought"},
+		{"tool_result command", `e2e:tool_result("success")`, "e2e:tool_result(", "success"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,18 +87,8 @@ func TestExtractParenContent(t *testing.T) {
 		prefix string
 		want   string
 	}{
-		{
-			name:   "simple content",
-			line:   `e2e:tool_use("Read", {"path":"/tmp"})`,
-			prefix: "e2e:tool_use(",
-			want:   `"Read", {"path":"/tmp"}`,
-		},
-		{
-			name:   "no trailing paren",
-			line:   `e2e:tool_use("Read"`,
-			prefix: "e2e:tool_use(",
-			want:   `"Read"`,
-		},
+		{"simple content", `e2e:tool_use("Read", {"path":"/tmp"})`, "e2e:tool_use(", `"Read", {"path":"/tmp"}`},
+		{"no trailing paren", `e2e:tool_use("Read"`, "e2e:tool_use(", `"Read"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,36 +107,11 @@ func TestExtractFirstStringArg(t *testing.T) {
 		wantVal  string
 		wantRest string
 	}{
-		{
-			name:     "simple string",
-			input:    `"hello", rest`,
-			wantVal:  "hello",
-			wantRest: ", rest",
-		},
-		{
-			name:     "string with escaped quote",
-			input:    `"say \"hi\"", more`,
-			wantVal:  `say "hi"`,
-			wantRest: ", more",
-		},
-		{
-			name:     "just a string",
-			input:    `"only"`,
-			wantVal:  "only",
-			wantRest: "",
-		},
-		{
-			name:     "empty input",
-			input:    "",
-			wantVal:  "",
-			wantRest: "",
-		},
-		{
-			name:     "non-quoted input",
-			input:    "bare",
-			wantVal:  "bare",
-			wantRest: "",
-		},
+		{"simple string", `"hello", rest`, "hello", ", rest"},
+		{"string with escaped quote", `"say \"hi\"", more`, `say "hi"`, ", more"},
+		{"just a string", `"only"`, "only", ""},
+		{"empty input", "", "", ""},
+		{"non-quoted input", "bare", "bare", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -289,21 +220,9 @@ func TestExtractRegexMatch(t *testing.T) {
 		input string
 		want  string
 	}{
-		{
-			name:  "task ID found",
-			input: "Kandev Task ID: abc-123",
-			want:  "abc-123",
-		},
-		{
-			name:  "task ID with extra whitespace",
-			input: "Kandev Task ID:   def-456",
-			want:  "def-456",
-		},
-		{
-			name:  "no match",
-			input: "no task id here",
-			want:  "",
-		},
+		{"task ID found", "Kandev Task ID: abc-123", "abc-123"},
+		{"task ID with extra whitespace", "Kandev Task ID:   def-456", "def-456"},
+		{"no match", "no task id here", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -315,153 +234,251 @@ func TestExtractRegexMatch(t *testing.T) {
 	}
 }
 
-// TestExecuteScriptMessage verifies e2e:message emits an assistant text block.
-func TestExecuteScriptMessage(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+// --- Mock sessionUpdater for testing ---
 
-	// Reset global state
-	resetState()
-
-	executeScript(enc, "", `e2e:message("hello from script")`)
-
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
-	}
-	assertMsgType(t, msgs[0], TypeAssistant)
-	assertContentText(t, msgs[0], "hello from script")
+// recordedUpdate stores a captured ACP session notification.
+type recordedUpdate struct {
+	notification acp.SessionNotification
 }
 
-// TestExecuteScriptThinking verifies e2e:thinking emits a thinking block.
-func TestExecuteScriptThinking(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+// mockUpdater implements sessionUpdater for tests, collecting all updates.
+type mockUpdater struct {
+	mu      sync.Mutex
+	updates []recordedUpdate
+}
 
-	executeScript(enc, "", `e2e:thinking("deep thought")`)
+func (m *mockUpdater) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updates = append(m.updates, recordedUpdate{notification: n})
+	return nil
+}
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+func (m *mockUpdater) RequestPermission(_ context.Context, _ acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{
+		Outcome: acp.RequestPermissionOutcome{
+			Selected: &acp.RequestPermissionOutcomeSelected{OptionId: "allow"},
+		},
+	}, nil
+}
+
+func (m *mockUpdater) getUpdates() []recordedUpdate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]recordedUpdate{}, m.updates...)
+}
+
+func newTestEmitter() (*emitter, *mockUpdater) {
+	mock := &mockUpdater{}
+	e := &emitter{
+		ctx:  context.Background(),
+		conn: mock,
+		sid:  "test-session",
 	}
-	assertMsgType(t, msgs[0], TypeAssistant)
-	assertContentThinking(t, msgs[0], "deep thought")
+	return e, mock
+}
+
+// --- Update assertion helpers ---
+
+func isTextUpdate(u recordedUpdate) bool {
+	return u.notification.Update.AgentMessageChunk != nil
+}
+
+func isThoughtUpdate(u recordedUpdate) bool {
+	return u.notification.Update.AgentThoughtChunk != nil
+}
+
+func isToolCallUpdate(u recordedUpdate) bool {
+	return u.notification.Update.ToolCall != nil
+}
+
+func isToolCallCompleteUpdate(u recordedUpdate) bool {
+	return u.notification.Update.ToolCallUpdate != nil
+}
+
+func getTextContent(u recordedUpdate) string {
+	if u.notification.Update.AgentMessageChunk == nil {
+		return ""
+	}
+	if u.notification.Update.AgentMessageChunk.Content.Text == nil {
+		return ""
+	}
+	return u.notification.Update.AgentMessageChunk.Content.Text.Text
+}
+
+func getThoughtContent(u recordedUpdate) string {
+	if u.notification.Update.AgentThoughtChunk == nil {
+		return ""
+	}
+	if u.notification.Update.AgentThoughtChunk.Content.Text == nil {
+		return ""
+	}
+	return u.notification.Update.AgentThoughtChunk.Content.Text.Text
+}
+
+func getToolCallTitle(u recordedUpdate) string {
+	if u.notification.Update.ToolCall == nil {
+		return ""
+	}
+	return u.notification.Update.ToolCall.Title
+}
+
+func getToolCallID(u recordedUpdate) acp.ToolCallId {
+	if u.notification.Update.ToolCall != nil {
+		return u.notification.Update.ToolCall.ToolCallId
+	}
+	if u.notification.Update.ToolCallUpdate != nil {
+		return u.notification.Update.ToolCallUpdate.ToolCallId
+	}
+	return ""
+}
+
+// --- Script execution tests ---
+
+// TestExecuteScriptMessage verifies e2e:message emits an agent text update.
+func TestExecuteScriptMessage(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:message("hello from script")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if !isTextUpdate(updates[0]) {
+		t.Fatal("expected text update")
+	}
+	if got := getTextContent(updates[0]); got != "hello from script" {
+		t.Errorf("text = %q, want %q", got, "hello from script")
+	}
+}
+
+// TestExecuteScriptThinking verifies e2e:thinking emits a thought update.
+func TestExecuteScriptThinking(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:thinking("deep thought")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if !isThoughtUpdate(updates[0]) {
+		t.Fatal("expected thought update")
+	}
+	if got := getThoughtContent(updates[0]); got != "deep thought" {
+		t.Errorf("thought = %q, want %q", got, "deep thought")
+	}
 }
 
 // TestExecuteScriptMultiLine verifies multiple commands are processed sequentially.
 func TestExecuteScriptMultiLine(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
 	script := "e2e:thinking(\"step 1\")\ne2e:message(\"step 2\")\ne2e:message(\"step 3\")"
-	executeScript(enc, "", script)
+	executeScript(e, "", script)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 3 {
+		t.Fatalf("expected 3 updates, got %d", len(updates))
 	}
-	assertContentThinking(t, msgs[0], "step 1")
-	assertContentText(t, msgs[1], "step 2")
-	assertContentText(t, msgs[2], "step 3")
+	if got := getThoughtContent(updates[0]); got != "step 1" {
+		t.Errorf("thought = %q, want %q", got, "step 1")
+	}
+	if got := getTextContent(updates[1]); got != "step 2" {
+		t.Errorf("text = %q, want %q", got, "step 2")
+	}
+	if got := getTextContent(updates[2]); got != "step 3" {
+		t.Errorf("text = %q, want %q", got, "step 3")
+	}
 }
 
 // TestExecuteScriptSkipsEmptyAndComments verifies blank lines and comments are skipped.
 func TestExecuteScriptSkipsEmptyAndComments(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
 	script := "e2e:message(\"one\")\n\n# this is a comment\n   \ne2e:message(\"two\")"
-	executeScript(enc, "", script)
+	executeScript(e, "", script)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
 	}
-	assertContentText(t, msgs[0], "one")
-	assertContentText(t, msgs[1], "two")
+	if got := getTextContent(updates[0]); got != "one" {
+		t.Errorf("text = %q, want %q", got, "one")
+	}
+	if got := getTextContent(updates[1]); got != "two" {
+		t.Errorf("text = %q, want %q", got, "two")
+	}
 }
 
-// TestExecuteScriptToolUse verifies e2e:tool_use emits a tool_use block.
+// TestExecuteScriptToolUse verifies e2e:tool_use emits a tool_call update.
 func TestExecuteScriptToolUse(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
-	executeScript(enc, "", `e2e:tool_use("Read", {"file_path":"/tmp/test.go"})`)
+	executeScript(e, "", `e2e:tool_use("Read", {"file_path":"/tmp/test.go"})`)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
 	}
-	assertMsgType(t, msgs[0], TypeAssistant)
-	content := getFirstContent(t, msgs[0])
-	if content["type"] != BlockToolUse {
-		t.Errorf("content type = %q, want %q", content["type"], BlockToolUse)
+	if !isToolCallUpdate(updates[0]) {
+		t.Fatal("expected tool_call update")
 	}
-	if content["name"] != "Read" {
-		t.Errorf("tool name = %q, want %q", content["name"], "Read")
-	}
-	input, ok := content["input"].(map[string]any)
-	if !ok {
-		t.Fatal("input is not a map")
-	}
-	if input["file_path"] != "/tmp/test.go" {
-		t.Errorf("file_path = %q, want %q", input["file_path"], "/tmp/test.go")
+	if got := getToolCallTitle(updates[0]); got != "Read" {
+		t.Errorf("title = %q, want %q", got, "Read")
 	}
 }
 
 // TestExecuteScriptToolUseAndResult verifies tool_use + tool_result pair.
 func TestExecuteScriptToolUseAndResult(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
 	script := "e2e:tool_use(\"Read\", {\"file_path\":\"/tmp/f.go\"})\ne2e:tool_result(\"file contents here\")"
-	executeScript(enc, "", script)
+	executeScript(e, "", script)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
 	}
 
-	// First: tool_use
-	toolUseContent := getFirstContent(t, msgs[0])
-	toolID := toolUseContent["id"].(string)
+	// First: tool_call start
+	if !isToolCallUpdate(updates[0]) {
+		t.Fatal("expected tool_call update")
+	}
+	toolID := getToolCallID(updates[0])
 	if toolID == "" {
-		t.Fatal("tool_use should have an id")
+		t.Fatal("tool_call should have an id")
 	}
 
-	// Second: tool_result referencing same ID
-	assertMsgType(t, msgs[1], TypeUser)
-	resultContent := getFirstContent(t, msgs[1])
-	if resultContent["type"] != BlockToolResult {
-		t.Errorf("result type = %q, want %q", resultContent["type"], BlockToolResult)
+	// Second: tool_call_update (completion) referencing same ID
+	if !isToolCallCompleteUpdate(updates[1]) {
+		t.Fatal("expected tool_call_update")
 	}
-	if resultContent["tool_use_id"] != toolID {
-		t.Errorf("tool_use_id = %q, want %q", resultContent["tool_use_id"], toolID)
-	}
-	if resultContent["content"] != "file contents here" {
-		t.Errorf("content = %q, want %q", resultContent["content"], "file contents here")
+	if got := getToolCallID(updates[1]); got != toolID {
+		t.Errorf("tool_call_update id = %q, want %q", got, toolID)
 	}
 }
 
 // TestExecuteScriptToolUseNoInput verifies tool_use with no input arg.
 func TestExecuteScriptToolUseNoInput(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
-	executeScript(enc, "", `e2e:tool_use("Glob")`)
+	executeScript(e, "", `e2e:tool_use("Glob")`)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
 	}
-	content := getFirstContent(t, msgs[0])
-	if content["name"] != "Glob" {
-		t.Errorf("tool name = %q, want %q", content["name"], "Glob")
+	if got := getToolCallTitle(updates[0]); got != "Glob" {
+		t.Errorf("title = %q, want %q", got, "Glob")
 	}
 }
 
@@ -471,31 +488,11 @@ func TestParseMCPConfigFromArgs(t *testing.T) {
 		args []string
 		want string
 	}{
-		{
-			name: "no flag",
-			args: []string{"mock-agent"},
-			want: "",
-		},
-		{
-			name: "separate flag and value",
-			args: []string{"mock-agent", "--mcp-config", `{"mcpServers":{"kandev":{"url":"http://localhost:10005/sse"}}}`},
-			want: `{"mcpServers":{"kandev":{"url":"http://localhost:10005/sse"}}}`,
-		},
-		{
-			name: "equals syntax",
-			args: []string{"mock-agent", `--mcp-config={"mcpServers":{}}`},
-			want: `{"mcpServers":{}}`,
-		},
-		{
-			name: "with other flags",
-			args: []string{"mock-agent", "--model", "fast", "--mcp-config", `{"mcpServers":{}}`},
-			want: `{"mcpServers":{}}`,
-		},
-		{
-			name: "dangling flag",
-			args: []string{"mock-agent", "--mcp-config"},
-			want: "",
-		},
+		{"no flag", []string{"mock-agent"}, ""},
+		{"separate flag and value", []string{"mock-agent", "--mcp-config", `{"mcpServers":{"kandev":{"url":"http://localhost:10005/sse"}}}`}, `{"mcpServers":{"kandev":{"url":"http://localhost:10005/sse"}}}`},
+		{"equals syntax", []string{"mock-agent", `--mcp-config={"mcpServers":{}}`}, `{"mcpServers":{}}`},
+		{"with other flags", []string{"mock-agent", "--model", "fast", "--mcp-config", `{"mcpServers":{}}`}, `{"mcpServers":{}}`},
+		{"dangling flag", []string{"mock-agent", "--mcp-config"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -547,86 +544,20 @@ func TestExtractMCPResultText(t *testing.T) {
 
 // TestExecuteScriptToolUseBadJSON verifies that malformed JSON emits a script error.
 func TestExecuteScriptToolUseBadJSON(t *testing.T) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	e, mock := newTestEmitter()
 	resetState()
 
-	executeScript(enc, "", `e2e:tool_use("Read", {bad json})`)
+	executeScript(e, "", `e2e:tool_use("Read", {bad json})`)
 
-	msgs := decodeJSONLines(t, buf.Bytes())
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message (error), got %d", len(msgs))
+	updates := mock.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update (error), got %d", len(updates))
 	}
-	assertMsgType(t, msgs[0], TypeAssistant)
-	content := getFirstContent(t, msgs[0])
-	text, _ := content["text"].(string)
+	if !isTextUpdate(updates[0]) {
+		t.Fatal("expected text update for error")
+	}
+	text := getTextContent(updates[0])
 	if !strings.Contains(text, "Script error") {
 		t.Errorf("expected script error message, got %q", text)
-	}
-}
-
-// --- Test helpers ---
-
-// decodeJSONLines splits output into JSON-decoded maps.
-func decodeJSONLines(t *testing.T, data []byte) []map[string]any {
-	t.Helper()
-	var results []map[string]any
-	dec := json.NewDecoder(bytes.NewReader(data))
-	for dec.More() {
-		var m map[string]any
-		if err := dec.Decode(&m); err != nil {
-			t.Fatalf("failed to decode JSON: %v", err)
-		}
-		results = append(results, m)
-	}
-	return results
-}
-
-func assertMsgType(t *testing.T, msg map[string]any, wantType string) {
-	t.Helper()
-	if msg["type"] != wantType {
-		t.Errorf("message type = %q, want %q", msg["type"], wantType)
-	}
-}
-
-func getFirstContent(t *testing.T, msg map[string]any) map[string]any {
-	t.Helper()
-	message, ok := msg["message"].(map[string]any)
-	if !ok {
-		t.Fatal("message field is not a map")
-	}
-	contentArr, ok := message["content"].([]any)
-	if !ok || len(contentArr) == 0 {
-		t.Fatal("content is not an array or is empty")
-	}
-	block, ok := contentArr[0].(map[string]any)
-	if !ok {
-		t.Fatal("first content block is not a map")
-	}
-	return block
-}
-
-func assertContentText(t *testing.T, msg map[string]any, wantText string) {
-	t.Helper()
-	content := getFirstContent(t, msg)
-	if content["type"] != BlockText {
-		t.Errorf("content type = %q, want %q", content["type"], BlockText)
-	}
-	// emitTextBlock appends a trailing newline to match real agent streaming behavior;
-	// allow the expected text with or without the trailing newline.
-	got, _ := content["text"].(string)
-	if got != wantText && got != wantText+"\n" {
-		t.Errorf("text = %q, want %q (or with trailing newline)", got, wantText)
-	}
-}
-
-func assertContentThinking(t *testing.T, msg map[string]any, wantThought string) {
-	t.Helper()
-	content := getFirstContent(t, msg)
-	if content["type"] != BlockThinking {
-		t.Errorf("content type = %q, want %q", content["type"], BlockThinking)
-	}
-	if content["thinking"] != wantThought {
-		t.Errorf("thinking = %q, want %q", content["thinking"], wantThought)
 	}
 }

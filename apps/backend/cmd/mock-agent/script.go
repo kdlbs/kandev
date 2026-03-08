@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // isScriptMode returns true if the command starts with "e2e:" prefix
@@ -16,50 +18,50 @@ func isScriptMode(cmd string) bool {
 }
 
 // executeScript processes a multi-line script command.
-func executeScript(enc *json.Encoder, fullPrompt, cmd string) {
+func executeScript(e *emitter, fullPrompt, cmd string) {
 	lines := strings.Split(cmd, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		executeCommand(enc, fullPrompt, line)
+		executeCommand(e, fullPrompt, line)
 	}
 }
 
 // executeCommand dispatches a single script command line.
-func executeCommand(enc *json.Encoder, fullPrompt, line string) {
+func executeCommand(e *emitter, fullPrompt, line string) {
 	switch {
 	case strings.HasPrefix(line, "e2e:message("):
 		text := extractStringArg(line, "e2e:message(")
-		emitTextBlock(enc, text, "")
+		e.text(text)
 
 	case strings.HasPrefix(line, "e2e:thinking("):
 		text := extractStringArg(line, "e2e:thinking(")
-		emitThinkingBlock(enc, text, "")
+		e.thought(text)
 
 	case strings.HasPrefix(line, "e2e:delay("):
 		ms := extractIntArg(line, "e2e:delay(")
 		fixedDelay(ms)
 
 	case strings.HasPrefix(line, "e2e:mcp:"):
-		executeMCPCommand(enc, fullPrompt, line)
+		executeMCPCommand(e, fullPrompt, line)
 
 	case strings.HasPrefix(line, "e2e:tool_use("):
-		executeSimulatedToolUse(enc, line)
+		executeSimulatedToolUse(e, line)
 
 	case strings.HasPrefix(line, "e2e:tool_result("):
-		executeSimulatedToolResult(enc, line)
+		executeSimulatedToolResult(e, line)
 	}
 }
 
 // executeMCPCommand parses and executes: e2e:mcp:<server>:<tool>(<json_args>)
-func executeMCPCommand(enc *json.Encoder, fullPrompt, line string) {
+func executeMCPCommand(e *emitter, fullPrompt, line string) {
 	rest := strings.TrimPrefix(line, "e2e:mcp:")
 
 	colonIdx := strings.Index(rest, ":")
 	if colonIdx < 0 {
-		emitTextBlock(enc, "Script error: invalid MCP command: "+line, "")
+		e.text("Script error: invalid MCP command: " + line)
 		return
 	}
 	server := rest[:colonIdx]
@@ -67,41 +69,40 @@ func executeMCPCommand(enc *json.Encoder, fullPrompt, line string) {
 
 	parenIdx := strings.Index(remainder, "(")
 	if parenIdx < 0 {
-		emitTextBlock(enc, "Script error: missing args in MCP command: "+line, "")
+		e.text("Script error: missing args in MCP command: " + line)
 		return
 	}
 	toolName := remainder[:parenIdx]
 	closeIdx := strings.LastIndex(remainder, ")")
 	if closeIdx <= parenIdx {
-		emitTextBlock(enc, "Script error: missing closing paren in MCP command: "+line, "")
+		e.text("Script error: missing closing paren in MCP command: " + line)
 		return
 	}
 	argsStr := remainder[parenIdx+1 : closeIdx]
 
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-		emitTextBlock(enc, fmt.Sprintf("Script error: bad MCP args JSON: %v", err), "")
+		e.text(fmt.Sprintf("Script error: bad MCP args JSON: %v", err))
 		return
 	}
 
 	substituteContextPlaceholders(args, fullPrompt)
 
 	toolID := nextToolID()
-	state.lastToolID = toolID
-	emitToolUseBlock(enc, toolID, toolName, args)
+	e.startTool(toolID, toolName, acp.ToolKindOther, args)
 
 	result, err := callMCPTool(server, toolName, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mock-agent: MCP call %s/%s failed: %v\n", server, toolName, err)
-		emitToolResultBlock(enc, toolID, "MCP error: "+err.Error(), true)
+		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
 	} else {
-		emitToolResultBlock(enc, toolID, result, false)
+		e.completeTool(toolID, map[string]any{"result": result})
 	}
 }
 
-// executeSimulatedToolUse emits a simulated tool_use block (no real execution).
+// executeSimulatedToolUse emits a simulated tool call start (no real execution).
 // Format: e2e:tool_use("name", {"key":"value"})
-func executeSimulatedToolUse(enc *json.Encoder, line string) {
+func executeSimulatedToolUse(e *emitter, line string) {
 	inner := extractParenContent(line, "e2e:tool_use(")
 	name, rest := extractFirstStringArg(inner)
 
@@ -111,21 +112,20 @@ func executeSimulatedToolUse(enc *json.Encoder, line string) {
 		rest = strings.TrimPrefix(rest, ",")
 		rest = strings.TrimSpace(rest)
 		if err := json.Unmarshal([]byte(rest), &input); err != nil {
-			emitTextBlock(enc, fmt.Sprintf("Script error: bad tool_use input JSON: %v", err), "")
+			e.text(fmt.Sprintf("Script error: bad tool_use input JSON: %v", err))
 			return
 		}
 	}
 
 	toolID := nextToolID()
-	state.lastToolID = toolID
-	emitToolUseBlock(enc, toolID, name, input)
+	e.startTool(toolID, name, acp.ToolKindOther, input)
 }
 
-// executeSimulatedToolResult emits a tool_result for the last tool_use.
+// executeSimulatedToolResult emits a tool completion for the last tool_use.
 // Format: e2e:tool_result("content")
-func executeSimulatedToolResult(enc *json.Encoder, line string) {
+func executeSimulatedToolResult(e *emitter, line string) {
 	content := extractStringArg(line, "e2e:tool_result(")
-	emitToolResultBlock(enc, state.lastToolID, content, false)
+	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{"result": content})
 }
 
 // --- Argument parsing helpers ---
@@ -166,7 +166,6 @@ func extractFirstStringArg(s string) (string, string) {
 	if len(s) == 0 || s[0] != '"' {
 		return s, ""
 	}
-	// Find closing quote (handling escaped quotes)
 	for i := 1; i < len(s); i++ {
 		if s[i] == '\\' {
 			i++ // skip escaped char
