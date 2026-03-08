@@ -36,6 +36,7 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
   if (!todos.length) return null;
 
   const completed = todos.filter((t) => resolveStatus(t) === "completed").length;
+  const allComplete = completed === todos.length;
   const progress = Math.round((completed / todos.length) * 100);
 
   return (
@@ -43,9 +44,14 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
       <HoverCardTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors rounded cursor-pointer"
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
+            allComplete
+              ? "text-green-500 hover:text-green-400"
+              : "text-muted-foreground hover:text-foreground",
+          )}
         >
-          <IconListCheck className="h-3 w-3" />
+          {allComplete ? <IconCheck className="h-3 w-3" /> : <IconListCheck className="h-3 w-3" />}
           <span>
             {completed}/{todos.length}
           </span>

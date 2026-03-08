@@ -35,7 +35,6 @@ import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
 import { ConfigOptionsDisplay } from "@/components/task/config-options-display";
-import { AuthMethodsIndicator } from "@/components/task/auth-methods-indicator";
 import { ContextPopover } from "./context-popover";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
@@ -342,7 +341,7 @@ function ToolbarRightSection({
       <ModeSelector sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />
       <ConfigOptionsDisplay sessionId={sessionId} />
-      <AuthMethodsIndicator sessionId={sessionId} />
+      {/* AuthMethodsIndicator hidden — UX needs rethinking */}
       {showEnhance && (
         <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />
       )}

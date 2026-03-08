@@ -115,6 +115,8 @@ const (
 	MessageTypeThinking MessageType = "thinking"
 	// MessageTypeAgentPlan is for agent native plan content (e.g. ExitPlanMode)
 	MessageTypeAgentPlan MessageType = "agent_plan"
+	// MessageTypeTodo is for agent todo/task list updates
+	MessageTypeTodo MessageType = "todo"
 )
 
 // Message represents a message in a task session

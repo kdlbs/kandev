@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { IconBrain, IconGitMerge, IconX } from "@tabler/icons-react";
+import { IconGitMerge, IconX } from "@tabler/icons-react";
 import { TodoIndicator } from "./todo-indicator";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -299,25 +299,11 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
-function SessionStatusBar({
-  agentMode,
-  todoItems,
-}: {
-  agentMode: string | undefined;
-  todoItems: TodoDisplayItem[];
-}) {
-  const showMode = agentMode && agentMode !== "default";
+function SessionStatusBar({ todoItems }: { todoItems: TodoDisplayItem[] }) {
   const showTodos = todoItems.length > 0;
-  if (!showMode && !showTodos) return null;
+  if (!showTodos) return null;
   return (
     <div className="flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground">
-      {showMode && (
-        <>
-          <IconBrain className="h-3 w-3" />
-          <span className="capitalize">{agentMode} mode</span>
-        </>
-      )}
-      {showMode && showTodos && <span className="text-border">·</span>}
       <TodoIndicator todos={todoItems} />
     </div>
   );
@@ -380,11 +366,6 @@ export function ChatInputArea({
     chatInputRef,
   );
 
-  const agentModeState = useAppStore((state) =>
-    resolvedSessionId ? state.sessionMode.bySessionId[resolvedSessionId] : undefined,
-  );
-  const agentMode = agentModeState?.currentModeId;
-
   const hasClarification = !!panelState.pendingClarification;
   const placeholder = resolveInputPlaceholder(
     isAgentBusy,
@@ -395,7 +376,7 @@ export function ChatInputArea({
   );
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      <SessionStatusBar agentMode={agentMode} todoItems={todoItems} />
+      <SessionStatusBar todoItems={todoItems} />
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       <ChatInputContainer
         ref={chatInputRef}

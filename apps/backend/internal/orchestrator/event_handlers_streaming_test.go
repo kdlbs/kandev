@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
@@ -52,7 +53,7 @@ func TestHandleSessionModeEvent(t *testing.T) {
 		require.Len(t, eb.events, 1)
 	})
 
-	t.Run("skips default mode", func(t *testing.T) {
+	t.Run("skips default mode without available modes", func(t *testing.T) {
 		eb := &recordingEventBus{}
 		svc := &Service{logger: testLogger(), eventBus: eb}
 
@@ -64,6 +65,26 @@ func TestHandleSessionModeEvent(t *testing.T) {
 		})
 
 		require.Empty(t, eb.events)
+	})
+
+	t.Run("publishes default mode with available modes (initial state)", func(t *testing.T) {
+		eb := &recordingEventBus{}
+		svc := &Service{logger: testLogger(), eventBus: eb}
+
+		svc.handleSessionModeEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModeID: "default",
+				AvailableModes: []streams.SessionModeInfo{
+					{ID: "default", Name: "Default"},
+					{ID: "plan", Name: "Plan"},
+				},
+			},
+		})
+
+		require.Len(t, eb.events, 1)
 	})
 
 	t.Run("publishes empty mode (mode exit)", func(t *testing.T) {

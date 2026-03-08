@@ -26,12 +26,21 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
       if (!sessionId) return;
       try {
         await setSessionMode(sessionId, modeId);
-      } catch {
-        // Mode change failed — the agent will send a mode_changed event if it succeeds
+      } catch (err) {
+        // TODO: remove debug log
+        console.log("[ModeSelector] set-mode API failed:", err);
       }
     },
     [sessionId],
   );
+
+  // TODO: remove debug logs
+  console.log("[ModeSelector]", {
+    sessionId,
+    modeState,
+    hasAvailableModes: !!modeState?.availableModes,
+    modesCount: modeState?.availableModes?.length ?? 0,
+  });
 
   if (
     !sessionId ||
@@ -57,12 +66,12 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
           <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top">
+      <DropdownMenuContent align="end" side="top" className="min-w-[280px]">
         {modeState.availableModes.map((mode) => (
           <DropdownMenuItem
             key={mode.id}
             onClick={() => handleModeChange(mode.id)}
-            className={mode.id === modeState.currentModeId ? "bg-accent" : ""}
+            className={mode.id === modeState.currentModeId ? "bg-muted" : ""}
           >
             <div>
               <div>{mode.name}</div>
