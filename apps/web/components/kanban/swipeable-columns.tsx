@@ -36,6 +36,7 @@ export function SwipeableColumns({
     align: "start",
     containScroll: "trimSnaps",
     watchDrag: true,
+    startIndex: activeIndex,
   });
 
   const getTasksForStep = useCallback(

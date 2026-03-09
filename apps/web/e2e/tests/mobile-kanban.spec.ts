@@ -33,7 +33,7 @@ test.describe("Mobile kanban view", () => {
     await mobile.mobileMenuButton.click();
 
     // Menu sheet should open with display options
-    await expect(testPage.getByText("Menu")).toBeVisible();
+    await expect(testPage.getByRole("heading", { name: "Menu" })).toBeVisible();
     await expect(testPage.getByText("Display Options")).toBeVisible();
   });
 
@@ -66,8 +66,10 @@ test.describe("Mobile kanban view", () => {
       const secondStepTab = mobile.columnTab(steps[1].title);
       await secondStepTab.click();
 
-      // Second step's task should now be visible
-      await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible({ timeout: 5000 });
+      // Wait for carousel to settle, then verify second step task is visible
+      await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible({ timeout: 10000 });
+      // First step's task should no longer be in viewport
+      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport();
     }
   });
 
@@ -160,7 +162,7 @@ test.describe("Mobile kanban view", () => {
   }) => {
     await apiClient.createTask(seedData.workspaceId, "Single Workflow Task", {
       workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_step_id: seedData.steps[0].id,
     });
 
     const mobile = new MobileKanbanPage(testPage);
