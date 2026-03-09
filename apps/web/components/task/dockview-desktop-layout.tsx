@@ -588,7 +588,7 @@ function setupPortalCleanup(api: DockviewReadyEvent["api"]) {
 }
 
 // ---------------------------------------------------------------------------
-// useSessionSwitchCleanup — releases session-scoped portals + triggers layout switch
+// useSessionSwitchCleanup — backup layout switch for external session changes
 // ---------------------------------------------------------------------------
 
 function useSessionSwitchCleanup(effectiveSessionId: string | null) {
@@ -603,12 +603,10 @@ function useSessionSwitchCleanup(effectiveSessionId: string | null) {
     const oldSessionId = prevSessionRef.current;
     prevSessionRef.current = effectiveSessionId;
 
-    // Release session-scoped portals from the old session so stale
-    // terminals, editors, etc. don't leak into the new session.
-    if (oldSessionId) {
-      panelPortalManager.releaseBySession(oldSessionId);
-    }
-
+    // Portal cleanup is handled synchronously inside switchSessionLayout
+    // (in the dockview store action) before any fromJSON call. This hook
+    // serves as a backup for external session changes (e.g. WS-driven)
+    // that don't go through the sidebar/dropdown switch helpers.
     if (effectiveSessionId) {
       performLayoutSwitch(oldSessionId, effectiveSessionId);
     }
@@ -701,8 +699,20 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
     };
   }, []);
 
+  // Visual masking: hide the dockview container during slow-path layout
+  // switches (full fromJSON rebuild) to prevent the old layout from flashing.
+  const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
+
   return (
-    <div className="flex-1 min-h-0">
+    <div
+      className="flex-1 min-h-0"
+      aria-busy={isRestoringLayout}
+      style={{
+        opacity: isRestoringLayout ? 0 : 1,
+        pointerEvents: isRestoringLayout ? "none" : undefined,
+        transition: isRestoringLayout ? "none" : "opacity 60ms ease-out",
+      }}
+    >
       <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
       <DockviewReact
         theme={themeKandev}

@@ -33,6 +33,7 @@ export type ChatInputEditorAreaProps = {
   addFiles: (files: File[]) => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
+  hideSessionsDropdown?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -142,6 +143,7 @@ export function ChatInputEditorArea({
   onImplementPlan,
   onEnhancePrompt,
   isEnhancingPrompt,
+  hideSessionsDropdown,
 }: ChatInputEditorAreaProps) {
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
@@ -203,6 +205,7 @@ export function ChatInputEditorArea({
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
         onAttachFiles={handleAttachFiles}
+        hideSessionsDropdown={hideSessionsDropdown}
       />
     </div>
   );

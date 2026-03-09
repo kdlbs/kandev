@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import type { DockviewApi, AddPanelOptions, SerializedDockview } from "dockview-react";
 import {
-  getSessionLayout,
   setSessionLayout,
   getSessionMaximizeState,
   setSessionMaximizeState,
@@ -22,6 +21,7 @@ import {
   mergeCurrentPanelsIntoPreset,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import { performSessionSwitch } from "./dockview-session-switch";
 import {
   injectIntentPanels,
   applyActivePanelOverrides,
@@ -30,6 +30,7 @@ import {
 import { buildFileStateActions } from "./dockview-file-state";
 import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
+import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -198,39 +199,6 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   }
   syncPinnedWidthsFromApi(api, set);
   return useDockviewStore.getState().pinnedWidths;
-}
-
-type SessionSwitchParams = {
-  api: DockviewApi;
-  oldSessionId: string | null;
-  newSessionId: string;
-  safeWidth: number;
-  safeHeight: number;
-  buildDefault: (api: DockviewApi) => void;
-};
-
-function performSessionSwitch(params: SessionSwitchParams): LayoutGroupIds {
-  const { api, oldSessionId, newSessionId, safeWidth, safeHeight, buildDefault } = params;
-  if (oldSessionId) {
-    try {
-      setSessionLayout(oldSessionId, api.toJSON());
-    } catch {
-      /* ignore */
-    }
-  }
-  const saved = getSessionLayout(newSessionId);
-  if (saved) {
-    try {
-      api.fromJSON(saved as SerializedDockview);
-      api.layout(safeWidth, safeHeight);
-      return applyLayoutFixups(api);
-    } catch {
-      /* fall through */
-    }
-  }
-  buildDefault(api);
-  api.layout(safeWidth, safeHeight);
-  return applyLayoutFixups(api);
 }
 
 function applyLayoutAndSet(
@@ -458,6 +426,11 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
       } catch {
         /* ignore */
       }
+    // Release session-scoped portals (terminals, editors, etc.) synchronously
+    // BEFORE rebuilding the layout so stale content doesn't flash in the new layout.
+    if (oldSessionId) {
+      panelPortalManager.releaseBySession(oldSessionId);
+    }
     set({ isRestoringLayout: true, currentLayoutSessionId: newSessionId });
     try {
       if (restoreMaximizeFromStorage(api, newSessionId, set)) return;
@@ -468,6 +441,7 @@ function buildSessionSwitchAction(set: StoreSet, get: StoreGet) {
         safeWidth: api.width,
         safeHeight: api.height,
         buildDefault: (a) => get().buildDefaultLayout(a),
+        getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout("default"),
       });
       set(ids);
       set({ isRestoringLayout: false });

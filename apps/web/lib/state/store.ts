@@ -203,6 +203,7 @@ export type AppState = {
   chatInput: (typeof defaultUIState)["chatInput"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
+  quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
 
   // GitHub actions
@@ -305,6 +306,11 @@ export type AppState = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  openQuickChat: (sessionId: string, workspaceId: string) => void;
+  closeQuickChat: () => void;
+  closeQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string) => void;
+  renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;
@@ -444,7 +450,10 @@ const defaultState = {
   mobileKanban: defaultUIState.mobileKanban,
   mobileSession: defaultUIState.mobileSession,
   chatInput: defaultUIState.chatInput,
+  documentPanel: defaultUIState.documentPanel,
   systemHealth: defaultUIState.systemHealth,
+  quickChat: defaultUIState.quickChat,
+  sessionFailureNotification: defaultUIState.sessionFailureNotification,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -515,7 +524,11 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     mobileKanban: { ...defaultState.mobileKanban, ...initialState.mobileKanban },
     mobileSession: { ...defaultState.mobileSession, ...initialState.mobileSession },
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
+    documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
+    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    sessionFailureNotification:
+      initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
   };
 }
 
@@ -594,7 +607,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       mobileKanban: merged.mobileKanban,
       mobileSession: merged.mobileSession,
       chatInput: merged.chatInput,
+      documentPanel: merged.documentPanel,
       systemHealth: merged.systemHealth,
+      quickChat: merged.quickChat,
+      sessionFailureNotification: merged.sessionFailureNotification,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

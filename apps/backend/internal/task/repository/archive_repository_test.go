@@ -114,7 +114,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	_ = repo.ArchiveTask(ctx, "task-2")
 
 	// Without includeArchived: should return only active task
-	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, false)
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// With includeArchived: should return both tasks
-	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, true)
+	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, true, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks with archived: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// Search with includeArchived=false should filter archived
-	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "Task", 1, 10, false)
+	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "Task", 1, 10, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestSQLiteRepository_ListTasksByWorkspace_IncludeArchived(t *testing.T) {
 	}
 
 	// Search with includeArchived=true should include archived
-	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "Task", 1, 10, true)
+	_, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "Task", 1, 10, true, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks with archived: %v", err)
 	}

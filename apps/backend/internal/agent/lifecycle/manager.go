@@ -38,6 +38,11 @@ type Manager struct {
 	worktreeMgr     *worktree.Manager
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
+	// dataDir is the base data directory for Kandev (from config.ResolvedDataDir()).
+	// Used for:
+	// - Session history storage (SessionHistoryManager)
+	// - Ephemeral workspace creation (quick chat, tasks without repositories)
+	dataDir string
 
 	// ExecutorRegistry manages multiple runtimes (Docker, Standalone, etc.)
 	// Each task can select its runtime based on executor type.
@@ -121,6 +126,7 @@ func NewManager(
 		profileResolver:          profileResolver,
 		mcpProvider:              mcpProvider,
 		logger:                   componentLogger,
+		dataDir:                  dataDir,
 		executionStore:           executionStore,
 		commandBuilder:           commandBuilder,
 		sessionManager:           sessionManager,

@@ -7,6 +7,7 @@ import {
   listRepositories,
   listWorkspaces,
   listTaskSessionMessages,
+  listQuickChatSessions,
 } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -135,14 +136,24 @@ export default async function Page({ searchParams }: PageProps) {
       );
     }
 
-    const [workflowList, repositoriesResponse] = await Promise.all([
+    const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
       listWorkflows(activeWorkspaceId, { cache: "no-store" }),
       listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
         repositories: [],
       })),
+      listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
     ]);
 
     const workflowId = resolveActiveId(workflowList.workflows, workflowIdParam, settingsWorkflowId);
+
+    // Map quick chat tasks to sessions
+    const quickChatSessions = quickChatResponse.tasks
+      .filter((t) => t.primary_session_id) // Only include tasks with active sessions
+      .map((t) => ({
+        sessionId: t.primary_session_id!,
+        workspaceId: t.workspace_id,
+        name: t.title !== "Quick Chat" ? t.title : undefined,
+      }));
 
     initialState = {
       ...initialState,
@@ -162,6 +173,11 @@ export default async function Page({ searchParams }: PageProps) {
         itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
         loadingByWorkspaceId: { [activeWorkspaceId]: false },
         loadedByWorkspaceId: { [activeWorkspaceId]: true },
+      },
+      quickChat: {
+        isOpen: false,
+        sessions: quickChatSessions,
+        activeSessionId: null,
       },
     };
 

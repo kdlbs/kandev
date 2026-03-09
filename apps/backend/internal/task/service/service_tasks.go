@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -60,6 +61,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		Priority:       req.Priority,
 		Position:       req.Position,
 		Metadata:       req.Metadata,
+		IsEphemeral:    req.IsEphemeral,
 	}
 
 	if err := s.tasks.CreateTask(ctx, task); err != nil {
@@ -407,8 +409,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
+	// Note: isEphemeral=false for archive to preserve quick-chat directories
 	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, false,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -465,8 +468,8 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	// 6. Return immediately - all remaining cleanup is async
 
 	// 7. Background: Stop agents and cleanup worktrees
-	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets,
+	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral {
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, task.IsEphemeral,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
@@ -504,6 +507,7 @@ func (s *Service) runAsyncTaskCleanup(
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
+	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
 	go func() {
@@ -532,7 +536,7 @@ func (s *Service) runAsyncTaskCleanup(
 			}
 		}
 
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees)
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, isEphemeral)
 
 		if len(cleanupErrors) > 0 {
 			s.logger.Warn(cleanupMsg+" with errors",
@@ -572,7 +576,7 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
-// Handles worktree cleanup and executor_running records.
+// Handles worktree cleanup, executor_running records, and quick-chat workspace directories.
 // Agent stopping is handled separately in the DeleteTask background goroutine.
 // Returns a slice of errors encountered (empty if all succeeded).
 func (s *Service) performTaskCleanup(
@@ -580,6 +584,7 @@ func (s *Service) performTaskCleanup(
 	taskID string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
+	isEphemeral bool,
 ) []error {
 	var errs []error
 
@@ -609,6 +614,29 @@ func (s *Service) performTaskCleanup(
 		}
 	}
 
+	// Cleanup quick-chat workspace directories for ephemeral tasks
+	if isEphemeral && s.quickChatDir != "" {
+		for _, session := range sessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			sessionDir := filepath.Join(s.quickChatDir, session.ID)
+			if err := os.RemoveAll(sessionDir); err != nil {
+				s.logger.Warn("failed to cleanup quick-chat workspace directory",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.String("path", sessionDir),
+					zap.Error(err))
+				errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", session.ID, err))
+			} else {
+				s.logger.Debug("cleaned up quick-chat workspace directory",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.String("path", sessionDir))
+			}
+		}
+	}
+
 	return errs
 }
 
@@ -628,8 +656,8 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
-func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
-	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize, includeArchived)
+func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error) {
+	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral)
 	if err != nil {
 		return nil, 0, err
 	}

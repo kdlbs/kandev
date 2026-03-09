@@ -238,6 +238,7 @@ export type Task = {
   primary_agent_name?: string | null;
   primary_working_directory?: string | null;
   is_remote_executor?: boolean;
+  is_ephemeral?: boolean;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;

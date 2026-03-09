@@ -119,6 +119,7 @@ function useSidebarData(workspaceId: string | null) {
       for (const step of snapshot.steps) {
         if (!stepMap.has(step.id)) stepMap.set(step.id, step);
       }
+      // Ephemeral tasks are already filtered out by useAllWorkflowSnapshots
       tasks.push(...snapshot.tasks);
     }
     const sortedSteps = [...stepMap.values()].sort((a, b) => a.position - b.position);

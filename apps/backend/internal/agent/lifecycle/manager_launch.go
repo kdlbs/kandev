@@ -3,6 +3,10 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,8 +108,9 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 
 // launchResolveWorkspacePath resolves the effective workspace path for non-worktree executors.
 // For worktree executors, workspace resolution is handled by the WorktreePreparer.
+// For tasks without repositories, creates a workspace directory in ~/.kandev/quick-chat/.
 // Returns workspacePath, mainRepoGitDir, worktreeID, worktreeBranch.
-func (m *Manager) launchResolveWorkspacePath(_ context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
 	if req.UseWorktree {
 		// Worktree executors: preparer handles worktree creation.
 		// Return empty path; it will be populated from preparer results.
@@ -114,6 +119,46 @@ func (m *Manager) launchResolveWorkspacePath(_ context.Context, req *LaunchReque
 	workspacePath = req.WorkspacePath
 	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
+	}
+	// For tasks without repositories (e.g., quick chat), create a workspace in ~/.kandev/quick-chat/
+	// These directories are cleaned up when the ephemeral task is deleted (see task service performTaskCleanup).
+	if workspacePath == "" && req.SessionID != "" && m.dataDir != "" {
+		quickChatDir := filepath.Join(m.dataDir, "quick-chat")
+		if err := os.MkdirAll(quickChatDir, 0755); err != nil {
+			m.logger.Warn("failed to create quick-chat directory, continuing without workspace",
+				zap.String("session_id", req.SessionID),
+				zap.String("quick_chat_dir", quickChatDir),
+				zap.Error(err))
+			return "", "", "", ""
+		}
+		// Validate SessionID doesn't contain path separators (security: prevent path traversal)
+		if strings.ContainsAny(req.SessionID, `/\`) {
+			m.logger.Warn("session ID contains path separator, rejecting",
+				zap.String("session_id", req.SessionID))
+			return "", "", "", ""
+		}
+		// Use session ID as directory name for easy cleanup
+		workspacePath = filepath.Join(quickChatDir, req.SessionID)
+		if err := os.MkdirAll(workspacePath, 0755); err != nil {
+			m.logger.Warn("failed to create session workspace, continuing without workspace",
+				zap.String("session_id", req.SessionID),
+				zap.String("workspace_path", workspacePath),
+				zap.Error(err))
+			return "", "", "", ""
+		}
+
+		// Initialize git repository in the workspace (if not already initialized)
+		if err := m.initGitRepo(ctx, workspacePath); err != nil {
+			m.logger.Warn("failed to initialize git repository in quick chat workspace",
+				zap.String("session_id", req.SessionID),
+				zap.String("workspace_path", workspacePath),
+				zap.Error(err))
+			// Continue anyway - git is optional for quick chat
+		}
+
+		m.logger.Info("created quick chat workspace",
+			zap.String("session_id", req.SessionID),
+			zap.String("workspace_path", workspacePath))
 	}
 	return
 }
@@ -556,5 +601,57 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 	}
 
 	m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, containerStateExited)
+	return nil
+}
+
+// initGitRepo initializes a git repository in the given directory.
+// Creates an initial commit so the workspace has a clean git state.
+// This function is idempotent - it skips initialization if .git already exists.
+func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
+	// Check if git repository already exists (idempotent)
+	gitDir := filepath.Join(workspacePath, ".git")
+	if info, err := os.Stat(gitDir); err == nil {
+		if info.IsDir() {
+			return nil // Already initialized
+		}
+	} else if !os.IsNotExist(err) {
+		// Non-ENOENT error (permissions, I/O, etc.) - fail explicitly
+		return fmt.Errorf("failed to check for .git directory: %w", err)
+	}
+
+	// Initialize git repository
+	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd.Dir = workspacePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init failed: %w (output: %s)", err, string(output))
+	}
+
+	// Configure git user (required for initial commit)
+	configName := exec.CommandContext(ctx, "git", "config", "user.name", "Kandev Quick Chat")
+	configName.Dir = workspacePath
+	_ = configName.Run() // Ignore error - might already be configured globally
+
+	configEmail := exec.CommandContext(ctx, "git", "config", "user.email", "quickchat@kandev.local")
+	configEmail.Dir = workspacePath
+	_ = configEmail.Run() // Ignore error - might already be configured globally
+
+	// Create initial commit with empty .gitkeep file
+	gitkeepPath := filepath.Join(workspacePath, ".gitkeep")
+	if err := os.WriteFile(gitkeepPath, []byte(""), 0644); err != nil {
+		return fmt.Errorf("failed to create .gitkeep: %w", err)
+	}
+
+	addCmd := exec.CommandContext(ctx, "git", "add", ".gitkeep")
+	addCmd.Dir = workspacePath
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
+	}
+
+	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", "Initial commit")
+	commitCmd.Dir = workspacePath
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
+	}
+
 	return nil
 }

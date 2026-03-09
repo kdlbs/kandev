@@ -132,6 +132,7 @@ type Service struct {
 	workflowStepCreator WorkflowStepCreator
 	workflowStepGetter  WorkflowStepGetter
 	startStepResolver   StartStepResolver
+	quickChatDir        string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 }
 
 // NewService creates a new task service
@@ -183,4 +184,10 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // SetStartStepResolver wires the start step resolver for CreateTask.
 func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
+}
+
+// SetQuickChatDir sets the directory for quick-chat workspaces.
+// When set, ephemeral task cleanup will delete the session directory under this path.
+func (s *Service) SetQuickChatDir(dir string) {
+	s.quickChatDir = dir
 }

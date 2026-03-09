@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -17,6 +17,9 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
+import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
+import { useAppStore } from "@/components/state-provider";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { CommandItem } from "@/lib/commands/types";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
@@ -116,13 +119,49 @@ function buildThemeCommand(
 export function GlobalCommands() {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
+  const openQuickChat = useAppStore((s) => s.openQuickChat);
+
+  const handleOpenQuickChat = useCallback(() => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+
+    // If there's an existing session for this workspace, open it
+    const existingSession = quickChatSessions.find((s) => s.workspaceId === activeWorkspaceId);
+    if (existingSession) {
+      openQuickChat(existingSession.sessionId, activeWorkspaceId);
+    } else {
+      // Open modal without a session - will show agent picker
+      openQuickChat("", activeWorkspaceId);
+    }
+  }, [activeWorkspaceId, quickChatSessions, openQuickChat]);
+
+  const quickChatCommand: CommandItem = useMemo(
+    () => ({
+      id: "quick-chat",
+      label: "Quick Chat",
+      group: "Actions",
+      icon: <IconMessageCircle className="size-3.5" />,
+      keywords: ["quick", "chat", "ai", "agent"],
+      shortcut: SHORTCUTS.QUICK_CHAT,
+      action: handleOpenQuickChat,
+    }),
+    [handleOpenQuickChat],
+  );
 
   const commands = useMemo<CommandItem[]>(
-    () => [...buildNavigationCommands(router.push), buildThemeCommand(resolvedTheme, setTheme)],
-    [router.push, resolvedTheme, setTheme],
+    () => [
+      ...buildNavigationCommands(router.push),
+      buildThemeCommand(resolvedTheme, setTheme),
+      quickChatCommand,
+    ],
+    [router.push, resolvedTheme, setTheme, quickChatCommand],
   );
 
   useRegisterCommands(commands);
+  useKeyboardShortcut(SHORTCUTS.QUICK_CHAT, handleOpenQuickChat);
 
   return null;
 }

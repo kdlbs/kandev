@@ -137,4 +137,8 @@ export const SHORTCUTS = {
     key: KEYS.TAB,
     modifiers: { shift: true },
   },
+  QUICK_CHAT: {
+    key: KEYS.Q,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
 } as const;

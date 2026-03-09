@@ -183,6 +183,23 @@ function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
   if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
+  if (state.quickChat) {
+    // Merge quick chat sessions, preserving isOpen from client
+    if (state.quickChat.sessions) {
+      draft.quickChat.sessions = state.quickChat.sessions;
+      // Validate activeSessionId exists in sessions after merge
+      if (
+        draft.quickChat.activeSessionId &&
+        !draft.quickChat.sessions.some((s) => s.sessionId === draft.quickChat.activeSessionId)
+      ) {
+        draft.quickChat.activeSessionId = draft.quickChat.sessions[0]?.sessionId ?? null;
+      }
+      // Close quick chat if no sessions remain
+      if (draft.quickChat.sessions.length === 0) {
+        draft.quickChat.isOpen = false;
+      }
+    }
+  }
   if (state.connection) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { status: _status, ...rest } = state.connection || {};

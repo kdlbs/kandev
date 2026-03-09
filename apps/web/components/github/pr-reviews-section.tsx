@@ -59,6 +59,17 @@ function buildAllReviewsMessage(reviews: PRReview[], prUrl: string): string {
   return parts.join("\n");
 }
 
+function deduplicateReviews(reviews: PRReview[]): PRReview[] {
+  const latestByAuthor = new Map<string, PRReview>();
+  for (const review of reviews) {
+    const current = latestByAuthor.get(review.author);
+    if (!current || new Date(review.created_at) > new Date(current.created_at)) {
+      latestByAuthor.set(review.author, review);
+    }
+  }
+  return Array.from(latestByAuthor.values());
+}
+
 function formatPendingReviewer(reviewer: RequestedReviewer): string {
   if (reviewer.type === "team") return `${reviewer.login} (team)`;
   return reviewer.login;
@@ -150,9 +161,15 @@ export function ReviewsSection({
   pendingReviewCount: number;
   onAddAsContext: (message: string) => void;
 }) {
+  const dedupedReviews = deduplicateReviews(reviews);
+  const reviewedAuthors = new Set(
+    dedupedReviews.filter((r) => r.state !== "PENDING").map((r) => r.author),
+  );
+  const pendingOnly = requestedReviewers.filter((r) => !reviewedAuthors.has(r.login));
+
   const { pendingCount, summary, totalCount } = computeSectionSummary(
-    reviews,
-    requestedReviewers,
+    dedupedReviews,
+    pendingOnly,
     pendingReviewCount,
   );
   const pendingText = pendingCount > 0 ? ` (${pendingCount} pending)` : "";
@@ -171,16 +188,16 @@ export function ReviewsSection({
       defaultOpen
       subtitle={subtitle}
       onAddAll={
-        reviews.length > 0
-          ? () => onAddAsContext(buildAllReviewsMessage(reviews, prUrl))
+        dedupedReviews.length > 0
+          ? () => onAddAsContext(buildAllReviewsMessage(dedupedReviews, prUrl))
           : undefined
       }
       addAllLabel="Add all reviews to chat context"
     >
-      {reviews.length === 0 && pendingCount === 0 && (
+      {dedupedReviews.length === 0 && pendingCount === 0 && (
         <p className="text-xs text-muted-foreground px-2 py-2">No reviews yet</p>
       )}
-      {reviews.map((review) => (
+      {dedupedReviews.map((review) => (
         <SubmittedReviewRow
           key={review.id}
           review={review}
@@ -188,7 +205,7 @@ export function ReviewsSection({
           onAddAsContext={onAddAsContext}
         />
       ))}
-      {requestedReviewers.map((reviewer) => (
+      {pendingOnly.map((reviewer) => (
         <PendingReviewRow key={`pending-${reviewer.type}-${reviewer.login}`} reviewer={reviewer} />
       ))}
     </CollapsibleSection>

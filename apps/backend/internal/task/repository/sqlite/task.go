@@ -35,9 +35,9 @@ func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	}
 
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.IsEphemeral, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
@@ -54,9 +54,9 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 	var metadata string
 	var archivedAt sql.NullTime
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
+		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
 		FROM tasks WHERE id = ?
-	`), id).Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &archivedAt, &task.CreatedAt, &task.UpdatedAt)
+	`), id).Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.Title, &task.Description, &task.State, &task.Priority, &task.Position, &metadata, &task.IsEphemeral, &archivedAt, &task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found: %s", id)
@@ -121,14 +121,14 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListTasks returns all non-archived tasks for a workflow
+// ListTasks returns all non-archived, non-ephemeral tasks for a workflow
 func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasks")
 	defer span.End()
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
+		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
 		FROM tasks
-		WHERE workflow_id = ? AND archived_at IS NULL
+		WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0
 		ORDER BY position
 	`), workflowID)
 	if err != nil {
@@ -139,32 +139,32 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 	return r.scanTasks(rows)
 }
 
-// CountTasksByWorkflow returns the number of non-archived tasks in a workflow
+// CountTasksByWorkflow returns the number of non-archived, non-ephemeral tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL`), workflowID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), workflowID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-// CountTasksByWorkflowStep returns the number of non-archived tasks in a workflow step
+// CountTasksByWorkflowStep returns the number of non-archived, non-ephemeral tasks in a workflow step
 func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL`), stepID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), stepID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-// ListTasksByWorkflowStep returns all non-archived tasks in a workflow step
+// ListTasksByWorkflowStep returns all non-archived, non-ephemeral tasks in a workflow step
 func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
+		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
 		FROM tasks
-		WHERE workflow_step_id = ? AND archived_at IS NULL ORDER BY position
+		WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0 ORDER BY position
 	`), workflowStepID)
 	if err != nil {
 		return nil, err
@@ -177,7 +177,9 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived bool) ([]*models.Task, int, error) {
+// If includeEphemeral is false, ephemeral tasks are excluded
+// If onlyEphemeral is true, only ephemeral tasks are returned
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -186,9 +188,19 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		offset = 0
 	}
 
-	archiveFilter := ""
+	// Build filter conditions
+	filter := ""
+	if onlyEphemeral {
+		// Only ephemeral tasks
+		filter += " AND is_ephemeral = 1"
+	} else if !includeEphemeral {
+		// Exclude ephemeral tasks
+		filter += " AND is_ephemeral = 0"
+	}
+	// If includeEphemeral is true and onlyEphemeral is false, include both
+
 	if !includeArchived {
-		archiveFilter = " AND archived_at IS NULL"
+		filter += " AND archived_at IS NULL"
 	}
 
 	var rows *sql.Rows
@@ -196,9 +208,9 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, archiveFilter, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, pageSize, offset)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, archiveFilter, pageSize, offset, includeArchived)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral)
 	}
 
 	if err != nil {
@@ -222,7 +234,7 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilt
 		return nil, 0, err
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, archived_at, created_at, updated_at
+		SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, archived_at, created_at, updated_at
 		FROM tasks
 		WHERE workspace_id = ?`+archiveFilter+`
 		ORDER BY updated_at DESC
@@ -232,13 +244,19 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, archiveFilt
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiveFilter string, pageSize, offset int, includeArchived bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
+	// Build task filter
 	tFilter := ""
+	if onlyEphemeral {
+		tFilter += " AND t.is_ephemeral = 1"
+	} else if !includeEphemeral {
+		tFilter += " AND t.is_ephemeral = 0"
+	}
 	if !includeArchived {
-		tFilter = " AND t.archived_at IS NULL"
+		tFilter += " AND t.archived_at IS NULL"
 	}
 
 	countQuery := fmt.Sprintf(`
@@ -259,7 +277,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, archiv
 	}
 
 	selectQuery := fmt.Sprintf(`
-		SELECT DISTINCT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.archived_at, t.created_at, t.updated_at
+		SELECT DISTINCT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.is_ephemeral, t.archived_at, t.created_at, t.updated_at
 		FROM tasks t
 		LEFT JOIN task_repositories tr ON t.id = tr.task_id
 		LEFT JOIN repositories r ON tr.repository_id = r.id
@@ -295,6 +313,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.Priority,
 			&task.Position,
 			&metadata,
+			&task.IsEphemeral,
 			&archivedAt,
 			&task.CreatedAt,
 			&task.UpdatedAt,
@@ -329,7 +348,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.archived_at, t.created_at, t.updated_at
+		SELECT t.id, t.workspace_id, t.workflow_id, t.workflow_step_id, t.title, t.description, t.state, t.priority, t.position, t.metadata, t.is_ephemeral, t.archived_at, t.created_at, t.updated_at
 		FROM tasks t
 		JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 		WHERE ws.auto_archive_after_hours > 0
