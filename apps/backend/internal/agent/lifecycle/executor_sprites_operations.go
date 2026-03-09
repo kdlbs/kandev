@@ -229,6 +229,7 @@ func (r *SpritesExecutor) createAgentInstance(
 		Protocol:      req.Protocol,
 		AgentType:     agentTypeFromReq(req),
 		McpServers:    req.McpServers,
+		McpMode:       req.McpMode,
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
