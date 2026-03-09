@@ -146,6 +146,10 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 		if err := c.ghClone(ctx, owner, name, targetPath); err == nil {
 			return nil
 		}
+		// Clean up any partial clone so the fallback can retry into a fresh path.
+		if rmErr := os.RemoveAll(targetPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("cleanup failed gh clone target: %w", rmErr)
+		}
 	}
 
 	// Fallback: git clone with credential helper.

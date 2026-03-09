@@ -162,7 +162,9 @@ export function ReviewsSection({
   onAddAsContext: (message: string) => void;
 }) {
   const dedupedReviews = deduplicateReviews(reviews);
-  const reviewedAuthors = new Set(dedupedReviews.map((r) => r.author));
+  const reviewedAuthors = new Set(
+    dedupedReviews.filter((r) => r.state !== "PENDING").map((r) => r.author),
+  );
   const pendingOnly = requestedReviewers.filter((r) => !reviewedAuthors.has(r.login));
 
   const { pendingCount, summary, totalCount } = computeSectionSummary(
