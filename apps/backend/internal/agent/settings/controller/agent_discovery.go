@@ -385,10 +385,14 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 		Description: "Required for GitHub integration features (PRs, reviews, webhooks).",
 		InfoURL:     "https://cli.github.com",
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		ghTool.InstallScript = "brew install gh"
-	} else {
-		ghTool.InstallScript = "See https://cli.github.com for install instructions"
+	case "windows":
+		ghTool.InstallScript = "winget install --id GitHub.cli"
+	default:
+		// No single command works across all Linux distros; rely on info_url.
+		ghTool.InstallScript = ""
 	}
 	if path, err := exec.LookPath("gh"); err == nil {
 		ghTool.Available = true

@@ -232,7 +232,7 @@ export function StepAgents({
       </p>
       <p className="text-xs text-muted-foreground">
         <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles run
-        with with Auto Approve enabled (YOLO mode).
+        with Auto Approve enabled (YOLO mode).
       </p>
     </div>
   );

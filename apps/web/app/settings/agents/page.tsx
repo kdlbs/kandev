@@ -72,6 +72,7 @@ function CopyButton({
       variant="ghost"
       size="sm"
       className="h-7 w-7 p-0 cursor-pointer shrink-0"
+      aria-label={isCopied ? "Copied" : "Copy install command"}
       onClick={() => onCopy(text)}
     >
       {isCopied ? (
