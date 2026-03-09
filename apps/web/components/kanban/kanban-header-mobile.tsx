@@ -56,9 +56,9 @@ export function KanbanHeaderMobile({
             variant="outline"
             size="icon"
             onClick={() => setMenuOpen(true)}
-            className="cursor-pointer h-10 w-10"
+            className="cursor-pointer"
           >
-            <IconMenu2 className="h-5 w-5" />
+            <IconMenu2 className="h-4 w-4" />
             <span className="sr-only">Open menu</span>
           </Button>
         </div>

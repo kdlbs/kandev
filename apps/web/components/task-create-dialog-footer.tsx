@@ -1,7 +1,13 @@
 "use client";
 
 import { memo } from "react";
-import { IconLoader2, IconFileInvoice, IconSend, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconLoader2,
+  IconFileInvoice,
+  IconSend,
+  IconChevronDown,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { DialogClose } from "@kandev/ui/dialog";
 import {
@@ -101,6 +107,7 @@ function StartTaskSplitButton({
               onClick={onAltAction}
               className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
             >
+              <IconPlus className="h-3.5 w-3.5 mr-1.5" />
               {isEditMode ? "Update task" : "Create without starting agent"}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -110,10 +117,11 @@ function StartTaskSplitButton({
       <Button
         type="button"
         variant="outline"
-        className="w-full h-10 cursor-pointer sm:hidden"
+        className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
         disabled={disabled}
         onClick={onAltAction}
       >
+        <IconPlus className="h-3.5 w-3.5" />
         {altLabel}
       </Button>
     </div>
