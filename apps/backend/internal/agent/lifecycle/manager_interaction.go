@@ -73,7 +73,9 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 }
 
 // SetSessionMode changes the session mode for a running agent.
-func (m *Manager) SetSessionMode(ctx context.Context, executionID, acpSessionID, modeID string) error {
+// Always uses the execution's current ACPSessionID rather than the caller's copy,
+// which may be stale during startup/restart when the session is being re-initialized.
+func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, modeID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -81,7 +83,10 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, acpSessionID,
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	return execution.agentctl.SetMode(ctx, acpSessionID, modeID)
+	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+		return fmt.Errorf("execution %q ACP session is not ready", executionID)
+	}
+	return execution.agentctl.SetMode(ctx, execution.ACPSessionID, modeID)
 }
 
 // SetSessionModeBySessionID changes the session mode for a running agent by session ID.

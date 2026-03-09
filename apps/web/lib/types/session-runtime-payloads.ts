@@ -44,7 +44,7 @@ export type SessionModelsPayload = {
   agent_id: string;
   current_model_id: string;
   models: SessionModelInfoPayload[];
-  config_options?: ConfigOptionPayload[];
+  config_options: ConfigOptionPayload[];
   timestamp: string;
 };
 

@@ -69,6 +69,12 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 		if name == "" {
 			name = m.generateName(att)
 		}
+		// Sanitize: strip directory components to prevent path traversal attacks.
+		name = filepath.Base(name)
+		if name == "." || name == ".." || name == string(filepath.Separator) {
+			m.logger.Warn("skipping attachment with invalid name", zap.String("original_name", att.Name))
+			continue
+		}
 
 		decoded, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {

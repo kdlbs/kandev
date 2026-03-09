@@ -93,7 +93,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 		Tag:         "latest",
 		Cmd:         Cmd("npx", "-y", claudeACPPkg).Build(),
 		WorkingDir:  "{workspace}",
-		RequiredEnv: []string{"ANTHROPIC_API_KEY"},
+		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
 			"MCP_TIMEOUT": "7200000",
 		},
