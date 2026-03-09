@@ -28,6 +28,11 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "mobile-chrome",
+      testMatch: /mobile-.*\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+    },
   ],
 
   // No webServer — each Playwright worker spawns its own frontend
