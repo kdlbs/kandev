@@ -349,6 +349,23 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 	case "available_commands":
 		m.handleAvailableCommandsEvent(execution, event)
 		return
+
+	case "session_mode":
+		execution.SetModeState(&CachedModeState{
+			CurrentModeID:  event.CurrentModeID,
+			AvailableModes: event.AvailableModes,
+		})
+		// No return — must flow through to PublishAgentStreamEvent so the orchestrator
+		// can filter and re-publish to the dedicated session mode subject.
+
+	case "session_models":
+		execution.SetModelState(&CachedModelState{
+			CurrentModelID: event.CurrentModelID,
+			Models:         event.SessionModels,
+			ConfigOptions:  event.ConfigOptions,
+		})
+		// No return — must flow through to PublishAgentStreamEvent so the orchestrator
+		// can persist the model and re-publish to the dedicated session models subject.
 	}
 
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)

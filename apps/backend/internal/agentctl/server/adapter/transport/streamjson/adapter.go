@@ -118,6 +118,9 @@ type Adapter struct {
 	promptTraceCtx context.Context
 	promptTraceMu  sync.RWMutex
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -141,9 +144,10 @@ type resultComplete struct {
 // cfg.AgentID is required for debug file naming.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
+	l := log.WithFields(zap.String("adapter", "stream-json"), zap.String("agent_id", cfg.AgentID))
 	return &Adapter{
 		cfg:                    cfg,
-		logger:                 log.WithFields(zap.String("adapter", "stream-json"), zap.String("agent_id", cfg.AgentID)),
+		logger:                 l,
 		agentID:                cfg.AgentID,
 		normalizer:             NewNormalizer(),
 		ctx:                    ctx,
@@ -151,6 +155,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:              make(chan AgentEvent, 100),
 		mainModelContextWindow: defaultContextWindow,
 		pendingToolCalls:       make(map[string]*streams.NormalizedPayload),
+		attachMgr:              shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -179,6 +184,9 @@ func (a *Adapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing stream-json adapter")
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	// Cancel the context to stop the read loop
 	if a.cancel != nil {

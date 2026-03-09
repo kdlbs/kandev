@@ -2,14 +2,10 @@ package codex
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -74,12 +70,22 @@ func (a *Adapter) buildPromptInputs(message string, attachments []v1.MessageAtta
 	}
 
 	if len(attachments) > 0 {
-		imagePaths, err := a.saveImageAttachments(a.cfg.WorkDir, attachments)
+		saved, err := a.attachMgr.SaveAttachments(attachments)
 		if err != nil {
-			a.logger.Warn("failed to save image attachments", zap.Error(err))
+			a.logger.Warn("failed to save attachments", zap.Error(err))
 		} else {
-			for _, imagePath := range imagePaths {
-				inputs = append(inputs, codex.UserInput{Type: "localImage", Path: imagePath})
+			var nonImageSaved []shared.SavedAttachment
+			for _, s := range saved {
+				if s.Type == "image" {
+					// Codex supports localImage input type with absolute path
+					inputs = append(inputs, codex.UserInput{Type: "localImage", Path: s.AbsPath})
+				} else {
+					nonImageSaved = append(nonImageSaved, s)
+				}
+			}
+			// Non-image files are referenced in prompt text
+			if prompt := shared.BuildAttachmentPrompt(nonImageSaved); prompt != "" {
+				inputs = append([]codex.UserInput{{Type: "text", Text: prompt}}, inputs...)
 			}
 		}
 	}
@@ -153,6 +159,9 @@ func (a *Adapter) waitForTurnCompletion(ctx context.Context, threadID, turnID st
 		}
 		a.logger.Info("turn completed", zap.String("turn_id", turnID), zap.Bool("success", completeResult.success))
 
+		// Clean up saved attachments — agent has finished reading them
+		a.attachMgr.Cleanup()
+
 		// Emit complete event via the stream.
 		// This normalizes Codex behavior to match other adapters.
 		// All adapters now emit complete events, eliminating the need for protocol-specific flags.
@@ -164,58 +173,6 @@ func (a *Adapter) waitForTurnCompletion(ctx context.Context, threadID, turnID st
 
 		return nil
 	}
-}
-
-// saveImageAttachments saves image attachments to temp files in the workspace.
-func (a *Adapter) saveImageAttachments(workDir string, attachments []v1.MessageAttachment) ([]string, error) {
-	var imagePaths []string
-
-	if workDir == "" {
-		return nil, fmt.Errorf("workDir is required to save attachments")
-	}
-
-	tempDir := filepath.Join(workDir, ".kandev", "temp", "images")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-
-	for _, att := range attachments {
-		if att.Type != "image" {
-			continue
-		}
-
-		imageData, err := base64.StdEncoding.DecodeString(att.Data)
-		if err != nil {
-			a.logger.Warn("failed to decode image attachment", zap.Error(err))
-			continue
-		}
-
-		ext := ".png"
-		switch att.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		case "image/png":
-			ext = ".png"
-		}
-
-		filename := fmt.Sprintf("image-%s%s", uuid.New().String()[:8], ext)
-		filePath := filepath.Join(tempDir, filename)
-		if err := os.WriteFile(filePath, imageData, 0644); err != nil {
-			a.logger.Warn("failed to write image file", zap.Error(err), zap.String("path", filePath))
-			continue
-		}
-
-		imagePaths = append(imagePaths, filePath)
-		a.logger.Info("saved image attachment",
-			zap.String("path", filePath),
-			zap.Int("size", len(imageData)))
-	}
-
-	return imagePaths, nil
 }
 
 // Cancel interrupts the current turn.

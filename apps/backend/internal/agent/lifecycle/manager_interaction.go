@@ -495,6 +495,26 @@ func (m *Manager) GetAvailableCommandsForSession(sessionID string) []streams.Ava
 	return execution.GetAvailableCommands()
 }
 
+// GetModeStateForSession returns the cached session mode state.
+// Returns nil if the session has no execution or no mode state cached.
+func (m *Manager) GetModeStateForSession(sessionID string) *CachedModeState {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil
+	}
+	return execution.GetModeState()
+}
+
+// GetModelStateForSession returns the cached session model state.
+// Returns nil if the session has no execution or no model state cached.
+func (m *Manager) GetModelStateForSession(sessionID string) *CachedModelState {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil
+	}
+	return execution.GetModelState()
+}
+
 // ListExecutions returns all currently tracked agent executions.
 //
 // Returns a snapshot of all executions in memory at the time of call. The returned slice

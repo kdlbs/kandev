@@ -149,7 +149,7 @@ var copilotPermSettings = map[string]PermissionSetting{
 
 func copilotStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", IsDefault: true, Source: "static"},
+		{ID: "gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", Source: "static"},
 		{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", Source: "static"},
 		{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5", Description: "Anthropic Claude Sonnet 4.5", Provider: "anthropic", Source: "static"},
 		{ID: "claude-opus-4.5", Name: "Claude Opus 4.5", Description: "Anthropic Claude Opus 4.5", Provider: "anthropic", Source: "static"},
@@ -161,7 +161,7 @@ func copilotStaticModels() []Model {
 		{ID: "gpt-5.1", Name: "GPT-5.1", Description: "OpenAI GPT-5.1", Provider: "openai", Source: "static"},
 		{ID: "gpt-5", Name: "GPT-5", Description: "OpenAI GPT-5", Provider: "openai", Source: "static"},
 		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Description: "OpenAI GPT-5.1 Codex Mini", Provider: "openai", Source: "static"},
-		{ID: "gpt-5-mini", Name: "GPT-5 Mini", Description: "OpenAI GPT-5 Mini", Provider: "openai", Source: "static"},
+		{ID: "gpt-5-mini", Name: "GPT-5 Mini", Description: "OpenAI GPT-5 Mini", Provider: "openai", Source: "static", IsDefault: true},
 		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro Preview", Description: "Google Gemini 3 Pro Preview", Provider: "google", Source: "static"},
 	}
 }

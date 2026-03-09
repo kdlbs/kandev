@@ -553,11 +553,6 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
-	// Skip "default" mode unless available modes are included (initial state from session/new).
-	// When availableModes is present, the frontend needs it to populate the mode selector.
-	if payload.Data.CurrentModeID == "default" && len(payload.Data.AvailableModes) == 0 {
-		return
-	}
 	eventPayload := lifecycle.SessionModeEventPayload{
 		TaskID:         payload.TaskID,
 		SessionID:      sessionID,
@@ -632,6 +627,10 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	}
 	session.AgentProfileSnapshot["model"] = model
 	_ = s.repo.UpdateTaskSession(ctx, session)
+	// Invalidate the message creator's model cache so subsequent messages use the new model.
+	if s.messageCreator != nil {
+		s.messageCreator.InvalidateModelCache(sessionID)
+	}
 }
 
 // handleSessionTodosEvent broadcasts plan/todo entries to the WebSocket and persists

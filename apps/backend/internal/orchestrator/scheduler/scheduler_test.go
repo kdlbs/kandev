@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -74,6 +75,9 @@ func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecuti
 }
 func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
 	return nil
+}
+func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
+	return errors.New("not supported")
 }
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {

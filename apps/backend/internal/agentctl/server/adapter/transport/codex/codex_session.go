@@ -61,6 +61,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 	a.mu.Lock()
 	a.threadID = result.Thread.ID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(result.Thread.ID)
 
 	a.logger.Info("created new thread", zap.String("thread_id", a.threadID))
 
@@ -113,6 +114,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.threadID = sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	a.logger.Info("resumed thread", zap.String("thread_id", a.threadID))
 

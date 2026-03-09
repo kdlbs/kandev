@@ -171,6 +171,9 @@ func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecution
 func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ string) error {
 	return nil
 }
+func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
+	return fmt.Errorf("not supported")
+}
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough

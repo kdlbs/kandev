@@ -78,6 +78,10 @@ func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecution
 	return nil
 }
 
+func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
+	return fmt.Errorf("not supported")
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
 }

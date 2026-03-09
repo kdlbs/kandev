@@ -112,6 +112,9 @@ type Adapter struct {
 	promptTraceCtx context.Context
 	promptTraceMu  sync.RWMutex
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -150,9 +153,10 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		log.Info("parsed model from AGENT_MODEL", zap.String("model", modelStr))
 	}
 
+	l := log.WithFields(zap.String("adapter", "opencode"), zap.String("agent_id", agentID))
 	return &Adapter{
 		cfg:                cfg,
-		logger:             log.WithFields(zap.String("adapter", "opencode"), zap.String("agent_id", agentID)),
+		logger:             l,
 		agentID:            agentID,
 		normalizer:         NewNormalizer(),
 		model:              modelSpec,
@@ -164,6 +168,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		password:           opencode.GenerateServerPassword(),
 		directory:          cfg.WorkDir,
 		modelContextWindow: 200000, // Default
+		attachMgr:          shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -343,6 +348,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
 
@@ -374,6 +380,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.sessionID = newSessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(newSessionID)
 
 	a.logger.Info("loaded session (forked)",
 		zap.String("original_session_id", sessionID),
@@ -394,8 +401,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 }
 
 // Prompt sends a prompt to OpenCode and waits for completion.
-// Note: attachments are not yet supported in OpenCode protocol - they are ignored.
-func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
+func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
 	a.mu.Lock()
 	client := a.client
 	sessionID := a.sessionID
@@ -405,6 +411,17 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 	a.resultCh = make(chan resultComplete, 1)
 	a.mu.Unlock()
 
+	// Save attachments to workspace and prepend references to message
+	finalMessage := message
+	if len(attachments) > 0 {
+		saved, err := a.attachMgr.SaveAttachments(attachments)
+		if err != nil {
+			a.logger.Warn("failed to save attachments", zap.Error(err))
+		} else if len(saved) > 0 {
+			finalMessage = shared.BuildAttachmentPrompt(saved) + message
+		}
+	}
+
 	if client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
@@ -413,12 +430,13 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolOpenCode, a.agentID, "prompt")
 	promptSpan.SetAttributes(
 		attribute.String("session_id", sessionID),
-		attribute.Int("prompt_length", len(message)),
+		attribute.Int("prompt_length", len(finalMessage)),
 	)
 	a.setPromptTraceCtx(promptCtx)
 	defer func() {
 		a.clearPromptTraceCtx()
 		promptSpan.End()
+		a.attachMgr.Cleanup()
 	}()
 
 	a.logger.Info("sending prompt",
@@ -431,7 +449,7 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 	}
 
 	// Send prompt with model selection (blocks until OpenCode finishes)
-	if err := client.SendPrompt(ctx, sessionID, message, a.model, "", ""); err != nil {
+	if err := client.SendPrompt(ctx, sessionID, finalMessage, a.model, "", ""); err != nil {
 		a.mu.Lock()
 		a.resultCh = nil
 		a.mu.Unlock()
@@ -441,19 +459,21 @@ func (a *Adapter) Prompt(ctx context.Context, message string, _ []v1.MessageAtta
 	a.logger.Info("prompt HTTP request completed, waiting for SSE idle signal",
 		zap.String("session_id", sessionID))
 
-	// Wait for result via control channel or context cancellation
+	return a.waitForPromptCompletion(ctx, client, sessionID)
+}
+
+// waitForPromptCompletion blocks until the prompt completes via the SSE control channel.
+func (a *Adapter) waitForPromptCompletion(ctx context.Context, client *opencode.Client, sessionID string) error {
 	controlCh := client.ControlChannel()
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Request cancellation
 			_ = a.Cancel(context.Background())
 			return ctx.Err()
 
 		case control, ok := <-controlCh:
 			if !ok {
-				// Channel closed
 				a.sendUpdate(AgentEvent{
 					Type:      streams.EventTypeComplete,
 					SessionID: sessionID,
@@ -551,6 +571,9 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	a.logger.Debug("OpenCode adapter: cancelling context")
 	a.cancel()

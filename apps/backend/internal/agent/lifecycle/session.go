@@ -124,6 +124,11 @@ func (sm *SessionManager) createOrLoadSession(
 	mcpServers []agentctltypes.McpServer,
 ) (string, error) {
 	rt := agentConfig.Runtime()
+	sm.logger.Debug("createOrLoadSession decision",
+		zap.String("agent_type", agentConfig.ID()),
+		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume),
+		zap.String("existing_session_id", existingSessionID),
+		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID)
 		if err != nil {
@@ -258,6 +263,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	taskDescription string,
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
+	profileModel string,
 ) error {
 	// Create session-level trace span to group all operations under one trace
 	_, sessionSpan := tracing.TraceSessionStart(
@@ -320,6 +326,21 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
+
+	// Set the user's configured profile model if it differs from the agent's default.
+	// ACP agents ignore --model CLI flags, so the model must be set via ACP protocol.
+	if profileModel != "" && profileModel != agentConfig.DefaultModel() && execution.agentctl != nil {
+		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
+			sm.logger.Warn("failed to set profile model via ACP",
+				zap.String("execution_id", execution.ID),
+				zap.String("model", profileModel),
+				zap.Error(err))
+		} else {
+			sm.logger.Info("set profile model on ACP session",
+				zap.String("execution_id", execution.ID),
+				zap.String("model", profileModel))
+		}
+	}
 
 	// Publish session created event
 	if sm.eventPublisher != nil {

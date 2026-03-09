@@ -234,7 +234,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
 		return nil
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
 		return nil
-	})
+	}, "")
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -359,7 +359,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, func(executionID string) error {
 		return nil
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, func(executionID string) error {
 		return nil
-	})
+	}, "")
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {

@@ -53,7 +53,7 @@ func TestHandleSessionModeEvent(t *testing.T) {
 		require.Len(t, eb.events, 1)
 	})
 
-	t.Run("skips default mode without available modes", func(t *testing.T) {
+	t.Run("publishes default mode without available modes (mode exit)", func(t *testing.T) {
 		eb := &recordingEventBus{}
 		svc := &Service{logger: testLogger(), eventBus: eb}
 
@@ -64,7 +64,7 @@ func TestHandleSessionModeEvent(t *testing.T) {
 			Data:      &lifecycle.AgentStreamEventData{CurrentModeID: "default"},
 		})
 
-		require.Empty(t, eb.events)
+		require.Len(t, eb.events, 1)
 	})
 
 	t.Run("publishes default mode with available modes (initial state)", func(t *testing.T) {

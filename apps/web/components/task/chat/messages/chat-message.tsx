@@ -99,7 +99,7 @@ type UserMessageProps = {
 };
 
 type UserMessageMetadata = {
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
@@ -109,14 +109,16 @@ type UserMessageMetadata = {
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
   const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
+  const fileAttachments = (metadata?.attachments || []).filter((att) => att.type === "resource");
   const contextFiles = metadata?.context_files || [];
   const hasPlanMode = !!metadata?.plan_mode;
   const hasReviewComments = !!metadata?.has_review_comments;
   const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
   const hasContent = !!(comment.content && comment.content.trim() !== "");
-  const hasAttachments = imageAttachments.length > 0;
+  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   return {
     imageAttachments,
+    fileAttachments,
     contextFiles,
     hasPlanMode,
     hasReviewComments,
@@ -179,6 +181,7 @@ function UserMessageContent({
   const userNavigation = useMessageNavigation(allMessages || [], comment.id, "user");
   const {
     imageAttachments,
+    fileAttachments,
     contextFiles,
     hasPlanMode,
     hasReviewComments,
@@ -207,6 +210,15 @@ function UserMessageContent({
                   className="max-h-48 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
                   onClick={() => openImageInWindow(att.mime_type, att.data)}
                 />
+              ))}
+              {fileAttachments.map((att, index) => (
+                <span
+                  key={`file-${index}`}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
+                >
+                  <IconFile size={12} />
+                  {att.name || "Attachment"}
+                </span>
               ))}
             </div>
           )}

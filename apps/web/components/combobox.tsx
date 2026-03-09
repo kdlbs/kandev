@@ -35,6 +35,10 @@ interface ComboboxProps {
   triggerClassName?: string;
   showSearch?: boolean;
   testId?: string;
+  popoverSide?: "top" | "right" | "bottom" | "left";
+  popoverAlign?: "start" | "center" | "end";
+  /** When true, the trigger always renders the plain label text instead of renderLabel. */
+  plainTrigger?: boolean;
 }
 
 export const Combobox = memo(function Combobox({
@@ -50,6 +54,9 @@ export const Combobox = memo(function Combobox({
   triggerClassName,
   showSearch = true,
   testId,
+  popoverSide,
+  popoverAlign = "start",
+  plainTrigger = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   // Track the highlighted item. Defaults to the selected value so the current
@@ -76,7 +83,7 @@ export const Combobox = memo(function Combobox({
           data-testid={testId}
         >
           <div className="flex min-w-0 flex-1 items-center">
-            {selectedOption?.renderLabel ? (
+            {!plainTrigger && selectedOption?.renderLabel ? (
               selectedOption.renderLabel()
             ) : (
               <span className="truncate">{selectedOption?.label || placeholder}</span>
@@ -91,7 +98,8 @@ export const Combobox = memo(function Combobox({
           "w-[var(--radix-popover-trigger-width)] min-w-[300px] max-w-none p-0 max-h-[var(--radix-popover-content-available-height)]",
           className,
         )}
-        align="start"
+        side={popoverSide}
+        align={popoverAlign}
       >
         <Command value={highlighted} onValueChange={setHighlighted}>
           {dropdownLabel ? (
@@ -107,6 +115,7 @@ export const Combobox = memo(function Combobox({
                 <CommandItem
                   key={option.value}
                   value={option.value}
+                  keywords={[option.label, option.description ?? ""]}
                   onSelect={() => {
                     onValueChange(option.value === value ? "" : option.value);
                     setOpen(false);

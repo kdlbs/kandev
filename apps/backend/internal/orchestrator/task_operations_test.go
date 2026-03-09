@@ -218,6 +218,7 @@ func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, str
 func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
 	return nil
 }
+func (m *mockMessageCreator) InvalidateModelCache(string) {}
 
 func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	ctx := context.Background()

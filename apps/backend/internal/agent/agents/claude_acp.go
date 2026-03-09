@@ -79,7 +79,7 @@ func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 func (a *ClaudeACP) DefaultModel() string { return "claude-sonnet-4-6" }
 
 func (a *ClaudeACP) ListModels(ctx context.Context) (*ModelList, error) {
-	return &ModelList{SupportsDynamic: true}, nil
+	return &ModelList{Models: claudeCodeStaticModels(), SupportsDynamic: true}, nil
 }
 
 func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {

@@ -43,6 +43,7 @@ func (a *Adapter) NewSession(ctx context.Context, _ []types.McpServer) (string, 
 	pendingCommands := a.takePendingCommands()
 	a.mu.Unlock()
 
+	a.attachMgr.SetSessionID(sessionID)
 	a.logger.Info("created new session placeholder", zap.String("session_id", sessionID))
 	a.emitPendingCommands(sessionID, pendingCommands)
 
@@ -57,6 +58,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	pendingCommands := a.takePendingCommands()
 	a.mu.Unlock()
 
+	a.attachMgr.SetSessionID(sessionID)
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
 	a.emitPendingCommands(sessionID, pendingCommands)
 

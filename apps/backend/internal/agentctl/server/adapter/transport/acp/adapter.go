@@ -4,6 +4,7 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +97,9 @@ type Adapter struct {
 	promptTraceCtx context.Context
 	promptTraceMu  sync.RWMutex
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -105,13 +109,15 @@ type Adapter struct {
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
 // cfg.AgentID is required for debug file naming.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
+	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	return &Adapter{
 		cfg:             cfg,
-		logger:          log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID)),
+		logger:          l,
 		agentID:         cfg.AgentID,
 		normalizer:      NewNormalizer(),
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
+		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -241,6 +247,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
@@ -335,6 +342,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 	// Check if the agent supports session loading
 	if !supportsLoad {
+		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
+			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
 
@@ -363,6 +372,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
@@ -435,7 +445,19 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		case contentTypeAudio:
 			contentBlocks = append(contentBlocks, acp.AudioBlock(att.Data, att.MimeType))
 		case contentTypeResource:
-			contentBlocks = append(contentBlocks, buildResourceBlock(att))
+			if a.capabilities.PromptCapabilities.EmbeddedContext {
+				contentBlocks = append(contentBlocks, buildResourceBlock(att))
+			} else {
+				// Agent doesn't support embedded resources — save to workspace and reference in text
+				saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
+				if saveErr != nil || len(saved) == 0 {
+					a.logger.Warn("failed to save attachment to workspace, falling back to resource block",
+						zap.String("name", att.Name), zap.Error(saveErr))
+					contentBlocks = append(contentBlocks, buildResourceBlock(att))
+				} else {
+					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
+				}
+			}
 		}
 	}
 
@@ -496,6 +518,9 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 		Data:      map[string]any{"stop_reason": stopReason},
 		Usage:     extractPromptUsage(resp.Meta),
 	})
+
+	// Clean up saved attachments — agent has finished reading them
+	a.attachMgr.Cleanup()
 
 	return nil
 }
@@ -613,6 +638,9 @@ func (a *Adapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing ACP adapter")
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	// Close update channel
 	close(a.updatesCh)
@@ -921,11 +949,18 @@ func derefStr(s *string) string {
 // Text-based MIME types use TextResourceContents; everything else uses BlobResourceContents.
 func buildResourceBlock(att v1.MessageAttachment) acp.ContentBlock {
 	uri := att.Name // Use filename as URI if no explicit URI
+	if uri == "" {
+		uri = "attachment"
+	}
 	if isTextMimeType(att.MimeType) {
+		text := att.Data
+		if decoded, err := base64.StdEncoding.DecodeString(att.Data); err == nil {
+			text = string(decoded)
+		}
 		return acp.ResourceBlock(acp.EmbeddedResourceResource{
 			TextResourceContents: &acp.TextResourceContents{
 				Uri:      uri,
-				Text:     att.Data,
+				Text:     text,
 				MimeType: acp.Ptr(att.MimeType),
 			},
 		})

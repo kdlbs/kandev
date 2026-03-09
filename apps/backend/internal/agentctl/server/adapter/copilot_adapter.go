@@ -82,6 +82,9 @@ type CopilotAdapter struct {
 	// Set in handleEvent before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -103,15 +106,17 @@ const mcpServerTypeHTTP = "http"
 func NewCopilotAdapter(cfg *Config, log *logger.Logger) *CopilotAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	l := log.WithFields(zap.String("adapter", "copilot"))
 	return &CopilotAdapter{
 		cfg:                 cfg,
-		logger:              log.WithFields(zap.String("adapter", "copilot")),
+		logger:              l,
 		normalizer:          NewCopilotNormalizer(),
 		ctx:                 ctx,
 		cancel:              cancel,
 		updatesCh:           make(chan AgentEvent, 100),
 		contextWindowSize:   defaultCopilotContextWindow,
 		pendingToolPayloads: make(map[string]*streams.NormalizedPayload),
+		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -316,6 +321,7 @@ func (a *CopilotAdapter) NewSession(ctx context.Context, mcpServers []types.McpS
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
 
@@ -348,6 +354,7 @@ func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string) erro
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	a.logger.Info("loaded session", zap.String("session_id", sessionID))
 
@@ -366,8 +373,7 @@ func (a *CopilotAdapter) LoadSession(ctx context.Context, sessionID string) erro
 }
 
 // Prompt sends a prompt to Copilot and waits for completion.
-// Note: attachments are not yet supported in Copilot protocol - they are ignored.
-func (a *CopilotAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
+func (a *CopilotAdapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
 	if a.client == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
@@ -381,12 +387,23 @@ func (a *CopilotAdapter) Prompt(ctx context.Context, message string, _ []v1.Mess
 	a.receivedDeltas = false // Reset delta tracking for new operation
 	a.mu.Unlock()
 
+	// Save attachments to workspace and prepend references to message
+	finalMessage := message
+	if len(attachments) > 0 {
+		saved, err := a.attachMgr.SaveAttachments(attachments)
+		if err != nil {
+			a.logger.Warn("failed to save attachments", zap.Error(err))
+		} else if len(saved) > 0 {
+			finalMessage = shared.BuildAttachmentPrompt(saved) + message
+		}
+	}
+
 	a.logger.Info("sending prompt via SDK",
 		zap.String("session_id", sessionID),
 		zap.String("operation_id", operationID))
 
 	// Send message (non-blocking, events come via handler)
-	if _, err := a.client.Send(ctx, message); err != nil {
+	if _, err := a.client.Send(ctx, finalMessage); err != nil {
 		a.mu.Lock()
 		a.resultCh = nil
 		a.mu.Unlock()
@@ -414,6 +431,7 @@ func (a *CopilotAdapter) Prompt(ctx context.Context, message string, _ []v1.Mess
 		a.logger.Info("prompt completed",
 			zap.String("operation_id", operationID),
 			zap.Bool("success", result.success))
+		a.attachMgr.Cleanup()
 		return nil
 	}
 }
@@ -465,6 +483,9 @@ func (a *CopilotAdapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing Copilot SDK adapter")
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	// Cancel the context
 	if a.cancel != nil {

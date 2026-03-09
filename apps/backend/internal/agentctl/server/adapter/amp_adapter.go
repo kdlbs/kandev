@@ -92,6 +92,9 @@ type AmpAdapter struct {
 	// Set in handleMessage before dispatch; used by sendUpdate for OTel tracing.
 	lastRawData json.RawMessage
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -104,9 +107,10 @@ const defaultAmpContextWindow = 200000
 func NewAmpAdapter(cfg *Config, log *logger.Logger) *AmpAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	l := log.WithFields(zap.String("adapter", "amp"))
 	return &AmpAdapter{
 		cfg:                    cfg,
-		logger:                 log.WithFields(zap.String("adapter", "amp")),
+		logger:                 l,
 		normalizer:             NewAmpNormalizer(),
 		oneShotCfg:             cfg.OneShotConfig,
 		ctx:                    ctx,
@@ -115,6 +119,7 @@ func NewAmpAdapter(cfg *Config, log *logger.Logger) *AmpAdapter {
 		mainModelContextWindow: defaultAmpContextWindow,
 		pendingToolCalls:       make(map[string]bool),
 		pendingToolPayloads:    make(map[string]*streams.NormalizedPayload),
+		attachMgr:              shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -193,6 +198,7 @@ func (a *AmpAdapter) NewSession(ctx context.Context, _ []types.McpServer) (strin
 	// Generate a placeholder session ID - Amp will return its thread ID
 	sessionID := uuid.New().String()
 	a.sessionID = sessionID
+	a.attachMgr.SetSessionID(sessionID)
 
 	a.logger.Info("created new session placeholder", zap.String("session_id", sessionID))
 
@@ -206,6 +212,7 @@ func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
 	a.sessionID = sessionID
 	a.hasAmpThreadID = sessionID != "" // LoadSession always receives a real Amp thread ID
 	a.mu.Unlock()
+	a.attachMgr.SetSessionID(sessionID)
 
 	// Set thread ID in client for tracking (only for non-one-shot)
 	if a.client != nil {
@@ -220,11 +227,26 @@ func (a *AmpAdapter) LoadSession(ctx context.Context, sessionID string) error {
 // Prompt sends a prompt to Amp and waits for completion.
 // In one-shot mode, this spawns a new subprocess per prompt.
 // Note: attachments are not yet supported in Amp protocol - they are ignored.
-func (a *AmpAdapter) Prompt(ctx context.Context, message string, _ []v1.MessageAttachment) error {
-	if a.oneShotCfg != nil {
-		return a.promptOneShot(ctx, message)
+func (a *AmpAdapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
+	// Save attachments to workspace and prepend references to message
+	finalMessage := message
+	if len(attachments) > 0 {
+		saved, err := a.attachMgr.SaveAttachments(attachments)
+		if err != nil {
+			a.logger.Warn("failed to save attachments", zap.Error(err))
+		} else if len(saved) > 0 {
+			finalMessage = shared.BuildAttachmentPrompt(saved) + message
+		}
 	}
-	return a.promptLongLived(ctx, message)
+
+	if a.oneShotCfg != nil {
+		err := a.promptOneShot(ctx, finalMessage)
+		a.attachMgr.Cleanup()
+		return err
+	}
+	err := a.promptLongLived(ctx, finalMessage)
+	a.attachMgr.Cleanup()
+	return err
 }
 
 // oneShotProcess holds the state of a one-shot subprocess spawned for a single prompt.
@@ -494,6 +516,9 @@ func (a *AmpAdapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing Amp adapter")
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	// Cancel the context
 	if a.cancel != nil {

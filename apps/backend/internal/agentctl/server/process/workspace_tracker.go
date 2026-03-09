@@ -49,10 +49,12 @@ type WorkspaceTracker struct {
 	gitPollInterval time.Duration
 
 	// Control
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	started  bool
-	stopOnce sync.Once
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	started    bool
+	stopOnce   sync.Once
+	cancelCtx  context.Context    // Cancellable context for killing in-flight git commands on Stop
+	cancelFunc context.CancelFunc // Cancel function called during Stop
 }
 
 // NewWorkspaceTracker creates a new workspace tracker
@@ -62,6 +64,8 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	// Cache validated git index path (works with worktrees where .git is a file)
 	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
 		gitIndexPath:               gitIndexPath,
@@ -69,6 +73,8 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		gitPollInterval:            DefaultGitPollInterval,
 		stopCh:                     make(chan struct{}),
+		cancelCtx:                  ctx,
+		cancelFunc:                 cancel,
 	}
 }
 
@@ -100,7 +106,9 @@ func resolveGitIndexPath(workDir string) string {
 // Start begins monitoring the workspace using polling (no fsnotify).
 // File changes are detected via git status polling, which is efficient and
 // doesn't consume file descriptors like fsnotify/kqueue does on macOS.
-func (wt *WorkspaceTracker) Start(ctx context.Context) {
+// The passed context is ignored — the tracker uses its own cancellable context
+// so that Stop() can kill in-flight git commands immediately.
+func (wt *WorkspaceTracker) Start(_ context.Context) {
 	wt.mu.Lock()
 	if wt.started {
 		wt.mu.Unlock()
@@ -112,18 +120,35 @@ func (wt *WorkspaceTracker) Start(ctx context.Context) {
 
 	// Start file change monitoring (uses git status polling)
 	wt.wg.Add(1)
-	go wt.monitorLoop(ctx)
+	go wt.monitorLoop(wt.cancelCtx)
 
 	// Start git polling for detecting manual git operations (commits, resets, etc.)
 	wt.wg.Add(1)
-	go wt.pollGitChanges(ctx)
+	go wt.pollGitChanges(wt.cancelCtx)
 }
 
-// Stop stops the workspace tracker
+// stopTimeout is the maximum time Stop() will wait for goroutines to exit.
+const stopTimeout = 5 * time.Second
+
+// Stop stops the workspace tracker. It cancels in-flight git commands and waits
+// up to 5 seconds for goroutines to exit before proceeding.
 func (wt *WorkspaceTracker) Stop() {
 	wt.stopOnce.Do(func() {
+		wt.cancelFunc() // Kill in-flight git commands immediately
 		close(wt.stopCh)
-		wt.wg.Wait()
+
+		done := make(chan struct{})
+		go func() {
+			wt.wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			// Clean shutdown
+		case <-time.After(stopTimeout):
+			wt.logger.Warn("workspace tracker stop timed out, proceeding anyway",
+				zap.Duration("timeout", stopTimeout))
+		}
 		wt.logger.Info("workspace tracker stopped")
 	})
 }

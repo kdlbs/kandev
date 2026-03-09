@@ -145,14 +145,26 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	return result, nil
 }
 
-// SwitchModel stops the current agent, restarts it with a new model, and sends the prompt.
-// For agents that support session resume (can_recover: true), it attempts to resume context.
-// For agents that don't support resume (can_recover: false), a fresh session is started.
+// SwitchModel switches the model for a running session. It first attempts an in-place switch
+// via ACP session/set_model (instant, no process restart). If the agent doesn't support
+// in-place switching, it falls back to stopping and restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
+
+	// Try in-place model switch first (ACP agents support session/set_model)
+	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
+		e.logger.Info("model switched in-place via ACP session/set_model",
+			zap.String("session_id", sessionID),
+			zap.String("new_model", newModel))
+		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)
+		return &PromptResult{StopReason: "model_switched_in_place"}, nil
+	}
+
+	e.logger.Debug("in-place model switch not available, falling back to agent restart",
+		zap.String("session_id", sessionID))
 
 	session, task, acpSessionID, existingRunning, err := e.prepareModelSwitch(ctx, taskID, sessionID)
 	if err != nil {
@@ -357,6 +369,27 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+	}
+}
+
+// persistInPlaceModelSwitch updates the session snapshot model after a successful
+// in-place model switch (no agent restart). Only the model field changes.
+func (e *Executor) persistInPlaceModelSwitch(ctx context.Context, sessionID, newModel string) {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		e.logger.Warn("failed to get session for in-place model switch persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session.AgentProfileSnapshot == nil {
+		session.AgentProfileSnapshot = make(map[string]interface{})
+	}
+	session.AgentProfileSnapshot["model"] = newModel
+	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+		e.logger.Warn("failed to persist in-place model switch",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 }
 

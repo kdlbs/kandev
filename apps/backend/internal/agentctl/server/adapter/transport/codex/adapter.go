@@ -102,6 +102,9 @@ type Adapter struct {
 	promptTraceCtx context.Context
 	promptTraceMu  sync.RWMutex
 
+	// Attachment management
+	attachMgr *shared.AttachmentManager
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -117,14 +120,16 @@ type turnCompleteResult struct {
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
 func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	ctx, cancel := context.WithCancel(context.Background())
+	l := log.WithFields(zap.String("adapter", "codex"), zap.String("agent_id", cfg.AgentID))
 	return &Adapter{
 		cfg:        cfg,
-		logger:     log.WithFields(zap.String("adapter", "codex"), zap.String("agent_id", cfg.AgentID)),
+		logger:     l,
 		agentID:    cfg.AgentID,
 		normalizer: NewNormalizer(),
 		ctx:        ctx,
 		cancel:     cancel,
 		updatesCh:  make(chan AgentEvent, 100),
+		attachMgr:  shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 	}
 }
 
@@ -153,6 +158,9 @@ func (a *Adapter) Close() error {
 	a.closed = true
 
 	a.logger.Info("closing Codex adapter")
+
+	// Clean up any saved attachments
+	a.attachMgr.Cleanup()
 
 	// Cancel the context to stop the read loop goroutine
 	if a.cancel != nil {

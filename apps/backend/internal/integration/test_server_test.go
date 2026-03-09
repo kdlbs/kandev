@@ -198,6 +198,7 @@ func (a *testMessageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.C
 func (a *testMessageCreatorAdapter) AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendThinkingContent(ctx, messageID, additionalContent)
 }
+func (a *testMessageCreatorAdapter) InvalidateModelCache(string) {}
 
 // testTurnServiceAdapter adapts the task service to the orchestrator.TurnService interface for tests
 type testTurnServiceAdapter struct {

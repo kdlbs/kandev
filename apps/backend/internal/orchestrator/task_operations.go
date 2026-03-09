@@ -1262,12 +1262,20 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 		zap.String("session_id", sessionID),
 		zap.String("from", currentModel),
 		zap.String("to", model))
-	s.startTurnForSession(ctx, sessionID)
 	switchCtx := context.WithoutCancel(ctx)
 	switchResult, err := s.executor.SwitchModel(switchCtx, taskID, sessionID, model, effectivePrompt)
 	if err != nil {
 		return nil, true, fmt.Errorf("model switch failed: %w", err)
 	}
+	if switchResult.StopReason == "model_switched_in_place" {
+		// Agent is still running with the new model — let PromptTask send the prompt normally.
+		// Invalidate the message creator's model cache so the next message picks up the new model.
+		if s.messageCreator != nil {
+			s.messageCreator.InvalidateModelCache(sessionID)
+		}
+		return nil, false, nil
+	}
+	s.startTurnForSession(ctx, sessionID)
 	s.setSessionRunning(ctx, taskID, sessionID, session)
 	return &PromptResult{
 		StopReason:   switchResult.StopReason,

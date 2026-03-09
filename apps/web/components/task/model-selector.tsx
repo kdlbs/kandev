@@ -1,15 +1,8 @@
 "use client";
 
-import { memo, useCallback } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { memo, useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
@@ -46,7 +39,12 @@ function resolveStaticModels(
     const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
     if (!profile) continue;
     const available = availableAgents.find((a: AvailableAgent) => a.name === agent.name);
-    return available?.model_config?.available_models ?? [];
+    const models = available?.model_config?.available_models ?? [];
+    // Static models don't include description — use model ID as subtitle when it differs from name
+    return models.map((m) => ({
+      ...m,
+      description: m.id !== m.name ? m.id : undefined,
+    }));
   }
   return [];
 }
@@ -110,8 +108,7 @@ function useModelSelectorState(sessionId: string | null) {
     (sid: string, modelId: string) => {
       setActiveModel(sid, modelId);
       setSessionModel(sid, modelId).catch((err) => {
-        // TODO: remove debug log
-        console.log("[ModelSelector] set-model API failed:", err);
+        console.error("[ModelSelector] set-model API failed:", err);
       });
     },
     [setActiveModel],
@@ -120,48 +117,60 @@ function useModelSelectorState(sessionId: string | null) {
   return { currentModel, modelOptions, handleModelChange };
 }
 
+function modelToComboboxOption(model: ModelOption): ComboboxOption {
+  return {
+    value: model.id,
+    label: model.name,
+    description: model.description,
+    renderLabel: () => (
+      <>
+        <div className="min-w-0 flex-1">
+          <div className="truncate">{model.name}</div>
+          {model.description && (
+            <div className="text-xs text-muted-foreground truncate" title={model.description}>{model.description}</div>
+          )}
+        </div>
+        {model.usageMultiplier && (
+          <span className="text-xs text-muted-foreground shrink-0">{model.usageMultiplier}</span>
+        )}
+      </>
+    ),
+  };
+}
+
 export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
   const { currentModel, modelOptions, handleModelChange } = useModelSelectorState(sessionId);
 
+  const comboboxOptions = useMemo(
+    () => modelOptions.map(modelToComboboxOption),
+    [modelOptions],
+  );
+
+  const onValueChange = useCallback(
+    (value: string) => {
+      // Don't allow deselecting — always keep a model selected
+      if (!value || !sessionId) return;
+      handleModelChange(sessionId, value);
+    },
+    [sessionId, handleModelChange],
+  );
+
   if (!sessionId || !currentModel) return null;
 
-  const displayName = modelOptions.find((m) => m.id === currentModel)?.name || currentModel;
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 cursor-pointer hover:bg-muted/40 whitespace-nowrap"
-        >
-          <span className="text-xs">{displayName}</span>
-          <IconChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="min-w-[280px]">
-        {modelOptions.map((model) => (
-          <DropdownMenuItem
-            key={model.id}
-            onClick={() => handleModelChange(sessionId, model.id)}
-            className={model.id === currentModel ? "bg-muted" : ""}
-          >
-            <div className="flex items-center justify-between w-full gap-2">
-              <div>
-                <div>{model.name}</div>
-                {model.description && (
-                  <div className="text-xs text-muted-foreground">{model.description}</div>
-                )}
-              </div>
-              {model.usageMultiplier && (
-                <span className="text-xs text-muted-foreground shrink-0">
-                  {model.usageMultiplier}
-                </span>
-              )}
-            </div>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Combobox
+      options={comboboxOptions}
+      value={currentModel}
+      onValueChange={onValueChange}
+      placeholder="Select model..."
+      searchPlaceholder="Filter models..."
+      emptyMessage="No models found."
+      showSearch={modelOptions.length > 5}
+      triggerClassName="h-7 gap-1 px-2 text-xs w-auto hover:bg-muted/40 whitespace-nowrap"
+      className="min-w-[280px]"
+      plainTrigger
+      popoverSide="top"
+      popoverAlign="end"
+    />
   );
 });

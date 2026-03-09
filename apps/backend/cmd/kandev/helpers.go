@@ -63,6 +63,8 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
 		result = appendAvailableCommandsMessage(sessionID, session, lifecycleMgr, result)
+		result = appendSessionModeMessage(sessionID, session, lifecycleMgr, result)
+		result = appendSessionModelsMessage(sessionID, session, lifecycleMgr, result)
 		return result, nil
 	}
 }
@@ -247,6 +249,49 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 		"session_id":         sessionID,
 		"task_id":            session.TaskID,
 		"available_commands": commands,
+	})
+	if err == nil {
+		result = append(result, notification)
+	}
+	return result
+}
+
+// appendSessionModeMessage adds session mode state notification to result if cached.
+func appendSessionModeMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
+	if lifecycleMgr == nil {
+		return result
+	}
+	modeState := lifecycleMgr.GetModeStateForSession(sessionID)
+	if modeState == nil || (modeState.CurrentModeID == "" && len(modeState.AvailableModes) == 0) {
+		return result
+	}
+	notification, err := ws.NewNotification(ws.ActionSessionModeChanged, lifecycle.SessionModeEventPayload{
+		TaskID:         session.TaskID,
+		SessionID:      sessionID,
+		CurrentModeID:  modeState.CurrentModeID,
+		AvailableModes: modeState.AvailableModes,
+	})
+	if err == nil {
+		result = append(result, notification)
+	}
+	return result
+}
+
+// appendSessionModelsMessage adds session models state notification to result if cached.
+func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
+	if lifecycleMgr == nil {
+		return result
+	}
+	modelState := lifecycleMgr.GetModelStateForSession(sessionID)
+	if modelState == nil || (modelState.CurrentModelID == "" && len(modelState.Models) == 0) {
+		return result
+	}
+	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
+		TaskID:         session.TaskID,
+		SessionID:      sessionID,
+		CurrentModelID: modelState.CurrentModelID,
+		Models:         modelState.Models,
+		ConfigOptions:  modelState.ConfigOptions,
 	})
 	if err == nil {
 		result = append(result, notification)

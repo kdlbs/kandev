@@ -27,20 +27,11 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
       try {
         await setSessionMode(sessionId, modeId);
       } catch (err) {
-        // TODO: remove debug log
-        console.log("[ModeSelector] set-mode API failed:", err);
+        console.error("[ModeSelector] set-mode API failed:", err);
       }
     },
     [sessionId],
   );
-
-  // TODO: remove debug logs
-  console.log("[ModeSelector]", {
-    sessionId,
-    modeState,
-    hasAvailableModes: !!modeState?.availableModes,
-    modesCount: modeState?.availableModes?.length ?? 0,
-  });
 
   if (
     !sessionId ||

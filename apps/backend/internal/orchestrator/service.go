@@ -79,6 +79,9 @@ type MessageCreator interface {
 	CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendThinkingMessage appends additional content to an existing streaming thinking message
 	AppendThinkingMessage(ctx context.Context, messageID, additionalContent string) error
+	// InvalidateModelCache clears any cached model for a session, forcing the next
+	// message to re-read the model from the DB. Called after model switches.
+	InvalidateModelCache(sessionID string)
 }
 
 // TurnService is an interface for managing session turns

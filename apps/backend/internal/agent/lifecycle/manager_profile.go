@@ -144,7 +144,21 @@ func runtimeName(rt ExecutorBackend) executor.Name {
 	return rt.Name()
 }
 
+// resolveProfileModel resolves the model configured on an agent profile.
+// Returns empty string if the profile cannot be resolved.
+func (m *Manager) resolveProfileModel(ctx context.Context, profileID string) string {
+	if profileID == "" || m.profileResolver == nil {
+		return ""
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.Model
+}
+
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, mcpServers []agentctltypes.McpServer) error {
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady)
+	profileModel := m.resolveProfileModel(ctx, execution.AgentProfileID)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, mcpServers, m.MarkReady, profileModel)
 }

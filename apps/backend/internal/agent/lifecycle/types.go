@@ -84,6 +84,14 @@ type AgentExecution struct {
 	availableCommands   []streams.AvailableCommand
 	availableCommandsMu sync.RWMutex
 
+	// Cached session mode state (for re-sending on subscribe after page refresh)
+	modeState   *CachedModeState
+	modeStateMu sync.RWMutex
+
+	// Cached session model state (for re-sending on subscribe after page refresh)
+	modelState   *CachedModelState
+	modelStateMu sync.RWMutex
+
 	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
 	// Buffered (size 1) so the sender never blocks.
 	promptDoneCh chan PromptCompletionSignal
@@ -138,6 +146,47 @@ func (ae *AgentExecution) GetAvailableCommands() []streams.AvailableCommand {
 	ae.availableCommandsMu.RLock()
 	defer ae.availableCommandsMu.RUnlock()
 	return ae.availableCommands
+}
+
+// CachedModeState holds the last-known session mode state for re-sending on subscribe.
+type CachedModeState struct {
+	CurrentModeID  string
+	AvailableModes []streams.SessionModeInfo
+}
+
+// CachedModelState holds the last-known session model state for re-sending on subscribe.
+type CachedModelState struct {
+	CurrentModelID string
+	Models         []streams.SessionModelInfo
+	ConfigOptions  []streams.ConfigOption
+}
+
+// SetModeState caches the session mode state on this execution.
+func (ae *AgentExecution) SetModeState(state *CachedModeState) {
+	ae.modeStateMu.Lock()
+	defer ae.modeStateMu.Unlock()
+	ae.modeState = state
+}
+
+// GetModeState returns the cached session mode state.
+func (ae *AgentExecution) GetModeState() *CachedModeState {
+	ae.modeStateMu.RLock()
+	defer ae.modeStateMu.RUnlock()
+	return ae.modeState
+}
+
+// SetModelState caches the session model state on this execution.
+func (ae *AgentExecution) SetModelState(state *CachedModelState) {
+	ae.modelStateMu.Lock()
+	defer ae.modelStateMu.Unlock()
+	ae.modelState = state
+}
+
+// GetModelState returns the cached session model state.
+func (ae *AgentExecution) GetModelState() *CachedModelState {
+	ae.modelStateMu.RLock()
+	defer ae.modelStateMu.RUnlock()
+	return ae.modelState
 }
 
 // SetSessionSpan stores the session-level trace span on the execution.
