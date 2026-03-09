@@ -51,7 +51,7 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 		return
 	}
 
-	// Broadcast updated available agents list
+	// Broadcast updated available agents list and profile created event
 	if h.hub != nil {
 		availableResp, availErr := h.controller.ListAvailableAgents(c.Request.Context())
 		if availErr != nil {
@@ -59,6 +59,13 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 		} else {
 			notification, _ := ws.NewNotification(ws.ActionAgentAvailableUpdated, gin.H{
 				"agents": availableResp.Agents,
+			})
+			h.hub.Broadcast(notification)
+		}
+		// Broadcast profile created so the create-task dialog picks up the new profile
+		if len(resp.Profiles) > 0 {
+			notification, _ := ws.NewNotification(ws.ActionAgentProfileCreated, gin.H{
+				"profile": resp.Profiles[0],
 			})
 			h.hub.Broadcast(notification)
 		}
