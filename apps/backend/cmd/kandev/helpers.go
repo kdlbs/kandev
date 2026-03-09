@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingshandlers "github.com/kandev/kandev/internal/agent/settings/handlers"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
@@ -431,6 +432,7 @@ type routeParams struct {
 	msgCreator              *messageCreatorAdapter
 	secretsSvc              *secrets.Service
 	secretStore             secrets.SecretStore
+	mcpConfigSvc            *mcpconfig.Service
 	webInternalURL          string
 	log                     *logger.Logger
 }
@@ -580,6 +582,9 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.log,
 	)
+	// Wire config-mode dependencies for agent-native configuration
+	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 

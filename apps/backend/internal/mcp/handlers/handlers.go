@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -17,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
+	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -61,6 +64,11 @@ type Handlers struct {
 	eventBus         EventBus
 	planService      *service.PlanService
 	logger           *logger.Logger
+
+	// Config-mode dependencies (optional, set via SetConfigDeps)
+	workflowSvc       *workflowsvc.Service
+	agentSettingsCtrl *agentsettingscontroller.Controller
+	mcpConfigSvc      *mcpconfig.Service
 }
 
 // NewHandlers creates new MCP handlers.
@@ -88,8 +96,21 @@ func NewHandlers(
 	}
 }
 
+// SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
+// These are optional and only needed when config-mode MCP sessions are used.
+func (h *Handlers) SetConfigDeps(
+	workflowSvc *workflowsvc.Service,
+	agentSettingsCtrl *agentsettingscontroller.Controller,
+	mcpConfigSvc *mcpconfig.Service,
+) {
+	h.workflowSvc = workflowSvc
+	h.agentSettingsCtrl = agentSettingsCtrl
+	h.mcpConfigSvc = mcpConfigSvc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
@@ -102,8 +123,39 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
+	count := 12
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", 12))
+	// Config-mode handlers (registered when config deps are set)
+	if h.workflowSvc != nil {
+		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
+		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
+		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
+		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
+		count += 4
+	}
+	if h.agentSettingsCtrl != nil {
+		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
+		d.RegisterFunc(ws.ActionMCPCreateAgent, h.handleCreateAgent)
+		d.RegisterFunc(ws.ActionMCPUpdateAgent, h.handleUpdateAgent)
+		d.RegisterFunc(ws.ActionMCPDeleteAgent, h.handleDeleteAgent)
+		d.RegisterFunc(ws.ActionMCPListAgentProfiles, h.handleListAgentProfiles)
+		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
+		count += 6
+	}
+	if h.mcpConfigSvc != nil {
+		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
+		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
+		count += 2
+	}
+	if h.taskSvc != nil {
+		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
+		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
+		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
+		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
+		count += 4
+	}
+
+	h.logger.Info("registered MCP handlers", zap.Int("count", count))
 }
 
 // handleListWorkspaces lists all workspaces.

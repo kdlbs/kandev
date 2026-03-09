@@ -1,0 +1,130 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+)
+
+func (h *Handlers) handleListAgents(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	resp, err := h.agentSettingsCtrl.ListAgents(ctx)
+	if err != nil {
+		h.logger.Error("failed to list agents", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list agents", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+func (h *Handlers) handleCreateAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		Name        string  `json:"name"`
+		WorkspaceID *string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.Name == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
+	}
+
+	agent, err := h.agentSettingsCtrl.CreateAgent(ctx, agentsettingscontroller.CreateAgentRequest{
+		Name:        req.Name,
+		WorkspaceID: req.WorkspaceID,
+	})
+	if err != nil {
+		h.logger.Error("failed to create agent", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create agent", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, agent)
+}
+
+func (h *Handlers) handleUpdateAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		AgentID       string  `json:"agent_id"`
+		SupportsMCP   *bool   `json:"supports_mcp"`
+		MCPConfigPath *string `json:"mcp_config_path"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.AgentID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
+	}
+
+	agent, err := h.agentSettingsCtrl.UpdateAgent(ctx, agentsettingscontroller.UpdateAgentRequest{
+		ID:            req.AgentID,
+		SupportsMCP:   req.SupportsMCP,
+		MCPConfigPath: req.MCPConfigPath,
+	})
+	if err != nil {
+		h.logger.Error("failed to update agent", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update agent", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, agent)
+}
+
+func (h *Handlers) handleDeleteAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	agentID, err := unmarshalStringField(msg.Payload, "agent_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if agentID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
+	}
+
+	if err := h.agentSettingsCtrl.DeleteAgent(ctx, agentID); err != nil {
+		h.logger.Error("failed to delete agent", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+func (h *Handlers) handleListAgentProfiles(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	agentID, err := unmarshalStringField(msg.Payload, "agent_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if agentID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
+	}
+
+	agent, err := h.agentSettingsCtrl.GetAgent(ctx, agentID)
+	if err != nil {
+		h.logger.Error("failed to get agent profiles", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get agent profiles", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"profiles": agent.Profiles,
+		"total":    len(agent.Profiles),
+	})
+}
+
+func (h *Handlers) handleUpdateAgentProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		ProfileID   string  `json:"profile_id"`
+		Name        *string `json:"name"`
+		Model       *string `json:"model"`
+		AutoApprove *bool   `json:"auto_approve"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ProfileID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "profile_id is required", nil)
+	}
+
+	profile, err := h.agentSettingsCtrl.UpdateProfile(ctx, agentsettingscontroller.UpdateProfileRequest{
+		ID:          req.ProfileID,
+		Name:        req.Name,
+		Model:       req.Model,
+		AutoApprove: req.AutoApprove,
+	})
+	if err != nil {
+		h.logger.Error("failed to update agent profile", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update agent profile", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, profile)
+}
