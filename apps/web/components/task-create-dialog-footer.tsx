@@ -55,53 +55,67 @@ function StartTaskSplitButton({
   onAltAction,
   onPlanModeAction,
 }: StartTaskSplitButtonProps) {
+  const altLabel = isEditMode ? "Update task" : "Create only";
+
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
-      <Button
-        type="submit"
-        variant="default"
-        className="rounded-none border-0 cursor-pointer gap-1.5 h-full"
-        disabled={disabled}
-        data-testid="submit-start-agent"
-      >
-        {isCreatingTask ? (
-          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <IconSend className="h-3.5 w-3.5" />
-        )}
-        {isCreatingTask ? "Starting..." : "Start task"}
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="default"
-            className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full"
-            disabled={disabled}
-            data-testid="submit-start-agent-chevron"
-          >
-            <IconChevronDown className="h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto min-w-max">
-          {onPlanModeAction && (
-            <DropdownMenuItem
-              onClick={onPlanModeAction}
-              className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
-              data-testid="submit-plan-mode"
-            >
-              <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
-              Start task in plan mode
-            </DropdownMenuItem>
+    <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
+      <div className="flex w-full sm:inline-flex sm:w-auto rounded-md border border-border overflow-hidden sm:h-7 h-10">
+        <Button
+          type="submit"
+          variant="default"
+          className="rounded-none border-0 cursor-pointer gap-1.5 h-full flex-1"
+          disabled={disabled}
+          data-testid="submit-start-agent"
+        >
+          {isCreatingTask ? (
+            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <IconSend className="h-3.5 w-3.5" />
           )}
-          <DropdownMenuItem
-            onClick={onAltAction}
-            className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
-          >
-            {isEditMode ? "Update task" : "Create without starting agent"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {isCreatingTask ? "Starting..." : "Start task"}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="default"
+              className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full hidden sm:flex"
+              disabled={disabled}
+              data-testid="submit-start-agent-chevron"
+            >
+              <IconChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-max">
+            {onPlanModeAction && (
+              <DropdownMenuItem
+                onClick={onPlanModeAction}
+                className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+                data-testid="submit-plan-mode"
+              >
+                <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
+                Start task in plan mode
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={onAltAction}
+              className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+            >
+              {isEditMode ? "Update task" : "Create without starting agent"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {/* Mobile-only: visible button for creating without starting agent */}
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full h-10 cursor-pointer sm:hidden"
+        disabled={disabled}
+        onClick={onAltAction}
+      >
+        {altLabel}
+      </Button>
     </div>
   );
 }
