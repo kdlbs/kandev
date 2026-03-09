@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	"os/exec"
+	"runtime"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -53,7 +56,8 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 		}
 		payload = append(payload, c.buildAvailableAgentDTO(ctx, ag, availability, now))
 	}
-	return &dto.ListAvailableAgentsResponse{Agents: payload, Total: len(payload)}, nil
+	tools := c.detectTools()
+	return &dto.ListAvailableAgentsResponse{Agents: payload, Tools: tools, Total: len(payload)}, nil
 }
 
 // HasAvailableAgents returns true if at least one agent is detected as installed.
@@ -119,6 +123,8 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	return dto.AvailableAgentDTO{
 		Name:              ag.ID(),
 		DisplayName:       displayName,
+		Description:       ag.Description(),
+		InstallScript:     ag.InstallScript(),
 		SupportsMCP:       availability.SupportsMCP,
 		MCPConfigPath:     availability.MCPConfigPath,
 		InstallationPaths: availability.InstallationPaths,
@@ -369,6 +375,26 @@ func (c *Controller) upsertAgent(ctx context.Context, result discovery.Availabil
 		}
 	}
 	return agent, nil
+}
+
+// detectTools checks for recommended CLI tools (e.g. gh) and returns their status.
+func (c *Controller) detectTools() []dto.ToolStatusDTO {
+	ghTool := dto.ToolStatusDTO{
+		Name:        "gh",
+		DisplayName: "GitHub CLI",
+		Description: "Required for GitHub integration features (PRs, reviews, webhooks).",
+		InfoURL:     "https://cli.github.com",
+	}
+	if runtime.GOOS == "darwin" {
+		ghTool.InstallScript = "brew install gh"
+	} else {
+		ghTool.InstallScript = "See https://cli.github.com for install instructions"
+	}
+	if path, err := exec.LookPath("gh"); err == nil {
+		ghTool.Available = true
+		ghTool.MatchedPath = path
+	}
+	return []dto.ToolStatusDTO{ghTool}
 }
 
 // detectAgents runs discovery and forces mock-agent available when enabled.

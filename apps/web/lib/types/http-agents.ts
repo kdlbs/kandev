@@ -111,9 +111,21 @@ export type PassthroughConfig = {
   description: string;
 };
 
+export type ToolStatus = {
+  name: string;
+  display_name: string;
+  available: boolean;
+  matched_path?: string;
+  install_script?: string;
+  description?: string;
+  info_url?: string;
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
+  description?: string;
+  install_script?: string;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
@@ -138,6 +150,7 @@ export type ListAgentDiscoveryResponse = {
 
 export type ListAvailableAgentsResponse = {
   agents: AvailableAgent[];
+  tools?: ToolStatus[];
   total: number;
 };
 

@@ -66,7 +66,7 @@ export type BackendMessage<T extends BackendMessageType, P> = {
   timestamp?: string;
 };
 
-import type { AvailableAgent, SavedLayout, StepEvents, TaskState } from "@/lib/types/http";
+import type { AvailableAgent, SavedLayout, StepEvents, TaskState, ToolStatus } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { TaskPR } from "@/lib/types/github";
@@ -120,6 +120,7 @@ export type AgentUpdatePayload = {
 
 export type AgentAvailableUpdatedPayload = {
   agents: AvailableAgent[];
+  tools?: ToolStatus[];
 };
 
 export type TerminalOutputPayload = {
