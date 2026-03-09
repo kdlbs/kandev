@@ -314,6 +314,20 @@ export class ApiClient {
     return this.request("GET", "/api/v1/workflow/templates");
   }
 
+  async deleteTask(taskId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  }
+
+  async archiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
+  }
+
+  async getAgentProfileMcpConfig(
+    profileId: string,
+  ): Promise<{ profile_id: string; enabled: boolean; servers: Record<string, unknown> }> {
+    return this.request("GET", `/api/v1/agent-profiles/${profileId}/mcp-config`);
+  }
+
   // --- E2E Test Reset ---
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
