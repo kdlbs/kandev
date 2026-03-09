@@ -299,6 +299,27 @@ const (
 	ActionMCPUpdateTaskPlan       = "mcp.update_task_plan"
 	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
 	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
+
+	// Config-mode MCP actions (agent-native configuration)
+	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
+	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"
+	ActionMCPDeleteWorkflowStep  = "mcp.delete_workflow_step"
+	ActionMCPReorderWorkflowStep = "mcp.reorder_workflow_steps"
+
+	ActionMCPListAgents  = "mcp.list_agents"
+	ActionMCPCreateAgent = "mcp.create_agent"
+	ActionMCPUpdateAgent = "mcp.update_agent"
+	ActionMCPDeleteAgent = "mcp.delete_agent"
+
+	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
+	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
+	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
+	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
+
+	ActionMCPMoveTask        = "mcp.move_task"
+	ActionMCPDeleteTask      = "mcp.delete_task"
+	ActionMCPArchiveTask     = "mcp.archive_task"
+	ActionMCPUpdateTaskState = "mcp.update_task_state"
 )
 
 // GitHub integration actions
