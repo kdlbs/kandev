@@ -127,7 +127,9 @@ function modelToComboboxOption(model: ModelOption): ComboboxOption {
         <div className="min-w-0 flex-1">
           <div className="truncate">{model.name}</div>
           {model.description && (
-            <div className="text-xs text-muted-foreground truncate" title={model.description}>{model.description}</div>
+            <div className="text-xs text-muted-foreground truncate" title={model.description}>
+              {model.description}
+            </div>
           )}
         </div>
         {model.usageMultiplier && (
@@ -141,10 +143,7 @@ function modelToComboboxOption(model: ModelOption): ComboboxOption {
 export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
   const { currentModel, modelOptions, handleModelChange } = useModelSelectorState(sessionId);
 
-  const comboboxOptions = useMemo(
-    () => modelOptions.map(modelToComboboxOption),
-    [modelOptions],
-  );
+  const comboboxOptions = useMemo(() => modelOptions.map(modelToComboboxOption), [modelOptions]);
 
   const onValueChange = useCallback(
     (value: string) => {

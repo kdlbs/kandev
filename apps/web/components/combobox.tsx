@@ -41,6 +41,55 @@ interface ComboboxProps {
   plainTrigger?: boolean;
 }
 
+function TriggerLabel({
+  selectedOption,
+  plainTrigger,
+  placeholder,
+}: {
+  selectedOption: ComboboxOption | undefined;
+  plainTrigger: boolean;
+  placeholder: string;
+}) {
+  if (!plainTrigger && selectedOption?.renderLabel) {
+    return selectedOption.renderLabel();
+  }
+  return <span className="truncate">{selectedOption?.label || placeholder}</span>;
+}
+
+function OptionsList({
+  options,
+  value,
+  onSelect,
+}: {
+  options: ComboboxOption[];
+  value: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <CommandGroup>
+      {options.map((option) => (
+        <CommandItem
+          key={option.value}
+          value={option.value}
+          keywords={[option.label, option.description ?? ""]}
+          onSelect={() => onSelect(option.value)}
+          className="relative pr-7"
+        >
+          <div className="flex min-w-0 flex-1 items-center">
+            {option.renderLabel ? option.renderLabel() : option.label}
+          </div>
+          <IconCheck
+            className={cn(
+              "absolute right-2 h-4 w-4",
+              value === option.value ? "opacity-100" : "opacity-0",
+            )}
+          />
+        </CommandItem>
+      ))}
+    </CommandGroup>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -83,11 +132,11 @@ export const Combobox = memo(function Combobox({
           data-testid={testId}
         >
           <div className="flex min-w-0 flex-1 items-center">
-            {!plainTrigger && selectedOption?.renderLabel ? (
-              selectedOption.renderLabel()
-            ) : (
-              <span className="truncate">{selectedOption?.label || placeholder}</span>
-            )}
+            <TriggerLabel
+              selectedOption={selectedOption}
+              plainTrigger={plainTrigger}
+              placeholder={placeholder}
+            />
           </div>
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -110,30 +159,14 @@ export const Combobox = memo(function Combobox({
           {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
-            <CommandGroup>
-              {options.map((option) => (
-                <CommandItem
-                  key={option.value}
-                  value={option.value}
-                  keywords={[option.label, option.description ?? ""]}
-                  onSelect={() => {
-                    onValueChange(option.value === value ? "" : option.value);
-                    setOpen(false);
-                  }}
-                  className="relative pr-7"
-                >
-                  <div className="flex min-w-0 flex-1 items-center">
-                    {option.renderLabel ? option.renderLabel() : option.label}
-                  </div>
-                  <IconCheck
-                    className={cn(
-                      "absolute right-2 h-4 w-4",
-                      value === option.value ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            <OptionsList
+              options={options}
+              value={value}
+              onSelect={(v) => {
+                onValueChange(v === value ? "" : v);
+                setOpen(false);
+              }}
+            />
           </CommandList>
         </Command>
       </PopoverContent>
