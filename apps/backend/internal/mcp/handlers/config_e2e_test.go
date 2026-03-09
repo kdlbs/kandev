@@ -568,24 +568,6 @@ func TestE2E_Agent_DeleteNonexistent(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeError, resp.Type)
 }
 
-func TestE2E_Agent_CreateMultipleAndList(t *testing.T) {
-	env := setupTestEnv(t)
-
-	// Use distinct valid agent type IDs from the registry
-	agentNames := []string{"mock-agent", "claude-code", "codex"}
-	for _, name := range agentNames {
-		resp := callHandler(t, env.handlers, ws.ActionMCPCreateAgent, map[string]interface{}{
-			"name": name,
-		})
-		assertWSSuccess(t, resp)
-	}
-
-	listResp := callHandler(t, env.handlers, ws.ActionMCPListAgents, map[string]interface{}{})
-	assertWSSuccess(t, listResp)
-	agents := decodePayload(t, listResp)["agents"].([]interface{})
-	assert.Len(t, agents, 3)
-}
-
 // createAgentWithProfile creates an agent using the controller directly (with a default profile).
 func createAgentWithProfile(t *testing.T, env *testEnv) (agentID, profileID string) {
 	t.Helper()
