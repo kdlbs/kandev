@@ -229,7 +229,10 @@ export type AppState = {
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
   setAgentDiscoveryLoading: (loading: boolean) => void;
-  setAvailableAgents: (agents: AvailableAgentsState["items"], tools?: AvailableAgentsState["tools"]) => void;
+  setAvailableAgents: (
+    agents: AvailableAgentsState["items"],
+    tools?: AvailableAgentsState["tools"],
+  ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;

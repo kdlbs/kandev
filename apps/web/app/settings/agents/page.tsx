@@ -57,7 +57,11 @@ function useCopyCommand() {
   return { copiedValue, copy };
 }
 
-function CopyButton({ text, copiedValue, onCopy }: {
+function CopyButton({
+  text,
+  copiedValue,
+  onCopy,
+}: {
   text: string;
   copiedValue: string | null;
   onCopy: (text: string) => void;
@@ -119,7 +123,11 @@ function AgentCard({ agent, savedAgent, displayName }: AgentCardProps) {
   );
 }
 
-function InstallCard({ agent, copiedValue, onCopy }: {
+function InstallCard({
+  agent,
+  copiedValue,
+  onCopy,
+}: {
   agent: AvailableAgent;
   copiedValue: string | null;
   onCopy: (text: string) => void;
@@ -145,7 +153,11 @@ function InstallCard({ agent, copiedValue, onCopy }: {
   );
 }
 
-function ToolInstallCard({ tool, copiedValue, onCopy }: {
+function ToolInstallCard({
+  tool,
+  copiedValue,
+  onCopy,
+}: {
   tool: ToolStatus;
   copiedValue: string | null;
   onCopy: (text: string) => void;
@@ -163,9 +175,7 @@ function ToolInstallCard({ tool, copiedValue, onCopy }: {
             </span>
           )}
         </div>
-        {tool.description && (
-          <p className="text-xs text-muted-foreground">{tool.description}</p>
-        )}
+        {tool.description && <p className="text-xs text-muted-foreground">{tool.description}</p>}
         {!tool.available && tool.install_script && (
           <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
             <code className="flex-1 truncate">{tool.install_script}</code>
@@ -320,20 +330,10 @@ function SuggestInstallSection({
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {notInstalledAgents.map((agent) => (
-          <InstallCard
-            key={agent.name}
-            agent={agent}
-            copiedValue={copiedValue}
-            onCopy={onCopy}
-          />
+          <InstallCard key={agent.name} agent={agent} copiedValue={copiedValue} onCopy={onCopy} />
         ))}
         {notInstalledTools.map((tool) => (
-          <ToolInstallCard
-            key={tool.name}
-            tool={tool}
-            copiedValue={copiedValue}
-            onCopy={onCopy}
-          />
+          <ToolInstallCard key={tool.name} tool={tool} copiedValue={copiedValue} onCopy={onCopy} />
         ))}
       </div>
     </div>

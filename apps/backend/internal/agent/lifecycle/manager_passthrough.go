@@ -257,9 +257,12 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 		return nil, fmt.Errorf("interactive runner not available for passthrough mode")
 	}
 
-	// Some agents (like Codex) require the terminal to be connected first because
-	// they query the terminal for cursor position on startup.
-	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, !pt.WaitForTerminal)
+	// Always start immediately with default dimensions (120×40). The first resize
+	// from the terminal WebSocket will correct the size. Without immediate start,
+	// WaitForTerminal agents deadlock: the frontend won't connect the terminal
+	// until the session leaves STARTING, but the process never starts without a resize.
+	// This matches ResumePassthroughSession and restartPassthroughProcess.
+	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, true)
 
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
