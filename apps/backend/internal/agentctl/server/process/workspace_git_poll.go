@@ -55,9 +55,10 @@ func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// getCurrentBranchName returns the current branch name
+// getCurrentBranchName returns the current branch name.
+// Returns empty string if in detached HEAD state (e.g., during rebase or when a commit/tag is checked out).
 func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "-q", "HEAD")
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -112,17 +113,19 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
 		return
 	}
 
-	// Branch changed without HEAD change - this shouldn't normally happen,
-	// but handle it by updating git status
+	// Branch changed without HEAD change - this can happen when switching between
+	// branches that point to the same commit. Still need to update base commit.
 	if branchChanged && !headChanged {
 		wt.gitStateMu.Lock()
 		wt.cachedBranchName = currentBranch
 		wt.cachedIndexHash = currentIndexHash
 		wt.gitStateMu.Unlock()
 
-		wt.logger.Info("git branch changed without HEAD change",
-			zap.String("previous", previousBranch),
-			zap.String("current", currentBranch))
+		// Handle branch switch to update base commit even when HEAD is the same
+		if previousBranch != "" {
+			wt.handleBranchSwitch(ctx, previousBranch, currentBranch, currentHead)
+			return
+		}
 		wt.updateGitStatus(ctx)
 		return
 	}
@@ -213,41 +216,50 @@ func (wt *WorkspaceTracker) handleBranchSwitch(ctx context.Context, previousBran
 	// Calculate the new base commit for the current branch
 	baseCommit := wt.getBaseCommitForBranch(ctx, currentBranch)
 
-	// Notify subscribers about the branch switch
-	wt.notifyWorkspaceStreamBranchSwitch(&types.GitBranchSwitchNotification{
-		Timestamp:      time.Now(),
-		PreviousBranch: previousBranch,
-		CurrentBranch:  currentBranch,
-		CurrentHead:    currentHead,
-		BaseCommit:     baseCommit,
-	})
+	// Only notify if we successfully resolved a base commit
+	// Skip notification if base commit resolution failed to avoid incomplete updates
+	if baseCommit != "" {
+		wt.notifyWorkspaceStreamBranchSwitch(&types.GitBranchSwitchNotification{
+			Timestamp:      time.Now(),
+			PreviousBranch: previousBranch,
+			CurrentBranch:  currentBranch,
+			CurrentHead:    currentHead,
+			BaseCommit:     baseCommit,
+		})
+	} else {
+		wt.logger.Warn("failed to resolve base commit for branch switch, skipping notification",
+			zap.String("branch", currentBranch))
+	}
 
 	// Update and broadcast git status to reflect the new branch
 	wt.updateGitStatus(ctx)
 }
 
 // getBaseCommitForBranch calculates the base commit (merge-base) for a given branch.
-// This is the common ancestor between the branch and the target branch (e.g., main).
+// This is the common ancestor between the branch and the integration branch (e.g., main).
+// Prioritizes integration branches (origin/main, origin/master, main, master) over upstream
+// to ensure the base commit represents the branch-off point from the main development line.
 func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch string) string {
-	// Try to get the upstream tracking branch first
-	upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
-	upstreamCmd.Dir = wt.workDir
-	upstreamOut, err := upstreamCmd.Output()
-
 	var baseBranch string
-	if err == nil && len(upstreamOut) > 0 {
-		baseBranch = strings.TrimSpace(string(upstreamOut))
+
+	// Try integration branch candidates first (origin/main, origin/master, main, master)
+	// This ensures we get the branch-off point from the main development line
+	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+		checkCmd.Dir = wt.workDir
+		if err := checkCmd.Run(); err == nil {
+			baseBranch = candidate
+			break
+		}
 	}
 
-	// If no upstream, try origin/main, origin/master, main, master
+	// Fall back to upstream tracking branch if no integration branch exists
 	if baseBranch == "" {
-		for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-			checkCmd.Dir = wt.workDir
-			if err := checkCmd.Run(); err == nil {
-				baseBranch = candidate
-				break
-			}
+		upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
+		upstreamCmd.Dir = wt.workDir
+		upstreamOut, err := upstreamCmd.Output()
+		if err == nil && len(upstreamOut) > 0 {
+			baseBranch = strings.TrimSpace(string(upstreamOut))
 		}
 	}
 

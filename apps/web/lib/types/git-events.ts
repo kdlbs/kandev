@@ -54,6 +54,22 @@ export type GitBranchSwitchData = {
   base_commit: string;
 };
 
+// Git snapshot data
+export type GitSnapshotData = {
+  id: string;
+  session_id: string;
+  snapshot_type: string;
+  branch: string;
+  remote_branch: string;
+  head_commit: string;
+  base_commit: string;
+  ahead: number;
+  behind: number;
+  files?: Record<string, FileInfo>;
+  triggered_by: string;
+  created_at: string;
+};
+
 // Individual event variants
 export type GitStatusUpdateEvent = GitEventBase & {
   type: "status_update";
@@ -75,9 +91,15 @@ export type GitBranchSwitchedEvent = GitEventBase & {
   branch_switch: GitBranchSwitchData;
 };
 
+export type GitSnapshotCreatedEvent = GitEventBase & {
+  type: "snapshot_created";
+  snapshot: GitSnapshotData;
+};
+
 // Discriminated union
 export type GitEventPayload =
   | GitStatusUpdateEvent
   | GitCommitCreatedEvent
   | GitCommitsResetEvent
-  | GitBranchSwitchedEvent;
+  | GitBranchSwitchedEvent
+  | GitSnapshotCreatedEvent;
