@@ -7,6 +7,7 @@ import {
   DragOverlay,
   DragStartEvent,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -16,6 +17,10 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { MobileColumnTabs } from "./mobile-column-tabs";
+import { SwipeableColumns } from "./swipeable-columns";
+import { MobileDropTargets } from "./mobile-drop-targets";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 export type SwimlaneKanbanContentProps = {
@@ -34,15 +39,26 @@ export type SwimlaneKanbanContentProps = {
 type SwimlaneKanbanDndOptions = {
   tasks: Task[];
   workflowId: string;
+  isMobile: boolean;
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
+function useSwimlaneKanbanDnd({
+  tasks,
+  workflowId,
+  isMobile,
+  onMoveError,
+}: SwimlaneKanbanDndOptions) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+  );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveTaskId(event.active.id as string);
@@ -87,8 +103,6 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
           workflow_step_id: targetStepId,
           position: nextPosition,
         });
-        // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
-        // via the task.moved event → orchestrator processOnEnter()
       } catch (error) {
         const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
         if (currentSnapshot) {
@@ -120,7 +134,203 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
     [tasks, activeTaskId],
   );
 
-  return { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask };
+  // Only use touch-friendly sensors on mobile
+  const mobileSensors = useSensors(
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  return {
+    sensors: isMobile ? mobileSensors : sensors,
+    handleDragStart,
+    handleDragEnd,
+    handleDragCancel,
+    moveTaskToStep,
+    activeTask,
+  };
+}
+
+function getInitialColumnIndex(steps: WorkflowStep[], tasks: Task[]): number {
+  if (steps.length === 0) return 0;
+  const idx = steps.findIndex((step) => tasks.some((t) => t.workflowStepId === step.id));
+  return idx !== -1 ? idx : 0;
+}
+
+function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
+  const [activeIndex, setActiveIndex] = useState(() => getInitialColumnIndex(steps, tasks));
+  return { activeIndex, setActiveIndex };
+}
+
+function MobileKanbanLayout({
+  steps,
+  tasks,
+  activeIndex,
+  onIndexChange,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  moveTaskToStep,
+  activeTask,
+  showMaximizeButton,
+  deletingTaskId,
+}: {
+  steps: WorkflowStep[];
+  tasks: Task[];
+  activeIndex: number;
+  onIndexChange: (index: number) => void;
+  onPreviewTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
+  onEditTask: (task: Task) => void;
+  onDeleteTask: (task: Task) => void;
+  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
+  activeTask: Task | null;
+  showMaximizeButton?: boolean;
+  deletingTaskId?: string | null;
+}) {
+  const taskCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const step of steps) {
+      counts[step.id] = tasks.filter((t) => t.workflowStepId === step.id).length;
+    }
+    return counts;
+  }, [steps, tasks]);
+
+  const currentStepId = steps[activeIndex]?.id ?? null;
+
+  return (
+    <div className="flex flex-col min-h-0" data-testid="mobile-kanban-layout">
+      <MobileColumnTabs
+        steps={steps}
+        activeIndex={activeIndex}
+        taskCounts={taskCounts}
+        onColumnChange={onIndexChange}
+      />
+      <SwipeableColumns
+        steps={steps}
+        tasks={tasks}
+        activeIndex={activeIndex}
+        onIndexChange={onIndexChange}
+        onPreviewTask={onPreviewTask}
+        onOpenTask={onOpenTask}
+        onEditTask={onEditTask}
+        onDeleteTask={onDeleteTask}
+        onMoveTask={moveTaskToStep}
+        showMaximizeButton={showMaximizeButton}
+        deletingTaskId={deletingTaskId}
+      />
+      <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
+    </div>
+  );
+}
+
+function TabletKanbanLayout({
+  steps,
+  tasks,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  moveTaskToStep,
+  showMaximizeButton,
+  deletingTaskId,
+}: {
+  steps: WorkflowStep[];
+  tasks: Task[];
+  onPreviewTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
+  onEditTask: (task: Task) => void;
+  onDeleteTask: (task: Task) => void;
+  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
+  showMaximizeButton?: boolean;
+  deletingTaskId?: string | null;
+}) {
+  const getTasksForStep = useCallback(
+    (stepId: string) =>
+      tasks
+        .filter((t) => t.workflowStepId === stepId)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [tasks],
+  );
+
+  return (
+    <div
+      className="flex overflow-x-auto snap-x snap-mandatory gap-2 h-full scrollbar-hide"
+      data-testid="tablet-kanban-layout"
+    >
+      {steps.map((step) => (
+        <div key={step.id} className="flex-shrink-0 w-[calc(50%-4px)] snap-start h-full">
+          <KanbanColumn
+            step={step}
+            tasks={getTasksForStep(step.id)}
+            onPreviewTask={onPreviewTask}
+            onOpenTask={onOpenTask}
+            onEditTask={onEditTask}
+            onDeleteTask={onDeleteTask}
+            onMoveTask={moveTaskToStep}
+            steps={steps}
+            showMaximizeButton={showMaximizeButton}
+            deletingTaskId={deletingTaskId}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DesktopKanbanLayout({
+  steps,
+  tasks,
+  onPreviewTask,
+  onOpenTask,
+  onEditTask,
+  onDeleteTask,
+  moveTaskToStep,
+  showMaximizeButton,
+  deletingTaskId,
+}: {
+  steps: WorkflowStep[];
+  tasks: Task[];
+  onPreviewTask: (task: Task) => void;
+  onOpenTask: (task: Task) => void;
+  onEditTask: (task: Task) => void;
+  onDeleteTask: (task: Task) => void;
+  moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
+  showMaximizeButton?: boolean;
+  deletingTaskId?: string | null;
+}) {
+  const getTasksForStep = useCallback(
+    (stepId: string) =>
+      tasks
+        .filter((t) => t.workflowStepId === stepId)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [tasks],
+  );
+
+  return (
+    <div
+      className="grid gap-0"
+      style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+    >
+      {steps.map((step) => (
+        <KanbanColumn
+          key={step.id}
+          step={step}
+          tasks={getTasksForStep(step.id)}
+          onPreviewTask={onPreviewTask}
+          onOpenTask={onOpenTask}
+          onEditTask={onEditTask}
+          onDeleteTask={onDeleteTask}
+          onMoveTask={moveTaskToStep}
+          steps={steps}
+          deletingTaskId={deletingTaskId}
+          showMaximizeButton={showMaximizeButton}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function SwimlaneKanbanContent({
@@ -135,16 +345,40 @@ export function SwimlaneKanbanContent({
   deletingTaskId,
   showMaximizeButton,
 }: SwimlaneKanbanContentProps) {
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
-
-  const getTasksForStep = (stepId: string) => {
-    return tasks
-      .filter((t) => t.workflowStepId === stepId)
-      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  };
+    useSwimlaneKanbanDnd({ tasks, workflowId, isMobile, onMoveError });
 
   if (steps.length === 0) return null;
+
+  const sharedProps = {
+    steps,
+    tasks,
+    onPreviewTask,
+    onOpenTask,
+    onEditTask,
+    onDeleteTask,
+    moveTaskToStep,
+    showMaximizeButton,
+    deletingTaskId,
+  };
+
+  let layoutContent: React.ReactNode;
+  if (isMobile) {
+    layoutContent = (
+      <MobileKanbanLayout
+        {...sharedProps}
+        activeIndex={activeIndex}
+        onIndexChange={setActiveIndex}
+        activeTask={activeTask}
+      />
+    );
+  } else if (isTablet) {
+    layoutContent = <TabletKanbanLayout {...sharedProps} />;
+  } else {
+    layoutContent = <DesktopKanbanLayout {...sharedProps} />;
+  }
 
   return (
     <DndContext
@@ -153,28 +387,7 @@ export function SwimlaneKanbanContent({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="">
-        <div
-          className="grid gap-0"
-          style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
-        >
-          {steps.map((step) => (
-            <KanbanColumn
-              key={step.id}
-              step={step}
-              tasks={getTasksForStep(step.id)}
-              onPreviewTask={onPreviewTask}
-              onOpenTask={onOpenTask}
-              onEditTask={onEditTask}
-              onDeleteTask={onDeleteTask}
-              onMoveTask={moveTaskToStep}
-              steps={steps}
-              deletingTaskId={deletingTaskId}
-              showMaximizeButton={showMaximizeButton}
-            />
-          ))}
-        </div>
-      </div>
+      {layoutContent}
       <DragOverlay dropAnimation={null}>
         {activeTask ? <KanbanCardPreview task={activeTask} /> : null}
       </DragOverlay>
