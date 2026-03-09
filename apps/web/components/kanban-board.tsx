@@ -10,6 +10,9 @@ import type { WorkflowsState } from "@/lib/state/slices";
 import { type MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { SwimlaneContainer } from "./kanban/swimlane-container";
 import { KanbanHeader } from "./kanban/kanban-header";
+import { MobileFab } from "./kanban/mobile-fab";
+import { MobileSearchBar } from "./kanban/mobile-search-bar";
+import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -214,6 +217,20 @@ function useKanbanBoardSetup(
     setIsDialogOpen: hooks.setIsDialogOpen,
     setTaskSessionAvailability: hooks.setTaskSessionAvailability,
   });
+
+  // Mobile bottom sheet: intercept card clicks to show task info first
+  const [mobileSheetTask, setMobileSheetTask] = useState<Task | null>(null);
+  const mobileCardClick = useCallback(
+    (task: Task) => {
+      if (isMobile) {
+        setMobileSheetTask(task);
+      } else {
+        handleCardClick(task);
+      }
+    },
+    [isMobile, handleCardClick],
+  );
+
   const automation = useMoveErrorState(router);
 
   useWorkflowSelection({
@@ -227,6 +244,7 @@ function useKanbanBoardSetup(
   });
 
   return {
+    isMobile,
     kanbanViewMode,
     kanban,
     workspaceState,
@@ -236,7 +254,9 @@ function useKanbanBoardSetup(
     ...hooks,
     ...automation,
     handleOpenTask,
-    handleCardClick,
+    handleCardClick: mobileCardClick,
+    mobileSheetTask,
+    setMobileSheetTask,
   };
 }
 
@@ -262,6 +282,9 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
       />
+      {s.isMobile && (
+        <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
+      )}
       <KanbanBoardDialogs
         isDialogOpen={s.isDialogOpen}
         handleDialogOpenChange={s.handleDialogOpenChange}
@@ -288,6 +311,21 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
       />
+      {s.isMobile && (
+        <>
+          <MobileFab onClick={s.handleCreate} />
+          <MobileTaskSheet
+            task={s.mobileSheetTask}
+            open={!!s.mobileSheetTask}
+            onOpenChange={(open) => {
+              if (!open) s.setMobileSheetTask(null);
+            }}
+            onGoToSession={s.handleOpenTask}
+            onEdit={s.handleEdit}
+            onDelete={s.handleDelete}
+          />
+        </>
+      )}
     </div>
   );
 }

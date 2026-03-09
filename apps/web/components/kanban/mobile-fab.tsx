@@ -14,6 +14,7 @@ export function MobileFab({ onClick, isDragging = false }: MobileFabProps) {
     <Button
       onClick={onClick}
       size="icon"
+      data-testid="mobile-fab"
       className={cn(
         "fixed z-40 h-14 w-14 rounded-full shadow-lg transition-all duration-200",
         "cursor-pointer hover:scale-105 active:scale-95",

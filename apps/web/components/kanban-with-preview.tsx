@@ -7,6 +7,7 @@ import { TaskPreviewPanel } from "./task-preview-panel";
 import { useKanbanPreview } from "@/hooks/use-kanban-preview";
 import { useKanbanLayout } from "@/hooks/use-kanban-layout";
 import { useTaskSession } from "@/hooks/use-task-session";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
@@ -87,6 +88,7 @@ function useResizeHandler(
 
 export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const router = useRouter();
+  const { isMobile } = useResponsiveBreakpoint();
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
@@ -169,6 +171,15 @@ export function KanbanWithPreview({ initialTaskId }: KanbanWithPreviewProps) {
   const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
 
   const activeSessionId = selectedTaskId ? selectedTaskSessionId : null;
+
+  // On mobile, skip the preview panel entirely — card clicks navigate directly
+  if (isMobile) {
+    return (
+      <div className="h-dvh w-full flex flex-col bg-background">
+        <KanbanBoard />
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="h-screen w-full flex flex-col bg-background relative">
