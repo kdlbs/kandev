@@ -5,7 +5,7 @@ export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
   settingsAgents: { items: [] },
   agentDiscovery: { items: [], loading: false, loaded: false },
-  availableAgents: { items: [], loading: false, loaded: false },
+  availableAgents: { items: [], tools: [], loading: false, loaded: false },
   agentProfiles: { items: [], version: 0 },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
@@ -84,9 +84,10 @@ function createCoreActions(
       set((draft) => {
         draft.agentDiscovery.loading = loading;
       }),
-    setAvailableAgents: (agents) =>
+    setAvailableAgents: (agents, tools) =>
       set((draft) => {
         draft.availableAgents.items = agents;
+        if (tools) draft.availableAgents.tools = tools;
         draft.availableAgents.loading = false;
         draft.availableAgents.loaded = true;
       }),

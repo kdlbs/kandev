@@ -8,6 +8,7 @@ import type {
   Executor,
   NotificationProvider,
   SavedLayout,
+  ToolStatus,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
@@ -28,6 +29,7 @@ export type AgentDiscoveryState = {
 
 export type AvailableAgentsState = {
   items: AvailableAgent[];
+  tools: ToolStatus[];
   loading: boolean;
   loaded: boolean;
 };
@@ -139,7 +141,10 @@ export type SettingsSliceActions = {
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
   setAgentDiscoveryLoading: (loading: boolean) => void;
-  setAvailableAgents: (agents: AvailableAgentsState["items"]) => void;
+  setAvailableAgents: (
+    agents: AvailableAgentsState["items"],
+    tools?: AvailableAgentsState["tools"],
+  ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
   setEditors: (editors: EditorsState["items"]) => void;

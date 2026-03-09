@@ -98,9 +98,21 @@ type PassthroughConfigDTO struct {
 	Description string `json:"description"`
 }
 
+type ToolStatusDTO struct {
+	Name          string `json:"name"`
+	DisplayName   string `json:"display_name"`
+	Available     bool   `json:"available"`
+	MatchedPath   string `json:"matched_path,omitempty"`
+	InstallScript string `json:"install_script,omitempty"`
+	Description   string `json:"description,omitempty"`
+	InfoURL       string `json:"info_url,omitempty"`
+}
+
 type AvailableAgentDTO struct {
 	Name               string                          `json:"name"`
 	DisplayName        string                          `json:"display_name"`
+	Description        string                          `json:"description,omitempty"`
+	InstallScript      string                          `json:"install_script,omitempty"`
 	SupportsMCP        bool                            `json:"supports_mcp"`
 	MCPConfigPath      string                          `json:"mcp_config_path,omitempty"`
 	InstallationPaths  []string                        `json:"installation_paths,omitempty"`
@@ -115,6 +127,7 @@ type AvailableAgentDTO struct {
 
 type ListAvailableAgentsResponse struct {
 	Agents []AvailableAgentDTO `json:"agents"`
+	Tools  []ToolStatusDTO     `json:"tools,omitempty"`
 	Total  int                 `json:"total"`
 }
 

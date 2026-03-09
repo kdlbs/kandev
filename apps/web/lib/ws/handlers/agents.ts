@@ -86,7 +86,12 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     "agent.available.updated": (message) => {
       store.setState((state) => ({
         ...state,
-        availableAgents: { items: message.payload.agents ?? [], loaded: true, loading: false },
+        availableAgents: {
+          items: message.payload.agents ?? [],
+          tools: message.payload.tools ?? state.availableAgents.tools,
+          loaded: true,
+          loading: false,
+        },
       }));
     },
     "agent.updated": (message) => {

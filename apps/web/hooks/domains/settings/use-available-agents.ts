@@ -13,7 +13,7 @@ export function useAvailableAgents(enabled = true) {
     setAvailableAgentsLoading(true);
     listAvailableAgents({ cache: "no-store" })
       .then((response) => {
-        setAvailableAgents(response.agents);
+        setAvailableAgents(response.agents, response.tools ?? []);
       })
       .catch(() => setAvailableAgents([]));
   }, [
