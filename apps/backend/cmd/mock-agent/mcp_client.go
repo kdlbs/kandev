@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	acp "github.com/coder/acp-go-sdk"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -92,6 +93,20 @@ func extractMCPResultText(result *mcp.CallToolResult) string {
 		return ""
 	}
 	return strings.Join(parts, "\n")
+}
+
+// registerACPMcpServers adds SSE MCP servers from an ACP NewSessionRequest
+// to the global mcpServers map so callMCPTool can reach them.
+func registerACPMcpServers(servers []acp.McpServer) {
+	for _, s := range servers {
+		if s.Sse != nil && s.Sse.Name != "" && s.Sse.Url != "" {
+			if mcpServers == nil {
+				mcpServers = make(map[string]mcpServerDef)
+			}
+			mcpServers[s.Sse.Name] = mcpServerDef{URL: s.Sse.Url, Type: "sse"}
+			_, _ = fmt.Fprintf(logOutput, "mock-agent: registered ACP MCP server %s at %s\n", s.Sse.Name, s.Sse.Url)
+		}
+	}
 }
 
 // closeMCPClients closes all open MCP clients (called on shutdown).

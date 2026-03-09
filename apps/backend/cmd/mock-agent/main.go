@@ -63,17 +63,26 @@ func main() {
 // Initialize handles the ACP initialize request, returning agent capabilities.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
 	return acp.InitializeResponse{
-		ProtocolVersion:   acp.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+		ProtocolVersion: acp.ProtocolVersionNumber,
+		AgentCapabilities: acp.AgentCapabilities{
+			LoadSession:     true,
+			McpCapabilities: acp.McpCapabilities{Sse: true},
+		},
 	}, nil
 }
 
 // NewSession creates a new conversation session.
-func (a *mockAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+// MCP servers from the ACP request are registered so callMCPTool can use them.
+func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
 	a.sessions[sid] = true
 	a.mu.Unlock()
+
+	// Register MCP servers from the ACP session request (SSE servers).
+	// This bridges ACP protocol MCP config to the mock agent's MCP client.
+	registerACPMcpServers(req.McpServers)
+
 	return acp.NewSessionResponse{SessionId: sid}, nil
 }
 
