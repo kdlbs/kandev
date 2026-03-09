@@ -6,6 +6,7 @@ import type {
   GitStatusUpdateEvent,
   GitCommitCreatedEvent,
   GitCommitsResetEvent,
+  GitBranchSwitchedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 
@@ -14,6 +15,7 @@ type GitEventHandlers = {
   status_update: (store: StoreApi<AppState>, event: GitStatusUpdateEvent) => void;
   commit_created: (store: StoreApi<AppState>, event: GitCommitCreatedEvent) => void;
   commits_reset: (store: StoreApi<AppState>, event: GitCommitsResetEvent) => void;
+  branch_switched: (store: StoreApi<AppState>, event: GitBranchSwitchedEvent) => void;
 };
 
 const gitEventHandlers: GitEventHandlers = {
@@ -60,6 +62,13 @@ const gitEventHandlers: GitEventHandlers = {
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(event.session_id);
   },
+
+  branch_switched: (store, event) => {
+    // Clear commits to trigger refetch with new base commit
+    store.getState().clearSessionCommits(event.session_id);
+    // Invalidate cumulative diff cache when branch switches
+    invalidateCumulativeDiffCache(event.session_id);
+  },
 };
 
 export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -80,6 +89,9 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
           break;
         case "commits_reset":
           gitEventHandlers.commits_reset(store, payload);
+          break;
+        case "branch_switched":
+          gitEventHandlers.branch_switched(store, payload);
           break;
       }
     },

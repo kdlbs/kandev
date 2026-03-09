@@ -117,3 +117,22 @@ type GitResetNotification struct {
 	// CurrentHead is the SHA HEAD is now pointing to.
 	CurrentHead string `json:"current_head"`
 }
+
+// GitBranchSwitchNotification is sent when the user switches branches (e.g., git checkout).
+// This signals that the base commit should be updated to reflect the new branch's merge-base.
+type GitBranchSwitchNotification struct {
+	// Timestamp is when this notification was created.
+	Timestamp time.Time `json:"timestamp"`
+
+	// PreviousBranch is the branch name before the switch.
+	PreviousBranch string `json:"previous_branch"`
+
+	// CurrentBranch is the new branch name after the switch.
+	CurrentBranch string `json:"current_branch"`
+
+	// CurrentHead is the SHA HEAD is now pointing to.
+	CurrentHead string `json:"current_head"`
+
+	// BaseCommit is the new base commit (merge-base with target branch).
+	BaseCommit string `json:"base_commit"`
+}

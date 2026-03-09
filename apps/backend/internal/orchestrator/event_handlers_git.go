@@ -33,6 +33,8 @@ func (s *Service) handleGitEvent(ctx context.Context, data watcher.GitEventData)
 		s.handleGitCommitCreated(ctx, data)
 	case lifecycle.GitEventTypeCommitsReset:
 		s.handleGitCommitsReset(ctx, data)
+	case lifecycle.GitEventTypeBranchSwitched:
+		s.handleBranchSwitched(ctx, data)
 	case lifecycle.GitEventTypeSnapshotCreated:
 		// Snapshot events are published from orchestrator, no need to handle here
 		s.logger.Debug("received snapshot_created event, no action needed",
@@ -253,6 +255,54 @@ func (s *Service) handleGitCommitsReset(ctx context.Context, data watcher.GitEve
 			Reset: &lifecycle.GitResetData{
 				PreviousHead: data.Reset.PreviousHead,
 				CurrentHead:  data.Reset.CurrentHead,
+			},
+		})
+		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
+	}
+}
+
+// handleBranchSwitched handles branch switch events by updating the session's base commit
+// and forwarding the event to the frontend for real-time updates.
+func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEventData) {
+	if data.BranchSwitch == nil {
+		s.logger.Debug("missing branch switch data for branch switch event",
+			zap.String("task_id", data.TaskID))
+		return
+	}
+
+	s.logger.Info("handling branch switch",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("previous_branch", data.BranchSwitch.PreviousBranch),
+		zap.String("current_branch", data.BranchSwitch.CurrentBranch),
+		zap.String("new_base_commit", data.BranchSwitch.BaseCommit))
+
+	// Update the session's base commit SHA to reflect the new branch's merge-base
+	if data.BranchSwitch.BaseCommit != "" {
+		if err := s.repo.UpdateTaskSessionBaseCommit(ctx, data.SessionID, data.BranchSwitch.BaseCommit); err != nil {
+			s.logger.Error("failed to update session base commit after branch switch",
+				zap.String("session_id", data.SessionID),
+				zap.String("base_commit", data.BranchSwitch.BaseCommit),
+				zap.Error(err))
+		} else {
+			s.logger.Info("updated session base commit after branch switch",
+				zap.String("session_id", data.SessionID),
+				zap.String("base_commit", data.BranchSwitch.BaseCommit))
+		}
+	}
+
+	// Forward branch_switched event to WebSocket subject for frontend real-time updates
+	if s.eventBus != nil {
+		event := bus.NewEvent(events.GitEvent, "orchestrator", &lifecycle.GitEventPayload{
+			Type:      lifecycle.GitEventTypeBranchSwitched,
+			SessionID: data.SessionID,
+			TaskID:    data.TaskID,
+			Timestamp: time.Now().Format("2006-01-02T15:04:05.000000000Z07:00"),
+			BranchSwitch: &lifecycle.GitBranchSwitchData{
+				PreviousBranch: data.BranchSwitch.PreviousBranch,
+				CurrentBranch:  data.BranchSwitch.CurrentBranch,
+				CurrentHead:    data.BranchSwitch.CurrentHead,
+				BaseCommit:     data.BranchSwitch.BaseCommit,
 			},
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)

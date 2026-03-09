@@ -42,6 +42,10 @@ func dispatchWorkspaceGitMessages(msg types.WorkspaceStreamMessage, callbacks Wo
 		if callbacks.OnGitReset != nil && msg.GitReset != nil {
 			callbacks.OnGitReset(msg.GitReset)
 		}
+	case types.WorkspaceMessageTypeBranchSwitch:
+		if callbacks.OnBranchSwitch != nil && msg.BranchSwitch != nil {
+			callbacks.OnBranchSwitch(msg.BranchSwitch)
+		}
 	case types.WorkspaceMessageTypeFileChange:
 		if callbacks.OnFileChange != nil && msg.FileChange != nil {
 			callbacks.OnFileChange(msg.FileChange)

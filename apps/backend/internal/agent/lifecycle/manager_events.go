@@ -372,6 +372,12 @@ func (m *Manager) handleGitResetDetected(execution *AgentExecution, reset *agent
 	m.eventPublisher.PublishGitReset(execution, reset)
 }
 
+// handleBranchSwitch processes branch switch events from the workspace tracker
+func (m *Manager) handleBranchSwitch(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification) {
+	// Publish branch switch event to event bus for orchestrator handling (base commit update)
+	m.eventPublisher.PublishBranchSwitch(execution, branchSwitch)
+}
+
 // handleFileChangeNotification processes file change notifications from the workspace tracker
 func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
 	m.eventPublisher.PublishFileChange(execution, notification)

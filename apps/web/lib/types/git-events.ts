@@ -46,6 +46,14 @@ export type GitResetData = {
   deleted_count: number;
 };
 
+// Git branch switch data
+export type GitBranchSwitchData = {
+  previous_branch: string;
+  current_branch: string;
+  current_head: string;
+  base_commit: string;
+};
+
 // Individual event variants
 export type GitStatusUpdateEvent = GitEventBase & {
   type: "status_update";
@@ -62,5 +70,14 @@ export type GitCommitsResetEvent = GitEventBase & {
   reset: GitResetData;
 };
 
+export type GitBranchSwitchedEvent = GitEventBase & {
+  type: "branch_switched";
+  branch_switch: GitBranchSwitchData;
+};
+
 // Discriminated union
-export type GitEventPayload = GitStatusUpdateEvent | GitCommitCreatedEvent | GitCommitsResetEvent;
+export type GitEventPayload =
+  | GitStatusUpdateEvent
+  | GitCommitCreatedEvent
+  | GitCommitsResetEvent
+  | GitBranchSwitchedEvent;

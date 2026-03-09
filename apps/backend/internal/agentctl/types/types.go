@@ -25,10 +25,11 @@ type (
 	PermissionRespondResponse = streams.PermissionRespondResponse
 
 	// Git stream types
-	GitStatusUpdate       = streams.GitStatusUpdate
-	GitCommitNotification = streams.GitCommitNotification
-	GitResetNotification  = streams.GitResetNotification
-	FileInfo              = streams.FileInfo
+	GitStatusUpdate             = streams.GitStatusUpdate
+	GitCommitNotification       = streams.GitCommitNotification
+	GitResetNotification        = streams.GitResetNotification
+	GitBranchSwitchNotification = streams.GitBranchSwitchNotification
+	FileInfo                    = streams.FileInfo
 
 	// File stream types
 	FileChangeNotification = streams.FileChangeNotification
@@ -168,6 +169,7 @@ const (
 	WorkspaceMessageTypeProcessStatus WorkspaceMessageType = "process_status"
 	WorkspaceMessageTypeGitCommit     WorkspaceMessageType = "git_commit"
 	WorkspaceMessageTypeGitReset      WorkspaceMessageType = "git_reset"
+	WorkspaceMessageTypeBranchSwitch  WorkspaceMessageType = "branch_switch"
 )
 
 // WorkspaceStreamMessage is the unified message format for the workspace stream.
@@ -200,6 +202,9 @@ type WorkspaceStreamMessage struct {
 
 	// Git reset fields (for git_reset)
 	GitReset *GitResetNotification `json:"git_reset,omitempty"`
+
+	// Branch switch fields (for branch_switch)
+	BranchSwitch *GitBranchSwitchNotification `json:"branch_switch,omitempty"`
 
 	// Error fields (for error)
 	Error string `json:"error,omitempty"`
@@ -247,6 +252,15 @@ func NewWorkspaceGitReset(reset *GitResetNotification) WorkspaceStreamMessage {
 		Type:      WorkspaceMessageTypeGitReset,
 		Timestamp: timeNowUnixMilli(),
 		GitReset:  reset,
+	}
+}
+
+// NewWorkspaceBranchSwitch creates a branch switch notification message
+func NewWorkspaceBranchSwitch(branchSwitch *GitBranchSwitchNotification) WorkspaceStreamMessage {
+	return WorkspaceStreamMessage{
+		Type:         WorkspaceMessageTypeBranchSwitch,
+		Timestamp:    timeNowUnixMilli(),
+		BranchSwitch: branchSwitch,
 	}
 }
 

@@ -275,6 +275,23 @@ func (p *EventPublisher) PublishGitReset(execution *AgentExecution, reset *agent
 	})
 }
 
+// PublishBranchSwitch publishes a branch switch event.
+func (p *EventPublisher) PublishBranchSwitch(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification) {
+	p.PublishGitEvent(&GitEventPayload{
+		Type:      GitEventTypeBranchSwitched,
+		TaskID:    execution.TaskID,
+		SessionID: execution.SessionID,
+		AgentID:   execution.ID,
+		Timestamp: branchSwitch.Timestamp.Format(time.RFC3339Nano),
+		BranchSwitch: &GitBranchSwitchData{
+			PreviousBranch: branchSwitch.PreviousBranch,
+			CurrentBranch:  branchSwitch.CurrentBranch,
+			CurrentHead:    branchSwitch.CurrentHead,
+			BaseCommit:     branchSwitch.BaseCommit,
+		},
+	})
+}
+
 // PublishFileChange publishes a file change notification to the event bus.
 func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notification *agentctl.FileChangeNotification) {
 	if p.eventBus == nil {

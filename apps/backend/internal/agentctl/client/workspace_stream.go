@@ -19,6 +19,7 @@ type WorkspaceStreamCallbacks struct {
 	OnGitStatus     func(update *GitStatusUpdate)
 	OnGitCommit     func(notification *GitCommitNotification)
 	OnGitReset      func(notification *GitResetNotification)
+	OnBranchSwitch  func(notification *GitBranchSwitchNotification)
 	OnFileChange    func(notification *FileChangeNotification)
 	OnProcessOutput func(output *types.ProcessOutput)
 	OnProcessStatus func(status *types.ProcessStatusUpdate)
@@ -75,6 +76,7 @@ var workspaceTracedTypes = map[types.WorkspaceMessageType]bool{
 	types.WorkspaceMessageTypeGitStatus:     true,
 	types.WorkspaceMessageTypeGitCommit:     true,
 	types.WorkspaceMessageTypeGitReset:      true,
+	types.WorkspaceMessageTypeBranchSwitch:  true,
 	types.WorkspaceMessageTypeFileChange:    true,
 	types.WorkspaceMessageTypeProcessStatus: true,
 	types.WorkspaceMessageTypeConnected:     true,

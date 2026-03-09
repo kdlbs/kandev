@@ -117,6 +117,21 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamGitReset(reset *types.GitResetN
 	}
 }
 
+// notifyWorkspaceStreamBranchSwitch sends branch switch notification to all workspace stream subscribers
+func (wt *WorkspaceTracker) notifyWorkspaceStreamBranchSwitch(branchSwitch *types.GitBranchSwitchNotification) {
+	wt.workspaceSubMu.RLock()
+	defer wt.workspaceSubMu.RUnlock()
+
+	msg := types.NewWorkspaceBranchSwitch(branchSwitch)
+	for sub := range wt.workspaceStreamSubscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Subscriber is slow, skip
+		}
+	}
+}
+
 // notifyWorkspaceStreamFileChange sends file change notification to all workspace stream subscribers
 func (wt *WorkspaceTracker) notifyWorkspaceStreamFileChange(notification types.FileChangeNotification) {
 	wt.workspaceSubMu.RLock()

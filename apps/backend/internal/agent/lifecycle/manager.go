@@ -144,6 +144,7 @@ func NewManager(
 		OnGitStatus:     mgr.handleGitStatusUpdate,
 		OnGitCommit:     mgr.handleGitCommitCreated,
 		OnGitReset:      mgr.handleGitResetDetected,
+		OnBranchSwitch:  mgr.handleBranchSwitch,
 		OnFileChange:    mgr.handleFileChangeNotification,
 		OnShellOutput:   mgr.handleShellOutput,
 		OnShellExit:     mgr.handleShellExit,

@@ -512,24 +512,25 @@ func (c *Client) Host() string {
 // Re-export types from types package for convenience.
 // These types are defined in the streams subpackage and re-exported through types.
 type (
-	GitStatusUpdate        = types.GitStatusUpdate
-	GitCommitNotification  = types.GitCommitNotification
-	GitResetNotification   = types.GitResetNotification
-	FileInfo               = types.FileInfo
-	FileEntry              = types.FileEntry
-	FileTreeNode           = types.FileTreeNode
-	FileTreeRequest        = types.FileTreeRequest
-	FileTreeResponse       = types.FileTreeResponse
-	FileContentRequest     = types.FileContentRequest
-	FileContentResponse    = types.FileContentResponse
-	FileChangeNotification = types.FileChangeNotification
-	ShellMessage           = types.ShellMessage
-	ShellStatusResponse    = types.ShellStatusResponse
-	ShellBufferResponse    = types.ShellBufferResponse
-	ProcessKind            = types.ProcessKind
-	ProcessStatus          = types.ProcessStatus
-	ProcessOutput          = types.ProcessOutput
-	ProcessStatusUpdate    = types.ProcessStatusUpdate
+	GitStatusUpdate             = types.GitStatusUpdate
+	GitCommitNotification       = types.GitCommitNotification
+	GitResetNotification        = types.GitResetNotification
+	GitBranchSwitchNotification = types.GitBranchSwitchNotification
+	FileInfo                    = types.FileInfo
+	FileEntry                   = types.FileEntry
+	FileTreeNode                = types.FileTreeNode
+	FileTreeRequest             = types.FileTreeRequest
+	FileTreeResponse            = types.FileTreeResponse
+	FileContentRequest          = types.FileContentRequest
+	FileContentResponse         = types.FileContentResponse
+	FileChangeNotification      = types.FileChangeNotification
+	ShellMessage                = types.ShellMessage
+	ShellStatusResponse         = types.ShellStatusResponse
+	ShellBufferResponse         = types.ShellBufferResponse
+	ProcessKind                 = types.ProcessKind
+	ProcessStatus               = types.ProcessStatus
+	ProcessOutput               = types.ProcessOutput
+	ProcessStatusUpdate         = types.ProcessStatusUpdate
 )
 
 // Close closes all connections and releases resources

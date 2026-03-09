@@ -149,6 +149,7 @@ const (
 	GitEventTypeStatusUpdate    GitEventType = "status_update"
 	GitEventTypeCommitCreated   GitEventType = "commit_created"
 	GitEventTypeCommitsReset    GitEventType = "commits_reset"
+	GitEventTypeBranchSwitched  GitEventType = "branch_switched"
 	GitEventTypeSnapshotCreated GitEventType = "snapshot_created"
 )
 
@@ -169,6 +170,9 @@ type GitEventPayload struct {
 
 	// For commits_reset
 	Reset *GitResetData `json:"reset,omitempty"`
+
+	// For branch_switched
+	BranchSwitch *GitBranchSwitchData `json:"branch_switch,omitempty"`
 
 	// For snapshot_created
 	Snapshot *GitSnapshotData `json:"snapshot,omitempty"`
@@ -212,6 +216,13 @@ type GitResetData struct {
 	PreviousHead string `json:"previous_head"`
 	CurrentHead  string `json:"current_head"`
 	DeletedCount int    `json:"deleted_count"`
+}
+
+type GitBranchSwitchData struct {
+	PreviousBranch string `json:"previous_branch"`
+	CurrentBranch  string `json:"current_branch"`
+	CurrentHead    string `json:"current_head"`
+	BaseCommit     string `json:"base_commit"`
 }
 
 type GitSnapshotData struct {
