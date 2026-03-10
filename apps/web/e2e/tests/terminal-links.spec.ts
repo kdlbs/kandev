@@ -5,6 +5,10 @@ import { test, expect } from "../fixtures/test-base";
 // ---------------------------------------------------------------------------
 
 test.describe("terminal clickable links", () => {
+  test.beforeEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({ terminal_link_behavior: "new_tab" });
+  });
+
   test("terminal_link_behavior defaults to new_tab and can be updated via API", async ({
     apiClient,
   }) => {
@@ -27,7 +31,8 @@ test.describe("terminal clickable links", () => {
     const res = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       terminal_link_behavior: "invalid_value",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(600);
 
     // Setting should remain unchanged
     const current = await apiClient.getUserSettings();

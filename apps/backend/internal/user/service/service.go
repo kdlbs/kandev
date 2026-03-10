@@ -162,13 +162,21 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		}
 		settings.KeyboardShortcuts = *req.KeyboardShortcuts
 	}
-	if req.TerminalLinkBehavior != nil {
-		v := strings.TrimSpace(*req.TerminalLinkBehavior)
-		if v != "new_tab" && v != "browser_panel" {
-			return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
-		}
-		settings.TerminalLinkBehavior = v
+	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
+		return err
 	}
+	return nil
+}
+
+func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != "new_tab" && v != "browser_panel" {
+		return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
+	}
+	settings.TerminalLinkBehavior = v
 	return nil
 }
 

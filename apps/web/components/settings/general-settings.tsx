@@ -12,7 +12,7 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { getBackendConfig } from "@/lib/config";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 
@@ -101,21 +101,26 @@ function ChatSubmitKeyCard() {
 function TerminalLinksCard() {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = async (value: "new_tab" | "browser_panel") => {
     if (isSaving) return;
     setIsSaving(true);
-    const previous = userSettings.terminalLinkBehavior;
+    const current = storeApi.getState().userSettings;
+    const previous = current.terminalLinkBehavior;
     try {
-      setUserSettings({ ...userSettings, terminalLinkBehavior: value });
+      setUserSettings({ ...current, terminalLinkBehavior: value });
       await updateUserSettings({
-        workspace_id: userSettings.workspaceId || "",
-        repository_ids: userSettings.repositoryIds || [],
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
         terminal_link_behavior: value,
       });
     } catch {
-      setUserSettings({ ...userSettings, terminalLinkBehavior: previous });
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        terminalLinkBehavior: previous,
+      });
     } finally {
       setIsSaving(false);
     }

@@ -197,6 +197,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
+		settings.TerminalLinkBehavior = "new_tab"
 		return settings, nil
 	}
 	var payload struct {
@@ -268,8 +269,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.KeyboardShortcuts == nil {
 		settings.KeyboardShortcuts = map[string]interface{}{}
 	}
-	settings.TerminalLinkBehavior = payload.TerminalLinkBehavior
-	if settings.TerminalLinkBehavior == "" {
+	if payload.TerminalLinkBehavior != "" {
+		settings.TerminalLinkBehavior = payload.TerminalLinkBehavior
+	} else {
 		settings.TerminalLinkBehavior = "new_tab"
 	}
 	return settings, nil
