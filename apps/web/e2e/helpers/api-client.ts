@@ -177,6 +177,7 @@ export class ApiClient {
       workflow_step_id?: string;
       repository_ids?: string[];
       executor_id?: string;
+      metadata?: Record<string, unknown>;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -191,6 +192,7 @@ export class ApiClient {
         ? { repositories: opts.repository_ids.map((id) => ({ repository_id: id })) }
         : {}),
       ...(opts?.executor_id ? { executor_id: opts.executor_id } : {}),
+      ...(opts?.metadata ? { metadata: opts.metadata } : {}),
     });
   }
 
@@ -467,5 +469,18 @@ export class ApiClient {
     sessionId: string,
   ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
     return this.request("GET", `/api/v1/sessions/${sessionId}/messages`);
+  }
+
+  async startConfigChat(
+    workspaceId: string,
+    opts?: { agent_profile_id?: string; executor_id?: string; prompt?: string },
+  ): Promise<{ task_id: string; session_id: string }> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/config-chat`, opts ?? {});
+  }
+
+  async listTasks(
+    workspaceId: string,
+  ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 }
