@@ -13,15 +13,9 @@ import { useConfigChat } from "@/components/config-chat/use-config-chat";
 
 function ConfigChatFAB() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
-  );
-  const { open, isStarting } = useConfigChat(workspaceId ?? "");
+  const { open } = useConfigChat(workspaceId ?? "");
 
   if (!workspaceId) return null;
-
-  const defaultProfileId =
-    workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
 
   return (
     <>
@@ -29,15 +23,17 @@ function ConfigChatFAB() {
         <TooltipTrigger asChild>
           <Button
             size="icon"
-            onClick={() => open(defaultProfileId)}
-            disabled={isStarting}
-            className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full shadow-lg cursor-pointer"
+            onClick={() => open()}
+            className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg cursor-pointer"
           >
-            <IconSparkles className="h-5 w-5" />
+            <IconSparkles className="h-6 w-6" />
             <span className="sr-only">AI Config Chat</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">Configure with AI</TooltipContent>
+        <TooltipContent side="left">
+          <p className="font-medium">AI Config Chat</p>
+          <p className="text-xs text-muted-foreground">Configure Kandev with natural language</p>
+        </TooltipContent>
       </Tooltip>
       <ConfigChatModal workspaceId={workspaceId} />
     </>
