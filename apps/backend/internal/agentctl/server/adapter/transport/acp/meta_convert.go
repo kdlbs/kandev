@@ -64,7 +64,7 @@ func extractTerminalAuth(meta map[string]any) *streams.TerminalAuth {
 
 // convertSessionModels converts ACP model info to stream types,
 // normalizing known _meta patterns (copilotUsage) while preserving raw _meta.
-func convertSessionModels(models []acp.ModelInfo) []streams.SessionModelInfo {
+func convertSessionModels(models []acp.UnstableModelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil
 	}
@@ -104,6 +104,41 @@ func extractUsageMultiplier(meta map[string]any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// convertACPConfigOptions converts typed ACP SessionConfigOption to stream ConfigOption.
+// This is the preferred path when the SDK properly parses configOptions from the response.
+func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOption {
+	if len(opts) == 0 {
+		return nil
+	}
+	result := make([]streams.ConfigOption, 0, len(opts))
+	for _, opt := range opts {
+		if opt.Select == nil {
+			continue
+		}
+		s := opt.Select
+		co := streams.ConfigOption{
+			Type:         s.Type,
+			ID:           string(s.Id),
+			Name:         s.Name,
+			CurrentValue: string(s.CurrentValue),
+		}
+		if s.Category != nil {
+			co.Category = string(*s.Category)
+		}
+		// Extract options from ungrouped list (most common case)
+		if s.Options.Ungrouped != nil {
+			for _, o := range *s.Options.Ungrouped {
+				co.Options = append(co.Options, streams.ConfigOptionValue{
+					Value: string(o.Value),
+					Name:  o.Name,
+				})
+			}
+		}
+		result = append(result, co)
+	}
+	return result
 }
 
 // extractConfigOptions extracts config options from ACP session _meta.

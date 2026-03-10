@@ -17,11 +17,22 @@ export function useSessionModel(
     return null;
   }, [agentProfileId, settingsAgents]);
 
-  const sessionModel = sessionProfile?.model ?? null;
+  const profileModel = sessionProfile?.model ?? null;
+
+  // ACP agents report their actual current model via session_models events.
+  // Use that as the authoritative "session model" so comparisons in useMessageHandler
+  // use the same ID space (ACP IDs) as the model selector dropdown.
+  const acpCurrentModel = useAppStore((state) =>
+    resolvedSessionId
+      ? state.sessionModels.bySessionId[resolvedSessionId]?.currentModelId || null
+      : null,
+  );
 
   // Get active model state for this session (user's selected model)
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const activeModel = resolvedSessionId ? (activeModels[resolvedSessionId] ?? null) : null;
+
+  const sessionModel = acpCurrentModel || profileModel;
 
   return {
     sessionModel,

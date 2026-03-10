@@ -114,4 +114,4 @@ require (
 
 // Fix for ACP notification ordering race condition
 // See: https://github.com/coder/acp-go-sdk/issues/20
-replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.6.3-fix.1
+replace github.com/coder/acp-go-sdk => github.com/agentcooper/acp-go-sdk v0.0.0-20260227120930-f21f3950f56d

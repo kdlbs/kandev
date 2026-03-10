@@ -608,6 +608,11 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		ConfigOptions:  payload.Data.ConfigOptions,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 	}
+	s.logger.Info("publishing session_models event to WS",
+		zap.String("session_id", sessionID),
+		zap.String("current_model_id", payload.Data.CurrentModelID),
+		zap.Int("models_count", len(payload.Data.SessionModels)),
+	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }

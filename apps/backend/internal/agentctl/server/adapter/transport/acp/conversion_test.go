@@ -646,7 +646,7 @@ func TestConvertAvailableCommands_WithInputHint(t *testing.T) {
 				Name:        "search",
 				Description: "Search codebase",
 				Input: &acp.AvailableCommandInput{
-					UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
+					Unstructured: &acp.UnstructuredCommandInput{
 						Hint: "Enter search query",
 					},
 				},
