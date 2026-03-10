@@ -69,7 +69,7 @@ test.describe("Mobile kanban view", () => {
       // Wait for carousel to settle, then verify second step task is visible
       await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible({ timeout: 10000 });
       // First step's task should no longer be in viewport
-      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport();
+      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport({ timeout: 5000 });
     }
   });
 
@@ -173,10 +173,7 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.swimlaneContainer).toBeVisible();
     await expect(mobile.taskCardByTitle("Single Workflow Task")).toBeVisible();
 
-    // The swimlane header button (collapse toggle) should not exist for single workflow
-    const swimlaneToggle = mobile.swimlaneContainer.locator("button", {
-      has: testPage.locator('[data-slot="badge"]'),
-    });
-    await expect(swimlaneToggle).not.toBeVisible();
+    // The swimlane header (collapse toggle) should not exist for single workflow
+    await expect(testPage.getByTestId("swimlane-header")).not.toBeVisible();
   });
 });

@@ -52,7 +52,7 @@ export function SwipeableColumns({
   // Sync carousel position with external activeIndex
   useEffect(() => {
     if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
-      emblaApi.scrollTo(activeIndex);
+      emblaApi.scrollTo(activeIndex, true);
     }
   }, [emblaApi, activeIndex]);
 

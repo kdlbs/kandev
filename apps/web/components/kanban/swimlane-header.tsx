@@ -22,6 +22,7 @@ export function SwimlaneHeader({
       type="button"
       onClick={onToggleCollapse}
       className="flex items-center gap-2 py-1.5 w-full text-left cursor-pointer group"
+      data-testid="swimlane-header"
     >
       <div className="flex-1 border-t border-dashed border-border/50" />
       <Badge variant="secondary" className="text-xs shrink-0 gap-1.5 px-2.5 py-0.5">
