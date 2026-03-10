@@ -10,6 +10,7 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
 } from "./slices";
 
 export const defaultState = {
@@ -70,6 +71,8 @@ export const defaultState = {
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
+  automations: defaultAutomationsState.automations,
+  automationRuns: defaultAutomationsState.automationRuns,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -161,6 +164,8 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     },
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
+    automations: { ...defaultState.automations, ...initialState.automations },
+    automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },

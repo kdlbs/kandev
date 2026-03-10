@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -15,14 +17,20 @@ import (
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
-func registerE2EResetRoutes(router *gin.Engine, repo *sqliterepo.Repository, taskSvc *taskservice.Service, log *logger.Logger) {
+func registerE2EResetRoutes(
+	router *gin.Engine,
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	automationSvc *automation.Service,
+	log *logger.Logger,
+) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
 	if mockMode != "true" && mockMode != "only" {
 		return
 	}
 
 	api := router.Group("/api/v1/e2e")
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, log))
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
@@ -31,7 +39,12 @@ func registerE2EResetRoutes(router *gin.Engine, repo *sqliterepo.Repository, tas
 	log.Info("registered E2E endpoints (test-only)")
 }
 
-func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, log *logger.Logger) gin.HandlerFunc {
+func handleE2EReset(
+	repo *sqliterepo.Repository,
+	taskSvc *taskservice.Service,
+	automationSvc *automation.Service,
+	log *logger.Logger,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		workspaceID := c.Param("workspaceId")
 
@@ -116,11 +129,31 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			return
 		}
 
+		deletedAutomations := deleteAutomationsForReset(ctx, automationSvc, workspaceID, log)
+
 		c.JSON(http.StatusOK, gin.H{
-			"deleted_tasks":     deletedTasks,
-			"deleted_workflows": deletedWorkflows,
+			"deleted_tasks":       deletedTasks,
+			"deleted_workflows":   deletedWorkflows,
+			"deleted_automations": deletedAutomations,
 		})
 	}
+}
+
+func deleteAutomationsForReset(
+	ctx context.Context,
+	automationSvc *automation.Service,
+	workspaceID string,
+	log *logger.Logger,
+) int {
+	if automationSvc == nil {
+		return 0
+	}
+	n, err := automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		log.Error("e2e reset: failed to delete automations", zap.Error(err))
+		return 0
+	}
+	return n
 }
 
 type e2eHiddenWorkflowRequest struct {

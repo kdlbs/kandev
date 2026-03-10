@@ -132,6 +132,7 @@ type repoStore interface {
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	// Multi-repo task environment children
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
@@ -265,6 +266,9 @@ type Service struct {
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
+
+	// Automation service for handling automation triggers
+	automationService AutomationService
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
@@ -780,6 +784,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to Linear integration events
 	s.subscribeLinearEvents()
+
+	// Subscribe to automation events
+	s.subscribeAutomationEvents()
 
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()
