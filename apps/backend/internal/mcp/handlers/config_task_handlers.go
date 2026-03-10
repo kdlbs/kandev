@@ -84,8 +84,18 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 	if req.State == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
+	state := v1.TaskState(req.State)
+	switch state {
+	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateScheduling,
+		v1.TaskStateInProgress, v1.TaskStateReview, v1.TaskStateBlocked,
+		v1.TaskStateWaitingForInput, v1.TaskStateCompleted,
+		v1.TaskStateFailed, v1.TaskStateCancelled:
+		// valid
+	default:
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+req.State, nil)
+	}
 
-	task, err := h.taskSvc.UpdateTaskState(ctx, req.TaskID, v1.TaskState(req.State))
+	task, err := h.taskSvc.UpdateTaskState(ctx, req.TaskID, state)
 	if err != nil {
 		h.logger.Error("failed to update task state", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)

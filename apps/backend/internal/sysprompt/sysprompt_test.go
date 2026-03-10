@@ -7,6 +7,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test constants to avoid repeated string literals.
+const (
+	testConfigPrompt = "Configure my workflow"
+	testPlanPrompt   = "Plan this task"
+	testTaskID       = "task-123"
+	testSessionID    = "session-123"
+)
+
 // --- ConfigContext tests ---
 
 func TestConfigContext_ContainsAllTools(t *testing.T) {
@@ -44,41 +52,45 @@ func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext, "INTERACTION:")
 }
 
-func TestConfigContext_HasSessionIDPlaceholder(t *testing.T) {
-	assert.Contains(t, ConfigContext, "%s")
+func TestConfigContext_HasExactlyOneSessionIDPlaceholder(t *testing.T) {
+	count := strings.Count(ConfigContext, "%s")
+	assert.Equal(t, 1, count, "ConfigContext should have exactly 1 %%s placeholder")
 }
 
 func TestFormatConfigContext_InjectsSessionID(t *testing.T) {
 	result := FormatConfigContext("session-abc-123")
-	assert.Contains(t, result, "session-abc-123")
+	assert.Contains(t, result, "Session ID: session-abc-123")
 	assert.NotContains(t, result, "%s")
+	assert.NotContains(t, result, "%!")
 }
 
 func TestInjectConfigContext_WrapsInSystemTags(t *testing.T) {
-	result := InjectConfigContext("session-123", "Configure my workflow")
+	result := InjectConfigContext(testSessionID, testConfigPrompt)
 	assert.True(t, strings.HasPrefix(result, TagStart))
 	assert.Contains(t, result, TagEnd)
-	assert.Contains(t, result, "Configure my workflow")
-	assert.Contains(t, result, "session-123")
+	assert.Contains(t, result, testConfigPrompt)
+	assert.Contains(t, result, testSessionID)
 }
 
 func TestInjectConfigContext_SystemContentStrippable(t *testing.T) {
-	result := InjectConfigContext("session-123", "Configure my workflow")
+	result := InjectConfigContext(testSessionID, testConfigPrompt)
 	stripped := StripSystemContent(result)
-	assert.Equal(t, "Configure my workflow", stripped)
+	assert.Equal(t, testConfigPrompt, stripped)
 	assert.NotContains(t, stripped, "KANDEV CONFIG MCP TOOLS")
 }
 
 // --- KandevContext tests (existing, verify not broken) ---
 
-func TestKandevContext_ContainsTaskIDPlaceholder(t *testing.T) {
-	assert.Contains(t, KandevContext, "%s")
+func TestKandevContext_HasExactlyTwoPlaceholders(t *testing.T) {
+	count := strings.Count(KandevContext, "%s")
+	assert.Equal(t, 2, count, "KandevContext should have exactly 2 %%s placeholders")
 }
 
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 	result := FormatKandevContext("task-abc", "session-xyz")
-	assert.Contains(t, result, "task-abc")
-	assert.Contains(t, result, "session-xyz")
+	assert.Contains(t, result, "Kandev Task ID: task-abc")
+	assert.Contains(t, result, "Session ID: session-xyz")
+	assert.NotContains(t, result, "%!")
 }
 
 func TestInjectKandevContext_WrapsInSystemTags(t *testing.T) {
@@ -135,32 +147,32 @@ func TestHasSystemContent(t *testing.T) {
 // --- PlanMode tests ---
 
 func TestInjectPlanMode_WrapsInTags(t *testing.T) {
-	result := InjectPlanMode("Plan this task")
+	result := InjectPlanMode(testPlanPrompt)
 	assert.True(t, strings.HasPrefix(result, TagStart))
 	assert.Contains(t, result, "PLAN MODE ACTIVE")
-	assert.Contains(t, result, "Plan this task")
+	assert.Contains(t, result, testPlanPrompt)
 }
 
 func TestInjectPlanMode_SystemContentStrippable(t *testing.T) {
-	result := InjectPlanMode("Plan this task")
+	result := InjectPlanMode(testPlanPrompt)
 	stripped := StripSystemContent(result)
-	assert.Equal(t, "Plan this task", stripped)
+	assert.Equal(t, testPlanPrompt, stripped)
 }
 
 // --- InterpolatePlaceholders tests ---
 
 func TestInterpolatePlaceholders_TaskID(t *testing.T) {
-	result := InterpolatePlaceholders("Check {task_id} status", "task-123")
+	result := InterpolatePlaceholders("Check {task_id} status", testTaskID)
 	assert.Equal(t, "Check task-123 status", result)
 }
 
 func TestInterpolatePlaceholders_NoPlaceholders(t *testing.T) {
-	result := InterpolatePlaceholders("No placeholders here", "task-123")
+	result := InterpolatePlaceholders("No placeholders here", testTaskID)
 	assert.Equal(t, "No placeholders here", result)
 }
 
 func TestInterpolatePlaceholders_MultiplePlaceholders(t *testing.T) {
-	result := InterpolatePlaceholders("{task_id} and {task_id}", "task-123")
+	result := InterpolatePlaceholders("{task_id} and {task_id}", testTaskID)
 	assert.Equal(t, "task-123 and task-123", result)
 }
 
