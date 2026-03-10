@@ -350,7 +350,7 @@ function connectWebSocket({
   };
 }
 
-function reconnectDelayMs(attempt: number): number {
+export function reconnectDelayMs(attempt: number): number {
   const cappedAttempt = Math.min(attempt, 5);
   return Math.min(5000, 300 * 2 ** cappedAttempt);
 }
