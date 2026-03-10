@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,23 +64,23 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 // --- Action constant tests ---
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {
-	// Verify agentctl-side constants match the expected WS action strings.
-	assert.Equal(t, "mcp.create_workflow_step", ActionMCPCreateWorkflowStep)
-	assert.Equal(t, "mcp.update_workflow_step", ActionMCPUpdateWorkflowStep)
-	assert.Equal(t, "mcp.delete_workflow_step", ActionMCPDeleteWorkflowStep)
-	assert.Equal(t, "mcp.reorder_workflow_steps", ActionMCPReorderWorkflowStep)
-	assert.Equal(t, "mcp.list_agents", ActionMCPListAgents)
-	assert.Equal(t, "mcp.create_agent", ActionMCPCreateAgent)
-	assert.Equal(t, "mcp.update_agent", ActionMCPUpdateAgent)
-	assert.Equal(t, "mcp.delete_agent", ActionMCPDeleteAgent)
-	assert.Equal(t, "mcp.list_agent_profiles", ActionMCPListAgentProfiles)
-	assert.Equal(t, "mcp.update_agent_profile", ActionMCPUpdateAgentProfile)
-	assert.Equal(t, "mcp.get_mcp_config", ActionMCPGetMcpConfig)
-	assert.Equal(t, "mcp.update_mcp_config", ActionMCPUpdateMcpConfig)
-	assert.Equal(t, "mcp.move_task", ActionMCPMoveTask)
-	assert.Equal(t, "mcp.delete_task", ActionMCPDeleteTask)
-	assert.Equal(t, "mcp.archive_task", ActionMCPArchiveTask)
-	assert.Equal(t, "mcp.update_task_state", ActionMCPUpdateTaskState)
+	// Verify canonical constants in pkg/websocket match the expected WS action strings.
+	assert.Equal(t, "mcp.create_workflow_step", ws.ActionMCPCreateWorkflowStep)
+	assert.Equal(t, "mcp.update_workflow_step", ws.ActionMCPUpdateWorkflowStep)
+	assert.Equal(t, "mcp.delete_workflow_step", ws.ActionMCPDeleteWorkflowStep)
+	assert.Equal(t, "mcp.reorder_workflow_steps", ws.ActionMCPReorderWorkflowStep)
+	assert.Equal(t, "mcp.list_agents", ws.ActionMCPListAgents)
+	assert.Equal(t, "mcp.create_agent", ws.ActionMCPCreateAgent)
+	assert.Equal(t, "mcp.update_agent", ws.ActionMCPUpdateAgent)
+	assert.Equal(t, "mcp.delete_agent", ws.ActionMCPDeleteAgent)
+	assert.Equal(t, "mcp.list_agent_profiles", ws.ActionMCPListAgentProfiles)
+	assert.Equal(t, "mcp.update_agent_profile", ws.ActionMCPUpdateAgentProfile)
+	assert.Equal(t, "mcp.get_mcp_config", ws.ActionMCPGetMcpConfig)
+	assert.Equal(t, "mcp.update_mcp_config", ws.ActionMCPUpdateMcpConfig)
+	assert.Equal(t, "mcp.move_task", ws.ActionMCPMoveTask)
+	assert.Equal(t, "mcp.delete_task", ws.ActionMCPDeleteTask)
+	assert.Equal(t, "mcp.archive_task", ws.ActionMCPArchiveTask)
+	assert.Equal(t, "mcp.update_task_state", ws.ActionMCPUpdateTaskState)
 }
 
 // --- Workflow handler tests ---
@@ -98,7 +99,7 @@ func TestCreateWorkflowStepHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPCreateWorkflowStep, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPCreateWorkflowStep, backend.lastAction)
 }
 
 func TestCreateWorkflowStepHandler_MissingWorkflowID(t *testing.T) {
@@ -135,7 +136,7 @@ func TestUpdateWorkflowStepHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPUpdateWorkflowStep, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPUpdateWorkflowStep, backend.lastAction)
 }
 
 func TestUpdateWorkflowStepHandler_MissingStepID(t *testing.T) {
@@ -160,7 +161,7 @@ func TestListAgentsHandler_Success(t *testing.T) {
 	result := callTool(t, s, "list_agents", map[string]interface{}{})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPListAgents, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPListAgents, backend.lastAction)
 }
 
 func TestCreateAgentHandler_Success(t *testing.T) {
@@ -174,7 +175,7 @@ func TestCreateAgentHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPCreateAgent, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPCreateAgent, backend.lastAction)
 }
 
 func TestCreateAgentHandler_MissingName(t *testing.T) {
@@ -212,7 +213,7 @@ func TestUpdateAgentHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPUpdateAgent, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPUpdateAgent, backend.lastAction)
 }
 
 func TestUpdateAgentHandler_MissingAgentID(t *testing.T) {
@@ -237,7 +238,7 @@ func TestDeleteAgentHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPDeleteAgent, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPDeleteAgent, backend.lastAction)
 }
 
 func TestDeleteAgentHandler_MissingAgentID(t *testing.T) {
@@ -262,7 +263,7 @@ func TestListAgentProfilesHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPListAgentProfiles, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPListAgentProfiles, backend.lastAction)
 }
 
 func TestListAgentProfilesHandler_MissingAgentID(t *testing.T) {
@@ -287,7 +288,7 @@ func TestUpdateAgentProfileHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPUpdateAgentProfile, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPUpdateAgentProfile, backend.lastAction)
 }
 
 func TestUpdateAgentProfileHandler_MissingProfileID(t *testing.T) {
@@ -312,7 +313,7 @@ func TestGetMcpConfigHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPGetMcpConfig, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPGetMcpConfig, backend.lastAction)
 }
 
 func TestGetMcpConfigHandler_MissingProfileID(t *testing.T) {
@@ -336,7 +337,7 @@ func TestUpdateMcpConfigHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPUpdateMcpConfig, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPUpdateMcpConfig, backend.lastAction)
 }
 
 func TestUpdateMcpConfigHandler_MissingProfileID(t *testing.T) {
@@ -363,7 +364,7 @@ func TestMoveTaskHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPMoveTask, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPMoveTask, backend.lastAction)
 }
 
 func TestMoveTaskHandler_MissingTaskID(t *testing.T) {
@@ -413,7 +414,7 @@ func TestDeleteTaskHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPDeleteTask, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPDeleteTask, backend.lastAction)
 }
 
 func TestDeleteTaskHandler_MissingTaskID(t *testing.T) {
@@ -436,7 +437,7 @@ func TestArchiveTaskHandler_Success(t *testing.T) {
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ActionMCPArchiveTask, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPArchiveTask, backend.lastAction)
 }
 
 func TestArchiveTaskHandler_MissingTaskID(t *testing.T) {

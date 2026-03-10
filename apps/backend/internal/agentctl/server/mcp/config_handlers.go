@@ -4,32 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-)
-
-// Config-mode MCP action constants for backend WS requests.
-// These must match the actions registered in pkg/websocket/actions.go.
-const (
-	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
-	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"
-	ActionMCPDeleteWorkflowStep  = "mcp.delete_workflow_step"
-	ActionMCPReorderWorkflowStep = "mcp.reorder_workflow_steps"
-
-	ActionMCPListAgents  = "mcp.list_agents"
-	ActionMCPCreateAgent = "mcp.create_agent"
-	ActionMCPUpdateAgent = "mcp.update_agent"
-	ActionMCPDeleteAgent = "mcp.delete_agent"
-
-	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
-	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
-	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
-	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
-
-	ActionMCPMoveTask        = "mcp.move_task"
-	ActionMCPDeleteTask      = "mcp.delete_task"
-	ActionMCPArchiveTask     = "mcp.archive_task"
-	ActionMCPUpdateTaskState = "mcp.update_task_state"
 )
 
 // --- Workflow config tools ---
@@ -219,7 +196,7 @@ func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["is_start_step"] != nil {
 			payload["is_start_step"] = args["is_start_step"]
 		}
-		return s.forwardToBackend(ctx, ActionMCPCreateWorkflowStep, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflowStep, payload)
 	}
 }
 
@@ -242,13 +219,13 @@ func (s *Server) updateWorkflowStepHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["is_start_step"] != nil {
 			payload["is_start_step"] = args["is_start_step"]
 		}
-		return s.forwardToBackend(ctx, ActionMCPUpdateWorkflowStep, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflowStep, payload)
 	}
 }
 
 func (s *Server) listAgentsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return s.forwardToBackend(ctx, ActionMCPListAgents, nil)
+		return s.forwardToBackend(ctx, ws.ActionMCPListAgents, nil)
 	}
 }
 
@@ -262,7 +239,7 @@ func (s *Server) createAgentHandler() server.ToolHandlerFunc {
 		if wsID := req.GetString("workspace_id", ""); wsID != "" {
 			payload["workspace_id"] = wsID
 		}
-		return s.forwardToBackend(ctx, ActionMCPCreateAgent, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateAgent, payload)
 	}
 }
 
@@ -279,7 +256,7 @@ func (s *Server) updateAgentHandler() server.ToolHandlerFunc {
 		if path := req.GetString("mcp_config_path", ""); path != "" {
 			payload["mcp_config_path"] = path
 		}
-		return s.forwardToBackend(ctx, ActionMCPUpdateAgent, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateAgent, payload)
 	}
 }
 
@@ -290,7 +267,7 @@ func (s *Server) deleteAgentHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("agent_id is required"), nil
 		}
 		payload := map[string]string{"agent_id": agentID}
-		return s.forwardToBackend(ctx, ActionMCPDeleteAgent, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteAgent, payload)
 	}
 }
 
@@ -301,7 +278,7 @@ func (s *Server) listAgentProfilesHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("agent_id is required"), nil
 		}
 		payload := map[string]string{"agent_id": agentID}
-		return s.forwardToBackend(ctx, ActionMCPListAgentProfiles, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPListAgentProfiles, payload)
 	}
 }
 
@@ -321,7 +298,7 @@ func (s *Server) updateAgentProfileHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["auto_approve"] != nil {
 			payload["auto_approve"] = args["auto_approve"]
 		}
-		return s.forwardToBackend(ctx, ActionMCPUpdateAgentProfile, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateAgentProfile, payload)
 	}
 }
 
@@ -332,7 +309,7 @@ func (s *Server) getMcpConfigHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("profile_id is required"), nil
 		}
 		payload := map[string]string{"profile_id": profileID}
-		return s.forwardToBackend(ctx, ActionMCPGetMcpConfig, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPGetMcpConfig, payload)
 	}
 }
 
@@ -350,7 +327,7 @@ func (s *Server) updateMcpConfigHandler() server.ToolHandlerFunc {
 		if args["servers"] != nil {
 			payload["servers"] = args["servers"]
 		}
-		return s.forwardToBackend(ctx, ActionMCPUpdateMcpConfig, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateMcpConfig, payload)
 	}
 }
 
@@ -376,7 +353,7 @@ func (s *Server) moveTaskHandler() server.ToolHandlerFunc {
 		if args := req.GetArguments(); args["position"] != nil {
 			payload["position"] = args["position"]
 		}
-		return s.forwardToBackend(ctx, ActionMCPMoveTask, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPMoveTask, payload)
 	}
 }
 
@@ -387,7 +364,7 @@ func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID}
-		return s.forwardToBackend(ctx, ActionMCPDeleteTask, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteTask, payload)
 	}
 }
 
@@ -398,7 +375,7 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID}
-		return s.forwardToBackend(ctx, ActionMCPArchiveTask, payload)
+		return s.forwardToBackend(ctx, ws.ActionMCPArchiveTask, payload)
 	}
 }
 
@@ -408,6 +385,9 @@ func (s *Server) forwardToBackend(ctx context.Context, action string, payload in
 	if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError("failed to marshal response: " + err.Error()), nil
+	}
 	return mcp.NewToolResultText(string(data)), nil
 }
