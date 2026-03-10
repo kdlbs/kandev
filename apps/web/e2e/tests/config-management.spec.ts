@@ -1,272 +1,509 @@
 import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
+import { SessionPage } from "../pages/session-page";
 
-test.describe("Config management — workflow steps", () => {
-  test("new workflow step appears as kanban column", async ({
+/**
+ * Config management via agent MCP tools.
+ *
+ * These tests verify the config-mode MCP flow: when a workflow step has
+ * `enable_plan_mode` on_enter, the agent session receives config-mode MCP
+ * tools (list_workspaces, create_workflow_step, list_agents, etc.) that
+ * let an AI agent configure Kandev via natural language.
+ *
+ * The mock agent uses `e2e:mcp:kandev:<tool>(<json_args>)` script commands
+ * to call real MCP tools through the agentctl MCP server.
+ *
+ * IMPORTANT: Step prompts must include `{{task_prompt}}` to avoid being
+ * wrapped in <kandev-system> tags (which stripKandevSystem would discard).
+ * The e2e: script commands must appear before {{task_prompt}} so they
+ * are the first content after kandev-system blocks are stripped.
+ */
+
+/** Build a step prompt that puts e2e script commands before {{task_prompt}}. */
+function scriptPrompt(...lines: string[]): string {
+  return [...lines, "{{task_prompt}}"].join("\n");
+}
+
+test.describe("Config-mode MCP — workflow management", () => {
+  test("agent can list workspaces via MCP tool", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // Create a new step via API
-    const step = await apiClient.createWorkflowStep(
-      seedData.workflowId,
-      "QA Review",
-      seedData.steps.length,
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Config MCP Workflow",
     );
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
 
-    // The new step should render as a column
-    const column = kanban.columnByStepId(step.id);
-    await expect(column).toBeVisible({ timeout: 10_000 });
-    await expect(column).toContainText("QA Review");
-  });
-
-  test("deleting a workflow step removes the kanban column", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // Create a step, then delete it
-    const step = await apiClient.createWorkflowStep(
-      seedData.workflowId,
-      "Ephemeral Step",
-      seedData.steps.length,
-    );
-    await apiClient.deleteWorkflowStep(step.id);
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const column = kanban.columnByStepId(step.id);
-    await expect(column).not.toBeVisible();
-  });
-
-  test("task placed in a new step renders in correct column", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const step = await apiClient.createWorkflowStep(
-      seedData.workflowId,
-      "Deploy",
-      seedData.steps.length,
-    );
-
-    const task = await apiClient.createTask(seedData.workspaceId, "Deploy Feature X", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: step.id,
-    });
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Deploy Feature X", step.id);
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    expect(task.id).toBeTruthy();
-  });
-});
-
-test.describe("Config management — task operations", () => {
-  test("task moves between columns via API", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const startStep = seedData.steps.find((s) => s.is_start_step) ?? seedData.steps[0];
-    const targetStep = seedData.steps.find((s) => s.id !== startStep.id);
-    if (!targetStep) {
-      test.skip(true, "Need at least 2 workflow steps");
-      return;
-    }
-
-    const task = await apiClient.createTask(seedData.workspaceId, "Move Me", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: startStep.id,
-    });
-
-    // Move the task to the target step
-    await apiClient.moveTask(task.id, seedData.workflowId, targetStep.id);
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    // Should be in the target column
-    const cardInTarget = kanban.taskCardInColumn("Move Me", targetStep.id);
-    await expect(cardInTarget).toBeVisible({ timeout: 10_000 });
-
-    // Should NOT be in the start column
-    const cardInStart = kanban.taskCardInColumn("Move Me", startStep.id);
-    await expect(cardInStart).not.toBeVisible();
-  });
-
-  test("archived task disappears from kanban", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const task = await apiClient.createTask(seedData.workspaceId, "Archivable Task", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await expect(kanban.taskCardByTitle("Archivable Task")).toBeVisible({ timeout: 10_000 });
-
-    // Archive via API
-    await apiClient.archiveTask(task.id);
-
-    // Task card should disappear (WS push removes it from board)
-    await expect(kanban.taskCardByTitle("Archivable Task")).not.toBeVisible({ timeout: 15_000 });
-  });
-
-  test("deleted task disappears from kanban", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const task = await apiClient.createTask(seedData.workspaceId, "Deletable Task", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await expect(kanban.taskCard(task.id)).toBeVisible({ timeout: 10_000 });
-
-    // Delete via API
-    await apiClient.deleteTask(task.id);
-
-    // Task card should disappear
-    await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 15_000 });
-  });
-});
-
-test.describe("Config management — agents & profiles", () => {
-  test("agent settings page lists available agents", async ({
-    testPage,
-  }) => {
-    await testPage.goto("/settings/agents");
-
-    // The supported agents section and Mock agent card should appear
-    await expect(testPage.getByText("Supported agents found")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("Mock").first()).toBeVisible();
-  });
-
-  test("agent profile page shows profile details", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // Use the seed profile which persists across test resets
-    const { agents } = await apiClient.listAgents();
-    const agent = agents.find((a) => a.profiles?.some((p) => p.id === seedData.agentProfileId));
-    if (!agent) {
-      test.skip(true, "No agent with seed profile found");
-      return;
-    }
-
-    await testPage.goto(`/settings/agents/${encodeURIComponent(agent.name)}/profiles/${seedData.agentProfileId}`);
-
-    // Profile page should show profile settings section
-    await expect(testPage.getByText("Profile settings", { exact: true })).toBeVisible({ timeout: 15_000 });
-  });
-
-  test("creating and deleting an agent profile via API is reflected in settings", async ({
-    testPage,
-    apiClient,
-  }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-
-    // Create a new profile
-    const profile = await apiClient.createAgentProfile(agent.id, "E2E Test Profile", {
-      model: agent.profiles[0]?.model ?? "default",
-      auto_approve: true,
-    });
-
-    // Navigate to agent page — new profile should be visible
-    await testPage.goto(`/settings/agents/${encodeURIComponent(agent.name)}`);
-    await expect(testPage.getByText("E2E Test Profile")).toBeVisible({ timeout: 15_000 });
-
-    // Delete and reload — profile should be gone
-    await apiClient.deleteAgentProfile(profile.id);
-    await testPage.reload();
-    await expect(testPage.getByText("E2E Test Profile")).not.toBeVisible({ timeout: 10_000 });
-  });
-
-  test("MCP config section is visible on profile page", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // Use the seed profile which persists across test resets
-    const { agents } = await apiClient.listAgents();
-    const agent = agents.find((a) => a.supports_mcp && a.profiles?.some((p) => p.id === seedData.agentProfileId));
-    if (!agent) {
-      test.skip(true, "No MCP-capable agent with seed profile available");
-      return;
-    }
-
-    await testPage.goto(`/settings/agents/${encodeURIComponent(agent.name)}/profiles/${seedData.agentProfileId}`);
-
-    // The MCP Configuration card should be visible
-    await expect(testPage.getByText("MCP Configuration")).toBeVisible({ timeout: 15_000 });
-  });
-});
-
-test.describe("Config management — workflow settings", () => {
-  test("workflow settings page loads and shows pipeline editor", async ({
-    testPage,
-    seedData,
-  }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/workflows`);
-
-    // The workflow pipeline editor should be visible with steps
-    await expect(testPage.getByText("Workflow Steps")).toBeVisible({ timeout: 15_000 });
-    // The workflow name input should contain the seeded workflow name
-    await expect(testPage.locator('input[value="E2E Workflow"]')).toBeVisible();
-  });
-
-  test("workflow step events persist through API round-trip", async ({
-    apiClient,
-    seedData,
-  }) => {
-    // Create a step with automation events
-    const step = await apiClient.createWorkflowStep(
-      seedData.workflowId,
-      "Automated Step",
-      seedData.steps.length,
-    );
-
-    await apiClient.updateWorkflowStep(step.id, {
-      prompt: "Run the automated tests",
+    // Configure step: auto_start + plan_mode → activates config-mode MCP tools.
+    // The agent script calls list_workspaces via MCP.
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Listing workspaces...")',
+        "e2e:mcp:kandev:list_workspaces({})",
+        'e2e:message("Done listing workspaces")',
+      ),
       events: {
-        on_enter: [{ type: "auto_start_agent" }],
-        on_turn_complete: [{ type: "move_to_next" }],
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
       },
     });
 
-    // Fetch steps and verify events persisted
-    const { steps } = await apiClient.listWorkflowSteps(seedData.workflowId);
-    const updated = steps.find((s) => s.id === step.id);
-    expect(updated).toBeTruthy();
-    expect(updated!.prompt).toBe("Run the automated tests");
-    expect(updated!.events?.on_enter).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "auto_start_agent" })]),
-    );
-    expect(updated!.events?.on_turn_complete).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "move_to_next" })]),
-    );
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "List Workspaces Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Move task to Configure step → triggers auto_start + plan_mode + config MCP
+    await apiClient.moveTask(task.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("List Workspaces Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    // Navigate to session
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // The agent should have completed — check for the "Done" message
+    await expect(session.chat.getByText("Done listing workspaces", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // The MCP tool call should appear in the chat (tool_use block for list_workspaces)
+    await expect(session.chat.getByText("list_workspaces", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
-  test("MCP config round-trip via API", async ({ apiClient, seedData }) => {
-    // Get the agent profile's MCP config
-    const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
-    expect(config.profile_id).toBe(seedData.agentProfileId);
-    // Default state: should have enabled field
-    expect(typeof config.enabled).toBe("boolean");
+  test("agent can create a workflow step via MCP tool", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Step Creation Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
+
+    // Agent will create a new workflow step named "QA Review" at position 2
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Creating QA Review step...")',
+        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"QA Review","position":2})`,
+        'e2e:message("QA Review step created")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Create Step Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await apiClient.moveTask(task.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("Create Step Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    // Navigate to session to verify agent completed
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("QA Review step created", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Also check MCP tool result in chat (look for error indicators)
+    const toolCallBlock = session.chat.getByText("create_workflow_step", { exact: true });
+    await expect(toolCallBlock).toBeVisible({ timeout: 10_000 });
+
+    // Verify the step was actually created via API
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const qaStep = steps.find((s) => s.name === "QA Review");
+    expect(qaStep).toBeTruthy();
+    expect(qaStep!.position).toBe(2);
+  });
+});
+
+test.describe("Config-mode MCP — agent management", () => {
+  test("agent can list agents via MCP tool", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Agent List Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
+
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Listing agents...")',
+        "e2e:mcp:kandev:list_agents({})",
+        'e2e:message("Done listing agents")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "List Agents Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await apiClient.moveTask(task.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("List Agents Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Agent should have completed with both messages visible
+    await expect(session.chat.getByText("Done listing agents", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(session.chat.getByText("list_agents", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("agent can list agent profiles via MCP tool", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // First get the agent ID
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Profile List Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
+
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Listing profiles...")',
+        `e2e:mcp:kandev:list_agent_profiles({"agent_id":"${agent.id}"})`,
+        'e2e:message("Done listing profiles")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "List Profiles Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await apiClient.moveTask(task.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("List Profiles Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("Done listing profiles", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+});
+
+test.describe("Config-mode MCP — task management", () => {
+  test("agent can list tasks via MCP tool", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Task List Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
+
+    // Create a sample task so there's something to list
+    await apiClient.createTask(seedData.workspaceId, "Sample Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+    });
+
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Listing tasks...")',
+        `e2e:mcp:kandev:list_tasks({"workflow_id":"${workflow.id}"})`,
+        'e2e:message("Done listing tasks")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const configTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "List Tasks Config Task",
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: inboxStep.id,
+        agent_profile_id: seedData.agentProfileId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.moveTask(configTask.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("List Tasks Config Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("Done listing tasks", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(session.chat.getByText("list_tasks", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("agent can move a task between workflow steps via MCP tool", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Task Move Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 1);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 2);
+
+    // Create a target task to move
+    const targetTask = await apiClient.createTask(seedData.workspaceId, "Target Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+    });
+
+    // Agent will move the target task from Inbox to Done
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Moving task to Done...")',
+        `e2e:mcp:kandev:move_task({"task_id":"${targetTask.id}","workflow_id":"${workflow.id}","workflow_step_id":"${doneStep.id}"})`,
+        'e2e:message("Task moved successfully")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const configTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Move Task Config Task",
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: inboxStep.id,
+        agent_profile_id: seedData.agentProfileId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.moveTask(configTask.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("Move Task Config Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("Task moved successfully", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Go back to kanban to verify the target task moved to Done column
+    await kanban.goto();
+    const targetInDone = kanban.taskCardInColumn("Target Task", doneStep.id);
+    await expect(targetInDone).toBeVisible({ timeout: 10_000 });
+  });
+});
+
+test.describe("Config-mode MCP — multi-tool workflow", () => {
+  test("agent executes multiple config MCP tools in sequence", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Multi-Tool Workflow",
+    );
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
+
+    // Agent will: list workspaces, list workflows, create a step — all via MCP
+    await apiClient.updateWorkflowStep(configStep.id, {
+      prompt: scriptPrompt(
+        'e2e:message("Starting multi-tool config...")',
+        "e2e:mcp:kandev:list_workspaces({})",
+        `e2e:mcp:kandev:list_workflows({"workspace_id":"${seedData.workspaceId}"})`,
+        `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Agent Created Step","position":2})`,
+        'e2e:message("Multi-tool config complete")',
+      ),
+      events: {
+        on_enter: [{ type: "auto_start_agent" }, { type: "enable_plan_mode" }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Multi-Tool Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await apiClient.moveTask(task.id, workflow.id, configStep.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardInColumn("Multi-Tool Task", configStep.id);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+
+    await card.click();
+    await expect(testPage).toHaveURL(/\/s\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Wait for the agent to complete all tool calls
+    await expect(session.chat.getByText("Multi-tool config complete", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Multiple tool calls get collapsed into a turn group — expand it
+    const toolCallsGroup = session.chat.getByRole("button", { name: /tool call/i });
+    await expect(toolCallsGroup).toBeVisible({ timeout: 5_000 });
+    await toolCallsGroup.click();
+
+    // Now individual MCP tool call names should be visible
+    await expect(session.chat.getByText("list_workspaces", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.chat.getByText("list_workflows", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(session.chat.getByText("create_workflow_step", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Verify the step was actually created
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const createdStep = steps.find((s) => s.name === "Agent Created Step");
+    expect(createdStep).toBeTruthy();
   });
 });

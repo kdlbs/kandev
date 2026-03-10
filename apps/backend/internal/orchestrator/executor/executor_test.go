@@ -42,6 +42,10 @@ func (m *mockAgentManager) SetExecutionDescription(ctx context.Context, agentExe
 	return nil
 }
 
+func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
 	if m.startAgentProcessFunc != nil {
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
