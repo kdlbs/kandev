@@ -20,6 +20,7 @@ export const defaultUIState: UISliceState = {
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
+  configChat: { isOpen: false, sessionId: null, taskId: null, workspaceId: null },
   sessionFailureNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
 };
@@ -118,6 +119,25 @@ function buildBottomTerminalActions(set: ImmerSet) {
   };
 }
 
+function buildConfigChatActions(set: ImmerSet) {
+  return {
+    openConfigChat: (sessionId: string, taskId: string, workspaceId: string) =>
+      set((draft) => {
+        draft.configChat.isOpen = true;
+        draft.configChat.sessionId = sessionId;
+        draft.configChat.taskId = taskId;
+        draft.configChat.workspaceId = workspaceId;
+      }),
+    closeConfigChat: () =>
+      set((draft) => {
+        draft.configChat.isOpen = false;
+        draft.configChat.sessionId = null;
+        draft.configChat.taskId = null;
+        draft.configChat.workspaceId = null;
+      }),
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
 ) => ({
@@ -125,6 +145,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
+  ...buildConfigChatActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;

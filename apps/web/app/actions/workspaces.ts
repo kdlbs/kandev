@@ -78,6 +78,7 @@ export async function updateWorkspaceAction(
     default_executor_id?: string;
     default_environment_id?: string;
     default_agent_profile_id?: string;
+    default_config_agent_profile_id?: string;
   },
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {

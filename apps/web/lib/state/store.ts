@@ -204,6 +204,7 @@ export type AppState = {
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
+  configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
 
@@ -315,6 +316,8 @@ export type AppState = {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
+  openConfigChat: (sessionId: string, taskId: string, workspaceId: string) => void;
+  closeConfigChat: () => void;
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;
