@@ -121,7 +121,7 @@ function StartTaskSplitButton({
           type="button"
           variant="outline"
           className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
-          disabled={disabled}
+          disabled={altDisabled}
           onClick={onPlanModeAction}
           data-testid="mobile-plan-mode"
         >

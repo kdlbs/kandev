@@ -134,12 +134,11 @@ function useSwimlaneKanbanDnd({
     [tasks, activeTaskId],
   );
 
-  // Only use touch-friendly sensors on mobile
+  // Only use touch-friendly sensor on mobile (PointerSensor conflicts with long-press)
   const mobileSensors = useSensors(
     useSensor(TouchSensor, {
       activationConstraint: { delay: 250, tolerance: 5 },
     }),
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
   return {

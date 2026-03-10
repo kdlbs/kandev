@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task } from "../kanban-card";
@@ -32,12 +32,19 @@ export function SwipeableColumns({
   showMaximizeButton,
   deletingTaskId,
 }: SwipeableColumnsProps) {
-  const [emblaRef, emblaApi] = useEmblaCarousel({
-    align: "start",
-    containScroll: "trimSnaps",
-    watchDrag: true,
-    startIndex: activeIndex,
-  });
+  // Stable options to avoid Embla reinitializing on every activeIndex change
+  const [initialIndex] = useState(activeIndex);
+  const options = useMemo(
+    () => ({
+      align: "start" as const,
+      containScroll: "trimSnaps" as const,
+      watchDrag: true,
+      startIndex: initialIndex,
+    }),
+    [initialIndex],
+  );
+  const [emblaRef, emblaApi] = useEmblaCarousel(options);
+  const isProgrammaticScroll = useRef(false);
 
   const getTasksForStep = useCallback(
     (stepId: string) => {
@@ -49,10 +56,15 @@ export function SwipeableColumns({
     [tasks],
   );
 
-  // Sync carousel position with external activeIndex
+  // Sync carousel position with external activeIndex (tab clicks)
   useEffect(() => {
     if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
+      isProgrammaticScroll.current = true;
       emblaApi.scrollTo(activeIndex, true);
+      // Reset flag after Embla settles
+      requestAnimationFrame(() => {
+        isProgrammaticScroll.current = false;
+      });
     }
   }, [emblaApi, activeIndex]);
 
@@ -61,6 +73,7 @@ export function SwipeableColumns({
     if (!emblaApi) return;
 
     const onSelect = () => {
+      if (isProgrammaticScroll.current) return;
       const selectedIndex = emblaApi.selectedScrollSnap();
       if (selectedIndex !== activeIndex) {
         onIndexChange(selectedIndex);

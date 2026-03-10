@@ -69,7 +69,9 @@ test.describe("Mobile kanban view", () => {
       // Wait for carousel to settle, then verify second step task is visible
       await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible({ timeout: 10000 });
       // First step's task should no longer be in viewport
-      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport({ timeout: 5000 });
+      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport({
+        timeout: 5000,
+      });
     }
   });
 
@@ -149,8 +151,8 @@ test.describe("Mobile kanban view", () => {
 
     // Bottom sheet should appear, NOT the desktop preview panel
     await expect(mobile.mobileTaskSheet).toBeVisible({ timeout: 5000 });
-    // Desktop preview panel should NOT exist
-    await expect(testPage.getByTestId("preview-panel")).not.toBeVisible();
+    // Desktop preview panel should NOT exist in the DOM at all
+    await expect(testPage.getByTestId("preview-panel")).toHaveCount(0);
     // No ?taskId= URL param (that's the desktop preview behavior)
     await expect(testPage).not.toHaveURL(/taskId=/);
   });

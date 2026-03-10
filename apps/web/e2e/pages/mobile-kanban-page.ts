@@ -29,7 +29,7 @@ export class MobileKanbanPage {
   }
 
   columnTab(name: string): Locator {
-    return this.page.getByRole("button", { name: new RegExp(name) });
+    return this.page.getByRole("button", { name });
   }
 
   taskCard(taskId: string): Locator {
