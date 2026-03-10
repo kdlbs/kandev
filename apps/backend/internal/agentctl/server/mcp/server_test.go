@@ -97,12 +97,6 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_mcp_config")
 	assert.Contains(t, tools, "update_mcp_config")
 
-	// Config mode should have task config tools
-	assert.Contains(t, tools, "list_tasks")
-	assert.Contains(t, tools, "move_task")
-	assert.Contains(t, tools, "delete_task")
-	assert.Contains(t, tools, "archive_task")
-
 	// Config mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question")
 
@@ -178,8 +172,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 5 workflow + 4 agent + 4 mcp + 4 task + 1 interaction = 18
-	assert.Equal(t, 18, len(tools))
+	// 5 workflow + 4 agent + 4 mcp + 1 interaction = 14
+	assert.Equal(t, 14, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -193,7 +187,6 @@ func TestServerModeConfig_ToolDescriptions(t *testing.T) {
 
 	assert.Contains(t, toolsMap["create_workflow_step"].Tool.Description, "Create a new workflow step")
 	assert.Contains(t, toolsMap["list_agents"].Tool.Description, "List all configured agents")
-	assert.Contains(t, toolsMap["move_task"].Tool.Description, "Move a task")
 	assert.Contains(t, toolsMap["get_mcp_config"].Tool.Description, "Get MCP server configuration")
 }
 

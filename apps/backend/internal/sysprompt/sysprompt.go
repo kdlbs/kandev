@@ -86,7 +86,8 @@ func FormatKandevContext(taskID, sessionID string) string {
 }
 
 // ConfigContext is the system prompt for config-mode MCP sessions.
-// It provides instructions for agents performing configuration operations.
+// It provides instructions for agents performing configuration operations
+// via the dedicated config chat on the settings page.
 const ConfigContext = `KANDEV CONFIG MCP TOOLS — You are a configuration assistant for the Kandev platform.
 You have access to the following MCP tools from the "kandev" server.
 Always use the exact tool names shown below (they include the _kandev suffix).
@@ -112,16 +113,16 @@ MCP CONFIG TOOLS:
 - get_mcp_config_kandev: Get MCP server config for a profile. Required: profile_id.
 - update_mcp_config_kandev: Update MCP config for a profile. Required: profile_id. Optional: enabled, servers.
 
-TASK TOOLS:
-- list_tasks_kandev: List tasks in a workflow. Required: workflow_id.
-- move_task_kandev: Move a task to a different step. Required: task_id, workflow_id, workflow_step_id. Optional: position.
-- delete_task_kandev: Delete a task permanently. Required: task_id.
-- archive_task_kandev: Archive a task. Required: task_id.
-
 INTERACTION:
 - ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
 
-IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete, archive) with the user first using ask_user_question_kandev.`
+EXAMPLE REQUESTS the user might ask:
+- "Add a 'Code Review' step to my workflow"
+- "Create a new agent profile for Claude with auto-approve enabled"
+- "Show me the current workflow steps"
+- "Update the MCP servers for the default agent profile"
+
+IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete) with the user first using ask_user_question_kandev.`
 
 // FormatConfigContext returns the config context prompt with the session ID injected.
 func FormatConfigContext(sessionID string) string {
