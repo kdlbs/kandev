@@ -49,6 +49,8 @@ export function MobileColumnTabs({
         <button
           key={step.id}
           ref={index === activeIndex ? activeTabRef : null}
+          data-testid={`column-tab-${index}`}
+          data-active={index === activeIndex}
           onClick={() => onColumnChange(index)}
           className={cn(
             "flex items-center gap-2 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
