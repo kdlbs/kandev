@@ -39,14 +39,14 @@ export type SwimlaneKanbanContentProps = {
 type SwimlaneKanbanDndOptions = {
   tasks: Task[];
   workflowId: string;
-  isMobile: boolean;
+  useTouchSensors: boolean;
   onMoveError?: (error: MoveTaskError) => void;
 };
 
 function useSwimlaneKanbanDnd({
   tasks,
   workflowId,
-  isMobile,
+  useTouchSensors,
   onMoveError,
 }: SwimlaneKanbanDndOptions) {
   const store = useAppStoreApi();
@@ -134,15 +134,15 @@ function useSwimlaneKanbanDnd({
     [tasks, activeTaskId],
   );
 
-  // Only use touch-friendly sensor on mobile (PointerSensor conflicts with long-press)
-  const mobileSensors = useSensors(
+  // Touch-only sensors for mobile/tablet (PointerSensor conflicts with touch scroll)
+  const touchSensors = useSensors(
     useSensor(TouchSensor, {
       activationConstraint: { delay: 250, tolerance: 5 },
     }),
   );
 
   return {
-    sensors: isMobile ? mobileSensors : sensors,
+    sensors: useTouchSensors ? touchSensors : sensors,
     handleDragStart,
     handleDragEnd,
     handleDragCancel,
@@ -168,6 +168,16 @@ function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
   }, [steps, tasks, rawIndex]);
 
   return { activeIndex, setActiveIndex };
+}
+
+function useTasksByStep(tasks: Task[]) {
+  return useCallback(
+    (stepId: string) =>
+      tasks
+        .filter((t) => t.workflowStepId === stepId)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [tasks],
+  );
 }
 
 function MobileKanbanLayout({
@@ -254,13 +264,7 @@ function TabletKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
 }) {
-  const getTasksForStep = useCallback(
-    (stepId: string) =>
-      tasks
-        .filter((t) => t.workflowStepId === stepId)
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
-    [tasks],
-  );
+  const getTasksForStep = useTasksByStep(tasks);
 
   return (
     <div
@@ -308,13 +312,7 @@ function DesktopKanbanLayout({
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
 }) {
-  const getTasksForStep = useCallback(
-    (stepId: string) =>
-      tasks
-        .filter((t) => t.workflowStepId === stepId)
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
-    [tasks],
-  );
+  const getTasksForStep = useTasksByStep(tasks);
 
   return (
     <div
@@ -355,7 +353,7 @@ export function SwimlaneKanbanContent({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks, workflowId, isMobile, onMoveError });
+    useSwimlaneKanbanDnd({ tasks, workflowId, useTouchSensors: isMobile || isTablet, onMoveError });
 
   if (steps.length === 0) return null;
 
