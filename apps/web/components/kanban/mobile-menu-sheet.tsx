@@ -153,7 +153,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
 
 function MobileNavLinks({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   return (
-    <div className="mt-auto space-y-2">
+    <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <Link href="/stats" onClick={() => onOpenChange(false)}>
         <Button variant="outline" className="w-full cursor-pointer">
           <IconChartBar className="h-4 w-4 mr-2" />
