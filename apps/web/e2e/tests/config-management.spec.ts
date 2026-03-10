@@ -25,15 +25,8 @@ function scriptPrompt(...lines: string[]): string {
 }
 
 test.describe("Config-mode MCP — workflow management", () => {
-  test("agent can list workspaces via MCP tool", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Config MCP Workflow",
-    );
+  test("agent can list workspaces via MCP tool", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Config MCP Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -96,10 +89,7 @@ test.describe("Config-mode MCP — workflow management", () => {
     apiClient,
     seedData,
   }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Step Creation Workflow",
-    );
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Step Creation Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -160,15 +150,8 @@ test.describe("Config-mode MCP — workflow management", () => {
 });
 
 test.describe("Config-mode MCP — agent management", () => {
-  test("agent can list agents via MCP tool", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Agent List Workflow",
-    );
+  test("agent can list agents via MCP tool", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Agent List Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -220,19 +203,12 @@ test.describe("Config-mode MCP — agent management", () => {
     });
   });
 
-  test("agent can list agent profiles via MCP tool", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("agent can list agent profiles via MCP tool", async ({ testPage, apiClient, seedData }) => {
     // First get the agent ID
     const { agents } = await apiClient.listAgents();
     const agent = agents[0];
 
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Profile List Workflow",
-    );
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Profile List Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -282,15 +258,8 @@ test.describe("Config-mode MCP — agent management", () => {
 });
 
 test.describe("Config-mode MCP — task management", () => {
-  test("agent can list tasks via MCP tool", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Task List Workflow",
-    );
+  test("agent can list tasks via MCP tool", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Task List Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -318,16 +287,12 @@ test.describe("Config-mode MCP — task management", () => {
       enable_preview_on_click: false,
     });
 
-    const configTask = await apiClient.createTask(
-      seedData.workspaceId,
-      "List Tasks Config Task",
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: inboxStep.id,
-        agent_profile_id: seedData.agentProfileId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    const configTask = await apiClient.createTask(seedData.workspaceId, "List Tasks Config Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     await apiClient.moveTask(configTask.id, workflow.id, configStep.id);
 
@@ -356,10 +321,7 @@ test.describe("Config-mode MCP — task management", () => {
     apiClient,
     seedData,
   }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Task Move Workflow",
-    );
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Task Move Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 1);
@@ -389,16 +351,12 @@ test.describe("Config-mode MCP — task management", () => {
       enable_preview_on_click: false,
     });
 
-    const configTask = await apiClient.createTask(
-      seedData.workspaceId,
-      "Move Task Config Task",
-      {
-        workflow_id: workflow.id,
-        workflow_step_id: inboxStep.id,
-        agent_profile_id: seedData.agentProfileId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    const configTask = await apiClient.createTask(seedData.workspaceId, "Move Task Config Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
 
     await apiClient.moveTask(configTask.id, workflow.id, configStep.id);
 
@@ -431,10 +389,7 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
     apiClient,
     seedData,
   }) => {
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Multi-Tool Workflow",
-    );
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Multi-Tool Workflow");
 
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const configStep = await apiClient.createWorkflowStep(workflow.id, "Configure", 1);
@@ -481,9 +436,11 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
     await session.waitForLoad();
 
     // Wait for the agent to complete all tool calls
-    await expect(session.chat.getByText("Multi-tool config complete", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(session.chat.getByText("Multi-tool config complete", { exact: true })).toBeVisible(
+      {
+        timeout: 15_000,
+      },
+    );
 
     // Multiple tool calls get collapsed into a turn group — expand it
     const toolCallsGroup = session.chat.getByRole("button", { name: /tool call/i });

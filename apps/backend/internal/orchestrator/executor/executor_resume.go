@@ -366,7 +366,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	// Activate config-mode MCP tools when plan_mode is set in session metadata.
 	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
-		req.McpMode = "config"
+		req.McpMode = McpModeConfig
 	}
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)

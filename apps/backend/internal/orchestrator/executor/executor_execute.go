@@ -473,7 +473,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 
 	// Activate config-mode MCP tools when plan_mode is set in session metadata.
 	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
-		req.McpMode = "config"
+		req.McpMode = McpModeConfig
 	}
 
 	if len(metadata) > 0 {
@@ -516,7 +516,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	effectiveMcpMode := mcpMode
 	if effectiveMcpMode == "" {
 		if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
-			effectiveMcpMode = "config"
+			effectiveMcpMode = McpModeConfig
 		}
 	}
 	if effectiveMcpMode != "" {

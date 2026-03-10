@@ -285,7 +285,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 
 	// Activate config-mode MCP tools when plan_mode is set in session metadata.
 	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
-		req.McpMode = "config"
+		req.McpMode = McpModeConfig
 	}
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)

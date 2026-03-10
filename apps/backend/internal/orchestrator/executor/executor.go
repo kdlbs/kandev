@@ -232,6 +232,10 @@ type LaunchAgentRequest struct {
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 }
 
+// McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
+// config, tasks). Used when plan_mode is enabled on a session.
+const McpModeConfig = "config"
+
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
 	AgentProfileID string
@@ -239,7 +243,7 @@ type LaunchOptions struct {
 	Prompt         string
 	WorkflowStepID string
 	StartAgent     bool
-	McpMode        string // MCP tool mode: "config" activates config-mode tools
+	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
 }
 
 // LaunchAgentResponse contains the result of launching an agent

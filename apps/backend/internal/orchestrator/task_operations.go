@@ -193,7 +193,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	var mcpMode string
 	if planModeActive {
-		mcpMode = "config"
+		mcpMode = executor.McpModeConfig
 	}
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true, McpMode: mcpMode})
@@ -395,7 +395,7 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 	// Determine MCP mode for the agent's MCP server
 	var mcpMode string
 	if planModeActive {
-		mcpMode = "config"
+		mcpMode = executor.McpModeConfig
 	}
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
