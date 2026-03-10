@@ -219,7 +219,10 @@ func (r *sqliteRepository) builtinCodeReviewPrompt(now time.Time) *models.Prompt
 STEP 1: Determine what to review
 - First, check if there are any uncommitted changes (dirty working directory)
 - If there are uncommitted/staged changes: review those files
-- If the working directory is clean: review the commits that have diverged from the master/main branch
+- If the working directory is clean: review ONLY the commits from this branch
+  - Use: git log --oneline $(git merge-base origin/main HEAD)..HEAD to list the branch commits
+  - Use: git diff $(git merge-base origin/main HEAD) to see the cumulative changes
+  - Do NOT diff directly against origin/main or master — that would include unrelated changes if the branch is outdated
 
 STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
 
