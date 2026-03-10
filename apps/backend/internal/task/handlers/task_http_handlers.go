@@ -825,7 +825,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 
 	agentProfileID, executorID, metadata := resolveConfigChatDefaults(body, workspace)
 	if agentProfileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no agent profile configured"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no agent profile configured — set a default agent profile in workspace settings"})
 		return
 	}
 
@@ -844,30 +844,67 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 	}
 
 	resp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:          task.ID,
-		Intent:          orchestrator.IntentPrepare,
-		AgentProfileID:  agentProfileID,
-		ExecutorID:      executorID,
-		LaunchWorkspace: true,
+		TaskID:         task.ID,
+		Intent:         orchestrator.IntentPrepare,
+		AgentProfileID: agentProfileID,
+		ExecutorID:     executorID,
 	})
 	if err != nil {
-		if deleteErr := h.service.DeleteTask(ctx, task.ID); deleteErr != nil {
-			h.logger.Error("failed to rollback config chat task",
-				zap.String("task_id", task.ID),
-				zap.Error(deleteErr))
-		}
-		h.logger.Error("failed to prepare config chat session", zap.Error(err), zap.String("task_id", task.ID))
+		h.deleteTaskOnError(task.ID, "config chat", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare session"})
 		return
 	}
 
+	sessionID := resp.SessionID
+
+	// If a prompt was provided, launch the agent asynchronously so it starts
+	// processing immediately. The frontend receives WS updates when it starts.
+	if body.Prompt != "" {
+		go h.launchConfigChatAgent(task.ID, sessionID, agentProfileID, body.Prompt)
+	}
+
 	h.logger.Info("config chat session created",
 		zap.String("task_id", task.ID),
-		zap.String("session_id", resp.SessionID),
+		zap.String("session_id", sessionID),
 		zap.String("workspace_id", workspaceID))
 
 	c.JSON(http.StatusOK, httpStartQuickChatResponse{
 		TaskID:    task.ID,
-		SessionID: resp.SessionID,
+		SessionID: sessionID,
 	})
+}
+
+func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
+	if deleteErr := h.service.DeleteTask(context.Background(), taskID); deleteErr != nil {
+		h.logger.Error("failed to rollback "+label+" task",
+			zap.String("task_id", taskID), zap.Error(deleteErr))
+	}
+	h.logger.Error("failed to prepare "+label+" session",
+		zap.Error(err), zap.String("task_id", taskID))
+}
+
+func (h *TaskHandlers) launchConfigChatAgent(
+	taskID, sessionID, agentProfileID, prompt string,
+) {
+	startCtx, cancel := context.WithTimeout(
+		context.Background(), constants.AgentLaunchTimeout,
+	)
+	defer cancel()
+	launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+		TaskID:         taskID,
+		Intent:         orchestrator.IntentStartCreated,
+		SessionID:      sessionID,
+		AgentProfileID: agentProfileID,
+		Prompt:         prompt,
+	})
+	if err != nil {
+		h.logger.Error("failed to start config chat agent",
+			zap.Error(err), zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
+	h.logger.Info("config chat agent started",
+		zap.String("task_id", taskID),
+		zap.String("session_id", launchResp.SessionID),
+		zap.String("execution_id", launchResp.AgentExecutionID))
 }
