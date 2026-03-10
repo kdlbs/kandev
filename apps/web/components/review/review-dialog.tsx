@@ -150,14 +150,11 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
   }, []);
 
-  const handleSelectFile = useCallback(
-    (path: string, setSelectedFile: (p: string) => void) => {
-      setSelectedFile(path);
-      // Note: scrolling is now handled by FileDiffSection when isSelected changes
-      // This ensures proper timing after the section expands
-    },
-    [],
-  );
+  const handleSelectFile = useCallback((path: string, setSelectedFile: (p: string) => void) => {
+    setSelectedFile(path);
+    // Note: scrolling is now handled by FileDiffSection when isSelected changes
+    // This ensures proper timing after the section expands
+  }, []);
 
   const handleToggleReviewed = useCallback(
     (path: string, reviewed: boolean) => {
