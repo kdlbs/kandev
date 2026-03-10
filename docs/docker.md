@@ -63,7 +63,7 @@ docker run -p 8080:8080 \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
+| `KANDEV_DATA_DIR` | `/data` | Kandev home directory — contains DB, worktrees, sessions, repos, and LSP servers |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |

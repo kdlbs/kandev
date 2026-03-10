@@ -85,7 +85,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 | Env Var | Default | Description |
 |---------|---------|-------------|
 | `KANDEV_SERVER_PORT` | `8080` | Server port (API + WebSocket + Web UI) |
-| `KANDEV_DATA_DIR` | `/data` | Base directory for all data (DB, worktrees, sessions, etc.) |
+| `KANDEV_DATA_DIR` | `/data` | Kandev home directory — contains DB, worktrees, sessions, repos, and LSP servers |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (requires DinD) |

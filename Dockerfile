@@ -95,7 +95,7 @@ RUN cd /usr/local/lib/kandev-cli && npm install --omit=dev && \
     chmod +x bin/cli.js && \
     ln -s /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev
 
-# Data directory for SQLite and worktrees
+# Kandev home directory (DB, worktrees, sessions, repos)
 VOLUME ["/data"]
 
 # Environment defaults for containerized operation

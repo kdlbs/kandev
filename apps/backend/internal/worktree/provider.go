@@ -20,7 +20,7 @@ func Provide(writer, reader *sqlx.DB, cfg *config.Config, log *logger.Logger) (*
 		FetchTimeoutSeconds: cfg.Worktree.FetchTimeoutSeconds,
 		PullTimeoutSeconds:  cfg.Worktree.PullTimeoutSeconds,
 	}
-	wtCfg.SetDataDirFallback(cfg.ResolvedDataDir())
+	wtCfg.SetDataDirFallback(cfg.ResolvedHomeDir())
 	manager, err := NewManager(wtCfg, store, log)
 	if err != nil {
 		return nil, nil, err

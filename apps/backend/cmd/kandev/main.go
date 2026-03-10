@@ -282,8 +282,8 @@ func startAgentInfrastructure(
 	log.Info("Workspace info provider configured for session recovery")
 
 	// Configure quick-chat workspace cleanup
-	if dataDir := cfg.ResolvedDataDir(); dataDir != "" {
-		quickChatDir := filepath.Join(dataDir, "quick-chat")
+	if homeDir := cfg.ResolvedHomeDir(); homeDir != "" {
+		quickChatDir := filepath.Join(homeDir, "quick-chat")
 		services.Task.SetQuickChatDir(quickChatDir)
 		log.Info("Quick-chat workspace cleanup configured", zap.String("quick_chat_dir", quickChatDir))
 	}
@@ -293,7 +293,7 @@ func startAgentInfrastructure(
 	// ============================================
 	repoCloner := repoclone.NewCloner(repoclone.Config{
 		BasePath: cfg.RepoClone.BasePath,
-	}, repoclone.DetectGitProtocol(), cfg.ResolvedDataDir(), log)
+	}, repoclone.DetectGitProtocol(), cfg.ResolvedHomeDir(), log)
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
 
@@ -349,7 +349,7 @@ func startGatewayAndServe(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, services.GitHub,
-		cfg.ResolvedDataDir(),
+		cfg.ResolvedHomeDir(),
 	)
 	if err != nil {
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))

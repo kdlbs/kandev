@@ -29,9 +29,29 @@ type Config struct {
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 }
 
+// ResolvedHomeDir returns the Kandev home directory (~/.kandev for local dev).
+// When KANDEV_DATA_DIR is explicitly set (e.g., /data in Docker), it returns that value
+// so containers keep a flat layout. When unset, returns ~/.kandev — the parent of the data dir.
+// Use this for workspace artifacts: worktrees, repos, sessions, quick-chat, lsp-servers.
+func (c *Config) ResolvedHomeDir() string {
+	if c.DataDir != "" {
+		if strings.HasPrefix(c.DataDir, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				return filepath.Join(home, c.DataDir[2:])
+			}
+		}
+		return c.DataDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".kandev"
+	}
+	return filepath.Join(home, ".kandev")
+}
+
 // ResolvedDataDir returns the base data directory for Kandev.
 // Config.DataDir is populated by Viper from the config file or KANDEV_DATA_DIR env var.
-// If empty, falls back to ~/.kandev/data.
+// If empty, falls back to ~/.kandev/data. Use this for the database only.
 func (c *Config) ResolvedDataDir() string {
 	if c.DataDir != "" {
 		if strings.HasPrefix(c.DataDir, "~/") {

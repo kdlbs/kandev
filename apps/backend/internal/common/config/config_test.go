@@ -6,6 +6,37 @@ import (
 	"testing"
 )
 
+func TestResolvedHomeDir_NoDataDir(t *testing.T) {
+	cfg := &Config{}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+	want := filepath.Join(home, ".kandev")
+	if got := cfg.ResolvedHomeDir(); got != want {
+		t.Errorf("ResolvedHomeDir() = %q, want %q", got, want)
+	}
+}
+
+func TestResolvedHomeDir_WithDataDir(t *testing.T) {
+	cfg := &Config{DataDir: "/data"}
+	if got := cfg.ResolvedHomeDir(); got != "/data" {
+		t.Errorf("ResolvedHomeDir() = %q, want %q", got, "/data")
+	}
+}
+
+func TestResolvedHomeDir_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+	cfg := &Config{DataDir: "~/mykandev"}
+	want := filepath.Join(home, "mykandev")
+	if got := cfg.ResolvedHomeDir(); got != want {
+		t.Errorf("ResolvedHomeDir() = %q, want %q", got, want)
+	}
+}
+
 func TestResolvedDataDir_ExplicitConfig(t *testing.T) {
 	cfg := &Config{DataDir: "/custom/data"}
 	if got := cfg.ResolvedDataDir(); got != "/custom/data" {
