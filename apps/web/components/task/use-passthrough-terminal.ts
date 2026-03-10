@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 
@@ -15,6 +16,20 @@ export const log = (...args: unknown[]) => {
 // Minimum dimensions to prevent zero-size issues
 export const MIN_WIDTH = 100;
 export const MIN_HEIGHT = 100;
+
+type TerminalContainerWithBuffer = HTMLDivElement & { __xtermReadBuffer?: () => string };
+
+/** Expose buffer reader on the container for e2e tests (xterm renders to canvas). */
+function exposeBufferReader(container: HTMLDivElement, terminal: Terminal) {
+  (container as TerminalContainerWithBuffer).__xtermReadBuffer = () => {
+    const buf = terminal.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+    }
+    return lines.join("\n");
+  };
+}
 
 export type TerminalInitOptions = {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -40,6 +55,7 @@ function initTerminalInstance(
     | "resizeTimeoutRef"
   >,
   fitAndResize: (force?: boolean) => void,
+  linkHandler?: (event: MouseEvent, uri: string) => void,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
@@ -60,6 +76,8 @@ function initTerminalInstance(
   const unicode11Addon = new Unicode11Addon();
   terminal.loadAddon(unicode11Addon);
   terminal.unicode.activeVersion = "11";
+  const webLinksAddon = new WebLinksAddon(linkHandler);
+  terminal.loadAddon(webLinksAddon);
   log("Opening terminal in container");
   terminal.open(termContainer);
   try {
@@ -91,17 +109,7 @@ function initTerminalInstance(
       log("WebGL failed, using canvas:", e);
     }
   });
-  // Expose buffer reader on the container for e2e tests (xterm renders to
-  // canvas so text isn't accessible in the DOM).
-  (termContainer as HTMLDivElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer =
-    () => {
-      const buf = terminal.buffer.active;
-      const lines: string[] = [];
-      for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
-        lines.push(buf.getLine(i)?.translateToString(true) ?? "");
-      }
-      return lines.join("\n");
-    };
+  exposeBufferReader(termContainer, terminal);
   const handleResize = () => {
     const rect = termContainer.getBoundingClientRect();
     if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) {
@@ -124,8 +132,7 @@ function initTerminalInstance(
       refs.webglAddonRef.current = null;
     }
     terminal.dispose();
-    (termContainer as HTMLDivElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer =
-      undefined;
+    (termContainer as TerminalContainerWithBuffer).__xtermReadBuffer = undefined;
     refs.xtermRef.current = null;
     refs.fitAddonRef.current = null;
     refs.isInitializedRef.current = false;
@@ -143,7 +150,8 @@ export function useTerminalInit({
   webglAddonRef,
   fitAndResize,
   onReady,
-}: TerminalInitOptions) {
+  linkHandler,
+}: TerminalInitOptions & { linkHandler?: (event: MouseEvent, uri: string) => void }) {
   const refs = {
     xtermRef,
     fitAddonRef,
@@ -169,7 +177,7 @@ export function useTerminalInit({
       const rect = container.getBoundingClientRect();
       log("Init check: dimensions", rect.width, "x", rect.height);
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
-        initTerminalInstance(container, refs, fitAndResize);
+        initTerminalInstance(container, refs, fitAndResize, linkHandler);
         onReady();
         return true;
       }

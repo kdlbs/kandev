@@ -16,7 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrUserNotFound = errors.New("user not found")
+var (
+	ErrUserNotFound = errors.New("user not found")
+	ErrValidation   = errors.New("validation error")
+)
 
 type Service struct {
 	repo        store.Repository
@@ -45,6 +48,7 @@ type UpdateUserSettingsRequest struct {
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
+	TerminalLinkBehavior        *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -95,16 +99,16 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, err
 	}
 	if err := applyBasicSettings(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := s.applyChatSubmitKey(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applyLSPSettings(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applySavedLayouts(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
@@ -161,6 +165,21 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		}
 		settings.KeyboardShortcuts = *req.KeyboardShortcuts
 	}
+	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != "new_tab" && v != "browser_panel" {
+		return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
+	}
+	settings.TerminalLinkBehavior = v
 	return nil
 }
 
@@ -243,6 +262,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
+		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

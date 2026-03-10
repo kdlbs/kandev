@@ -7,6 +7,7 @@ import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/
 import { useRequest } from "@/lib/http/use-request";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
+import { parseTerminalLinkBehavior } from "@/lib/ssr/user-settings";
 import {
   type EditorFormState,
   buildConfig,
@@ -238,6 +239,7 @@ function buildUserSettingsFromResponse(
     enablePreviewOnClick: s.enable_preview_on_click ?? false,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
+    terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     ...mapEditorSettingsFields(s),
   };
 }

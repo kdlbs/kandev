@@ -153,6 +153,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              keyboardShortcuts,
+		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 	})
 	if err != nil {
 		return err
@@ -196,6 +197,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
+		settings.TerminalLinkBehavior = "new_tab"
 		return settings, nil
 	}
 	var payload struct {
@@ -218,6 +220,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 		DefaultUtilityModel         string                            `json:"default_utility_model"`
 		KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`
+		TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -265,6 +268,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts
 	if settings.KeyboardShortcuts == nil {
 		settings.KeyboardShortcuts = map[string]interface{}{}
+	}
+	if payload.TerminalLinkBehavior != "" {
+		settings.TerminalLinkBehavior = payload.TerminalLinkBehavior
+	} else {
+		settings.TerminalLinkBehavior = "new_tab"
 	}
 	return settings, nil
 }

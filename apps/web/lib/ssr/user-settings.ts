@@ -2,6 +2,10 @@ import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
 
+export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" | "browser_panel" {
+  return value === "browser_panel" ? "browser_panel" : "new_tab";
+}
+
 export function buildCoreFields(s: UserSettingsData) {
   return {
     workspaceId: s.workspace_id || null,
@@ -18,6 +22,7 @@ export function buildCoreFields(s: UserSettingsData) {
     savedLayouts: s.saved_layouts ?? [],
     defaultUtilityAgentId: s.default_utility_agent_id || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
+    terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
   };
 }
 
@@ -53,6 +58,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       savedLayouts: [] as SavedLayout[],
       defaultUtilityAgentId: null,
       keyboardShortcuts: {} as Record<string, { key: string; modifiers?: Record<string, boolean> }>,
+      terminalLinkBehavior: "new_tab" as const,
       ...buildLspFields(undefined),
       loaded: false,
     };

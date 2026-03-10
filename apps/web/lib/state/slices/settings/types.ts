@@ -118,6 +118,7 @@ export type UserSettingsState = {
   savedLayouts: SavedLayout[];
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
+  terminalLinkBehavior: "new_tab" | "browser_panel";
   loaded: boolean;
 };
 

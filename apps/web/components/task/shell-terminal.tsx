@@ -3,12 +3,14 @@
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
+import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -30,6 +32,7 @@ function useTerminalInit(
   isReadOnlyMode: boolean,
   taskId: string | null,
   sessionId: string | null | undefined,
+  linkHandler?: (event: MouseEvent, uri: string) => void,
 ) {
   const { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef } = refs;
 
@@ -45,6 +48,8 @@ function useTerminalInit(
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    const webLinksAddon = new WebLinksAddon(linkHandler);
+    terminal.loadAddon(webLinksAddon);
     terminal.open(terminalRef.current);
     fitAddon.fit();
     xtermRef.current = terminal;
@@ -89,6 +94,7 @@ function useTerminalInit(
     taskId,
     sessionId,
     isReadOnlyMode,
+    linkHandler,
     terminalRef,
     xtermRef,
     fitAddonRef,
@@ -276,8 +282,9 @@ export function ShellTerminal({
     if (client) client.send({ type: "request", action, payload });
   }, []);
 
+  const linkHandler = useTerminalLinkHandler();
   const refs: TerminalRefs = { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef };
-  useTerminalInit(refs, isReadOnlyMode, taskId, sessionId);
+  useTerminalInit(refs, isReadOnlyMode, taskId, sessionId, linkHandler);
 
   // Handle user input (interactive mode only)
   useEffect(() => {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/controller"
 	"github.com/kandev/kandev/internal/user/dto"
+	"github.com/kandev/kandev/internal/user/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -71,8 +73,12 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 	}
 	resp, err := h.controller.UpdateUserSettings(c.Request.Context(), req)
 	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrValidation) {
+			status = http.StatusBadRequest
+		}
 		h.logger.Error("failed to update user settings", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user settings"})
+		c.JSON(status, gin.H{"error": "failed to update user settings"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
@@ -93,7 +99,11 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 	}
 	resp, err := h.controller.UpdateUserSettings(ctx, req)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, service.ErrValidation) {
+			code = ws.ErrorCodeBadRequest
+		}
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to update user settings", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
