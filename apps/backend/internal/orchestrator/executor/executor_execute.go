@@ -311,7 +311,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
 	if session.AgentExecutionID != "" {
-		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent)
+		return e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode)
 	}
 
 	repoInfo, err := e.resolvePrimaryRepoInfo(ctx, task.ID)
@@ -322,6 +322,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, repoInfo)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
+	if opts.McpMode != "" {
+		req.McpMode = opts.McpMode
 	}
 
 	e.logger.Info("launching agent for prepared session",
@@ -466,6 +471,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.RepositoryURL = cloneURL
 	}
 
+	// Activate config-mode MCP tools when plan_mode is set in session metadata.
+	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
+		req.McpMode = "config"
+	}
+
 	if len(metadata) > 0 {
 		req.Metadata = metadata
 	}
@@ -475,7 +485,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 
 // startAgentOnExistingWorkspace handles the case where LaunchPreparedSession is called on a session
 // whose workspace (agentctl) was already launched. It optionally starts just the agent subprocess.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string) (*TaskExecution, error) {
 	if !startAgent {
 		// Workspace already launched, nothing else to do
 		now := time.Now().UTC()
@@ -498,6 +508,24 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.String("agent_execution_id", session.AgentExecutionID),
 				zap.Error(err))
 			// Non-fatal: agent may start without description
+		}
+	}
+
+	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
+	// The workspace may have been prepared before plan_mode was set on the session.
+	effectiveMcpMode := mcpMode
+	if effectiveMcpMode == "" {
+		if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
+			effectiveMcpMode = "config"
+		}
+	}
+	if effectiveMcpMode != "" {
+		if err := e.agentManager.SetMcpMode(ctx, session.AgentExecutionID, effectiveMcpMode); err != nil {
+			e.logger.Warn("failed to set MCP mode for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", session.AgentExecutionID),
+				zap.String("mcp_mode", effectiveMcpMode),
+				zap.Error(err))
 		}
 	}
 
