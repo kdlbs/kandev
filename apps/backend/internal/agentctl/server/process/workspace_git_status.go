@@ -101,19 +101,16 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 		update.HeadCommit = strings.TrimSpace(string(headOut))
 	}
 
-	// Get base commit SHA using merge-base between current branch and origin.
-	// This gives us the common ancestor, which is what we need to filter commits
-	// made during the session.
-	baseBranch := update.RemoteBranch
-	if baseBranch == "" {
-		// Try origin/main first, then origin/master, then local main/master
-		for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-			checkCmd.Dir = wt.workDir
-			if err := checkCmd.Run(); err == nil {
-				baseBranch = candidate
-				break
-			}
+	// Get base commit SHA using merge-base between current branch and the integration branch.
+	// Always use the integration branch (origin/main, etc.) rather than the tracking branch,
+	// so we show all changes this branch introduces compared to the main development line.
+	var baseBranch string
+	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+		checkCmd.Dir = wt.workDir
+		if err := checkCmd.Run(); err == nil {
+			baseBranch = candidate
+			break
 		}
 	}
 	if baseBranch != "" {
