@@ -45,6 +45,7 @@ type UpdateUserSettingsRequest struct {
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
+	TerminalLinkBehavior        *string
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -161,6 +162,13 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		}
 		settings.KeyboardShortcuts = *req.KeyboardShortcuts
 	}
+	if req.TerminalLinkBehavior != nil {
+		v := strings.TrimSpace(*req.TerminalLinkBehavior)
+		if v != "new_tab" && v != "browser_panel" {
+			return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
+		}
+		settings.TerminalLinkBehavior = v
+	}
 	return nil
 }
 
@@ -243,6 +251,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
+		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {

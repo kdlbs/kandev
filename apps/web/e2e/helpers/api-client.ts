@@ -63,6 +63,15 @@ export type MockCheckRun = {
 export class ApiClient {
   constructor(private baseUrl: string) {}
 
+  /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
+  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
@@ -254,10 +263,17 @@ export class ApiClient {
     return this.request("GET", "/api/v1/executors");
   }
 
+  async getUserSettings(): Promise<{
+    settings: { terminal_link_behavior?: string; [key: string]: unknown };
+  }> {
+    return this.request("GET", "/api/v1/user/settings");
+  }
+
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
+    terminal_link_behavior?: "new_tab" | "browser_panel";
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }

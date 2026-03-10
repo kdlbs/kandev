@@ -374,6 +374,7 @@ export type UserSettingsUpdatedPayload = {
   saved_layouts?: SavedLayout[];
   default_utility_agent_id?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
+  terminal_link_behavior?: string;
   updated_at?: string;
 };
 

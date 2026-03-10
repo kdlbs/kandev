@@ -40,6 +40,7 @@ function carryForwardSettings(current: DisplaySettings) {
     savedLayouts: current.savedLayouts ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
+    terminalLinkBehavior: (current.terminalLinkBehavior ?? "new_tab") as "new_tab" | "browser_panel",
   };
 }
 

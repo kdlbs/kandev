@@ -28,6 +28,7 @@ export const defaultSettingsState: SettingsSliceState = {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    terminalLinkBehavior: "new_tab",
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     showReleaseNotification: true,

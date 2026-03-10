@@ -28,6 +28,10 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
           savedLayouts: message.payload.saved_layouts ?? [],
           defaultUtilityAgentId: message.payload.default_utility_agent_id || null,
           keyboardShortcuts: message.payload.keyboard_shortcuts ?? {},
+          terminalLinkBehavior:
+            message.payload.terminal_link_behavior === "browser_panel"
+              ? "browser_panel"
+              : "new_tab",
           loaded: true,
         },
       }));

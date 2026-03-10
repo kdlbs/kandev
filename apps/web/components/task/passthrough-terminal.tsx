@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { getBackendConfig } from "@/lib/config";
+import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import {
   log,
   MIN_WIDTH,
@@ -89,6 +90,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     setConnectedSessionId(sessionId ?? null);
   }, [sessionId]);
 
+  const linkHandler = useTerminalLinkHandler();
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
     xtermRef,
@@ -108,6 +110,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     webglAddonRef,
     fitAndResize,
     onReady: onTerminalReady,
+    linkHandler,
   });
 
   useWebSocketConnection({

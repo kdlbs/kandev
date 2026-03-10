@@ -34,6 +34,7 @@ type UserSettingsDTO struct {
 	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
 	DefaultUtilityModel         string                            `json:"default_utility_model"`
 	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
+	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -72,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	DefaultUtilityAgentID       *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts           *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
+	TerminalLinkBehavior        *string                            `json:"terminal_link_behavior,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -105,6 +107,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		DefaultUtilityAgentID:       settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:         settings.DefaultUtilityModel,
 		KeyboardShortcuts:           settings.KeyboardShortcuts,
+		TerminalLinkBehavior:        settings.TerminalLinkBehavior,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTheme } from "next-themes";
-import { IconCommand, IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
+import { IconCommand, IconLink, IconPalette, IconServer, IconKeyboard } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
@@ -98,6 +98,59 @@ function ChatSubmitKeyCard() {
   );
 }
 
+function TerminalLinksCard() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleChange = async (value: "new_tab" | "browser_panel") => {
+    if (isSaving) return;
+    setIsSaving(true);
+    const previous = userSettings.terminalLinkBehavior;
+    try {
+      setUserSettings({ ...userSettings, terminalLinkBehavior: value });
+      await updateUserSettings({
+        workspace_id: userSettings.workspaceId || "",
+        repository_ids: userSettings.repositoryIds || [],
+        terminal_link_behavior: value,
+      });
+    } catch {
+      setUserSettings({ ...userSettings, terminalLinkBehavior: previous });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Terminal Links</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="terminal-link-behavior">Open links in</Label>
+          <Select
+            value={userSettings.terminalLinkBehavior}
+            onValueChange={(v) => handleChange(v as "new_tab" | "browser_panel")}
+            disabled={isSaving}
+          >
+            <SelectTrigger id="terminal-link-behavior">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="new_tab">New browser tab</SelectItem>
+              <SelectItem value="browser_panel">Built-in browser panel</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Cmd+click (or Ctrl+click) a URL in the terminal to open it.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function BackendConnectionCard() {
   const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
   const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -151,6 +204,16 @@ export function GeneralSettings() {
       <Separator />
 
       <ShellSettingsCard />
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconLink className="h-5 w-5" />}
+        title="Terminal Links"
+        description="Configure how clickable URLs in the terminal are opened"
+      >
+        <TerminalLinksCard />
+      </SettingsSection>
 
       <Separator />
 
