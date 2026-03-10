@@ -44,7 +44,7 @@ export function SwipeableColumns({
     [initialIndex],
   );
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
-  const isProgrammaticScroll = useRef(false);
+  const userInteracting = useRef(false);
 
   const getTasksForStep = useCallback(
     (stepId: string) => {
@@ -59,29 +59,30 @@ export function SwipeableColumns({
   // Sync carousel position with external activeIndex (tab clicks)
   useEffect(() => {
     if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
-      isProgrammaticScroll.current = true;
       emblaApi.scrollTo(activeIndex, true);
-      // Reset flag after Embla settles
-      requestAnimationFrame(() => {
-        isProgrammaticScroll.current = false;
-      });
     }
   }, [emblaApi, activeIndex]);
 
-  // Update external activeIndex when user swipes
+  // Sync tab state when user swipes (only on user-initiated interactions)
   useEffect(() => {
     if (!emblaApi) return;
 
+    const onPointerDown = () => {
+      userInteracting.current = true;
+    };
     const onSelect = () => {
-      if (isProgrammaticScroll.current) return;
+      if (!userInteracting.current) return;
+      userInteracting.current = false;
       const selectedIndex = emblaApi.selectedScrollSnap();
       if (selectedIndex !== activeIndex) {
         onIndexChange(selectedIndex);
       }
     };
 
+    emblaApi.on("pointerDown", onPointerDown);
     emblaApi.on("select", onSelect);
     return () => {
+      emblaApi.off("pointerDown", onPointerDown);
       emblaApi.off("select", onSelect);
     };
   }, [emblaApi, activeIndex, onIndexChange]);

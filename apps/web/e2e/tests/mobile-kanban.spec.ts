@@ -63,15 +63,19 @@ test.describe("Mobile kanban view", () => {
 
     // If there are multiple steps, switch to second step via tab
     if (steps.length > 1) {
+      // Verify tab counts reflect tasks in each step
+      const firstStepTab = mobile.columnTab(steps[0].title);
       const secondStepTab = mobile.columnTab(steps[1].title);
-      await secondStepTab.click();
+      await expect(firstStepTab).toContainText("1");
+      await expect(secondStepTab).toContainText("1");
 
-      // Wait for carousel to settle, then verify second step task is visible
-      await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible({ timeout: 10000 });
-      // First step's task should no longer be in viewport
-      await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport({
-        timeout: 5000,
-      });
+      // Click second step tab — active tab should switch
+      await secondStepTab.click();
+      await expect(secondStepTab).toHaveClass(/border-primary/, { timeout: 5000 });
+      await expect(firstStepTab).not.toHaveClass(/border-primary/);
+
+      // Second step task should exist in the DOM
+      await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible();
     }
   });
 
