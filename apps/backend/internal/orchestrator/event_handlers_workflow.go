@@ -299,7 +299,9 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	if !s.shouldAutoStartStep(ctx, data.ToStepID) {
+	// Load the target step to check auto-start and plan mode flags
+	step, err := s.workflowStepGetter.GetStep(ctx, data.ToStepID)
+	if err != nil || step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
 		s.logger.Debug("task.moved: no session and target step has no auto-start",
 			zap.String("task_id", data.TaskID),
 			zap.String("to_step_id", data.ToStepID))
@@ -316,14 +318,16 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 
 	agentProfileID, _ := task.Metadata["agent_profile_id"].(string)
 	executorProfileID, _ := task.Metadata["executor_profile_id"].(string)
+	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
 	s.logger.Info("task.moved: starting task (no session, auto-start step)",
 		zap.String("task_id", data.TaskID),
 		zap.String("to_step_id", data.ToStepID),
 		zap.String("agent_profile_id", agentProfileID),
-		zap.String("executor_profile_id", executorProfileID))
+		zap.String("executor_profile_id", executorProfileID),
+		zap.Bool("plan_mode", planMode))
 
-	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, false)
+	_, err = s.StartTask(ctx, task.ID, agentProfileID, "", executorProfileID, 0, task.Description, data.ToStepID, planMode)
 	if err != nil {
 		s.logger.Error("task.moved: failed to auto-start task",
 			zap.String("task_id", data.TaskID),
@@ -455,7 +459,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// Passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
-		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
+		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 		if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, effectivePrompt); err != nil {
 			s.logger.Error("failed to auto-start passthrough agent for step",
 				zap.String("task_id", taskID),
@@ -470,7 +474,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// ACP path: build prompt from step configuration.
 		// Run auto-start inline so queue state is visible before handleAgentReady
 		// checks for queued messages.
-		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID)
+		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 		planMode := hasPlanMode
 		err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
 		if err != nil {
