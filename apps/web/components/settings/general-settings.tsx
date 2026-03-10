@@ -148,7 +148,7 @@ function TerminalLinksCard() {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Cmd+click (or Ctrl+click) a URL in the terminal to open it.
+            Click a URL in the terminal to open it.
           </p>
         </div>
       </CardContent>
