@@ -99,7 +99,11 @@ func (h *Handlers) wsUpdateUserSettings(ctx context.Context, msg *ws.Message) (*
 	}
 	resp, err := h.controller.UpdateUserSettings(ctx, req)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update user settings", nil)
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, service.ErrValidation) {
+			code = ws.ErrorCodeBadRequest
+		}
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to update user settings", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
