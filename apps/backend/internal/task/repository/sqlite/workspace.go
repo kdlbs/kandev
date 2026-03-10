@@ -29,11 +29,12 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 			default_executor_id,
 			default_environment_id,
 			default_agent_profile_id,
+			default_config_agent_profile_id,
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -44,9 +45,10 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultExecutorID sql.NullString
 	var defaultEnvironmentID sql.NullString
 	var defaultAgentProfileID sql.NullString
+	var defaultConfigAgentProfileID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
 	`), id).Scan(
 		&workspace.ID,
@@ -56,6 +58,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 		&defaultExecutorID,
 		&defaultEnvironmentID,
 		&defaultAgentProfileID,
+		&defaultConfigAgentProfileID,
 		&workspace.CreatedAt,
 		&workspace.UpdatedAt,
 	)
@@ -67,6 +70,9 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	}
 	if defaultAgentProfileID.Valid && defaultAgentProfileID.String != "" {
 		workspace.DefaultAgentProfileID = &defaultAgentProfileID.String
+	}
+	if defaultConfigAgentProfileID.Valid && defaultConfigAgentProfileID.String != "" {
+		workspace.DefaultConfigAgentProfileID = &defaultConfigAgentProfileID.String
 	}
 
 	if err == sql.ErrNoRows {
@@ -86,9 +92,10 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 			default_executor_id = ?,
 			default_environment_id = ?,
 			default_agent_profile_id = ?,
+			default_config_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ?
-	`), workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.UpdatedAt, workspace.ID)
+	`), workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -117,7 +124,7 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 // ListWorkspaces returns all workspaces
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, created_at, updated_at
+		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -131,6 +138,7 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 		var defaultExecutorID sql.NullString
 		var defaultEnvironmentID sql.NullString
 		var defaultAgentProfileID sql.NullString
+		var defaultConfigAgentProfileID sql.NullString
 		if err := rows.Scan(
 			&workspace.ID,
 			&workspace.Name,
@@ -139,6 +147,7 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 			&defaultExecutorID,
 			&defaultEnvironmentID,
 			&defaultAgentProfileID,
+			&defaultConfigAgentProfileID,
 			&workspace.CreatedAt,
 			&workspace.UpdatedAt,
 		); err != nil {
@@ -152,6 +161,9 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 		}
 		if defaultAgentProfileID.Valid && defaultAgentProfileID.String != "" {
 			workspace.DefaultAgentProfileID = &defaultAgentProfileID.String
+		}
+		if defaultConfigAgentProfileID.Valid && defaultConfigAgentProfileID.String != "" {
+			workspace.DefaultConfigAgentProfileID = &defaultConfigAgentProfileID.String
 		}
 		result = append(result, workspace)
 	}

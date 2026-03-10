@@ -74,6 +74,9 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Quick chat endpoint - creates ephemeral task with prepared session
 	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
+
+	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
+	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)
 }
 
 func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
