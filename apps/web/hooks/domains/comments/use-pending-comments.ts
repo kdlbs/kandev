@@ -51,8 +51,9 @@ export function usePendingDiffComments(): DiffComment[] {
 
 /**
  * Get all pending plan comments.
+ * If sessionId is provided, only returns comments belonging to that session.
  */
-export function usePendingPlanComments(): PlanComment[] {
+export function usePendingPlanComments(sessionId?: string | null): PlanComment[] {
   const byId = useCommentsStore((state) => state.byId);
   const pendingForChat = useCommentsStore((state) => state.pendingForChat);
 
@@ -61,16 +62,21 @@ export function usePendingPlanComments(): PlanComment[] {
     const pending: PlanComment[] = [];
     for (const id of pendingForChat) {
       const comment = byId[id];
-      if (comment && isPlanComment(comment)) pending.push(comment);
+      if (comment && isPlanComment(comment)) {
+        // Filter by sessionId if provided
+        if (sessionId && comment.sessionId !== sessionId) continue;
+        pending.push(comment);
+      }
     }
     return pending.length === 0 ? EMPTY_PLAN_COMMENTS : pending;
-  }, [byId, pendingForChat]);
+  }, [byId, pendingForChat, sessionId]);
 }
 
 /**
  * Get all pending PR feedback comments.
+ * If sessionId is provided, only returns comments belonging to that session.
  */
-export function usePendingPRFeedback(): PRFeedbackComment[] {
+export function usePendingPRFeedback(sessionId?: string | null): PRFeedbackComment[] {
   const byId = useCommentsStore((state) => state.byId);
   const pendingForChat = useCommentsStore((state) => state.pendingForChat);
 
@@ -79,8 +85,12 @@ export function usePendingPRFeedback(): PRFeedbackComment[] {
     const pending: PRFeedbackComment[] = [];
     for (const id of pendingForChat) {
       const comment = byId[id];
-      if (comment && isPRFeedbackComment(comment)) pending.push(comment);
+      if (comment && isPRFeedbackComment(comment)) {
+        // Filter by sessionId if provided
+        if (sessionId && comment.sessionId !== sessionId) continue;
+        pending.push(comment);
+      }
     }
     return pending.length === 0 ? EMPTY_PR_FEEDBACK_COMMENTS : pending;
-  }, [byId, pendingForChat]);
+  }, [byId, pendingForChat, sessionId]);
 }
