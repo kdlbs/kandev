@@ -78,10 +78,7 @@ function buildModelOptions(
   return options;
 }
 
-function resolveProfileModel(
-  profileId: string | null | undefined,
-  agents: Agent[],
-): string | null {
+function resolveProfileModel(profileId: string | null | undefined, agents: Agent[]): string | null {
   if (!profileId) return null;
   for (const agent of agents) {
     const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
@@ -125,7 +122,12 @@ function useModelSelectorState(sessionId: string | null) {
 
   const activeModel = sessionId ? activeModels[sessionId] || null : null;
   const acpCurrentModel = sessionModelsData?.currentModelId || null;
-  const currentModel = resolveCurrentModel(activeModel, acpCurrentModel, snapshotModel, profileModel);
+  const currentModel = resolveCurrentModel(
+    activeModel,
+    acpCurrentModel,
+    snapshotModel,
+    profileModel,
+  );
   const modelOptions = buildModelOptions(availableModels, currentModel);
 
   const handleModelChange = useCallback(

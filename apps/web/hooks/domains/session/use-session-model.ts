@@ -33,13 +33,6 @@ export function useSessionModel(
   const activeModel = resolvedSessionId ? (activeModels[resolvedSessionId] ?? null) : null;
 
   const sessionModel = acpCurrentModel || profileModel;
-  console.debug("[useSessionModel]", {
-    resolvedSessionId,
-    profileModel,
-    acpCurrentModel,
-    activeModel,
-    sessionModel,
-  });
 
   return {
     sessionModel,
