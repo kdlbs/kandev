@@ -32,7 +32,7 @@ test.describe("terminal clickable links", () => {
       terminal_link_behavior: "invalid_value",
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(600);
+    expect(res.status).toBeLessThan(500);
 
     // Setting should remain unchanged
     const current = await apiClient.getUserSettings();

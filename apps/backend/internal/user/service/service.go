@@ -16,7 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrUserNotFound = errors.New("user not found")
+var (
+	ErrUserNotFound = errors.New("user not found")
+	ErrValidation   = errors.New("validation error")
+)
 
 type Service struct {
 	repo        store.Repository
@@ -96,16 +99,16 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, err
 	}
 	if err := applyBasicSettings(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := s.applyChatSubmitKey(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applyLSPSettings(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applySavedLayouts(settings, req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
 	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {

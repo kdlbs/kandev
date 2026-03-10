@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/controller"
 	"github.com/kandev/kandev/internal/user/dto"
+	"github.com/kandev/kandev/internal/user/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -71,8 +73,12 @@ func (h *Handlers) httpUpdateUserSettings(c *gin.Context) {
 	}
 	resp, err := h.controller.UpdateUserSettings(c.Request.Context(), req)
 	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrValidation) {
+			status = http.StatusBadRequest
+		}
 		h.logger.Error("failed to update user settings", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user settings"})
+		c.JSON(status, gin.H{"error": "failed to update user settings"})
 		return
 	}
 	c.JSON(http.StatusOK, resp)
