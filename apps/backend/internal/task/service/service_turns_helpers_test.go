@@ -1,9 +1,11 @@
 package service
 
 import (
-	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestIsExecutorRunningNotFoundError(t *testing.T) {
@@ -18,28 +20,23 @@ func TestIsExecutorRunningNotFoundError(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "sql.ErrNoRows",
-			err:  sql.ErrNoRows,
+			name: "sentinel error directly",
+			err:  models.ErrExecutorRunningNotFound,
 			want: true,
 		},
 		{
-			name: "wrapped sql.ErrNoRows",
-			err:  errors.Join(errors.New("outer"), sql.ErrNoRows),
+			name: "wrapped sentinel error",
+			err:  fmt.Errorf("%w for session: abc-123", models.ErrExecutorRunningNotFound),
 			want: true,
 		},
 		{
-			name: "error containing not-found message",
-			err:  errors.New("executor running not found for session abc-123"),
+			name: "double-wrapped sentinel error",
+			err:  fmt.Errorf("outer: %w", fmt.Errorf("%w for session: abc-123", models.ErrExecutorRunningNotFound)),
 			want: true,
 		},
 		{
 			name: "unrelated error",
 			err:  errors.New("connection refused"),
-			want: false,
-		},
-		{
-			name: "partial match should not match",
-			err:  errors.New("executor running found"),
 			want: false,
 		},
 	}

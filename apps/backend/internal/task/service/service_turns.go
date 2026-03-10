@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -279,8 +278,5 @@ func isExecutorRunningNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return true
-	}
-	return strings.Contains(err.Error(), "executor running not found for session")
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
 }

@@ -1,12 +1,16 @@
 package models
 
 import (
+	"errors"
 	"maps"
 	"time"
 
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// ErrExecutorRunningNotFound is returned when no executor running record exists for a session.
+var ErrExecutorRunningNotFound = errors.New("executor running not found")
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {

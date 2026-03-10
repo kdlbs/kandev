@@ -310,7 +310,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("executor running not found for session: %s", sessionID)
+		return nil, fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
 	if err != nil {
 		return nil, err

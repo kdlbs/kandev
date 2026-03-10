@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reconnectDelayMs } from "./use-passthrough-terminal";
+import { reconnectDelayMs } from "./ws-reconnect";
 
 describe("reconnectDelayMs", () => {
   it("returns 300ms for attempt 0", () => {
