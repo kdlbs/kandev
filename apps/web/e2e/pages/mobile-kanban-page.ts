@@ -20,6 +20,8 @@ export class MobileKanbanPage {
   async goto() {
     await this.page.goto("/");
     await this.board.waitFor({ state: "visible" });
+    // Wait for mobile-specific layout to render
+    await this.page.getByTestId("mobile-kanban-layout").waitFor({ state: "visible" });
   }
 
   mobileKanbanLayout(): Locator {

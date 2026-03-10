@@ -159,7 +159,15 @@ function getInitialColumnIndex(steps: WorkflowStep[], tasks: Task[]): number {
 }
 
 function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
-  const [activeIndex, setActiveIndex] = useState(() => getInitialColumnIndex(steps, tasks));
+  const [rawIndex, setActiveIndex] = useState(() => getInitialColumnIndex(steps, tasks));
+
+  // Derive clamped index — avoids calling setState in an effect
+  const activeIndex = useMemo(() => {
+    if (steps.length === 0) return 0;
+    if (rawIndex >= steps.length) return getInitialColumnIndex(steps, tasks);
+    return rawIndex;
+  }, [steps, tasks, rawIndex]);
+
   return { activeIndex, setActiveIndex };
 }
 

@@ -49,6 +49,7 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
 type StartTaskSplitButtonProps = {
   isCreatingTask: boolean;
   disabled: boolean;
+  altDisabled: boolean;
   isEditMode: boolean;
   onAltAction: () => void;
   onPlanModeAction?: () => void;
@@ -57,6 +58,7 @@ type StartTaskSplitButtonProps = {
 function StartTaskSplitButton({
   isCreatingTask,
   disabled,
+  altDisabled,
   isEditMode,
   onAltAction,
   onPlanModeAction,
@@ -113,12 +115,25 @@ function StartTaskSplitButton({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {/* Mobile-only: visible button for creating without starting agent */}
+      {/* Mobile-only: visible buttons for plan mode and creating without agent */}
+      {onPlanModeAction && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
+          disabled={disabled}
+          onClick={onPlanModeAction}
+          data-testid="mobile-plan-mode"
+        >
+          <IconFileInvoice className="h-3.5 w-3.5" />
+          Plan mode
+        </Button>
+      )}
       <Button
         type="button"
         variant="outline"
         className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
-        disabled={disabled}
+        disabled={altDisabled}
         onClick={onAltAction}
       >
         <IconPlus className="h-3.5 w-3.5" />
@@ -220,37 +235,30 @@ function isMissingWorkflowCtx(
   return isCreateMode && (!workspaceId || !effectiveWorkflowId);
 }
 
-function computeFooterState(props: TaskCreateDialogFooterProps) {
-  const {
-    isSessionMode,
-    isCreateMode,
-    isEditMode,
-    isPassthroughProfile,
-    isCreatingTask,
-    hasTitle,
-    hasDescription,
-    hasRepositorySelection,
-    branch,
-    agentProfileId,
-    workspaceId,
-    effectiveWorkflowId,
-  } = props;
-  const showStartTask =
-    (isCreateMode && (hasDescription || isPassthroughProfile)) ||
-    Boolean(isEditMode && agentProfileId);
-  const missingCtx = isMissingWorkflowCtx(isCreateMode, workspaceId, effectiveWorkflowId);
-  const splitDisabled =
-    isCreatingTask ||
-    !hasTitle ||
-    !hasRepositorySelection ||
-    !branch ||
-    !agentProfileId ||
-    missingCtx;
-  const defaultDisabled = isSessionMode
-    ? !agentProfileId
-    : !hasTitle || !hasRepositorySelection || !branch || missingCtx;
+function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
+  const missingCtx = isMissingWorkflowCtx(
+    props.isCreateMode,
+    props.workspaceId,
+    props.effectiveWorkflowId,
+  );
+  return (
+    props.isCreatingTask ||
+    !props.hasTitle ||
+    !props.hasRepositorySelection ||
+    !props.branch ||
+    missingCtx
+  );
+}
 
-  return { showStartTask, splitDisabled, defaultDisabled };
+function computeFooterState(props: TaskCreateDialogFooterProps) {
+  const showStartTask =
+    (props.isCreateMode && (props.hasDescription || props.isPassthroughProfile)) ||
+    Boolean(props.isEditMode && props.agentProfileId);
+  const altDisabled = computeBaseDisabled(props);
+  const splitDisabled = altDisabled || !props.agentProfileId;
+  const defaultDisabled = props.isSessionMode ? !props.agentProfileId : altDisabled;
+
+  return { showStartTask, splitDisabled, altDisabled, defaultDisabled };
 }
 
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
@@ -272,7 +280,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     onCreateWithoutAgent,
     onCreateWithPlanMode,
   } = props;
-  const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
+  const { showStartTask, splitDisabled, altDisabled, defaultDisabled } = computeFooterState(props);
 
   return (
     <>
@@ -308,6 +316,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
               <StartTaskSplitButton
                 isCreatingTask={isCreatingTask}
                 disabled={splitDisabled}
+                altDisabled={altDisabled}
                 isEditMode={isEditMode}
                 onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
                 onPlanModeAction={onCreateWithPlanMode}

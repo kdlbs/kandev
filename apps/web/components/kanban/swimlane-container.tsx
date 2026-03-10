@@ -177,7 +177,7 @@ export function SwimlaneContainer({
     : orderedWorkflows.filter((wf) => getFilteredTasks(wf.id).length > 0);
 
   const ViewComponent = (getViewByStoredValue(viewMode) ?? getDefaultView()).component;
-  const hideHeaders = isMobile && visibleWorkflows.length === 1;
+  const hideHeaders = isMobile && (workflowFilter !== null || orderedWorkflows.length === 1);
   const containerClass = isMobile
     ? "flex-1 min-h-0 overflow-y-auto pb-4 space-y-3"
     : "flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-3";

@@ -149,8 +149,8 @@ test.describe("Mobile kanban view", () => {
 
     // Bottom sheet should appear, NOT the desktop preview panel
     await expect(mobile.mobileTaskSheet).toBeVisible({ timeout: 5000 });
-    // Desktop preview panel should NOT be visible
-    await expect(testPage.locator('[data-slot="drawer-content"]')).toBeVisible();
+    // Desktop preview panel should NOT exist
+    await expect(testPage.getByTestId("preview-panel")).not.toBeVisible();
     // No ?taskId= URL param (that's the desktop preview behavior)
     await expect(testPage).not.toHaveURL(/taskId=/);
   });
