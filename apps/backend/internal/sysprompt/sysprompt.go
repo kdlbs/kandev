@@ -121,7 +121,7 @@ TASK TOOLS:
 INTERACTION:
 - ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
 
-IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete, archive) with the user first using ask_user_question.`
+IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete, archive) with the user first using ask_user_question_kandev.`
 
 // FormatConfigContext returns the config context prompt with the session ID injected.
 func FormatConfigContext(sessionID string) string {

@@ -204,6 +204,9 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 // This allows reconfiguring the tool set after initial creation (e.g., when
 // a session transitions to plan/config mode on a pre-existing workspace).
 func (s *Server) SetMode(mode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if mode == "" {
 		mode = ModeTask
 	}

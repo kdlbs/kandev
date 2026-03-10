@@ -149,6 +149,7 @@ func (s *Server) registerConfigMcpTools() {
 			mcp.WithDescription("Update MCP server configuration for an agent profile. Pass the full servers map."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The agent profile ID")),
 			mcp.WithBoolean("enabled", mcp.Description("Whether MCP is enabled for this profile")),
+			mcp.WithObject("servers", mcp.Description("Full MCP servers map to set. Each key is a server name, value is the server configuration object.")),
 		),
 		s.wrapHandler("update_mcp_config", s.updateMcpConfigHandler()),
 	)

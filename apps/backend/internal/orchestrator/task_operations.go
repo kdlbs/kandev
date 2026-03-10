@@ -384,7 +384,13 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		effectivePrompt = task.Description
 	}
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, "", workflowStepID, planMode)
+	// Prepare session first so we have the sessionID for config context injection
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	if err != nil {
+		return nil, err
+	}
+
+	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode)
 
 	// Determine MCP mode for the agent's MCP server
 	var mcpMode string
@@ -392,11 +398,6 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		mcpMode = "config"
 	}
 
-	// Prepare session and launch with MCP mode set at creation time
-	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
-	if err != nil {
-		return nil, err
-	}
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: agentProfileID,
 		ExecutorID:     executorID,
