@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
-import { IconSettings } from "@tabler/icons-react";
+import { IconSparkles } from "@tabler/icons-react";
 import { QuickChatContent } from "@/components/quick-chat/quick-chat-content";
 import { useConfigChat } from "./use-config-chat";
 
@@ -24,7 +24,7 @@ function ConfigChatEmptyState({ onSelectPrompt }: { onSelectPrompt: (prompt: str
         <div className="text-center space-y-2">
           <div className="flex justify-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted">
-              <IconSettings className="h-6 w-6 text-muted-foreground" />
+              <IconSparkles className="h-6 w-6 text-muted-foreground" />
             </div>
           </div>
           <h3 className="text-lg font-medium">Configure Kandev with AI</h3>
@@ -63,7 +63,7 @@ export const ConfigChatModal = memo(function ConfigChatModal({
       >
         <DialogTitle className="sr-only">Config Chat</DialogTitle>
         <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/20">
-          <IconSettings className="h-4 w-4 text-muted-foreground" />
+          <IconSparkles className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">Config Chat</span>
         </div>
         {sessionId ? (

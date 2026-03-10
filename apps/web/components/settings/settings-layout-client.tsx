@@ -1,34 +1,44 @@
 "use client";
 
-import { IconArrowLeft, IconMessageChatbot } from "@tabler/icons-react";
+import { IconArrowLeft, IconSparkles } from "@tabler/icons-react";
 import { usePathname } from "next/navigation";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from "@kandev/ui/breadcrumb";
 import { Button } from "@kandev/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { ConfigChatModal } from "@/components/config-chat/config-chat-modal";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 
-function ConfigChatButton() {
+function ConfigChatFAB() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspace = useAppStore(
+    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
+  );
   const { open, isStarting } = useConfigChat(workspaceId ?? "");
 
   if (!workspaceId) return null;
 
+  const defaultProfileId =
+    workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
+
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => open()}
-        disabled={isStarting}
-        className="cursor-pointer gap-2"
-      >
-        <IconMessageChatbot className="h-4 w-4" />
-        Config Chat
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            onClick={() => open(defaultProfileId)}
+            disabled={isStarting}
+            className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full shadow-lg cursor-pointer"
+          >
+            <IconSparkles className="h-5 w-5" />
+            <span className="sr-only">AI Config Chat</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="left">Configure with AI</TooltipContent>
+      </Tooltip>
       <ConfigChatModal workspaceId={workspaceId} />
     </>
   );
@@ -45,7 +55,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
       <SidebarProvider>
         <SettingsAppSidebar />
         <SidebarInset>
-          <header className="flex h-16 shrink-0 items-center gap-2 justify-between">
+          <header className="flex h-16 shrink-0 items-center gap-2">
             <div className="flex items-center gap-2 px-0 sm:px-4">
               <SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />
               <Breadcrumb>
@@ -59,11 +69,9 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
                 </BreadcrumbList>
               </Breadcrumb>
             </div>
-            <div className="flex items-center gap-2 px-4">
-              <ConfigChatButton />
-            </div>
           </header>
           <div className="flex flex-1 flex-col gap-4 p-4 pt-0">{children}</div>
+          <ConfigChatFAB />
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
