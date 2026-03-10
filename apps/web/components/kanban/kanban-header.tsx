@@ -13,7 +13,6 @@ import {
   IconMenu2,
   IconChartBar,
   IconTimeline,
-  IconMessageCircle,
 } from "@tabler/icons-react";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { RefreshReviewsButton } from "../github/refresh-reviews-button";
@@ -21,7 +20,7 @@ import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
-import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { linkToTasks } from "@/lib/links";
@@ -99,7 +98,7 @@ function getToggleValue(currentPage: string, kanbanViewMode: string | null): str
 
 function TabletHeader({
   onCreateTask,
-  onOpenQuickChat,
+  workspaceId,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -112,7 +111,7 @@ function TabletHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
-  onOpenQuickChat: () => void;
+  workspaceId?: string;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -148,20 +147,8 @@ function TabletHeader({
           <IconPlus className="h-4 w-4" />
           <span className="hidden sm:inline ml-1">Add task</span>
         </Button>
+        <QuickChatButton workspaceId={workspaceId} />
         <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon-lg"
-                onClick={onOpenQuickChat}
-                className="cursor-pointer h-8 w-8"
-              >
-                <IconMessageCircle className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Quick Chat</TooltipContent>
-          </Tooltip>
           <ViewToggleGroup
             toggleValue={toggleValue}
             onValueChange={handleViewChange}
@@ -187,7 +174,7 @@ function TabletHeader({
 
 function DesktopHeader({
   onCreateTask,
-  onOpenQuickChat,
+  workspaceId,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -199,7 +186,7 @@ function DesktopHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
-  onOpenQuickChat: () => void;
+  workspaceId?: string;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -232,20 +219,8 @@ function DesktopHeader({
           <IconPlus className="h-4 w-4" />
           Add task
         </Button>
+        <QuickChatButton workspaceId={workspaceId} />
         <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={onOpenQuickChat}
-                className="cursor-pointer"
-              >
-                <IconMessageCircle className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Quick Chat</TooltipContent>
-          </Tooltip>
           <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -308,7 +283,6 @@ export function KanbanHeader({
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = getToggleValue(currentPage, kanbanViewMode);
   const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
-  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
 
   const indicatorProps = {
     showReleaseNotesButton: releaseNotes.showTopbarButton,
@@ -317,7 +291,7 @@ export function KanbanHeader({
     onOpenHealthDialog: healthIndicator.openDialog,
   };
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
-  const sharedActions = { onCreateTask, onOpenQuickChat: handleOpenQuickChat };
+  const sharedActions = { onCreateTask, workspaceId };
 
   const renderHeader = () => {
     if (isMobile) {
