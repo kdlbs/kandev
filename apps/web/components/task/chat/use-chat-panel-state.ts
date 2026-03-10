@@ -257,9 +257,10 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
   useEffect(() => {
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
-  const planComments = usePendingPlanComments();
-  const pendingCommentsByFile = usePendingDiffCommentsByFile();
-  const pendingPRFeedback = usePendingPRFeedback();
+  // Filter pending comments by sessionId to prevent cross-session leakage
+  const planComments = usePendingPlanComments(resolvedSessionId);
+  const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
+  const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const clearSessionPlanComments = useCallback(() => {
@@ -287,13 +288,17 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
     [removeComment],
   );
   const handleClearPRFeedback = useCallback(() => {
+    if (!resolvedSessionId) return;
     const state = useCommentsStore.getState();
     const allPending = [...state.pendingForChat];
     for (const id of allPending) {
       const c = state.byId[id];
-      if (c && isPRFeedbackComment(c)) state.removeComment(id);
+      // Only clear PR feedback for the current session
+      if (c && isPRFeedbackComment(c) && c.sessionId === resolvedSessionId) {
+        state.removeComment(id);
+      }
     }
-  }, []);
+  }, [resolvedSessionId]);
   return {
     planComments,
     pendingCommentsByFile,

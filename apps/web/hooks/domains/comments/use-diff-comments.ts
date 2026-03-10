@@ -34,8 +34,11 @@ const EMPTY_BY_FILE: Record<string, DiffComment[]> = {};
 
 /**
  * Get all pending diff comments grouped by file path.
+ * If sessionId is provided, only returns comments belonging to that session.
  */
-export function usePendingDiffCommentsByFile(): Record<string, DiffComment[]> {
+export function usePendingDiffCommentsByFile(
+  sessionId?: string | null,
+): Record<string, DiffComment[]> {
   const byId = useCommentsStore((state) => state.byId);
   const pendingForChat = useCommentsStore((state) => state.pendingForChat);
 
@@ -45,10 +48,12 @@ export function usePendingDiffCommentsByFile(): Record<string, DiffComment[]> {
     for (const id of pendingForChat) {
       const comment = byId[id];
       if (comment && isDiffComment(comment)) {
+        // Filter by sessionId if provided
+        if (sessionId && comment.sessionId !== sessionId) continue;
         if (!byFile[comment.filePath]) byFile[comment.filePath] = [];
         byFile[comment.filePath].push(comment);
       }
     }
     return Object.keys(byFile).length === 0 ? EMPTY_BY_FILE : byFile;
-  }, [byId, pendingForChat]);
+  }, [byId, pendingForChat, sessionId]);
 }
