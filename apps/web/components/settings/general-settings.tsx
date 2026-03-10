@@ -147,9 +147,7 @@ function TerminalLinksCard() {
               <SelectItem value="browser_panel">Built-in browser panel</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
-            Click a URL in the terminal to open it.
-          </p>
+          <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
         </div>
       </CardContent>
     </Card>
