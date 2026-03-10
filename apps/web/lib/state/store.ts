@@ -205,6 +205,7 @@ export type AppState = {
   systemHealth: (typeof defaultUIState)["systemHealth"];
   quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
+  bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
 
   // GitHub actions
   setGitHubStatus: (status: GitHubStatus | null) => void;
@@ -317,6 +318,7 @@ export type AppState = {
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;
+  toggleBottomTerminal: () => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
@@ -457,6 +459,7 @@ const defaultState = {
   systemHealth: defaultUIState.systemHealth,
   quickChat: defaultUIState.quickChat,
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
+  bottomTerminal: defaultUIState.bottomTerminal,
 };
 
 function mergeInitialState(initialState?: Partial<AppState>): typeof defaultState {
@@ -532,6 +535,7 @@ function mergeInitialState(initialState?: Partial<AppState>): typeof defaultStat
     quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
+    bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
   };
 }
 
@@ -614,6 +618,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       systemHealth: merged.systemHealth,
       quickChat: merged.quickChat,
       sessionFailureNotification: merged.sessionFailureNotification,
+      bottomTerminal: merged.bottomTerminal,
       // Add hydrate method
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),

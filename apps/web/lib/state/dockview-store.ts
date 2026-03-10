@@ -287,6 +287,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         });
       }
     },
+
     setSidebarVisible: (visible: boolean) => {
       const { sidebarVisible } = get();
       if (sidebarVisible === visible) return;

@@ -7,6 +7,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { startReconnectLoop } from "./ws-reconnect";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { matchesShortcut } from "@/lib/keyboard/utils";
 
 // Debug flag - set to true to see detailed logs
 const DEBUG = false;
@@ -57,6 +59,7 @@ function initTerminalInstance(
   >,
   fitAndResize: (force?: boolean) => void,
   linkHandler?: (event: MouseEvent, uri: string) => void,
+  onToggleBottomTerminal?: () => void,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
@@ -79,14 +82,20 @@ function initTerminalInstance(
   terminal.unicode.activeVersion = "11";
   const webLinksAddon = new WebLinksAddon(linkHandler);
   terminal.loadAddon(webLinksAddon);
-  log("Opening terminal in container");
   terminal.open(termContainer);
+  // Intercept bottom terminal shortcut to toggle panel
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (matchesShortcut(event, SHORTCUTS.BOTTOM_TERMINAL)) {
+      if (event.type === "keydown" && onToggleBottomTerminal) onToggleBottomTerminal();
+      return false;
+    }
+    return true;
+  });
   try {
     fitAddon.fit();
     refs.lastDimensionsRef.current = { cols: terminal.cols, rows: terminal.rows };
-    log("Initial fit:", terminal.cols, "x", terminal.rows);
-  } catch (e) {
-    log("Initial fit failed:", e);
+  } catch {
+    /* fit failed */
   }
   refs.xtermRef.current = terminal;
   refs.fitAddonRef.current = fitAddon;
@@ -141,6 +150,11 @@ function initTerminalInstance(
   };
 }
 
+type TerminalInitHookOptions = TerminalInitOptions & {
+  linkHandler?: (event: MouseEvent, uri: string) => void;
+  onToggleBottomTerminal?: () => void;
+};
+
 export function useTerminalInit({
   terminalRef,
   xtermRef,
@@ -152,7 +166,8 @@ export function useTerminalInit({
   fitAndResize,
   onReady,
   linkHandler,
-}: TerminalInitOptions & { linkHandler?: (event: MouseEvent, uri: string) => void }) {
+  onToggleBottomTerminal,
+}: TerminalInitHookOptions) {
   const refs = {
     xtermRef,
     fitAddonRef,
@@ -178,7 +193,7 @@ export function useTerminalInit({
       const rect = container.getBoundingClientRect();
       log("Init check: dimensions", rect.width, "x", rect.height);
       if (rect.width >= MIN_WIDTH && rect.height >= MIN_HEIGHT) {
-        initTerminalInstance(container, refs, fitAndResize, linkHandler);
+        initTerminalInstance(container, refs, fitAndResize, linkHandler, onToggleBottomTerminal);
         onReady();
         return true;
       }

@@ -21,6 +21,7 @@ export const defaultUIState: UISliceState = {
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
+  bottomTerminal: { isOpen: false },
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -187,5 +188,14 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setSessionFailureNotification: (n) =>
     set((draft) => {
       draft.sessionFailureNotification = n;
+    }),
+  toggleBottomTerminal: () =>
+    set((draft) => {
+      const newValue = !draft.bottomTerminal.isOpen;
+      draft.bottomTerminal.isOpen = newValue;
+      // Persist to localStorage
+      if (typeof window !== "undefined") {
+        localStorage.setItem("bottom-terminal-open", String(newValue));
+      }
     }),
 });

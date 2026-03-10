@@ -24,6 +24,7 @@ import {
 
 type BaseProps = {
   sessionId?: string | null;
+  autoFocus?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; label?: string };
 type ShellTerminalProps = BaseProps & { mode: "shell"; terminalId: string; label?: string };
@@ -40,7 +41,7 @@ type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
  * - Resize commands sent via binary protocol: [0x01][JSON {cols, rows}]
  */
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { sessionId: propSessionId, mode, label } = props;
+  const { sessionId: propSessionId, mode, label, autoFocus } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   log("Render - props:", { propSessionId, mode, terminalId, label });
 
@@ -64,10 +65,8 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   const wsBaseUrl = useMemo(() => {
     try {
-      const backendUrl = getBackendConfig().apiBaseUrl;
-      const url = new URL(backendUrl);
-      const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-      return `${protocol}//${url.host}`;
+      const url = new URL(getBackendConfig().apiBaseUrl);
+      return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
     } catch {
       return "ws://localhost:8080";
     }
@@ -86,9 +85,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const [connectedSessionId, setConnectedSessionId] = useState<string | null>(null);
   const isConnected = sessionId != null && connectedSessionId === sessionId;
   const onConnected = useCallback(() => {
-    log("WebSocket connected — hiding loading overlay for session", sessionId);
     setConnectedSessionId(sessionId ?? null);
-  }, [sessionId]);
+    if (autoFocus) xtermRef.current?.focus();
+  }, [sessionId, autoFocus]);
 
   const linkHandler = useTerminalLinkHandler();
   const sendResize = useSendResize(wsRef);
@@ -100,6 +99,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     sendResize,
   });
 
+  const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
   useTerminalInit({
     terminalRef,
     xtermRef,
@@ -111,6 +111,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     fitAndResize,
     onReady: onTerminalReady,
     linkHandler,
+    onToggleBottomTerminal: toggleBottomTerminal,
   });
 
   useWebSocketConnection({

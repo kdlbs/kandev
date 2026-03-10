@@ -69,6 +69,10 @@ export type SessionFailureNotification = {
   message: string;
 };
 
+export type BottomTerminalState = {
+  isOpen: boolean;
+};
+
 export type UISliceState = {
   previewPanel: PreviewPanelState;
   rightPanel: RightPanelState;
@@ -81,6 +85,7 @@ export type UISliceState = {
   systemHealth: SystemHealthState;
   quickChat: QuickChatState;
   sessionFailureNotification: SessionFailureNotification | null;
+  bottomTerminal: BottomTerminalState;
 };
 
 export type UISliceActions = {
@@ -108,6 +113,7 @@ export type UISliceActions = {
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
+  toggleBottomTerminal: () => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

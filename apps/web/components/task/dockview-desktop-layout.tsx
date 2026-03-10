@@ -40,6 +40,7 @@ import { CommitDetailPanel } from "./commit-detail-panel";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { PreviewController } from "./preview/preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
+import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { useReviewDialog } from "./use-review-dialog";
@@ -705,7 +706,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   return (
     <div
-      className="flex-1 min-h-0"
+      className="flex-1 min-h-0 grid grid-rows-[1fr_auto]"
       aria-busy={isRestoringLayout}
       style={{
         opacity: isRestoringLayout ? 0 : 1,
@@ -713,19 +714,22 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         transition: isRestoringLayout ? "none" : "opacity 60ms ease-out",
       }}
     >
-      <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
-      <DockviewReact
-        theme={themeKandev}
-        components={components}
-        tabComponents={tabComponents}
-        defaultTabComponent={ContextMenuTab}
-        leftHeaderActionsComponent={LeftHeaderActions}
-        rightHeaderActionsComponent={RightHeaderActions}
-        watermarkComponent={DockviewWatermark}
-        onReady={onReady}
-        defaultRenderer="always"
-        className="h-full"
-      />
+      <div className="min-h-0 flex flex-col">
+        <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
+        <DockviewReact
+          theme={themeKandev}
+          components={components}
+          tabComponents={tabComponents}
+          defaultTabComponent={ContextMenuTab}
+          leftHeaderActionsComponent={LeftHeaderActions}
+          rightHeaderActionsComponent={RightHeaderActions}
+          watermarkComponent={DockviewWatermark}
+          onReady={onReady}
+          defaultRenderer="always"
+          className="flex-1 min-h-0"
+        />
+      </div>
+      <BottomTerminalPanel sessionId={effectiveSessionId} />
       <PanelPortalHost renderPanel={renderPanel} />
       {effectiveSessionId && (
         <ReviewDialog

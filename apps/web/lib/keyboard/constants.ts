@@ -141,4 +141,8 @@ export const SHORTCUTS = {
     key: KEYS.Q,
     modifiers: { ctrlOrCmd: true, shift: true },
   },
+  BOTTOM_TERMINAL: {
+    key: KEYS.J,
+    modifiers: { ctrlOrCmd: true },
+  },
 } as const;

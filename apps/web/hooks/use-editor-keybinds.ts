@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
+import { matchesShortcut } from "@/lib/keyboard/utils";
 import type { DockviewApi } from "dockview-react";
 
 function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
@@ -89,10 +91,20 @@ function handleLayoutToggle(e: KeyboardEvent): boolean {
     return true;
   }
 
-  if (isCmdKey(e, "KeyJ")) {
+  return false;
+}
+
+function handleBottomTerminal(
+  e: KeyboardEvent,
+  appStore: ReturnType<typeof useAppStoreApi>,
+): boolean {
+  if (isEditableTarget(e)) return false;
+
+  // Cmd/Ctrl+J — toggle bottom terminal panel
+  if (matchesShortcut(e, SHORTCUTS.BOTTOM_TERMINAL)) {
     e.preventDefault();
     e.stopPropagation();
-    useDockviewStore.getState().toggleRightPanels();
+    appStore.getState().toggleBottomTerminal();
     return true;
   }
 
@@ -104,7 +116,7 @@ function handleLayoutToggle(e: KeyboardEvent): boolean {
  * - Cmd/Ctrl+Shift+[ / ] — navigate prev/next tab in active group
  * - Ctrl+` — toggle terminal focus
  * - Cmd/Ctrl+B — toggle sidebar
- * - Cmd/Ctrl+J — toggle right panels
+ * - Cmd/Ctrl+J — toggle bottom terminal panel
  */
 export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
@@ -137,10 +149,12 @@ export function useEditorKeybinds() {
         return;
       }
 
-      handleLayoutToggle(e);
+      if (handleLayoutToggle(e)) return;
+      handleBottomTerminal(e, appStore);
     };
 
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // Use capture phase so we receive events before xterm.js
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [appStore]);
 }
