@@ -2,9 +2,7 @@ import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
 
-export function parseTerminalLinkBehavior(
-  value: string | undefined,
-): "new_tab" | "browser_panel" {
+export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" | "browser_panel" {
   return value === "browser_panel" ? "browser_panel" : "new_tab";
 }
 
