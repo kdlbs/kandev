@@ -116,6 +116,7 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		Protocol:       agent.ProtocolACP,
 		ModelFlag:      NewParam("--model", "{model}"),
 		WorkspaceFlag:  "--workspace-root",
+		AssumeMcpSse:   true,
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,

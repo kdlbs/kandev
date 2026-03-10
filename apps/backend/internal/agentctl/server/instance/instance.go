@@ -86,6 +86,9 @@ type CreateRequest struct {
 
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
+
+	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
+	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

@@ -237,7 +237,11 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
 
-	filteredServers := filterMcpServersByCapabilities(mcpServers, a.capabilities.McpCapabilities, a.logger)
+	caps := a.capabilities.McpCapabilities
+	if a.cfg.AssumeMcpSse {
+		caps.Sse = true
+	}
+	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),

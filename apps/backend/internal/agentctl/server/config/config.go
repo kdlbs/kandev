@@ -155,6 +155,9 @@ type InstanceConfig struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool.
 	// Used for TUI/passthrough agents that don't need clarification tools.
 	DisableAskQuestion bool
+
+	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
+	AssumeMcpSse bool
 }
 
 // Load loads the configuration from environment variables.
@@ -255,6 +258,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DisableAskQuestion {
 		cfg.DisableAskQuestion = true
 	}
+	if overrides.AssumeMcpSse {
+		cfg.AssumeMcpSse = true
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -269,6 +275,7 @@ type InstanceOverrides struct {
 	McpServers         []McpServerConfig
 	SessionID          string
 	DisableAskQuestion bool
+	AssumeMcpSse       bool
 }
 
 // ParseCommand splits a command string into arguments

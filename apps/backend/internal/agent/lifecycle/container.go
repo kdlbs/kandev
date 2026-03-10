@@ -95,6 +95,12 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		agentType = config.AgentConfig.ID()
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
+	assumeMcpSse := false
+	if config.AgentConfig != nil {
+		if rt := config.AgentConfig.Runtime(); rt != nil {
+			assumeMcpSse = rt.AssumeMcpSse
+		}
+	}
 
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:                 config.InstanceID,
@@ -106,6 +112,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 		McpServers:         config.McpServers,
 		SessionID:          config.SessionID,
 		DisableAskQuestion: disableAskQuestion,
+		AssumeMcpSse:       assumeMcpSse,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

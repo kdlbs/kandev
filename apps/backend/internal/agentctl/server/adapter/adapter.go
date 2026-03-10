@@ -249,6 +249,9 @@ type Config struct {
 	// OneShotConfig is set for one-shot adapters that manage their own subprocess.
 	// When non-nil, the process manager skips subprocess creation.
 	OneShotConfig *OneShotConfig
+
+	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
+	AssumeMcpSse bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -275,5 +278,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AuthValue:      c.AuthValue,
 		Headers:        c.Headers,
 		Extra:          c.Extra,
+		AssumeMcpSse:   c.AssumeMcpSse,
 	}
 }

@@ -89,6 +89,12 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		agentType = req.AgentConfig.ID()
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
+	assumeMcpSse := false
+	if req.AgentConfig != nil {
+		if rt := req.AgentConfig.Runtime(); rt != nil {
+			assumeMcpSse = rt.AssumeMcpSse
+		}
+	}
 
 	createReq := &agentctl.CreateInstanceRequest{
 		ID:                 req.InstanceID,
@@ -101,6 +107,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		McpServers:         req.McpServers,
 		SessionID:          req.SessionID,
 		DisableAskQuestion: disableAskQuestion,
+		AssumeMcpSse:       assumeMcpSse,
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

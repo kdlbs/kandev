@@ -105,6 +105,7 @@ func (a *Copilot) Runtime() *RuntimeConfig {
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolCopilot,
 		ModelFlag:      NewParam("--model", "{model}"),
+		AssumeMcpSse:   true,
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			ResumeFlag:          NewParam("--resume"),

@@ -46,6 +46,9 @@ type Config struct {
 
 	// Protocol-specific configuration
 	Extra map[string]string
+
+	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
+	AssumeMcpSse bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

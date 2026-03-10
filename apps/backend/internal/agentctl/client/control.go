@@ -45,6 +45,7 @@ type CreateInstanceRequest struct {
 	McpServers         []McpServerConfig `json:"mcp_servers,omitempty"`
 	SessionID          string            `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
 	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
+	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
