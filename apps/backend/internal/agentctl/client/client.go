@@ -243,6 +243,45 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 	return nil
 }
 
+// SetMcpMode changes the MCP tool mode on the agentctl instance.
+// This reconfigures which MCP tools are available to the agent.
+func (c *Client) SetMcpMode(ctx context.Context, mode string) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/mode", c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(struct {
+		Mode string `json:"mode"`
+	}{Mode: mode})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/mode", bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		httpErr := fmt.Errorf("set MCP mode failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return httpErr
+	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return nil
+}
+
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)

@@ -200,6 +200,19 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 	}
 }
 
+// SetMode changes the MCP server mode and re-registers tools accordingly.
+// This allows reconfiguring the tool set after initial creation (e.g., when
+// a session transitions to plan/config mode on a pre-existing workspace).
+func (s *Server) SetMode(mode string) {
+	if mode == "" {
+		mode = ModeTask
+	}
+	s.mode = mode
+	// Clear all existing tools and re-register for the new mode.
+	s.mcpServer.SetTools() // empty call clears all tools
+	s.registerTools()
+}
+
 // registerTools registers MCP tools based on the server mode.
 func (s *Server) registerTools() {
 	count := 0

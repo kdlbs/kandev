@@ -252,6 +252,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AgentConfig:         agentConfig,
 		McpServers:          mcpServers,
 		PreviousExecutionID: reqWithWorktree.PreviousExecutionID,
+		McpMode:             reqWithWorktree.McpMode,
 		OnProgress:          m.newProgressCallback(reqWithWorktree.TaskID, reqWithWorktree.SessionID),
 	}
 
@@ -477,6 +478,20 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 	}
 	execution.Metadata["task_description"] = description
 	return nil
+}
+
+// SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
+// This is used when a session transitions to plan/config mode after the workspace was
+// already prepared with the default (task) mode.
+func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+	return execution.agentctl.SetMcpMode(ctx, mode)
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name
