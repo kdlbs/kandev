@@ -51,7 +51,7 @@ func (a *ClaudeCode) DisplayName() string { return "Claude" }
 func (a *ClaudeCode) Description() string {
 	return "Anthropic Claude Code CLI-powered autonomous coding agent using the stream-json protocol."
 }
-func (a *ClaudeCode) Enabled() bool     { return true }
+func (a *ClaudeCode) Enabled() bool     { return false }
 func (a *ClaudeCode) DisplayOrder() int { return 1 }
 
 func (a *ClaudeCode) Logo(v LogoVariant) []byte {
@@ -192,10 +192,10 @@ var claudeCodePermSettings = map[string]PermissionSetting{
 
 func claudeCodeStaticModels() []Model {
 	return []Model{
-		{ID: "claude-sonnet-4-6", Name: "Sonnet 4.6", Description: "Latest Sonnet model for coding and everyday tasks", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "claude-sonnet-4-5", Name: "Sonnet 4.5", Description: "Previous Sonnet generation with strong reasoning", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "claude-opus-4-6", Name: "Opus 4.6", Description: "Latest and most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "claude-opus-4-5", Name: "Opus 4.5", Description: "Most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "claude-haiku-4-5", Name: "Haiku 4.5", Description: "Fast and affordable model for simple tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-sonnet-4-6", ACPID: "sonnet", Name: "Sonnet 4.6", Description: "Latest Sonnet model for coding and everyday tasks", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "claude-sonnet-4-5", ACPID: "sonnet", Name: "Sonnet 4.5", Description: "Previous Sonnet generation with strong reasoning", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-opus-4-6", ACPID: "default", Name: "Opus 4.6", Description: "Latest and most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-opus-4-5", ACPID: "default", Name: "Opus 4.5", Description: "Most capable model for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "claude-haiku-4-5", ACPID: "haiku", Name: "Haiku 4.5", Description: "Fast and affordable model for simple tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
 	}
 }

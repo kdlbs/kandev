@@ -47,12 +47,12 @@ func NewCodexACP() *CodexACP {
 
 func (a *CodexACP) ID() string          { return "codex-acp" }
 func (a *CodexACP) Name() string        { return "Codex ACP Agent" }
-func (a *CodexACP) DisplayName() string { return "Codex (ACP)" }
+func (a *CodexACP) DisplayName() string { return "Codex" }
 func (a *CodexACP) Description() string {
 	return "OpenAI Codex coding agent using the ACP protocol via the Zed Industries bridge."
 }
 func (a *CodexACP) Enabled() bool     { return true }
-func (a *CodexACP) DisplayOrder() int { return 3 }
+func (a *CodexACP) DisplayOrder() int { return 2 }
 
 func (a *CodexACP) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

@@ -49,12 +49,12 @@ func NewClaudeACP() *ClaudeACP {
 
 func (a *ClaudeACP) ID() string          { return "claude-acp" }
 func (a *ClaudeACP) Name() string        { return "Claude ACP Agent" }
-func (a *ClaudeACP) DisplayName() string { return "Claude (ACP)" }
+func (a *ClaudeACP) DisplayName() string { return "Claude" }
 func (a *ClaudeACP) Description() string {
 	return "Anthropic Claude coding agent using the ACP protocol via the Zed Industries bridge."
 }
 func (a *ClaudeACP) Enabled() bool     { return true }
-func (a *ClaudeACP) DisplayOrder() int { return 2 }
+func (a *ClaudeACP) DisplayOrder() int { return 1 }
 
 func (a *ClaudeACP) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

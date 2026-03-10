@@ -51,7 +51,7 @@ func (a *Copilot) DisplayName() string { return "Copilot" }
 func (a *Copilot) Description() string {
 	return "GitHub Copilot CLI-powered autonomous coding agent using the Copilot SDK protocol."
 }
-func (a *Copilot) Enabled() bool     { return true }
+func (a *Copilot) Enabled() bool     { return false }
 func (a *Copilot) DisplayOrder() int { return 6 }
 
 func (a *Copilot) Logo(v LogoVariant) []byte {
@@ -83,7 +83,7 @@ func (a *Copilot) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *Copilot) DefaultModel() string { return "gpt-4.1" }
+func (a *Copilot) DefaultModel() string { return "gpt-5-mini" }
 
 func (a *Copilot) ListModels(ctx context.Context) (*ModelList, error) {
 	return &ModelList{Models: copilotStaticModels(), SupportsDynamic: false}, nil
@@ -149,19 +149,22 @@ var copilotPermSettings = map[string]PermissionSetting{
 
 func copilotStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-4.1", Name: "GPT-4.1", Description: "OpenAI GPT-4.1", Provider: "openai", Source: "static"},
-		{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Description: "Anthropic Claude Sonnet 4", Provider: "anthropic", Source: "static"},
-		{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5", Description: "Anthropic Claude Sonnet 4.5", Provider: "anthropic", Source: "static"},
-		{ID: "claude-opus-4.5", Name: "Claude Opus 4.5", Description: "Anthropic Claude Opus 4.5", Provider: "anthropic", Source: "static"},
-		{ID: "claude-haiku-4.5", Name: "Claude Haiku 4.5", Description: "Anthropic Claude Haiku 4.5", Provider: "anthropic", Source: "static"},
-		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Description: "OpenAI GPT-5.2 Codex", Provider: "openai", Source: "static"},
-		{ID: "gpt-5.2", Name: "GPT-5.2", Description: "OpenAI GPT-5.2", Provider: "openai", Source: "static"},
-		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", Description: "OpenAI GPT-5.1 Codex Max", Provider: "openai", Source: "static"},
-		{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Description: "OpenAI GPT-5.1 Codex", Provider: "openai", Source: "static"},
-		{ID: "gpt-5.1", Name: "GPT-5.1", Description: "OpenAI GPT-5.1", Provider: "openai", Source: "static"},
-		{ID: "gpt-5", Name: "GPT-5", Description: "OpenAI GPT-5", Provider: "openai", Source: "static"},
-		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Description: "OpenAI GPT-5.1 Codex Mini", Provider: "openai", Source: "static"},
-		{ID: "gpt-5-mini", Name: "GPT-5 Mini", Description: "OpenAI GPT-5 Mini", Provider: "openai", Source: "static", IsDefault: true},
-		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro Preview", Description: "Google Gemini 3 Pro Preview", Provider: "google", Source: "static"},
+		{ID: "claude-sonnet-4.6", Name: "Claude Sonnet 4.6", Provider: "anthropic", Source: "static"},
+		{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5", Provider: "anthropic", Source: "static"},
+		{ID: "claude-opus-4.6", Name: "Claude Opus 4.6", Provider: "anthropic", Source: "static"},
+		{ID: "claude-opus-4.5", Name: "Claude Opus 4.5", Provider: "anthropic", Source: "static"},
+		{ID: "claude-haiku-4.5", Name: "Claude Haiku 4.5", Provider: "anthropic", Source: "static"},
+		{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", Provider: "anthropic", Source: "static"},
+		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro (Preview)", Provider: "google", Source: "static"},
+		{ID: "gpt-5.4", Name: "GPT-5.4", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3-Codex", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2-Codex", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.2", Name: "GPT-5.2", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1-Codex-Max", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.1-codex", Name: "GPT-5.1-Codex", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.1", Name: "GPT-5.1", Provider: "openai", Source: "static"},
+		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1-Codex-Mini", Provider: "openai", Source: "static"},
+		{ID: "gpt-5-mini", Name: "GPT-5 Mini", Provider: "openai", Source: "static", IsDefault: true},
+		{ID: "gpt-4.1", Name: "GPT-4.1", Provider: "openai", Source: "static"},
 	}
 }

@@ -49,12 +49,12 @@ func NewCopilotACP() *CopilotACP {
 
 func (a *CopilotACP) ID() string          { return "copilot-acp" }
 func (a *CopilotACP) Name() string        { return "Copilot ACP Agent" }
-func (a *CopilotACP) DisplayName() string { return "Copilot (ACP)" }
+func (a *CopilotACP) DisplayName() string { return "Copilot" }
 func (a *CopilotACP) Description() string {
 	return "GitHub Copilot coding agent using the ACP protocol over stdin/stdout."
 }
 func (a *CopilotACP) Enabled() bool     { return true }
-func (a *CopilotACP) DisplayOrder() int { return 7 }
+func (a *CopilotACP) DisplayOrder() int { return 6 }
 
 func (a *CopilotACP) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

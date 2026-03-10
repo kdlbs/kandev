@@ -89,12 +89,33 @@ const (
 // Model describes a single model available for an agent.
 type Model struct {
 	ID            string `json:"id"`
+	ACPID         string `json:"acp_id,omitempty"` // ACP protocol model ID (if different from ID)
 	Name          string `json:"name"`
 	Description   string `json:"description,omitempty"`
 	Provider      string `json:"provider"`
 	ContextWindow int    `json:"context_window"` // 0 = unspecified
 	IsDefault     bool   `json:"is_default"`
 	Source        string `json:"source,omitempty"` // "static" or "dynamic"
+}
+
+// ACPModelID returns the model ID for ACP SetModel. Falls back to ID if ACPID is not set.
+func (m Model) ACPModelID() string {
+	if m.ACPID != "" {
+		return m.ACPID
+	}
+	return m.ID
+}
+
+// ResolveACPModelID finds the ACP model ID for a given profile model ID.
+// Searches the model list for a matching ID and returns its ACPID.
+// Returns the original ID if no ACPID mapping exists.
+func ResolveACPModelID(models []Model, profileModel string) string {
+	for _, m := range models {
+		if m.ID == profileModel && m.ACPID != "" {
+			return m.ACPID
+		}
+	}
+	return profileModel
 }
 
 // ToInferenceModel converts a Model to an InferenceModel.
