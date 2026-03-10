@@ -100,6 +100,10 @@ type Adapter struct {
 	// Attachment management
 	attachMgr *shared.AttachmentManager
 
+	// Available models from the most recent session creation/load.
+	// Used by SetModel to validate the requested model exists.
+	availableModels []acp.ModelInfo
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -246,6 +250,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
+	if resp.Models != nil {
+		a.availableModels = resp.Models.AvailableModels
+	}
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -371,6 +378,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	if resp.Models != nil {
+		a.availableModels = resp.Models.AvailableModels
+	}
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -898,14 +908,33 @@ func (a *Adapter) SetMode(ctx context.Context, modeID string) error {
 }
 
 // SetModel changes the agent's model via ACP session/set_model (unstable SDK method).
+// If the model ID doesn't exist in the agent's available models, the call is skipped to avoid 404.
 func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	available := a.availableModels
 	a.mu.RUnlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+
+	// Validate model exists in the agent's available models (if known).
+	if len(available) > 0 {
+		found := false
+		for _, m := range available {
+			if string(m.ModelId) == modelID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			a.logger.Warn("skipping SetModel: model not in agent's available models",
+				zap.String("model_id", modelID),
+				zap.Int("available_count", len(available)))
+			return nil
+		}
 	}
 
 	_, err := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{

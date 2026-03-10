@@ -39,20 +39,20 @@ func TestAuggieParseModels(t *testing.T) {
      Fast and efficient responses
  - Claude Opus 4.5 [opus4.5]
      Best for complex tasks
- - Sonnet 4.5 [sonnet4.5]
-     Great for everyday tasks`,
+ - Sonnet 4.6 [sonnet4.6]
+     Latest Sonnet model`,
 			wantLen: 3,
-			wantIDs: []string{"haiku4.5", "opus4.5", "sonnet4.5"},
-			wantDef: "sonnet4.5",
+			wantIDs: []string{"haiku4.5", "opus4.5", "sonnet4.6"},
+			wantDef: "sonnet4.6",
 		},
 		{
 			name: "models without descriptions",
 			input: `Available models:
  - Haiku 4.5 [haiku4.5]
- - Sonnet 4.5 [sonnet4.5]`,
+ - Sonnet 4.6 [sonnet4.6]`,
 			wantLen: 2,
-			wantIDs: []string{"haiku4.5", "sonnet4.5"},
-			wantDef: "sonnet4.5",
+			wantIDs: []string{"haiku4.5", "sonnet4.6"},
+			wantDef: "sonnet4.6",
 		},
 		{
 			name:    "empty output returns empty slice",
@@ -83,10 +83,10 @@ Another random line`,
 			name: "default model gets IsDefault true",
 			input: ` - Other [other-id]
      Some model
- - Sonnet 4.5 [sonnet4.5]
+ - Sonnet 4.6 [sonnet4.6]
      Default model`,
 			wantLen: 2,
-			wantDef: "sonnet4.5",
+			wantDef: "sonnet4.6",
 		},
 	}
 

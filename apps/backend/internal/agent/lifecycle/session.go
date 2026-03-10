@@ -328,17 +328,24 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution.sessionInitialized = true
 
 	// Set the user's configured profile model if it differs from the agent's default.
-	// ACP agents ignore --model CLI flags, so the model must be set via ACP protocol.
+	// Resolve ACP-specific model ID (e.g., "claude-opus-4-6" → "default" for Claude ACP).
 	if profileModel != "" && profileModel != agentConfig.DefaultModel() && execution.agentctl != nil {
-		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
+		acpModel := profileModel
+		if list, err := agentConfig.ListModels(ctx); err == nil && list != nil {
+			acpModel = agents.ResolveACPModelID(list.Models, profileModel)
+		}
+
+		if err := execution.agentctl.SetModel(ctx, acpModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel),
+				zap.String("acp_model", acpModel),
 				zap.Error(err))
 		} else {
 			sm.logger.Info("set profile model on ACP session",
 				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel))
+				zap.String("model", profileModel),
+				zap.String("acp_model", acpModel))
 		}
 	}
 

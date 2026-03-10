@@ -40,12 +40,12 @@ func NewOpenCodeACP() *OpenCodeACP {
 
 func (a *OpenCodeACP) ID() string          { return "opencode-acp" }
 func (a *OpenCodeACP) Name() string        { return "OpenCode AI Agent (ACP)" }
-func (a *OpenCodeACP) DisplayName() string { return "OpenCode (ACP)" }
+func (a *OpenCodeACP) DisplayName() string { return "OpenCode" }
 func (a *OpenCodeACP) Description() string {
 	return "OpenCode coding agent using ACP protocol over stdin/stdout."
 }
 func (a *OpenCodeACP) Enabled() bool     { return true }
-func (a *OpenCodeACP) DisplayOrder() int { return 5 }
+func (a *OpenCodeACP) DisplayOrder() int { return 4 }
 
 func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 	if v == LogoDark {

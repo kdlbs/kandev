@@ -81,7 +81,7 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	return result, nil
 }
 
-func (a *Auggie) DefaultModel() string { return "sonnet4.5" }
+func (a *Auggie) DefaultModel() string { return "sonnet4.6" }
 
 func (a *Auggie) ListModels(ctx context.Context) (*ModelList, error) {
 	models, err := execAndParse(ctx, 30*time.Second, auggieParseModels, "auggie", "model", "list")
@@ -181,12 +181,16 @@ var auggiePermSettings = map[string]PermissionSetting{
 
 func auggieStaticModels() []Model {
 	return []Model{
-		{ID: "sonnet4.5", Name: "Sonnet 4.5", Description: "Great for everyday tasks", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
-		{ID: "opus4.5", Name: "Claude Opus 4.5", Description: "Best for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "haiku4.5", Name: "Haiku 4.5", Description: "Fast and efficient responses", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "sonnet4", Name: "Sonnet 4", Description: "Legacy model", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
-		{ID: "gpt5.1", Name: "GPT-5.1", Description: "Strong reasoning and planning", Provider: "openai", ContextWindow: 128000, Source: "static"},
-		{ID: "gpt5", Name: "GPT-5", Description: "OpenAI GPT-5 legacy", Provider: "openai", ContextWindow: 128000, Source: "static"},
+		{ID: "sonnet4.6", ACPID: "claude-sonnet-4-6", Name: "Sonnet 4.6", Description: "Latest Sonnet model with improved capabilities", Provider: "anthropic", ContextWindow: 200000, IsDefault: true, Source: "static"},
+		{ID: "sonnet4.5", ACPID: "claude-sonnet-4-5", Name: "Sonnet 4.5", Description: "Great for everyday tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "opus4.6", ACPID: "claude-opus-4-6", Name: "Opus 4.6", Description: "Best for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "opus4.5", ACPID: "claude-opus-4-5", Name: "Opus 4.5", Description: "Best for complex tasks", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "haiku4.5", ACPID: "claude-haiku-4-5", Name: "Haiku 4.5", Description: "Fast and efficient responses", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "sonnet4", ACPID: "claude-sonnet-4", Name: "Sonnet 4", Description: "Legacy model", Provider: "anthropic", ContextWindow: 200000, Source: "static"},
+		{ID: "gpt5.4", ACPID: "gpt-5-4", Name: "GPT-5.4", Description: "Strong reasoning and planning (free for a limited time)", Provider: "openai", ContextWindow: 128000, Source: "static"},
+		{ID: "gpt5.2", ACPID: "gpt-5-2", Name: "GPT-5.2", Description: "Smarter but slower and more expensive than GPT-5.1", Provider: "openai", ContextWindow: 128000, Source: "static"},
+		{ID: "gpt5.1", ACPID: "gpt-5-1", Name: "GPT-5.1", Description: "Strong reasoning and planning", Provider: "openai", ContextWindow: 128000, Source: "static"},
+		{ID: "gpt5", ACPID: "gpt-5", Name: "GPT-5", Description: "OpenAI GPT-5 legacy", Provider: "openai", ContextWindow: 128000, Source: "static"},
 	}
 }
 
@@ -203,7 +207,7 @@ var auggieModelLineRe = regexp.MustCompile(`^\s*-\s+(.+?)\s+\[(\S+)\]\s*$`)
 func auggieParseModels(output string) ([]Model, error) {
 	lines := strings.Split(output, "\n")
 	models := make([]Model, 0)
-	defaultModel := "sonnet4.5"
+	defaultModel := "sonnet4.6"
 
 	for i := 0; i < len(lines); i++ {
 		m := auggieModelLineRe.FindStringSubmatch(lines[i])

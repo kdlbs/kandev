@@ -47,12 +47,12 @@ func NewAmpACP() *AmpACP {
 
 func (a *AmpACP) ID() string          { return "amp-acp" }
 func (a *AmpACP) Name() string        { return "Amp ACP Agent" }
-func (a *AmpACP) DisplayName() string { return "Amp (ACP)" }
+func (a *AmpACP) DisplayName() string { return "Amp" }
 func (a *AmpACP) Description() string {
 	return "Sourcegraph Amp coding agent using the ACP protocol via the community bridge."
 }
 func (a *AmpACP) Enabled() bool     { return true }
-func (a *AmpACP) DisplayOrder() int { return 8 }
+func (a *AmpACP) DisplayOrder() int { return 7 }
 
 func (a *AmpACP) Logo(v LogoVariant) []byte {
 	if v == LogoDark {
