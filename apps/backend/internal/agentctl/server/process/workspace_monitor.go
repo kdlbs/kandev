@@ -18,6 +18,10 @@ import (
 // causing "too many open files" errors in large workspaces.
 const DefaultFilePollInterval = 2 * time.Second
 
+// gitCommandTimeout is the maximum time to wait for git commands during polling.
+// This prevents the monitor loop from hanging if git is blocked (e.g., index lock).
+const gitCommandTimeout = 10 * time.Second
+
 // monitorLoop polls for file changes using file mtimes and quick git checks.
 // This is more efficient than fsnotify on macOS and avoids file descriptor exhaustion.
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
@@ -30,8 +34,8 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	wt.updateGitStatus(ctx)
 	wt.updateFiles(ctx)
 
-	// Cache the last known state
-	lastState := wt.getWorkspaceState(ctx)
+	// Cache the last known state (ignore error on initial fetch)
+	lastState, _ := wt.getWorkspaceState(ctx)
 
 	wt.logger.Info("file polling started", zap.Duration("interval", DefaultFilePollInterval))
 
@@ -43,7 +47,14 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// Quick state check using mtime + diff-files
-			currentState := wt.getWorkspaceState(ctx)
+			currentState, err := wt.getWorkspaceState(ctx)
+			if err != nil {
+				// Git command failed - skip this cycle and retry on next tick.
+				// Don't update lastState so the change will be detected when git recovers.
+				wt.logger.Warn("failed to get workspace state, will retry next cycle",
+					zap.Error(err))
+				continue
+			}
 			if currentState.changed(lastState) {
 				lastState = currentState
 				wt.logger.Debug("workspace state changed, updating")
@@ -69,7 +80,9 @@ type workspaceState struct {
 
 // getWorkspaceState returns the current workspace state using fast checks.
 // Uses index mtime + git diff-files output + file mtimes.
-func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceState {
+// Returns an error if any git command fails, so the caller can skip the update
+// and retry on the next poll cycle.
+func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceState, error) {
 	var state workspaceState
 
 	// Check index mtime (gitIndexPath is pre-validated at startup)
@@ -79,21 +92,32 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) workspaceStat
 		}
 	}
 
+	// Create a timeout context for git commands to prevent hanging
+	gitCtx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+
 	// git diff-files shows changed files with their blob hashes.
 	// However, the output doesn't change when an already-dirty file is modified
 	// again because the index blob hash stays constant and the worktree hash
 	// is always shown as 0000000 (not computed). To detect subsequent changes
 	// to dirty files, we also include the mtime of each dirty file.
-	cmd := exec.CommandContext(ctx, "git", "diff-files", "--name-only")
+	cmd := exec.CommandContext(gitCtx, "git", "diff-files", "--name-only")
 	cmd.Dir = wt.workDir
-	out, _ := cmd.Output()
+	out, err := cmd.Output()
+	if err != nil {
+		return state, fmt.Errorf("git diff-files: %w", err)
+	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
 	// Check untracked files - git diff-files doesn't include them
 	// Use git ls-files to get untracked files, then check their mtimes
-	state.untrackedID = wt.getUntrackedFilesID(ctx)
+	untrackedID, err := wt.getUntrackedFilesID(gitCtx)
+	if err != nil {
+		return state, err
+	}
+	state.untrackedID = untrackedID
 
-	return state
+	return state, nil
 }
 
 // buildDirtyFilesID builds an identifier string for dirty tracked files.
@@ -125,13 +149,17 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 
 // getUntrackedFilesID returns a string identifying the current state of untracked files.
 // Uses file list + mtimes to detect when untracked files are added, removed, or modified.
-func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
+// Returns an error if the git command fails (e.g., timeout, index lock).
+func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, error) {
 	// Get list of untracked files (excluding ignored)
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard")
 	cmd.Dir = wt.workDir
 	out, err := cmd.Output()
-	if err != nil || len(out) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("git ls-files: %w", err)
+	}
+	if len(out) == 0 {
+		return "", nil // No untracked files is not an error
 	}
 
 	// Build a string from file paths + mtimes to detect any changes
@@ -155,7 +183,7 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) string {
 	}
 
 	// Return the full string - any mtime change will produce a different string
-	return hashInput.String()
+	return hashInput.String(), nil
 }
 
 // sanitizePath validates that the given relative file path stays within the workspace directory.
