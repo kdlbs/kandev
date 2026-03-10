@@ -287,17 +287,18 @@ const (
 	ActionSpritesNetworkPolicyUpdate = "sprites.network_policy.update"
 
 	// MCP tool actions (agentctl -> backend via WS tunnel)
-	ActionMCPListWorkspaces    = "mcp.list_workspaces"
-	ActionMCPListWorkflows     = "mcp.list_workflows"
-	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
-	ActionMCPListTasks         = "mcp.list_tasks"
-	ActionMCPCreateTask        = "mcp.create_task"
-	ActionMCPUpdateTask        = "mcp.update_task"
-	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
-	ActionMCPCreateTaskPlan    = "mcp.create_task_plan"
-	ActionMCPGetTaskPlan       = "mcp.get_task_plan"
-	ActionMCPUpdateTaskPlan    = "mcp.update_task_plan"
-	ActionMCPDeleteTaskPlan    = "mcp.delete_task_plan"
+	ActionMCPListWorkspaces       = "mcp.list_workspaces"
+	ActionMCPListWorkflows        = "mcp.list_workflows"
+	ActionMCPListWorkflowSteps    = "mcp.list_workflow_steps"
+	ActionMCPListTasks            = "mcp.list_tasks"
+	ActionMCPCreateTask           = "mcp.create_task"
+	ActionMCPUpdateTask           = "mcp.update_task"
+	ActionMCPAskUserQuestion      = "mcp.ask_user_question"
+	ActionMCPCreateTaskPlan       = "mcp.create_task_plan"
+	ActionMCPGetTaskPlan          = "mcp.get_task_plan"
+	ActionMCPUpdateTaskPlan       = "mcp.update_task_plan"
+	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
+	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
 )
 
 // GitHub integration actions

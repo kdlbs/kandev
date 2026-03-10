@@ -265,7 +265,7 @@ func NewService(
 		executor:                     exec,
 		scheduler:                    sched,
 		messageQueue:                 msgQueue,
-		clarificationWatchdogTimeout: 2 * time.Minute,
+		clarificationWatchdogTimeout: 15 * time.Second,
 	}
 
 	// Wire executor state changes through the orchestrator so events are published

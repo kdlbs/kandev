@@ -70,10 +70,12 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 		zap.Bool("rejected", data.Rejected))
 
 	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
-		s.logger.Error("failed to resume agent with clarification answer",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
+		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
+			s.logger.Error("failed to resume agent with clarification answer",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(err))
+		}
 	}
 	return nil
 }
@@ -109,7 +111,9 @@ func (s *Service) getClarificationWatchdogTimeout() time.Duration {
 	if s.clarificationWatchdogTimeout > 0 {
 		return s.clarificationWatchdogTimeout
 	}
-	return 2 * time.Minute
+	// After primary path delivery, if the agent doesn't send events within 15s,
+	// its MCP client has timed out and the response was dropped. Trigger fallback.
+	return 15 * time.Second
 }
 
 func (s *Service) scheduleClarificationWatchdog(data clarificationAnsweredData) {
@@ -167,13 +171,49 @@ func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData)
 		zap.String("session_id", data.SessionID),
 		zap.String("pending_id", data.PendingID))
 
-	if _, err := s.PromptTask(context.Background(), data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
-		s.logger.Error("failed to resume agent via clarification watchdog fallback",
+	ctx := context.Background()
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
+			s.logger.Error("failed to resume agent via clarification watchdog fallback",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("pending_id", data.PendingID),
+				zap.Error(err))
+		}
+	}
+}
+
+// retryClarificationAfterCancel handles the case where PromptTask fails because
+// the agent is stuck in RUNNING state (MCP client timed out during clarification).
+// It cancels the stuck turn and retries the prompt. Returns true if recovery succeeded.
+func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarificationAnsweredData, prompt string, promptErr error) bool {
+	if !isAgentPromptInProgressError(promptErr) {
+		return false
+	}
+
+	s.logger.Warn("agent stuck in RUNNING state during clarification recovery; cancelling turn",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID))
+
+	if err := s.CancelAgent(ctx, data.SessionID); err != nil {
+		s.logger.Error("failed to cancel stuck agent for clarification recovery",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return false
+	}
+
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil); err != nil {
+		s.logger.Error("failed to resume agent after cancel in clarification recovery",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
-			zap.String("pending_id", data.PendingID),
 			zap.Error(err))
+		return false
 	}
+
+	s.logger.Info("successfully recovered stuck agent with clarification answer",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID))
+	return true
 }
 
 func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {

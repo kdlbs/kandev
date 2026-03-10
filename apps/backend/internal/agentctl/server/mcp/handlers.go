@@ -7,22 +7,24 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"go.uber.org/zap"
 )
 
 // MCP action constants for backend WS requests
 // These must match the actions registered in pkg/websocket/actions.go
 const (
-	ActionMCPListWorkspaces    = "mcp.list_workspaces"
-	ActionMCPListWorkflows     = "mcp.list_workflows"
-	ActionMCPListWorkflowSteps = "mcp.list_workflow_steps"
-	ActionMCPListTasks         = "mcp.list_tasks"
-	ActionMCPCreateTask        = "mcp.create_task"
-	ActionMCPUpdateTask        = "mcp.update_task"
-	ActionMCPAskUserQuestion   = "mcp.ask_user_question"
-	ActionMCPCreateTaskPlan    = "mcp.create_task_plan"
-	ActionMCPGetTaskPlan       = "mcp.get_task_plan"
-	ActionMCPUpdateTaskPlan    = "mcp.update_task_plan"
-	ActionMCPDeleteTaskPlan    = "mcp.delete_task_plan"
+	ActionMCPListWorkspaces       = "mcp.list_workspaces"
+	ActionMCPListWorkflows        = "mcp.list_workflows"
+	ActionMCPListWorkflowSteps    = "mcp.list_workflow_steps"
+	ActionMCPListTasks            = "mcp.list_tasks"
+	ActionMCPCreateTask           = "mcp.create_task"
+	ActionMCPUpdateTask           = "mcp.update_task"
+	ActionMCPAskUserQuestion      = "mcp.ask_user_question"
+	ActionMCPClarificationTimeout = "mcp.clarification_timeout"
+	ActionMCPCreateTaskPlan       = "mcp.create_task_plan"
+	ActionMCPGetTaskPlan          = "mcp.get_task_plan"
+	ActionMCPUpdateTaskPlan       = "mcp.update_task_plan"
+	ActionMCPDeleteTaskPlan       = "mcp.delete_task_plan"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -176,10 +178,14 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 
 		// Use the MCP request context from the agent. This ensures that if the agent's
 		// MCP client times out, we'll detect it and not update the session state.
-		// Previous behavior used a detached context which meant we couldn't tell if the
-		// agent had given up, leading to sessions stuck in RUNNING state.
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ActionMCPAskUserQuestion, payload, &result); err != nil {
+			if ctx.Err() != nil {
+				// Agent's MCP client disconnected/timed out. Notify backend to cancel
+				// pending clarifications so the user's answer goes through the event
+				// fallback path immediately instead of waiting for the watchdog.
+				go s.notifyClarificationTimeout()
+			}
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
@@ -267,6 +273,19 @@ func extractAnswerMap(answer interface{}) *mcp.CallToolResult {
 		return mcp.NewToolResultText(fmt.Sprintf("User answered: %s", customText))
 	}
 	return nil
+}
+
+// notifyClarificationTimeout sends a fire-and-forget notification to the backend
+// that the agent's MCP client disconnected while waiting for a clarification response.
+// The backend cancels the pending clarification so the user's answer goes through
+// the event fallback path (new turn) instead of the primary path (same turn).
+func (s *Server) notifyClarificationTimeout() {
+	payload := map[string]string{"session_id": s.sessionID}
+	if err := s.backend.RequestPayload(context.Background(), ActionMCPClarificationTimeout, payload, nil); err != nil {
+		s.logger.Warn("failed to notify backend of clarification timeout",
+			zap.String("session_id", s.sessionID),
+			zap.Error(err))
+	}
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {

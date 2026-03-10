@@ -26,6 +26,7 @@ import (
 type ClarificationService interface {
 	CreateRequest(req *clarification.Request) string
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
+	CancelSession(sessionID string) []string
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -100,8 +101,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
+	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", 11))
+	h.logger.Info("registered MCP handlers", zap.Int("count", 12))
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -544,4 +546,27 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// handleClarificationTimeout is called by agentctl when the agent's MCP client
+// disconnects while waiting for a clarification response. It cancels the pending
+// clarification so the user's eventual answer goes through the event fallback path
+// (new turn) instead of the primary path (which would be dropped).
+func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+
+	cancelled := h.clarificationSvc.CancelSession(req.SessionID)
+	h.logger.Info("cancelled pending clarifications on agent MCP timeout",
+		zap.String("session_id", req.SessionID),
+		zap.Int("count", len(cancelled)))
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": len(cancelled)})
 }
