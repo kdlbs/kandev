@@ -191,12 +191,7 @@ func (s *Service) StartTaskWithSession(ctx context.Context, taskID string, sessi
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode)
 
-	var mcpMode string
-	if planModeActive {
-		mcpMode = executor.McpModeConfig
-	}
-
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true, McpMode: mcpMode})
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, Prompt: effectivePrompt, WorkflowStepID: workflowStepID, StartAgent: true})
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +283,11 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 		stepID = *session.WorkflowStepID
 	}
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, stepID, planMode)
+
+	// Inject config context for config-mode sessions (dedicated settings chat)
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+	}
 
 	executorID := session.ExecutorID
 
@@ -392,10 +392,11 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 
 	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode)
 
-	// Determine MCP mode for the agent's MCP server
-	var mcpMode string
-	if planModeActive {
-		mcpMode = executor.McpModeConfig
+	// Inject config context for config-mode sessions (dedicated settings chat)
+	configMode := false
+	if cm, ok := task.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
+		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
@@ -404,14 +405,13 @@ func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID s
 		Prompt:         effectivePrompt,
 		WorkflowStepID: workflowStepID,
 		StartAgent:     true,
-		McpMode:        mcpMode,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	if execution.SessionID != "" {
-		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive)
+		s.recordInitialMessage(ctx, taskID, execution.SessionID, effectivePrompt, planModeActive || configMode)
 
 		// Set plan mode in session metadata so the frontend can detect it.
 		// applyWorkflowAndPlanMode only injects plan mode into the prompt text;
@@ -453,7 +453,6 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 
 	if planMode && !stepHasPlanMode {
 		var parts []string
-		parts = append(parts, sysprompt.Wrap(sysprompt.FormatConfigContext(sessionID)))
 		parts = append(parts, sysprompt.Wrap(sysprompt.InterpolatePlaceholders(sysprompt.DefaultPlanPrefix, taskID)))
 		parts = append(parts, effectivePrompt)
 		effectivePrompt = strings.Join(parts, "\n\n")
@@ -477,15 +476,9 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
 // If step.Prompt contains {{task_prompt}}, it is replaced with the base prompt.
 // Otherwise, step.Prompt is prepended to the base prompt.
-// If the step has enable_plan_mode in on_enter events, config context is prepended.
 // System-injected content is wrapped in <kandev-system> tags so it can be stripped when displaying to users.
 func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
 	var parts []string
-
-	// Apply config context prefix if plan mode is enabled (wrapped in system tags)
-	if step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode) {
-		parts = append(parts, sysprompt.Wrap(sysprompt.FormatConfigContext(sessionID)))
-	}
 
 	// Build the prompt from step.Prompt template and base prompt
 	if step.Prompt != "" {
@@ -1208,9 +1201,9 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
-	// Apply config context prefix if plan mode is enabled
+	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)
 	effectivePrompt := prompt
-	if planMode {
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
 	}
 

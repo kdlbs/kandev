@@ -14,6 +14,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// isConfigModeSession returns true if the session has config_mode: true in its metadata.
+// Config-mode sessions are dedicated settings-chat sessions that get config MCP tools.
+func isConfigModeSession(session *models.TaskSession) bool {
+	if session == nil || session.Metadata == nil {
+		return false
+	}
+	cm, ok := session.Metadata["config_mode"].(bool)
+	return ok && cm
+}
+
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
 // On error it marks both the session and task as FAILED.
 // On success it calls onSuccess with a non-cancellable context derived from ctx.
@@ -221,6 +231,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		AgentProfileSnapshot: agentProfileSnapshot,
 		IsPrimary:            true,
 		IsPassthrough:        isPassthrough,
+		Metadata:             metadata,
 	}
 	if workflowStepID != "" {
 		session.WorkflowStepID = &workflowStepID
@@ -471,8 +482,8 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.RepositoryURL = cloneURL
 	}
 
-	// Activate config-mode MCP tools when plan_mode is set in session metadata.
-	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
 		req.McpMode = McpModeConfig
 	}
 
@@ -512,12 +523,10 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 
 	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
-	// The workspace may have been prepared before plan_mode was set on the session.
+	// The workspace may have been prepared before config_mode was set on the session.
 	effectiveMcpMode := mcpMode
-	if effectiveMcpMode == "" {
-		if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
-			effectiveMcpMode = McpModeConfig
-		}
+	if effectiveMcpMode == "" && isConfigModeSession(session) {
+		effectiveMcpMode = McpModeConfig
 	}
 	if effectiveMcpMode != "" {
 		if err := e.agentManager.SetMcpMode(ctx, session.AgentExecutionID, effectiveMcpMode); err != nil {

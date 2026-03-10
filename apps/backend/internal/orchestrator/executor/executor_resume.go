@@ -364,8 +364,8 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		return nil, "", execConfig, nil, err
 	}
 
-	// Activate config-mode MCP tools when plan_mode is set in session metadata.
-	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
 		req.McpMode = McpModeConfig
 	}
 

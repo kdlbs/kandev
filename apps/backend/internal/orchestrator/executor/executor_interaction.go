@@ -283,8 +283,8 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		Metadata:        execConfig.Metadata,
 	}
 
-	// Activate config-mode MCP tools when plan_mode is set in session metadata.
-	if pm, ok := session.Metadata["plan_mode"].(bool); ok && pm {
+	// Activate config-mode MCP tools when config_mode is set in session metadata.
+	if isConfigModeSession(session) {
 		req.McpMode = McpModeConfig
 	}
 
