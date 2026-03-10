@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -246,9 +247,15 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	// Populate executor info for correct runtime selection and remote reconnection
 	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("failed to get executor running for session",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		if isExecutorRunningNotFoundError(err) {
+			s.logger.Debug("executor running not ready for session",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			s.logger.Warn("failed to get executor running for session",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	} else if running != nil {
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
@@ -266,4 +273,14 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+func isExecutorRunningNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	return strings.Contains(err.Error(), "executor running not found for session")
 }

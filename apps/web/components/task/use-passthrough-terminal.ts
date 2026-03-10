@@ -272,6 +272,7 @@ type ConnectWebSocketOptions = {
   isMountedCheck: () => boolean;
   onTimeout: (id: ReturnType<typeof setTimeout>) => void;
   onConnected: () => void;
+  onSocketClose: (event: CloseEvent) => void;
 };
 
 function connectWebSocket({
@@ -287,6 +288,7 @@ function connectWebSocket({
   isMountedCheck,
   onTimeout,
   onConnected,
+  onSocketClose,
 }: ConnectWebSocketOptions) {
   if (attachAddonRef.current) {
     attachAddonRef.current.dispose();
@@ -341,9 +343,92 @@ function connectWebSocket({
       attachAddonRef.current.dispose();
       attachAddonRef.current = null;
     }
+    onSocketClose(event);
   };
   ws.onerror = (error) => {
     log("WebSocket error:", error);
+  };
+}
+
+function reconnectDelayMs(attempt: number): number {
+  const cappedAttempt = Math.min(attempt, 5);
+  return Math.min(5000, 300 * 2 ** cappedAttempt);
+}
+
+type ReconnectLoopOptions = {
+  sessionId: string;
+  wsBaseUrl: string;
+  mode: "agent" | "shell";
+  terminalId: string | undefined;
+  label: string | undefined;
+  terminal: Terminal;
+  fitAndResize: (force?: boolean) => void;
+  wsRef: React.MutableRefObject<WebSocket | null>;
+  attachAddonRef: React.MutableRefObject<AttachAddon | null>;
+  onConnected: () => void;
+};
+
+function startReconnectLoop({
+  sessionId,
+  wsBaseUrl,
+  mode,
+  terminalId,
+  label,
+  terminal,
+  fitAndResize,
+  wsRef,
+  attachAddonRef,
+  onConnected,
+}: ReconnectLoopOptions): () => void {
+  let isMounted = true;
+  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let settleTimeout: ReturnType<typeof setTimeout> | null = null;
+  let retryAttempt = 0;
+
+  const scheduleConnect = (delayMs: number) => {
+    if (!isMounted) return;
+    if (connectTimeout) clearTimeout(connectTimeout);
+    connectTimeout = setTimeout(() => {
+      if (!isMounted) return;
+      connectWebSocket({
+        sessionId,
+        wsBaseUrl,
+        mode,
+        terminalId,
+        label,
+        terminal,
+        fitAndResize,
+        wsRef,
+        attachAddonRef,
+        isMountedCheck: () => isMounted,
+        onTimeout: (id) => {
+          settleTimeout = id;
+        },
+        onConnected: () => {
+          retryAttempt = 0;
+          onConnected();
+        },
+        onSocketClose: (event) => {
+          if (!isMounted) return;
+          const nextDelay = reconnectDelayMs(retryAttempt);
+          retryAttempt += 1;
+          log("Scheduling reconnect", {
+            attempt: retryAttempt,
+            delayMs: nextDelay,
+            code: event.code,
+          });
+          scheduleConnect(nextDelay);
+        },
+      });
+    }, delayMs);
+  };
+
+  scheduleConnect(150);
+
+  return () => {
+    isMounted = false;
+    if (connectTimeout) clearTimeout(connectTimeout);
+    if (settleTimeout) clearTimeout(settleTimeout);
   };
 }
 
@@ -390,33 +475,21 @@ export function useWebSocketConnection({
     log("Resetting terminal buffer for session", sessionId);
     terminal.reset();
 
-    let isMounted = true;
-    let connectTimeout: ReturnType<typeof setTimeout> | null = null;
-    let settleTimeout: ReturnType<typeof setTimeout> | null = null;
-    connectTimeout = setTimeout(() => {
-      if (!isMounted) return;
-      connectWebSocket({
-        sessionId,
-        wsBaseUrl,
-        mode,
-        terminalId,
-        label,
-        terminal,
-        fitAndResize,
-        wsRef,
-        attachAddonRef,
-        isMountedCheck: () => isMounted,
-        onTimeout: (id) => {
-          settleTimeout = id;
-        },
-        onConnected,
-      });
-    }, 150);
+    const stopReconnectLoop = startReconnectLoop({
+      sessionId,
+      wsBaseUrl,
+      mode,
+      terminalId,
+      label,
+      terminal,
+      fitAndResize,
+      wsRef,
+      attachAddonRef,
+      onConnected,
+    });
     return () => {
       log("WebSocket cleanup");
-      isMounted = false;
-      if (connectTimeout) clearTimeout(connectTimeout);
-      if (settleTimeout) clearTimeout(settleTimeout);
+      stopReconnectLoop();
       if (attachAddonRef.current) {
         attachAddonRef.current.dispose();
         attachAddonRef.current = null;

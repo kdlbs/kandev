@@ -145,7 +145,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
           <div className="flex flex-col items-center gap-3 text-muted-foreground">
             <GridSpinner />
             <span className="text-sm">
-              {mode === "agent" ? "Starting agent..." : "Connecting..."}
+              {mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
             </span>
           </div>
         </div>

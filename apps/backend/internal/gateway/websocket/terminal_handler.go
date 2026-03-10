@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -101,6 +103,12 @@ func checkWebSocketOrigin(r *http.Request) bool {
 // resizeCommandByte is the binary protocol marker for resize messages.
 // First byte 0x01 indicates resize, followed by JSON {cols, rows}.
 const resizeCommandByte = 0x01
+
+const (
+	passthroughReadyTimeout = 30 * time.Second
+	shellExecutionTimeout   = 15 * time.Second
+	pollInterval            = 500 * time.Millisecond
+)
 
 // ResizePayload is the JSON payload for resize commands.
 type ResizePayload struct {
@@ -223,17 +231,26 @@ func (h *TerminalHandler) shouldUseWorkspaceShell(ctx context.Context, sessionID
 // resume flow recreates the execution asynchronously; this bridges the gap so the
 // terminal doesn't fall back to a local shell.
 func (h *TerminalHandler) waitForRemoteExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, bool) {
+	return h.waitForRemoteExecutionWithTimeout(ctx, sessionID, 30*time.Second)
+}
+
+func (h *TerminalHandler) waitForRemoteExecutionWithTimeout(
+	ctx context.Context,
+	sessionID string,
+	timeout time.Duration,
+) (*lifecycle.AgentExecution, bool) {
 	// Fast path: execution already exists.
 	if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
 		return execution, true
 	}
 
-	h.logger.Info("waiting for remote execution to become available",
-		zap.String("session_id", sessionID))
+	h.logger.Info("waiting for execution to become available",
+		zap.String("session_id", sessionID),
+		zap.Duration("timeout", timeout))
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	timer := time.NewTimer(30 * time.Second)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	for {
@@ -241,12 +258,13 @@ func (h *TerminalHandler) waitForRemoteExecution(ctx context.Context, sessionID 
 		case <-ctx.Done():
 			return nil, false
 		case <-timer.C:
-			h.logger.Warn("timed out waiting for remote execution",
-				zap.String("session_id", sessionID))
+			h.logger.Warn("timed out waiting for execution",
+				zap.String("session_id", sessionID),
+				zap.Duration("timeout", timeout))
 			return nil, false
 		case <-ticker.C:
 			if execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID); exists {
-				h.logger.Info("remote execution became available",
+				h.logger.Info("execution became available",
 					zap.String("session_id", sessionID),
 					zap.String("execution_id", execution.ID))
 				return execution, true
@@ -386,11 +404,15 @@ func (h *TerminalHandler) handleAgentPassthroughWS(
 	// 1. Normal case: execution exists with running process
 	// 2. Backend restart: no execution, need to create and start
 	// 3. Process died: execution exists but process not running, need to restart
-	execution, err := h.lifecycleMgr.EnsurePassthroughExecution(c.Request.Context(), sessionID)
+	execution, err := h.ensurePassthroughExecutionReady(c.Request.Context(), sessionID)
 	if err != nil {
 		h.logger.Warn("failed to ensure passthrough execution",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -431,6 +453,44 @@ func (h *TerminalHandler) handleAgentPassthroughWS(
 
 	// Run the terminal bridge
 	h.runTerminalBridge(conn, sessionID, processID, interactiveRunner, wsw)
+}
+
+func (h *TerminalHandler) ensurePassthroughExecutionReady(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	execution, err := h.lifecycleMgr.EnsurePassthroughExecution(ctx, sessionID)
+	if err == nil {
+		return execution, nil
+	}
+	if !errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) {
+		return nil, err
+	}
+
+	h.logger.Info("waiting for passthrough workspace to become ready",
+		zap.String("session_id", sessionID),
+		zap.Duration("timeout", passthroughReadyTimeout))
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, passthroughReadyTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("%w: timed out after %s", lifecycle.ErrSessionWorkspaceNotReady, passthroughReadyTimeout)
+		case <-ticker.C:
+			execution, err := h.lifecycleMgr.EnsurePassthroughExecution(timeoutCtx, sessionID)
+			if err == nil {
+				h.logger.Info("passthrough workspace became ready",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", execution.ID))
+				return execution, nil
+			}
+			if !errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) {
+				return nil, err
+			}
+		}
+	}
 }
 
 // runTerminalBridge handles WebSocket I/O and manages the PTY connection.
@@ -789,16 +849,31 @@ func (h *TerminalHandler) resolvePreferredShell(ctx context.Context) string {
 	return shell
 }
 
-// resolveWorkingDir returns the workspace path for the given session, if available.
-func (h *TerminalHandler) resolveWorkingDir(sessionID string) string {
+// resolveWorkingDir returns the workspace path for the given session.
+// It waits briefly for execution/workspace readiness to avoid launching shells in the wrong cwd.
+func (h *TerminalHandler) resolveWorkingDir(ctx context.Context, sessionID string) (string, error) {
 	execution, exists := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !exists {
-		h.logger.Info("handleUserShellWS: no execution found, using empty working directory")
-		return ""
+	if exists && execution.WorkspacePath != "" {
+		h.logger.Info("handleUserShellWS: got working directory from execution",
+			zap.String("working_dir", execution.WorkspacePath))
+		return execution.WorkspacePath, nil
 	}
-	h.logger.Info("handleUserShellWS: got working directory from execution",
+
+	h.logger.Info("handleUserShellWS: waiting for execution workspace path",
+		zap.String("session_id", sessionID),
+		zap.Duration("timeout", shellExecutionTimeout))
+
+	execution, exists = h.waitForRemoteExecutionWithTimeout(ctx, sessionID, shellExecutionTimeout)
+	if !exists || execution == nil {
+		return "", fmt.Errorf("session %s execution is not ready yet", sessionID)
+	}
+	if execution.WorkspacePath == "" {
+		return "", fmt.Errorf("%w: session %s has no workspace path configured", lifecycle.ErrSessionWorkspaceNotReady, sessionID)
+	}
+
+	h.logger.Info("handleUserShellWS: got working directory after wait",
 		zap.String("working_dir", execution.WorkspacePath))
-	return execution.WorkspacePath
+	return execution.WorkspacePath, nil
 }
 
 // resolveShellLabel returns the label and initial command for a user shell, derived
@@ -841,7 +916,13 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("initial_command", initialCommand))
 
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
-	workingDir := h.resolveWorkingDir(sessionID)
+	workingDir, err := h.resolveWorkingDir(c.Request.Context(), sessionID)
+	if err != nil {
+		h.logger.Warn("handleUserShellWS: workspace path not ready",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return "", http.StatusServiceUnavailable, err.Error()
+	}
 
 	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
 

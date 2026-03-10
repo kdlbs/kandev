@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
 )
+
+// ErrSessionWorkspaceNotReady indicates the task session exists but does not yet
+// have a resolved workspace path (typically while worktree preparation is in progress).
+var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
@@ -128,7 +133,7 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	}
 
 	if info.WorkspacePath == "" {
-		return nil, fmt.Errorf("session %s has no workspace path configured", sessionID)
+		return nil, fmt.Errorf("%w: session %s has no workspace path configured", ErrSessionWorkspaceNotReady, sessionID)
 	}
 
 	if info.TaskID == "" {
