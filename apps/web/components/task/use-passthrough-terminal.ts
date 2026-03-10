@@ -86,6 +86,7 @@ function initTerminalInstance(
   // Intercept bottom terminal shortcut to toggle panel
   terminal.attachCustomKeyEventHandler((event) => {
     if (matchesShortcut(event, SHORTCUTS.BOTTOM_TERMINAL)) {
+      event.preventDefault();
       if (event.type === "keydown" && onToggleBottomTerminal) onToggleBottomTerminal();
       return false;
     }
