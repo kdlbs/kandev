@@ -47,9 +47,11 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  // Find index of selected file - we need to force-load all files up to it
+  const selectedIndex = selectedFile ? files.findIndex((f) => f.path === selectedFile) : -1;
   return (
     <div ref={scrollContainerRef} className="overflow-y-auto h-full">
-      {files.map((file) => (
+      {files.map((file, index) => (
         <FileDiffSection
           key={file.path}
           file={file}
@@ -59,6 +61,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           autoMarkOnScroll={autoMarkOnScroll}
           wordWrap={wordWrap}
           isSelected={selectedFile === file.path}
+          forceLoad={selectedIndex >= 0 && index <= selectedIndex}
           onToggleReviewed={onToggleReviewed}
           onDiscard={onDiscard}
           onOpenFile={onOpenFile}
@@ -78,6 +81,7 @@ type FileDiffSectionProps = {
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
   isSelected?: boolean;
+  forceLoad?: boolean;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string) => void;
@@ -274,6 +278,7 @@ function FileDiffSection({
   autoMarkOnScroll,
   wordWrap,
   isSelected,
+  forceLoad,
   onToggleReviewed,
   onDiscard,
   onOpenFile,
@@ -282,12 +287,22 @@ function FileDiffSection({
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
-  // Force-expand when the user explicitly navigates to this file
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing collapsed state from parent selection prop
-    if (isSelected) setCollapsed(false);
-  }, [isSelected]);
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
+  // Force load when: visible via intersection observer, or forceLoad is true (all files up to selected)
+  const shouldRenderContent = isVisible || forceLoad;
+  useEffect(() => {
+    if (isSelected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing collapsed state from parent selection prop
+      setCollapsed(false);
+      // Wait for all diffs above to fully render before scrolling
+      // Double rAF ensures layout is complete after React commit
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          sectionRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    }
+  }, [isSelected, sectionRef]);
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
     isReviewed,
@@ -327,7 +342,7 @@ function FileDiffSection({
       />
       <div ref={sentinelRef} />
       {!collapsed &&
-        (isVisible && file.diff ? (
+        (shouldRenderContent && file.diff ? (
           <div className="">
             <FileDiffViewer
               filePath={file.path}
