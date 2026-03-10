@@ -70,7 +70,7 @@ func (e *emitter) completeTool(id acp.ToolCallId, output any) {
 func (e *emitter) requestPermission(toolCallID acp.ToolCallId, title string, kind acp.ToolKind, input any) bool {
 	resp, err := e.conn.RequestPermission(e.ctx, acp.RequestPermissionRequest{
 		SessionId: e.sid,
-		ToolCall: acp.RequestPermissionToolCall{
+		ToolCall: acp.ToolCallUpdate{
 			ToolCallId: toolCallID,
 			Title:      acp.Ptr(title),
 			Kind:       acp.Ptr(kind),

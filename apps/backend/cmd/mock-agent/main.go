@@ -116,6 +116,10 @@ func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeReques
 	return acp.SetSessionModeResponse{}, nil
 }
 
+func (a *mockAgent) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	return acp.SetSessionConfigOptionResponse{}, nil
+}
+
 // extractPromptText concatenates text content blocks from the prompt.
 func extractPromptText(blocks []acp.ContentBlock) string {
 	var parts []string

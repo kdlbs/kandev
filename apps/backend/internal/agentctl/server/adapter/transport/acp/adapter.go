@@ -102,7 +102,7 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []acp.ModelInfo
+	availableModels []acp.UnstableModelInfo
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -266,7 +266,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	// Emit session models if the agent returned model state
 	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta)
+		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -315,7 +315,7 @@ func toACPMcpServers(servers []types.McpServer) []acp.McpServer {
 		switch server.Type {
 		case "sse":
 			out = append(out, acp.McpServer{
-				Sse: &acp.McpServerSse{
+				Sse: &acp.McpServerSseInline{
 					Name:    server.Name,
 					Url:     server.URL,
 					Type:    "sse",
@@ -394,7 +394,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string) error {
 
 	// Emit session models if the agent returned model state
 	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta)
+		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -838,8 +838,8 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 			Name:        cmd.Name,
 			Description: cmd.Description,
 		}
-		if cmd.Input != nil && cmd.Input.UnstructuredCommandInput != nil {
-			ac.InputHint = cmd.Input.UnstructuredCommandInput.Hint
+		if cmd.Input != nil && cmd.Input.Unstructured != nil {
+			ac.InputHint = cmd.Input.Unstructured.Hint
 		}
 		commands[i] = ac
 	}
@@ -870,14 +870,48 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 }
 
 // emitSessionModels emits a session_models event from the session response.
-func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta any) {
+func (a *Adapter) emitSessionModels(sessionID string, models *acp.UnstableSessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
+	currentModelID := string(models.CurrentModelId)
+	// Prefer typed config options from the response; fall back to _meta extraction for older agents
+	configOptions := convertACPConfigOptions(acpConfigOptions)
+	if len(configOptions) == 0 {
+		configOptions = extractConfigOptions(meta)
+	}
+
+	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
+	// try to resolve it from configOptions or the first available model.
+	if currentModelID == "" {
+		currentModelID = resolveCurrentModelFromConfig(configOptions)
+	}
+	if currentModelID == "" && len(models.AvailableModels) > 0 {
+		currentModelID = string(models.AvailableModels[0].ModelId)
+		a.logger.Info("currentModelId empty, using first available model as fallback",
+			zap.String("fallback_model", currentModelID),
+		)
+	}
+
+	a.logger.Info("emitting session_models event",
+		zap.String("session_id", sessionID),
+		zap.String("current_model_id", currentModelID),
+		zap.Int("available_models", len(models.AvailableModels)),
+	)
 	a.sendUpdate(AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
-		CurrentModelID: string(models.CurrentModelId),
+		CurrentModelID: currentModelID,
 		SessionModels:  convertSessionModels(models.AvailableModels),
-		ConfigOptions:  extractConfigOptions(meta),
+		ConfigOptions:  configOptions,
 	})
+}
+
+// resolveCurrentModelFromConfig extracts current model ID from configOptions.
+func resolveCurrentModelFromConfig(options []streams.ConfigOption) string {
+	for _, opt := range options {
+		if opt.ID == "model" || opt.Category == "model" {
+			return opt.CurrentValue
+		}
+	}
+	return ""
 }
 
 // SetMode changes the agent's session mode via ACP session/set_mode.
@@ -937,9 +971,9 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 		}
 	}
 
-	_, err := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{
+	_, err := conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
 		SessionId: acp.SessionId(sessionID),
-		ModelId:   acp.ModelId(modelID),
+		ModelId:   acp.UnstableModelId(modelID),
 	})
 	if err != nil {
 		return fmt.Errorf("set session model failed: %w", err)
@@ -958,7 +992,7 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
-		MethodId: acp.AuthMethodId(methodID),
+		MethodId: methodID,
 	})
 	if err != nil {
 		return fmt.Errorf("authenticate failed: %w", err)

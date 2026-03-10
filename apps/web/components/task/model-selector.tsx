@@ -78,6 +78,27 @@ function buildModelOptions(
   return options;
 }
 
+function resolveProfileModel(
+  profileId: string | null | undefined,
+  agents: Agent[],
+): string | null {
+  if (!profileId) return null;
+  for (const agent of agents) {
+    const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
+    if (profile?.model) return profile.model;
+  }
+  return null;
+}
+
+function resolveCurrentModel(
+  activeModel: string | null,
+  acpCurrentModel: string | null,
+  snapshotModel: string | null,
+  profileModel: string | null,
+): string | null {
+  return activeModel || acpCurrentModel || snapshotModel || profileModel;
+}
+
 /** Resolves available models and current model from store state. */
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
@@ -93,15 +114,18 @@ function useModelSelectorState(sessionId: string | null) {
 
   const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
+  const profileModel = useMemo(
+    () => resolveProfileModel(session?.agent_profile_id, settingsAgents as Agent[]),
+    [session?.agent_profile_id, settingsAgents],
+  );
 
-  // Prefer dynamic ACP session models when available, fall back to static registry models
   const availableModels = sessionModelsData?.models?.length
     ? sessionModelsToOptions(sessionModelsData.models)
     : resolveStaticModels(settingsAgents as Agent[], session?.agent_profile_id, availableAgents);
 
   const activeModel = sessionId ? activeModels[sessionId] || null : null;
   const acpCurrentModel = sessionModelsData?.currentModelId || null;
-  const currentModel = activeModel || acpCurrentModel || snapshotModel;
+  const currentModel = resolveCurrentModel(activeModel, acpCurrentModel, snapshotModel, profileModel);
   const modelOptions = buildModelOptions(availableModels, currentModel);
 
   const handleModelChange = useCallback(
