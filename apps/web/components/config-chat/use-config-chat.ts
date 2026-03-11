@@ -15,6 +15,7 @@ function useConfigChatStore() {
       taskId: s.configChat.taskId,
       workspaceId: s.configChat.workspaceId,
       openConfigChat: s.openConfigChat,
+      openConfigChatModal: s.openConfigChatModal,
       closeConfigChat: s.closeConfigChat,
     })),
   );
@@ -39,7 +40,7 @@ export function useConfigChat(workspaceId: string) {
       return;
     }
     // Open the modal without a session — the empty state will handle profile selection
-    store.openConfigChat("", "", workspaceId);
+    store.openConfigChatModal(workspaceId);
   }, [workspaceId, store]);
 
   /** Starts a config chat session with the given profile and optional prompt. */

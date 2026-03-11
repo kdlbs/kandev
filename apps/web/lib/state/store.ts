@@ -317,6 +317,7 @@ export type AppState = {
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
   openConfigChat: (sessionId: string, taskId: string, workspaceId: string) => void;
+  openConfigChatModal: (workspaceId: string) => void;
   closeConfigChat: () => void;
   setSessionFailureNotification: (
     n: import("./slices/ui/types").SessionFailureNotification | null,

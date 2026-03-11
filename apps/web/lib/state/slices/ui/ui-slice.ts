@@ -128,6 +128,11 @@ function buildConfigChatActions(set: ImmerSet) {
         draft.configChat.taskId = taskId;
         draft.configChat.workspaceId = workspaceId;
       }),
+    openConfigChatModal: (workspaceId: string) =>
+      set((draft) => {
+        draft.configChat.isOpen = true;
+        draft.configChat.workspaceId = workspaceId;
+      }),
     closeConfigChat: () =>
       set((draft) => {
         draft.configChat.isOpen = false;

@@ -122,6 +122,7 @@ export type UISliceActions = {
   setActiveQuickChatSession: (sessionId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
   openConfigChat: (sessionId: string, taskId: string, workspaceId: string) => void;
+  openConfigChatModal: (workspaceId: string) => void;
   closeConfigChat: () => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
