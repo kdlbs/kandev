@@ -34,6 +34,7 @@ export type ChatInputEditorAreaProps = {
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;
+  minimalToolbar?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -146,6 +147,7 @@ export function ChatInputEditorArea({
   isEnhancingPrompt,
   isUtilityConfigured,
   hideSessionsDropdown,
+  minimalToolbar,
 }: ChatInputEditorAreaProps) {
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
@@ -205,6 +207,7 @@ export function ChatInputEditorArea({
         isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
         hideSessionsDropdown={hideSessionsDropdown}
+        minimalToolbar={minimalToolbar}
       />
     </div>
   );

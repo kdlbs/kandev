@@ -325,6 +325,7 @@ type ChatInputAreaProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  minimalToolbar?: boolean;
 };
 
 export function ChatInputArea({
@@ -338,6 +339,7 @@ export function ChatInputArea({
   panelState,
   isSending,
   hideSessionsDropdown,
+  minimalToolbar,
 }: ChatInputAreaProps) {
   const {
     resolvedSessionId,
@@ -416,6 +418,7 @@ export function ChatInputArea({
         onAddContextFile={handleAddContextFile}
         onImplementPlan={handleImplementPlan}
         hideSessionsDropdown={hideSessionsDropdown}
+        minimalToolbar={minimalToolbar}
       />
     </div>
   );

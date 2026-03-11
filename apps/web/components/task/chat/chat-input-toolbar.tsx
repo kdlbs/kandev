@@ -70,6 +70,8 @@ export type ChatInputToolbarProps = {
   onAttachFiles?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
   hideSessionsDropdown?: boolean;
+  /** When true, only render the submit/cancel button — no other controls */
+  minimalToolbar?: boolean;
 };
 
 type SubmitButtonProps = {
@@ -434,8 +436,25 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   isUtilityConfigured = false,
   onAttachFiles,
   hideSessionsDropdown,
+  minimalToolbar,
 }: ChatInputToolbarProps) {
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+
+  if (minimalToolbar) {
+    return (
+      <div className="flex items-center justify-end gap-1 px-1 pt-0 pb-0.5 border-t border-border">
+        <SubmitButton
+          isAgentBusy={isAgentBusy}
+          isDisabled={isDisabled}
+          isSending={isSending}
+          planModeEnabled={false}
+          onCancel={onCancel}
+          onSubmit={onSubmit}
+          submitShortcut={submitShortcut}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
