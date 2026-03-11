@@ -179,7 +179,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If includeArchived is false, archived tasks are excluded
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral bool) ([]*models.Task, int, error) {
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -201,6 +201,10 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 
 	if !includeArchived {
 		filter += " AND archived_at IS NULL"
+	}
+
+	if excludeConfig {
+		filter += " AND (metadata IS NULL OR json_extract(metadata, '$.config_mode') IS NOT 1)"
 	}
 
 	var rows *sql.Rows

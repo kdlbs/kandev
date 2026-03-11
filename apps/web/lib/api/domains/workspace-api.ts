@@ -88,7 +88,7 @@ export async function listQuickChatSessions(workspaceId: string, options?: ApiRe
       workspace_id: string;
       primary_session_id?: string | null;
     }>;
-  }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true`, options);
+  }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true&exclude_config=true`, options);
 }
 
 // Config Chat operations
