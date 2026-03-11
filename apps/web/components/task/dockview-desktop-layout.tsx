@@ -714,7 +714,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         transition: isRestoringLayout ? "none" : "opacity 60ms ease-out",
       }}
     >
-      <div className="min-h-0 flex flex-col">
+      <div className="min-h-0 min-w-0 overflow-hidden flex flex-col">
         <PreviewController sessionId={effectiveSessionId} hasDevScript={hasDevScript} />
         <DockviewReact
           theme={themeKandev}
