@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
@@ -21,10 +21,19 @@ function useConfigChatStore() {
   );
 }
 
+function useUpdateWorkspaceInStore() {
+  const storeApi = useAppStoreApi();
+  return (workspaceId: string, updates: Record<string, unknown>) => {
+    const { workspaces, setWorkspaces } = storeApi.getState();
+    setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
+  };
+}
+
 export function useConfigChat(workspaceId: string) {
   const { toast } = useToast();
   const store = useConfigChatStore();
   const [isStarting, setIsStarting] = useState(false);
+  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
 
   const workspace = useAppStore(
     (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
@@ -33,17 +42,14 @@ export function useConfigChat(workspaceId: string) {
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
 
-  /** Opens the modal. If there's an existing session for this workspace, re-opens it. */
   const open = useCallback(() => {
     if (store.sessionId && store.workspaceId === workspaceId) {
       store.openConfigChat(store.sessionId, store.taskId ?? "", workspaceId);
       return;
     }
-    // Open the modal without a session — the empty state will handle profile selection
     store.openConfigChatModal(workspaceId);
   }, [workspaceId, store]);
 
-  /** Starts a config chat session with the given profile and optional prompt. */
   const startSession = useCallback(
     async (agentProfileId: string, prompt?: string) => {
       if (isStarting) return;
@@ -61,6 +67,9 @@ export function useConfigChat(workspaceId: string) {
             await updateWorkspaceAction(workspaceId, {
               default_config_agent_profile_id: agentProfileId,
             });
+            updateWorkspaceInStore(workspaceId, {
+              default_config_agent_profile_id: agentProfileId,
+            });
           } catch {
             // Non-critical — don't fail the chat start for this
           }
@@ -75,7 +84,7 @@ export function useConfigChat(workspaceId: string) {
         setIsStarting(false);
       }
     },
-    [workspaceId, isStarting, store, toast, workspace?.default_config_agent_profile_id],
+    [workspaceId, isStarting, store, toast, workspace?.default_config_agent_profile_id, updateWorkspaceInStore],
   );
 
   const close = useCallback(() => {

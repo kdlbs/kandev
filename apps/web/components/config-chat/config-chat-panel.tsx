@@ -18,26 +18,14 @@ const SUGGESTION_PROMPTS = [
   "Update the MCP servers for the default agent profile",
 ];
 
-function SuggestionList({
-  onSelect,
-  disabled,
-}: {
-  onSelect: (prompt: string) => void;
-  disabled: boolean;
-}) {
+function SuggestionList() {
   return (
     <div className="flex-1 flex flex-col justify-end space-y-1.5 mb-3">
       <p className="text-xs text-muted-foreground font-medium">Try asking</p>
       {SUGGESTION_PROMPTS.map((prompt) => (
-        <button
-          key={prompt}
-          type="button"
-          onClick={() => onSelect(prompt)}
-          disabled={disabled}
-          className="text-left text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <p key={prompt} className="text-xs text-muted-foreground/70 py-0.5">
           {prompt}
-        </button>
+        </p>
       ))}
     </div>
   );
@@ -52,7 +40,7 @@ function ProfileSelector({
 }) {
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
   return (
-    <div className="space-y-1.5 mb-3">
+    <div className="space-y-2.5 mb-3">
       <label className="text-xs font-medium" htmlFor="config-agent-select">
         Select an agent profile
       </label>
@@ -60,7 +48,7 @@ function ProfileSelector({
         <SelectTrigger id="config-agent-select" className="w-full cursor-pointer">
           <SelectValue placeholder="Choose an agent profile..." />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="w-[var(--radix-select-trigger-width)]">
           {profiles.map((profile) => (
             <SelectItem key={profile.id} value={profile.id} className="cursor-pointer">
               {profile.label}
@@ -124,7 +112,7 @@ function ConfigChatEmptyState({
       )}
 
       {inputValue.length === 0 ? (
-        <SuggestionList onSelect={setInputValue} disabled={!effectiveProfileId} />
+        <SuggestionList />
       ) : (
         <div className="flex-1" />
       )}

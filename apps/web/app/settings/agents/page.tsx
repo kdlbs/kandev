@@ -16,7 +16,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import {
@@ -383,6 +383,8 @@ function ConfigChatAgentSection() {
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
+  const storeApi = useAppStoreApi();
+
   const handleChange = async (value: string) => {
     const effectiveValue = value === "none" ? "" : value;
     setSelectedId(effectiveValue);
@@ -392,6 +394,12 @@ function ConfigChatAgentSection() {
       await updateWorkspaceAction(workspace.id, {
         default_config_agent_profile_id: effectiveValue,
       });
+      const { workspaces, setWorkspaces } = storeApi.getState();
+      setWorkspaces(
+        workspaces.items.map((w) =>
+          w.id === workspace.id ? { ...w, default_config_agent_profile_id: effectiveValue } : w,
+        ),
+      );
       toast({ title: "Configuration agent updated", variant: "success" });
     } catch (error) {
       toast({
