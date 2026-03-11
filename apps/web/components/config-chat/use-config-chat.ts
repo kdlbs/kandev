@@ -3,7 +3,6 @@
 import { useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 
@@ -30,9 +29,9 @@ function useUpdateWorkspaceInStore() {
 }
 
 export function useConfigChat(workspaceId: string) {
-  const { toast } = useToast();
   const store = useConfigChatStore();
   const [isStarting, setIsStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const updateWorkspaceInStore = useUpdateWorkspaceInStore();
 
   const workspace = useAppStore(
@@ -54,6 +53,7 @@ export function useConfigChat(workspaceId: string) {
     async (agentProfileId: string, prompt?: string) => {
       if (isStarting) return;
       setIsStarting(true);
+      setError(null);
       try {
         const response = await startConfigChat(workspaceId, {
           agent_profile_id: agentProfileId,
@@ -74,17 +74,14 @@ export function useConfigChat(workspaceId: string) {
             // Non-critical — don't fail the chat start for this
           }
         }
-      } catch (error) {
-        toast({
-          title: "Failed to start config chat",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(message);
       } finally {
         setIsStarting(false);
       }
     },
-    [workspaceId, isStarting, store, toast, workspace?.default_config_agent_profile_id, updateWorkspaceInStore],
+    [workspaceId, isStarting, store, workspace?.default_config_agent_profile_id, updateWorkspaceInStore],
   );
 
   const close = useCallback(() => {
@@ -96,6 +93,7 @@ export function useConfigChat(workspaceId: string) {
     sessionId: store.sessionId,
     taskId: store.taskId,
     isStarting,
+    error,
     workspace,
     defaultProfileId,
     open,

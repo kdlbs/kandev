@@ -67,10 +67,12 @@ function ConfigChatEmptyState({
   defaultProfileId,
   onSelectPrompt,
   isStarting,
+  error,
 }: {
   defaultProfileId: string | undefined;
   onSelectPrompt: (prompt: string, profileId: string) => void;
   isStarting: boolean;
+  error: string | null;
 }) {
   const profileCount = useAppStore((s) => s.agentProfiles.items?.length ?? 0);
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
@@ -140,6 +142,10 @@ function ConfigChatEmptyState({
         </Button>
       </div>
 
+      {error && (
+        <p className="text-xs text-destructive mt-2">{error}</p>
+      )}
+
       {profileCount === 0 && (
         <p className="text-xs text-center text-muted-foreground mt-2">
           No agent profiles found. Create one in the Agents settings first.
@@ -156,7 +162,7 @@ type ConfigChatPanelProps = {
 export const ConfigChatPanel = memo(function ConfigChatPanel({
   workspaceId,
 }: ConfigChatPanelProps) {
-  const { isOpen, sessionId, isStarting, defaultProfileId, startSession, open, close } =
+  const { isOpen, sessionId, isStarting, error, defaultProfileId, startSession, open, close } =
     useConfigChat(workspaceId);
 
   return (
@@ -191,6 +197,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         side="top"
         align="end"
         sideOffset={8}
+        onInteractOutside={(e) => e.preventDefault()}
         className="w-[420px] max-h-[550px] h-[550px] p-0 gap-0 flex flex-col shadow-2xl"
       >
         {sessionId ? (
@@ -200,6 +207,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
             defaultProfileId={defaultProfileId}
             onSelectPrompt={(prompt, profileId) => startSession(profileId, prompt)}
             isStarting={isStarting}
+            error={error}
           />
         )}
       </PopoverContent>
