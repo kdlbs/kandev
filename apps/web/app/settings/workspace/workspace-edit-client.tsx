@@ -109,8 +109,6 @@ type WorkspaceSettingsCardProps = {
   executorsEmpty: boolean;
   defaultAgentProfileId: string;
   onAgentProfileChange: (value: string) => void;
-  defaultConfigAgentProfileId: string;
-  onConfigAgentProfileChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
   isLoading: boolean;
   saveStatus: "idle" | "loading" | "success" | "error";
@@ -127,8 +125,6 @@ function WorkspaceSettingsCard({
   executorsEmpty,
   defaultAgentProfileId,
   onAgentProfileChange,
-  defaultConfigAgentProfileId,
-  onConfigAgentProfileChange,
   agentProfiles,
   isLoading,
   saveStatus,
@@ -172,14 +168,6 @@ function WorkspaceSettingsCard({
             options={profileOptions}
             emptyLabel="No agent profiles available"
             emptyValue="empty-agent-profiles"
-          />
-          <SelectField
-            label="Configuration Agent Profile"
-            value={defaultConfigAgentProfileId}
-            onChange={onConfigAgentProfileChange}
-            options={profileOptions}
-            emptyLabel="No agent profiles available"
-            emptyValue="empty-config-agent-profiles"
           />
           <div className="flex justify-end pt-2">
             <UnsavedSaveButton
@@ -308,11 +296,10 @@ type SavedState = {
   name: string;
   executorId: string;
   agentProfileId: string;
-  configAgentProfileId: string;
 };
 
 function buildWorkspaceUpdates(
-  draft: { name: string; executorId: string; agentProfileId: string; configAgentProfileId: string },
+  draft: { name: string; executorId: string; agentProfileId: string },
   saved: SavedState,
 ): Record<string, string | undefined> {
   const updates: Record<string, string | undefined> = {};
@@ -320,8 +307,6 @@ function buildWorkspaceUpdates(
   if (draft.executorId !== saved.executorId) updates.default_executor_id = draft.executorId;
   if (draft.agentProfileId !== saved.agentProfileId)
     updates.default_agent_profile_id = draft.agentProfileId;
-  if (draft.configAgentProfileId !== saved.configAgentProfileId)
-    updates.default_config_agent_profile_id = draft.configAgentProfileId;
   return updates;
 }
 
@@ -329,7 +314,6 @@ type WorkspaceDraftState = {
   workspaceNameDraft: string;
   defaultExecutorId: string;
   defaultAgentProfileId: string;
-  defaultConfigAgentProfileId: string;
 };
 
 type SaveRequestLike = {
@@ -369,7 +353,6 @@ function buildSaveHandler({
           name: draft.workspaceNameDraft,
           executorId: draft.defaultExecutorId,
           agentProfileId: draft.defaultAgentProfileId,
-          configAgentProfileId: draft.defaultConfigAgentProfileId,
         },
         savedState,
       );
@@ -379,7 +362,6 @@ function buildSaveHandler({
         name: updated.name ?? draft.workspaceNameDraft.trim(),
         executorId: updated.default_executor_id ?? "",
         agentProfileId: updated.default_agent_profile_id ?? "",
-        configAgentProfileId: updated.default_config_agent_profile_id ?? "",
       });
       setWorkspaces(
         workspaces.map((ws: Workspace) =>
@@ -390,8 +372,6 @@ function buildSaveHandler({
                 default_executor_id: updated.default_executor_id ?? null,
                 default_environment_id: updated.default_environment_id ?? null,
                 default_agent_profile_id: updated.default_agent_profile_id ?? null,
-                default_config_agent_profile_id:
-                  updated.default_config_agent_profile_id ?? null,
               }
             : ws,
         ),
@@ -415,14 +395,10 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const [defaultAgentProfileId, setDefaultAgentProfileId] = useState(
     workspace.default_agent_profile_id ?? "",
   );
-  const [defaultConfigAgentProfileId, setDefaultConfigAgentProfileId] = useState(
-    workspace.default_config_agent_profile_id ?? "",
-  );
   const [savedState, setSavedState] = useState<SavedState>({
     name: workspace.name ?? "",
     executorId: workspace.default_executor_id ?? "",
     agentProfileId: workspace.default_agent_profile_id ?? "",
-    configAgentProfileId: workspace.default_config_agent_profile_id ?? "",
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -439,12 +415,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const isDirty =
     workspaceNameDraft.trim() !== savedState.name ||
     defaultExecutorId !== savedState.executorId ||
-    defaultAgentProfileId !== savedState.agentProfileId ||
-    defaultConfigAgentProfileId !== savedState.configAgentProfileId;
+    defaultAgentProfileId !== savedState.agentProfileId;
 
   const handleSave = buildSaveHandler({
     currentWorkspace,
-    draft: { workspaceNameDraft, defaultExecutorId, defaultAgentProfileId, defaultConfigAgentProfileId },
+    draft: { workspaceNameDraft, defaultExecutorId, defaultAgentProfileId },
     savedState,
     isDirty,
     setSavedState,
@@ -478,8 +453,6 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setDefaultExecutorId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
-    defaultConfigAgentProfileId,
-    setDefaultConfigAgentProfileId,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deleteConfirmText,
@@ -503,8 +476,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setDefaultExecutorId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
-    defaultConfigAgentProfileId,
-    setDefaultConfigAgentProfileId,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deleteConfirmText,
@@ -537,8 +508,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         executorsEmpty={executors.length === 0}
         defaultAgentProfileId={defaultAgentProfileId}
         onAgentProfileChange={setDefaultAgentProfileId}
-        defaultConfigAgentProfileId={defaultConfigAgentProfileId}
-        onConfigAgentProfileChange={setDefaultConfigAgentProfileId}
         agentProfiles={agentProfiles}
         isLoading={saveWorkspaceRequest.isLoading}
         saveStatus={saveWorkspaceRequest.status}
