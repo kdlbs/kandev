@@ -412,7 +412,7 @@ function TaskPageInner({
         taskTitle={taskProps.taskTitle}
         displayBranch={merged.worktreeBranch}
       >
-        <div className="h-screen w-full flex flex-col bg-background">
+        <div className="h-screen w-full flex flex-col bg-background overflow-hidden">
           <SessionCommands
             sessionId={effectiveSessionId}
             baseBranch={taskProps.baseBranch}

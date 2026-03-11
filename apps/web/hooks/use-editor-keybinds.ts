@@ -98,9 +98,11 @@ function handleBottomTerminal(
   e: KeyboardEvent,
   appStore: ReturnType<typeof useAppStoreApi>,
 ): boolean {
-  if (isEditableTarget(e)) return false;
-
   // Cmd/Ctrl+J — toggle bottom terminal panel
+  // Note: no isEditableTarget guard here. Ctrl+J is not a standard text
+  // editing shortcut, and we must preventDefault even when an xterm textarea
+  // is focused — otherwise the un-prevented event causes escape-sequence
+  // artifacts (e.g. trailing "R" from cursor-position reports during resize).
   if (matchesShortcut(e, SHORTCUTS.BOTTOM_TERMINAL)) {
     e.preventDefault();
     e.stopPropagation();

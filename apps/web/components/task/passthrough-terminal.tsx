@@ -86,7 +86,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const isConnected = sessionId != null && connectedSessionId === sessionId;
   const onConnected = useCallback(() => {
     setConnectedSessionId(sessionId ?? null);
-    if (autoFocus) xtermRef.current?.focus();
+    if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
   }, [sessionId, autoFocus]);
 
   const linkHandler = useTerminalLinkHandler();
