@@ -15,11 +15,13 @@ import { ClarificationInputOverlay } from "@/components/task/chat/clarification-
 type QuickChatContentProps = {
   sessionId: string;
   minimalToolbar?: boolean;
+  placeholderOverride?: string;
 };
 
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
+  placeholderOverride,
 }: QuickChatContentProps) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const [clarificationKey, setClarificationKey] = useState(0);
@@ -87,6 +89,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         isSending={isSending}
         hideSessionsDropdown={true}
         minimalToolbar={minimalToolbar}
+        placeholderOverride={placeholderOverride}
       />
     </div>
   );

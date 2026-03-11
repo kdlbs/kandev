@@ -201,7 +201,11 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         className="w-[420px] max-h-[550px] h-[550px] p-0 gap-0 flex flex-col shadow-2xl"
       >
         {sessionId ? (
-          <QuickChatContent sessionId={sessionId} minimalToolbar />
+          <QuickChatContent
+            sessionId={sessionId}
+            minimalToolbar
+            placeholderOverride="Ask anything about your configuration..."
+          />
         ) : (
           <ConfigChatEmptyState
             defaultProfileId={defaultProfileId}

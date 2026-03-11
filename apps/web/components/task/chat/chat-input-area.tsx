@@ -326,6 +326,7 @@ type ChatInputAreaProps = {
   isSending: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  placeholderOverride?: string;
 };
 
 export function ChatInputArea({
@@ -340,6 +341,7 @@ export function ChatInputArea({
   isSending,
   hideSessionsDropdown,
   minimalToolbar,
+  placeholderOverride,
 }: ChatInputAreaProps) {
   const {
     resolvedSessionId,
@@ -371,7 +373,7 @@ export function ChatInputArea({
   );
 
   const hasClarification = !!panelState.pendingClarification;
-  const placeholder = resolveInputPlaceholder(
+  const placeholder = placeholderOverride ?? resolveInputPlaceholder(
     isAgentBusy,
     activeDocument?.type,
     planModeEnabled,
