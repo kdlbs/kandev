@@ -322,6 +322,15 @@ const (
 	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
 
+	ActionMCPListExecutors         = "mcp.list_executors"
+	ActionMCPCreateExecutor        = "mcp.create_executor"
+	ActionMCPUpdateExecutor        = "mcp.update_executor"
+	ActionMCPDeleteExecutor        = "mcp.delete_executor"
+	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"
+	ActionMCPCreateExecutorProfile = "mcp.create_executor_profile"
+	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"
+	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
+
 	ActionMCPMoveTask        = "mcp.move_task"
 	ActionMCPDeleteTask      = "mcp.delete_task"
 	ActionMCPArchiveTask     = "mcp.archive_task"

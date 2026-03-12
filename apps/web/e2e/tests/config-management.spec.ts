@@ -509,6 +509,114 @@ test.describe("Config-mode MCP — task management", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Executor management
+// ---------------------------------------------------------------------------
+
+test.describe("Config-mode MCP — executor management", () => {
+  test("agent can list executors", async ({ testPage, apiClient, seedData }) => {
+    const session = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Listing executors...")',
+        "e2e:mcp:kandev:list_executors({})",
+        'e2e:message("Executors listed")',
+      ].join("\n"),
+    );
+
+    const page = await runAndWait(testPage, session.session_id, "Executors listed");
+    await expect(page.chat.getByText("list_executors")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("agent can create and delete an executor", async ({ testPage, apiClient, seedData }) => {
+    // Create executor via MCP
+    const createSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Creating executor...")',
+        'e2e:mcp:kandev:create_executor({"name":"E2E Docker Executor","type":"local_docker"})',
+        'e2e:message("Executor created")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, createSession.session_id, "Executor created");
+
+    // Verify via API
+    const { executors } = await apiClient.listExecutors();
+    const created = executors.find((e) => e.name === "E2E Docker Executor");
+    expect(created).toBeTruthy();
+    expect(created!.type).toBe("local_docker");
+
+    // Delete executor via MCP
+    const deleteSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Deleting executor...")',
+        `e2e:mcp:kandev:delete_executor({"executor_id":"${created!.id}"})`,
+        'e2e:message("Executor deleted")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, deleteSession.session_id, "Executor deleted");
+
+    // Verify deleted
+    const { executors: afterDelete } = await apiClient.listExecutors();
+    expect(afterDelete.find((e) => e.id === created!.id)).toBeUndefined();
+  });
+
+  test("agent can create and delete an executor profile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Create an executor via API for the profile
+    const executor = await apiClient.createExecutor("Profile Test Executor", "local_docker");
+
+    // Create profile via MCP
+    const createSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Creating executor profile...")',
+        `e2e:mcp:kandev:create_executor_profile({"executor_id":"${executor.id}","name":"E2E Profile"})`,
+        'e2e:message("Executor profile created")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, createSession.session_id, "Executor profile created");
+
+    // Verify via API
+    const { executors } = await apiClient.listExecutors();
+    const exec = executors.find((e) => e.id === executor.id);
+    const profile = exec?.profiles?.find((p) => p.name === "E2E Profile");
+    expect(profile).toBeTruthy();
+
+    // Delete profile via MCP
+    const deleteSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Deleting executor profile...")',
+        `e2e:mcp:kandev:delete_executor_profile({"profile_id":"${profile!.id}"})`,
+        'e2e:message("Executor profile deleted")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, deleteSession.session_id, "Executor profile deleted");
+
+    // Verify deleted
+    const { executors: afterDelete } = await apiClient.listExecutors();
+    const execAfter = afterDelete.find((e) => e.id === executor.id);
+    expect(execAfter?.profiles?.find((p) => p.id === profile!.id)).toBeUndefined();
+
+    // Cleanup: delete the test executor
+    await apiClient.deleteExecutor(executor.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Multi-tool workflows
 // ---------------------------------------------------------------------------
 

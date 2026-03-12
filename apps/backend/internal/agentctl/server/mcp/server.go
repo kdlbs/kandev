@@ -230,6 +230,8 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerConfigMcpTools()
 		count += 4
+		s.registerConfigExecutorTools()
+		count += 8
 		s.registerConfigTaskTools()
 		count += 4
 		if !s.disableAskQuestion {

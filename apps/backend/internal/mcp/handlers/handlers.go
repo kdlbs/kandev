@@ -158,6 +158,19 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
 		count += 4
+
+		// Executor config handlers (gated on config-mode via workflowSvc)
+		if h.workflowSvc != nil {
+			d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
+			d.RegisterFunc(ws.ActionMCPCreateExecutor, h.handleCreateExecutor)
+			d.RegisterFunc(ws.ActionMCPUpdateExecutor, h.handleUpdateExecutor)
+			d.RegisterFunc(ws.ActionMCPDeleteExecutor, h.handleDeleteExecutor)
+			d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
+			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
+			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
+			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
+			count += 8
+		}
 	}
 
 	h.logger.Info("registered MCP handlers", zap.Int("count", count))
@@ -205,6 +218,26 @@ func (h *Handlers) handleListByField(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+// handleDeleteByField is a generic handler for deleting a resource identified by a single string field.
+func (h *Handlers) handleDeleteByField(
+	ctx context.Context, msg *ws.Message,
+	fieldName, logErrMsg, clientErrMsg string,
+	fn func(context.Context, string) error,
+) (*ws.Message, error) {
+	value, err := unmarshalStringField(msg.Payload, fieldName)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if value == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldName+" is required", nil)
+	}
+	if err := fn(ctx, value); err != nil {
+		h.logger.Error(logErrMsg, zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg+": "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
 // handleListWorkflows lists workflows for a workspace.

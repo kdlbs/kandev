@@ -270,6 +270,27 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);
   }
 
+  async deleteExecutor(executorId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/executors/${executorId}`);
+  }
+
+  async createExecutorProfile(
+    executorId: string,
+    name: string,
+    opts?: { mcp_policy?: string; prepare_script?: string; cleanup_script?: string },
+  ): Promise<{ id: string; name: string }> {
+    return this.request("POST", `/api/v1/executors/${executorId}/profiles`, {
+      name,
+      ...(opts?.mcp_policy ? { mcp_policy: opts.mcp_policy } : {}),
+      ...(opts?.prepare_script ? { prepare_script: opts.prepare_script } : {}),
+      ...(opts?.cleanup_script ? { cleanup_script: opts.cleanup_script } : {}),
+    });
+  }
+
+  async deleteExecutorProfile(profileId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
+  }
+
   async listExecutors(): Promise<{
     executors: Array<{
       id: string;

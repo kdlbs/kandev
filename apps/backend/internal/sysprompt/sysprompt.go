@@ -110,6 +110,16 @@ AGENT TOOLS:
 - create_agent_profile_kandev: Create a new agent profile. Required: agent_id, name, model. Optional: auto_approve.
 - delete_agent_profile_kandev: Delete an agent profile. Required: profile_id.
 
+EXECUTOR TOOLS:
+- list_executors_kandev: List all executors.
+- create_executor_kandev: Create a new executor. Required: name, type (local_pc, local_docker, sprites, worktree). Optional: status, resumable, config.
+- update_executor_kandev: Update an executor. Required: executor_id. Optional: name, status, resumable, config.
+- delete_executor_kandev: Delete an executor. Required: executor_id. Fails if active sessions exist.
+- list_executor_profiles_kandev: List profiles for an executor. Required: executor_id.
+- create_executor_profile_kandev: Create an executor profile. Required: executor_id, name. Optional: mcp_policy, config, prepare_script, cleanup_script.
+- update_executor_profile_kandev: Update an executor profile. Required: profile_id. Optional: name, mcp_policy, config, prepare_script, cleanup_script.
+- delete_executor_profile_kandev: Delete an executor profile. Required: profile_id.
+
 MCP CONFIG TOOLS:
 - list_agent_profiles_kandev: List profiles for an agent. Required: agent_id.
 - update_agent_profile_kandev: Update a profile. Required: profile_id. Optional: name, model, auto_approve.
@@ -131,6 +141,7 @@ EXAMPLE REQUESTS the user might ask:
 - "Create a new agent profile for Claude with auto-approve enabled"
 - "Show me the current workflow steps"
 - "Update the MCP servers for the default agent profile"
+- "Create a new Docker executor with a production profile"
 - "Move all completed tasks to the 'Done' column"
 - "Archive old tasks from last month"
 

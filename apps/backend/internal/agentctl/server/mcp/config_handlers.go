@@ -166,6 +166,85 @@ func (s *Server) registerConfigMcpTools() {
 	)
 }
 
+// --- Executor config tools ---
+
+func (s *Server) registerConfigExecutorTools() {
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("list_executors",
+			"List all executors.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("list_executors", s.listExecutorsHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_executor",
+			mcp.WithDescription("Create a new executor."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Executor name")),
+			mcp.WithString("type", mcp.Required(), mcp.Description("Executor type: local_pc, local_docker, sprites, worktree")),
+			mcp.WithString("status", mcp.Description("Executor status: active or disabled (default: active)")),
+			mcp.WithBoolean("resumable", mcp.Description("Whether sessions can be resumed on this executor")),
+			mcp.WithObject("config", mcp.Description("Key-value configuration map")),
+		),
+		s.wrapHandler("create_executor", s.createExecutorHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_executor",
+			mcp.WithDescription("Update an existing executor."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
+			mcp.WithString("name", mcp.Description("New executor name")),
+			mcp.WithString("status", mcp.Description("New status: active or disabled")),
+			mcp.WithBoolean("resumable", mcp.Description("Whether sessions can be resumed")),
+			mcp.WithObject("config", mcp.Description("Key-value configuration map")),
+		),
+		s.wrapHandler("update_executor", s.updateExecutorHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_executor",
+			mcp.WithDescription("Delete an executor. Fails if active sessions exist."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID to delete")),
+		),
+		s.wrapHandler("delete_executor", s.deleteExecutorHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_executor_profiles",
+			mcp.WithDescription("List all profiles for an executor."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
+		),
+		s.wrapHandler("list_executor_profiles", s.listExecutorProfilesHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("create_executor_profile",
+			mcp.WithDescription("Create a new executor profile."),
+			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
+			mcp.WithString("mcp_policy", mcp.Description("MCP policy for this profile")),
+			mcp.WithObject("config", mcp.Description("Key-value configuration map")),
+			mcp.WithString("prepare_script", mcp.Description("Script to run before agent starts")),
+			mcp.WithString("cleanup_script", mcp.Description("Script to run after agent stops")),
+		),
+		s.wrapHandler("create_executor_profile", s.createExecutorProfileHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_executor_profile",
+			mcp.WithDescription("Update an existing executor profile."),
+			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID")),
+			mcp.WithString("name", mcp.Description("New profile name")),
+			mcp.WithString("mcp_policy", mcp.Description("New MCP policy")),
+			mcp.WithObject("config", mcp.Description("New configuration map")),
+			mcp.WithString("prepare_script", mcp.Description("New prepare script")),
+			mcp.WithString("cleanup_script", mcp.Description("New cleanup script")),
+		),
+		s.wrapHandler("update_executor_profile", s.updateExecutorProfileHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_executor_profile",
+			mcp.WithDescription("Delete an executor profile."),
+			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID to delete")),
+		),
+		s.wrapHandler("delete_executor_profile", s.deleteExecutorProfileHandler()),
+	)
+}
+
 // --- Task config tools ---
 
 func (s *Server) registerConfigTaskTools() {
@@ -473,6 +552,154 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"task_id": taskID}
 		return s.forwardToBackend(ctx, ws.ActionMCPArchiveTask, payload)
+	}
+}
+
+// --- Executor handler implementations ---
+
+func (s *Server) listExecutorsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return s.forwardToBackend(ctx, ws.ActionMCPListExecutors, nil)
+	}
+}
+
+func (s *Server) createExecutorHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		execType, err := req.RequireString("type")
+		if err != nil {
+			return mcp.NewToolResultError("type is required"), nil
+		}
+		payload := map[string]interface{}{
+			"name": name,
+			"type": execType,
+		}
+		if status := req.GetString("status", ""); status != "" {
+			payload["status"] = status
+		}
+		args := req.GetArguments()
+		if args["resumable"] != nil {
+			payload["resumable"] = args["resumable"]
+		}
+		if args["config"] != nil {
+			payload["config"] = args["config"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateExecutor, payload)
+	}
+}
+
+func (s *Server) updateExecutorHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		executorID, err := req.RequireString("executor_id")
+		if err != nil {
+			return mcp.NewToolResultError("executor_id is required"), nil
+		}
+		payload := map[string]interface{}{"executor_id": executorID}
+		if name := req.GetString("name", ""); name != "" {
+			payload["name"] = name
+		}
+		if status := req.GetString("status", ""); status != "" {
+			payload["status"] = status
+		}
+		args := req.GetArguments()
+		if args["resumable"] != nil {
+			payload["resumable"] = args["resumable"]
+		}
+		if args["config"] != nil {
+			payload["config"] = args["config"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateExecutor, payload)
+	}
+}
+
+func (s *Server) deleteExecutorHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		executorID, err := req.RequireString("executor_id")
+		if err != nil {
+			return mcp.NewToolResultError("executor_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteExecutor, map[string]string{"executor_id": executorID})
+	}
+}
+
+func (s *Server) listExecutorProfilesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		executorID, err := req.RequireString("executor_id")
+		if err != nil {
+			return mcp.NewToolResultError("executor_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPListExecutorProfiles, map[string]string{"executor_id": executorID})
+	}
+}
+
+func (s *Server) createExecutorProfileHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		executorID, err := req.RequireString("executor_id")
+		if err != nil {
+			return mcp.NewToolResultError("executor_id is required"), nil
+		}
+		name, err := req.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		payload := map[string]interface{}{
+			"executor_id": executorID,
+			"name":        name,
+		}
+		if mcpPolicy := req.GetString("mcp_policy", ""); mcpPolicy != "" {
+			payload["mcp_policy"] = mcpPolicy
+		}
+		if prepareScript := req.GetString("prepare_script", ""); prepareScript != "" {
+			payload["prepare_script"] = prepareScript
+		}
+		if cleanupScript := req.GetString("cleanup_script", ""); cleanupScript != "" {
+			payload["cleanup_script"] = cleanupScript
+		}
+		args := req.GetArguments()
+		if args["config"] != nil {
+			payload["config"] = args["config"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateExecutorProfile, payload)
+	}
+}
+
+func (s *Server) updateExecutorProfileHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		profileID, err := req.RequireString("profile_id")
+		if err != nil {
+			return mcp.NewToolResultError("profile_id is required"), nil
+		}
+		payload := map[string]interface{}{"profile_id": profileID}
+		if name := req.GetString("name", ""); name != "" {
+			payload["name"] = name
+		}
+		if mcpPolicy := req.GetString("mcp_policy", ""); mcpPolicy != "" {
+			payload["mcp_policy"] = mcpPolicy
+		}
+		if prepareScript := req.GetString("prepare_script", ""); prepareScript != "" {
+			payload["prepare_script"] = prepareScript
+		}
+		if cleanupScript := req.GetString("cleanup_script", ""); cleanupScript != "" {
+			payload["cleanup_script"] = cleanupScript
+		}
+		args := req.GetArguments()
+		if args["config"] != nil {
+			payload["config"] = args["config"]
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateExecutorProfile, payload)
+	}
+}
+
+func (s *Server) deleteExecutorProfileHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		profileID, err := req.RequireString("profile_id")
+		if err != nil {
+			return mcp.NewToolResultError("profile_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteExecutorProfile, map[string]string{"profile_id": profileID})
 	}
 }
 

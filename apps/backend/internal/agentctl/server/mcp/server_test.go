@@ -69,6 +69,14 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "move_task")
 	assert.NotContains(t, tools, "delete_task")
 	assert.NotContains(t, tools, "archive_task")
+	assert.NotContains(t, tools, "list_executors")
+	assert.NotContains(t, tools, "create_executor")
+	assert.NotContains(t, tools, "update_executor")
+	assert.NotContains(t, tools, "delete_executor")
+	assert.NotContains(t, tools, "list_executor_profiles")
+	assert.NotContains(t, tools, "create_executor_profile")
+	assert.NotContains(t, tools, "update_executor_profile")
+	assert.NotContains(t, tools, "delete_executor_profile")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -102,6 +110,16 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "update_agent_profile")
 	assert.Contains(t, tools, "get_mcp_config")
 	assert.Contains(t, tools, "update_mcp_config")
+
+	// Config mode should have executor tools
+	assert.Contains(t, tools, "list_executors")
+	assert.Contains(t, tools, "create_executor")
+	assert.Contains(t, tools, "update_executor")
+	assert.Contains(t, tools, "delete_executor")
+	assert.Contains(t, tools, "list_executor_profiles")
+	assert.Contains(t, tools, "create_executor_profile")
+	assert.Contains(t, tools, "update_executor_profile")
+	assert.Contains(t, tools, "delete_executor_profile")
 
 	// Config mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question")
@@ -178,8 +196,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 8 workflow + 4 agent + 4 mcp + 4 task + 1 interaction = 21
-	assert.Equal(t, 21, len(tools))
+	// 8 workflow + 4 agent + 4 mcp + 8 executor + 4 task + 1 interaction = 29
+	assert.Equal(t, 29, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
