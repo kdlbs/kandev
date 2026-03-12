@@ -228,7 +228,7 @@ export function ResetDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button type="button" variant="outline" disabled={isLoading}>
+            <Button type="button" variant="outline" disabled={isLoading} className="cursor-pointer">
               Cancel
             </Button>
           </DialogClose>

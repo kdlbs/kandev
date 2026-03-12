@@ -209,7 +209,7 @@ function CommitDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button type="button" variant="outline">
+            <Button type="button" variant="outline" className="cursor-pointer">
               Cancel
             </Button>
           </DialogClose>
@@ -351,7 +351,7 @@ function PRDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button type="button" variant="outline">
+            <Button type="button" variant="outline" className="cursor-pointer">
               Cancel
             </Button>
           </DialogClose>
