@@ -261,7 +261,11 @@ export class ApiClient {
 
   async updateWorkspace(
     workspaceId: string,
-    updates: { default_executor_id?: string },
+    updates: {
+      default_executor_id?: string;
+      default_agent_profile_id?: string;
+      default_config_agent_profile_id?: string;
+    },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/workspaces/${workspaceId}`, updates);
   }
@@ -480,7 +484,7 @@ export class ApiClient {
   async listSessionMessages(
     sessionId: string,
   ): Promise<{ messages: Array<{ id: string; content: string; author_type: string }> }> {
-    return this.request("GET", `/api/v1/sessions/${sessionId}/messages`);
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
   }
 
   async listTasks(
