@@ -319,6 +319,8 @@ export type AppState = {
     n: import("./slices/ui/types").SessionFailureNotification | null,
   ) => void;
   toggleBottomTerminal: () => void;
+  openBottomTerminalWithCommand: (command: string) => void;
+  clearBottomTerminalCommand: () => void;
   setMessages: (
     sessionId: string,
     messages: Message[],
