@@ -188,8 +188,19 @@ func parseFileList(output string) []string {
 
 // parseShellOutput parses ACP's XML-like shell output format.
 // Format: "...<return-code>N</return-code>...<output>...</output>..."
+// Falls back to treating the entire string as stdout when no XML tags are found
+// (e.g. Claude Code sends plain string rawOutput).
 // Returns exit code, stdout, and stderr (stderr from <stderr> tag if present).
 func parseShellOutput(output string) (exitCode int, stdout, stderr string) {
+	hasXMLTags := strings.Contains(output, "<return-code>") ||
+		strings.Contains(output, "<output>") ||
+		strings.Contains(output, "<stderr>")
+
+	if !hasXMLTags {
+		// Plain string output (e.g. Claude Code ACP) — treat entire string as stdout
+		return 0, strings.TrimSpace(output), ""
+	}
+
 	// Extract return code
 	if start := strings.Index(output, "<return-code>"); start != -1 {
 		start += len("<return-code>")
@@ -218,6 +229,28 @@ func parseShellOutput(output string) (exitCode int, stdout, stderr string) {
 	}
 
 	return exitCode, stdout, stderr
+}
+
+// UpdatePayloadInput updates a stored NormalizedPayload with new rawInput data.
+// This handles agents (e.g. Claude Code) that send rawInput incrementally
+// via tool_call_update events after the initial tool_call.
+func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawInput any) {
+	inputMap, ok := rawInput.(map[string]any)
+	if !ok || payload == nil {
+		return
+	}
+
+	if shellExec := payload.ShellExec(); shellExec != nil {
+		if cmd := shared.GetString(inputMap, "command"); cmd != "" && shellExec.Command == "" {
+			shellExec.Command = cmd
+		}
+		if cwd := shared.GetString(inputMap, "cwd"); cwd != "" && shellExec.WorkDir == "" {
+			shellExec.WorkDir = cwd
+		}
+		if desc := shared.GetString(inputMap, "description"); desc != "" && shellExec.Description == "" {
+			shellExec.Description = desc
+		}
+	}
 }
 
 // normalizeEdit converts ACP edit tool data.

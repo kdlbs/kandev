@@ -1243,32 +1243,40 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		status = toolStatusComplete
 	}
 
-	// Look up the stored payload and update with result if we have rawOutput
-	var normalizedPayload *streams.NormalizedPayload
-	if tcu.RawOutput != nil {
-		a.mu.Lock()
-		if payload, ok := a.activeToolCalls[toolCallID]; ok {
-			a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
-			normalizedPayload = payload
-			if status == toolStatusComplete || status == toolStatusError {
-				delete(a.activeToolCalls, toolCallID)
-			}
-		}
-		a.mu.Unlock()
-	} else if status == toolStatusComplete || status == toolStatusError {
-		// Clean up even without output
-		a.mu.Lock()
-		normalizedPayload = a.activeToolCalls[toolCallID]
+	isTerminal := status == toolStatusComplete || status == toolStatusError
+
+	a.mu.Lock()
+	payload := a.activeToolCalls[toolCallID]
+
+	// Update stored payload with incremental rawInput (e.g. Claude Code sends
+	// command/cwd in a tool_call_update after the initial empty tool_call)
+	if tcu.RawInput != nil && payload != nil {
+		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput)
+	}
+
+	// Update stored payload with tool result output
+	if tcu.RawOutput != nil && payload != nil {
+		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+	}
+
+	if isTerminal {
 		delete(a.activeToolCalls, toolCallID)
-		a.mu.Unlock()
+	}
+	a.mu.Unlock()
+
+	// Extract title from update if present
+	var title string
+	if tcu.Title != nil {
+		title = *tcu.Title
 	}
 
 	return &AgentEvent{
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ToolTitle:         title,
 		ToolStatus:        status,
-		NormalizedPayload: normalizedPayload,
+		NormalizedPayload: payload,
 		ToolCallContents:  a.convertToolCallContents(tcu.Content),
 	}
 }
