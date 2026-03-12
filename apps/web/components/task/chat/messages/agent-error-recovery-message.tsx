@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, memo } from "react";
-import { IconAlertTriangle, IconRefresh, IconPlayerPlay } from "@tabler/icons-react";
+import { useState, useCallback, memo } from "react";
+import {
+  IconAlertTriangle,
+  IconRefresh,
+  IconPlayerPlay,
+  IconTerminal2,
+  IconCopy,
+  IconCheck,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useAppStoreApi } from "@/components/state-provider";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { RecoveryMetadata } from "@/components/task/chat/types";
+import type { RecoveryAuthMethod, RecoveryMetadata } from "@/components/task/chat/types";
 
 type RecoveryState = "pending" | "recovering" | "recovered" | "error";
 
@@ -21,6 +29,7 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   const [state, setState] = useState<RecoveryState>("pending");
   const metadata = comment.metadata as RecoveryMetadata | undefined;
   const canRecover = Boolean(metadata?.task_id && metadata?.session_id);
+  const storeApi = useAppStoreApi();
 
   // Hide entirely once recovery succeeded or session is active again (handles page refresh)
   const isSessionActive =
@@ -53,6 +62,15 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
     }
   };
 
+  const openBottomTerminal = useCallback(() => {
+    const store = storeApi.getState();
+    if (!store.bottomTerminal.isOpen) {
+      store.toggleBottomTerminal();
+    }
+  }, [storeApi]);
+
+  const isAuthError = metadata?.is_auth_error === true;
+  const authMethods = metadata?.auth_methods;
   const message = comment.content || "Agent encountered an error";
 
   return (
@@ -64,6 +82,21 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
 
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="text-xs font-mono text-red-600 dark:text-red-400">{message}</div>
+
+          {isAuthError && authMethods && authMethods.length > 0 && (
+            <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+              <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                Authentication required — log in before resuming
+              </div>
+              {authMethods.map((method) => (
+                <AuthMethodRow
+                  key={method.id}
+                  method={method}
+                  onOpenTerminal={openBottomTerminal}
+                />
+              ))}
+            </div>
+          )}
 
           <div className="mt-2 flex items-center gap-2">
             {metadata?.has_resume_token && (
@@ -111,3 +144,84 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
     </div>
   );
 });
+
+function AuthMethodRow({
+  method,
+  onOpenTerminal,
+}: {
+  method: RecoveryAuthMethod;
+  onOpenTerminal: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const termAuth = method.terminal_auth;
+
+  const fullCommand = termAuth
+    ? `${termAuth.command}${termAuth.args ? ` ${termAuth.args.join(" ")}` : ""}`
+    : null;
+
+  const handleCopy = useCallback(async () => {
+    if (!fullCommand) return;
+    try {
+      await navigator.clipboard.writeText(fullCommand);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard API unavailable
+    }
+  }, [fullCommand]);
+
+  const handleRunInTerminal = useCallback(() => {
+    onOpenTerminal();
+  }, [onOpenTerminal]);
+
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{method.name}</div>
+      {termAuth && fullCommand ? (
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 text-xs bg-muted/50 rounded px-2 py-1 font-mono flex-1 min-w-0">
+            <IconTerminal2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <code className="text-[11px] truncate">{fullCommand}</code>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 cursor-pointer shrink-0"
+                onClick={handleCopy}
+              >
+                {copied ? (
+                  <IconCheck className="h-3 w-3 text-green-500" />
+                ) : (
+                  <IconCopy className="h-3 w-3 text-muted-foreground" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Copy command</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[11px] cursor-pointer gap-1 px-2 shrink-0"
+                onClick={handleRunInTerminal}
+              >
+                <IconTerminal2 className="h-3 w-3" />
+                Open terminal
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              Open the bottom terminal (Cmd+J) to run this command
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">
+          {method.description || "Login required"}
+        </div>
+      )}
+    </div>
+  );
+}

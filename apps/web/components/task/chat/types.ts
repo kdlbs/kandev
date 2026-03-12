@@ -106,11 +106,21 @@ export type StatusMetadata = {
   cancelled?: boolean;
 };
 
+export type RecoveryAuthMethod = {
+  id: string;
+  name: string;
+  description?: string;
+  terminal_auth?: { command: string; args?: string[]; label?: string };
+  meta?: Record<string, unknown>;
+};
+
 export type RecoveryMetadata = StatusMetadata & {
   recovery_actions: true;
   session_id: string;
   task_id: string;
   has_resume_token: boolean;
+  is_auth_error?: boolean;
+  auth_methods?: RecoveryAuthMethod[];
 };
 
 export type GitOperationErrorMetadata = StatusMetadata & {

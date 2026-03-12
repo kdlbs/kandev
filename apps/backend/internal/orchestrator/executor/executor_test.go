@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -87,6 +88,9 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 }
 
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
+func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
+	return nil
+}
 func (m *mockAgentManager) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return false
 }

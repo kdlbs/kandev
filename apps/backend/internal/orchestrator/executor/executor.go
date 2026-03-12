@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -112,6 +113,10 @@ type AgentManagerClient interface {
 	// WasSessionInitialized reports whether the given execution completed session initialization.
 	// Used to distinguish launch-phase failures from normal prompt failures.
 	WasSessionInitialized(executionID string) bool
+
+	// GetSessionAuthMethods returns cached auth methods for a session's execution.
+	// Used to include auth method hints in error recovery messages.
+	GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo
 
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool

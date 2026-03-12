@@ -350,6 +350,11 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.handleAvailableCommandsEvent(execution, event)
 		return
 
+	case "agent_capabilities":
+		if len(event.AuthMethods) > 0 {
+			execution.SetAuthMethods(event.AuthMethods)
+		}
+
 	case "session_mode":
 		execution.SetModeState(&CachedModeState{
 			CurrentModeID:  event.CurrentModeID,

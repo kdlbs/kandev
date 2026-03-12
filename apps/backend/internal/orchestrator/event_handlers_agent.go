@@ -457,7 +457,32 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 	// Create a status message with recovery action metadata.
 	if s.messageCreator != nil {
-		statusMsg := fmt.Sprintf("Agent encountered an error: %s", data.ErrorMessage)
+		authErr := isAuthError(data.ErrorMessage)
+		displayMsg := data.ErrorMessage
+		if authErr {
+			if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
+				displayMsg = readable
+			}
+		}
+
+		statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+
+		meta := map[string]interface{}{
+			"variant":          "error",
+			"recovery_actions": true,
+			"session_id":       data.SessionID,
+			"task_id":          data.TaskID,
+			"has_resume_token": s.wasResumeAttempt(ctx, data.SessionID),
+			"is_auth_error":    authErr,
+		}
+
+		// Include cached auth methods so the frontend can show login options.
+		if authErr {
+			if methods := s.agentManager.GetSessionAuthMethods(data.SessionID); len(methods) > 0 {
+				meta["auth_methods"] = methods
+			}
+		}
+
 		if err := s.messageCreator.CreateSessionMessage(
 			ctx,
 			data.TaskID,
@@ -465,13 +490,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 			data.SessionID,
 			string(v1.MessageTypeStatus),
 			s.getActiveTurnID(data.SessionID),
-			map[string]interface{}{
-				"variant":          "error",
-				"recovery_actions": true,
-				"session_id":       data.SessionID,
-				"task_id":          data.TaskID,
-				"has_resume_token": s.wasResumeAttempt(ctx, data.SessionID),
-			},
+			meta,
 			false,
 		); err != nil {
 			s.logger.Warn("failed to create recovery status message",

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -175,6 +176,9 @@ func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ st
 	return fmt.Errorf("not supported")
 }
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
+func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
+	return nil
+}
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough
 }

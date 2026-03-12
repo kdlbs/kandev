@@ -27,6 +27,16 @@ func (m *Manager) WasSessionInitialized(executionID string) bool {
 	return exec.sessionInitialized
 }
 
+// GetSessionAuthMethods returns the cached auth methods for a session's execution.
+// Returns nil if the session has no execution or no auth methods were received.
+func (m *Manager) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
+	exec, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil
+	}
+	return exec.GetAuthMethods()
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
