@@ -149,11 +149,7 @@ export function ChatInputEditorArea({
 }: ChatInputEditorAreaProps) {
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt ? () => {} : handleSubmitWithReset;
-
-  const handleAttachFiles = useCallback(() => {
-    fileInputRef.current?.click();
-  }, [fileInputRef]);
-
+  const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <EditorWithTooltip

@@ -426,8 +426,7 @@ const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
 }: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
-  const { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl } =
-    useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
 
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
