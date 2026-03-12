@@ -63,7 +63,10 @@ function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
   }));
 }
 
-type CumulativeDiffFiles = Record<string, { diff?: string; status?: string; additions?: number; deletions?: number }>;
+type CumulativeDiffFiles = Record<
+  string,
+  { diff?: string; status?: string; additions?: number; deletions?: number }
+>;
 
 function collectReviewPaths(
   uncommittedFiles: FileInfo[],
@@ -232,7 +235,15 @@ function ChangesPanelDialogsSection({
   isUtilityConfigured,
 }: Pick<
   ChangesPanelBodyProps,
-  "dialogs" | "isLoading" | "stagedFileCount" | "stagedAdditions" | "stagedDeletions" | "displayBranch" | "baseBranch" | "utilityGen" | "isUtilityConfigured"
+  | "dialogs"
+  | "isLoading"
+  | "stagedFileCount"
+  | "stagedAdditions"
+  | "stagedDeletions"
+  | "displayBranch"
+  | "baseBranch"
+  | "utilityGen"
+  | "isUtilityConfigured"
 > & { lastCommitMessage?: string | null }) {
   return (
     <>
