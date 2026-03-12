@@ -589,8 +589,33 @@ export class ApiClient {
 
   async listTaskSessions(
     taskId: string,
-  ): Promise<{ sessions: Array<{ id: string; state: string }> }> {
+  ): Promise<{
+    sessions: Array<{
+      id: string;
+      task_id: string;
+      state: string;
+      task_environment_id?: string;
+    }>;
+    total: number;
+  }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async getTaskEnvironment(
+    taskId: string,
+  ): Promise<{
+    id: string;
+    task_id: string;
+    worktree_id?: string;
+    worktree_path?: string;
+    status: string;
+  } | null> {
+    const res = await this.rawRequest("GET", `/api/v1/tasks/${taskId}/environment`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`getTaskEnvironment failed (${res.status}): ${await res.text()}`);
+    }
+    return res.json();
   }
 
   // --- GitHub Review Watch ---
