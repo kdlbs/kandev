@@ -54,7 +54,8 @@ func newTestMessageHandlers(t *testing.T, repo *sessionStateSequencer) *MessageH
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: repo, Environments: repo, Reviews: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	return NewMessageHandlers(svc, nil, log)
 }

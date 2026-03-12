@@ -288,6 +288,7 @@ export type TaskSession = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  task_environment_id?: string;
   state: TaskSessionState;
   error_message?: string;
   metadata?: Record<string, unknown> | null;

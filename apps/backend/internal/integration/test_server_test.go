@@ -264,7 +264,8 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		Workspaces: taskRepo, Tasks: taskRepo, TaskRepos: taskRepo,
 		Workflows: taskRepo, Messages: taskRepo, Turns: taskRepo,
 		Sessions: taskRepo, GitSnapshots: taskRepo, RepoEntities: taskRepo,
-		Executors: taskRepo, Environments: taskRepo, Reviews: taskRepo,
+		Executors: taskRepo, Environments: taskRepo, TaskEnvironments: taskRepo,
+		Reviews: taskRepo,
 	}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
 

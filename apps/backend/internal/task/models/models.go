@@ -265,6 +265,9 @@ type TaskSession struct {
 	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time              `json:"updated_at"`
 
+	// Environment reference
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
+
 	// Workflow-related fields
 	IsPrimary      bool    `json:"is_primary"`                 // Whether this is the primary session for the task
 	IsPassthrough  bool    `json:"is_passthrough"`             // Whether this session uses passthrough (PTY) mode
@@ -319,6 +322,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["repository_snapshot"] = s.RepositorySnapshot
 	}
 	result["is_passthrough"] = s.IsPassthrough
+	if s.TaskEnvironmentID != "" {
+		result["task_environment_id"] = s.TaskEnvironmentID
+	}
 	return result
 }
 
@@ -489,6 +495,80 @@ type Environment struct {
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	DeletedAt    *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// TaskEnvironmentStatus represents the lifecycle state of a task execution environment.
+type TaskEnvironmentStatus string
+
+const (
+	TaskEnvironmentStatusCreating TaskEnvironmentStatus = "creating"
+	TaskEnvironmentStatusReady    TaskEnvironmentStatus = "ready"
+	TaskEnvironmentStatusStopped  TaskEnvironmentStatus = "stopped"
+	TaskEnvironmentStatusFailed   TaskEnvironmentStatus = "failed"
+)
+
+// TaskEnvironment represents a per-task execution environment instance.
+// It owns the workspace (worktree/container/sandbox) and the agentctl control server.
+// Multiple sessions can share the same TaskEnvironment.
+type TaskEnvironment struct {
+	ID                string                `json:"id"`
+	TaskID            string                `json:"task_id"`
+	RepositoryID      string                `json:"repository_id"`
+	ExecutorType      string                `json:"executor_type"`
+	ExecutorID        string                `json:"executor_id"`
+	ExecutorProfileID string                `json:"executor_profile_id"`
+	AgentExecutionID  string                `json:"agent_execution_id"` // agentctl execution handle
+	ControlPort       int                   `json:"control_port"`       // agentctl control port
+	Status            TaskEnvironmentStatus `json:"status"`
+
+	// Type-specific fields
+	WorktreeID     string `json:"worktree_id,omitempty"`
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	WorktreeBranch string `json:"worktree_branch,omitempty"`
+	WorkspacePath  string `json:"workspace_path,omitempty"`
+	ContainerID    string `json:"container_id,omitempty"`
+	SandboxID      string `json:"sandbox_id,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ToAPI converts internal TaskEnvironment to API map.
+func (te *TaskEnvironment) ToAPI() map[string]interface{} {
+	result := map[string]interface{}{
+		"id":                  te.ID,
+		"task_id":             te.TaskID,
+		"repository_id":       te.RepositoryID,
+		"executor_type":       te.ExecutorType,
+		"executor_id":         te.ExecutorID,
+		"executor_profile_id": te.ExecutorProfileID,
+		"status":              string(te.Status),
+		"workspace_path":      te.WorkspacePath,
+		"created_at":          te.CreatedAt,
+		"updated_at":          te.UpdatedAt,
+	}
+	if te.AgentExecutionID != "" {
+		result["agent_execution_id"] = te.AgentExecutionID
+	}
+	if te.ControlPort != 0 {
+		result["control_port"] = te.ControlPort
+	}
+	if te.WorktreeID != "" {
+		result["worktree_id"] = te.WorktreeID
+	}
+	if te.WorktreePath != "" {
+		result["worktree_path"] = te.WorktreePath
+	}
+	if te.WorktreeBranch != "" {
+		result["worktree_branch"] = te.WorktreeBranch
+	}
+	if te.ContainerID != "" {
+		result["container_id"] = te.ContainerID
+	}
+	if te.SandboxID != "" {
+		result["sandbox_id"] = te.SandboxID
+	}
+	return result
 }
 
 // TaskPlan represents a plan associated with a task
