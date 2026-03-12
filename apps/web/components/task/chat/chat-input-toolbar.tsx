@@ -409,35 +409,16 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-export const ChatInputToolbar = memo(function ChatInputToolbar({
-  planModeEnabled,
-  planModeAvailable = true,
-  mcpServers = [],
-  onPlanModeChange,
-  sessionId,
-  taskId,
-  taskTitle,
-  taskDescription,
-  isAgentBusy,
-  isDisabled,
-  isSending,
-  onCancel,
-  onSubmit,
-  submitKey = "cmd_enter",
-  contextCount = 0,
-  contextPopoverOpen = false,
-  onContextPopoverOpenChange,
-  planContextEnabled = false,
-  contextFiles = [],
-  onToggleFile,
-  onImplementPlan,
-  onEnhancePrompt,
-  isEnhancingPrompt = false,
-  isUtilityConfigured = false,
-  onAttachFiles,
-  hideSessionsDropdown,
-  minimalToolbar,
-}: ChatInputToolbarProps) {
+export const ChatInputToolbar = memo(function ChatInputToolbar(props: ChatInputToolbarProps) {
+  const {
+    planModeEnabled, planModeAvailable = true, mcpServers = [], onPlanModeChange,
+    sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isDisabled,
+    isSending, onCancel, onSubmit, submitKey = "cmd_enter", contextCount = 0,
+    contextPopoverOpen = false, onContextPopoverOpenChange, planContextEnabled = false,
+    contextFiles = [], onToggleFile, onImplementPlan, onEnhancePrompt,
+    isEnhancingPrompt = false, isUtilityConfigured = false, onAttachFiles,
+    hideSessionsDropdown, minimalToolbar,
+  } = props;
   const submitShortcut = submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
 
   if (minimalToolbar) {
