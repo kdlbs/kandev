@@ -18,15 +18,16 @@ type WorkflowDTO struct {
 }
 
 type WorkspaceDTO struct {
-	ID                    string    `json:"id"`
-	Name                  string    `json:"name"`
-	Description           *string   `json:"description,omitempty"`
-	OwnerID               string    `json:"owner_id"`
-	DefaultExecutorID     *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID  *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID *string   `json:"default_agent_profile_id,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                          string    `json:"id"`
+	Name                        string    `json:"name"`
+	Description                 *string   `json:"description,omitempty"`
+	OwnerID                     string    `json:"owner_id"`
+	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	CreatedAt                   time.Time `json:"created_at"`
+	UpdatedAt                   time.Time `json:"updated_at"`
 }
 
 type RepositoryDTO struct {
@@ -341,15 +342,16 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	}
 
 	return WorkspaceDTO{
-		ID:                    workspace.ID,
-		Name:                  workspace.Name,
-		Description:           description,
-		OwnerID:               workspace.OwnerID,
-		DefaultExecutorID:     workspace.DefaultExecutorID,
-		DefaultEnvironmentID:  workspace.DefaultEnvironmentID,
-		DefaultAgentProfileID: workspace.DefaultAgentProfileID,
-		CreatedAt:             workspace.CreatedAt,
-		UpdatedAt:             workspace.UpdatedAt,
+		ID:                          workspace.ID,
+		Name:                        workspace.Name,
+		Description:                 description,
+		OwnerID:                     workspace.OwnerID,
+		DefaultExecutorID:           workspace.DefaultExecutorID,
+		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
+		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
+		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
+		CreatedAt:                   workspace.CreatedAt,
+		UpdatedAt:                   workspace.UpdatedAt,
 	}
 }
 
