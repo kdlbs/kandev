@@ -76,7 +76,8 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     activeProcessBySessionId: {},
     devProcessBySessionId: {},
   },
-  gitStatus: { bySessionId: {} },
+  gitStatus: { byEnvironmentId: {} },
+  environmentIdBySessionId: {},
   sessionCommits: { bySessionId: {}, loading: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
@@ -187,13 +188,30 @@ export const createSessionRuntimeSlice: StateCreator<
   ...buildTerminalShellProcessActions(set),
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
-      const existing = draft.gitStatus.bySessionId[sessionId];
+      // Resolve environment key: prefer cached mapping, fall back to cross-slice lookup
+      let envKey = draft.environmentIdBySessionId[sessionId];
+      if (!envKey) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const session = (draft as any).taskSessions?.items?.[sessionId];
+        if (session?.task_environment_id) {
+          envKey = session.task_environment_id;
+          draft.environmentIdBySessionId[sessionId] = envKey;
+        } else {
+          envKey = sessionId;
+        }
+      }
+      const existing = draft.gitStatus.byEnvironmentId[envKey];
       if (existing && !hasGitStatusChanged(existing, gitStatus)) return;
-      draft.gitStatus.bySessionId[sessionId] = gitStatus;
+      draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
     }),
   clearGitStatus: (sessionId) =>
     set((draft) => {
-      delete draft.gitStatus.bySessionId[sessionId];
+      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+      delete draft.gitStatus.byEnvironmentId[envKey];
+    }),
+  registerSessionEnvironment: (sessionId, environmentId) =>
+    set((draft) => {
+      draft.environmentIdBySessionId[sessionId] = environmentId;
     }),
   setContextWindow: (sessionId, contextWindow) =>
     set((draft) => {

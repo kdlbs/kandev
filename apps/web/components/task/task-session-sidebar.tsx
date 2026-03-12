@@ -95,7 +95,8 @@ function useSidebarData(workspaceId: string | null) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusBySessionId = useAppStore((state) => state.gitStatus.bySessionId);
+  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -137,7 +138,7 @@ function useSidebarData(workspaceId: string | null) {
       ]),
     );
     const items = allTasks.map((task: KanbanState["tasks"][number]) => {
-      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusBySessionId);
+      const sessionInfo = getSessionInfoForTask(task.id, sessionsByTaskId, gitStatusByEnvId, envIdBySessionId);
       const resolvedSessionState =
         sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
       const repoSlug = task.repositoryId ? repositorySlugById.get(task.repositoryId) : undefined;
@@ -187,7 +188,8 @@ function useSidebarData(workspaceId: string | null) {
     allTasks,
     workspaceId,
     sessionsByTaskId,
-    gitStatusBySessionId,
+    gitStatusByEnvId,
+    envIdBySessionId,
     taskPRsByTaskId,
     archivedState,
   ]);
