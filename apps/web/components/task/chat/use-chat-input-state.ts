@@ -69,10 +69,23 @@ function useAttachments(sessionId: string | null) {
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
 
+  // Reset attachments from storage when session changes
+  useEffect(() => {
+    if (sessionId === prevSessionIdRef.current) return;
+    prevSessionIdRef.current = sessionId;
+    const newAttachments = sessionId
+      ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview)
+      : [];
+    /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
+    setAttachments(newAttachments);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    attachmentsRef.current = newAttachments;
+  }, [sessionId]);
+
+  // Persist attachments to storage when they change (for the same session)
   useEffect(() => {
     attachmentsRef.current = attachments;
-    if (sessionId && prevSessionIdRef.current === sessionId)
-      setChatDraftAttachments(sessionId, attachments);
+    if (sessionId) setChatDraftAttachments(sessionId, attachments);
   }, [attachments, sessionId]);
 
   const addFiles = useCallback(
@@ -102,7 +115,6 @@ function useAttachments(sessionId: string | null) {
   return {
     attachments,
     attachmentsRef,
-    prevSessionIdRef,
     setAttachments,
     addFiles,
     handleRemoveAttachment,
@@ -124,23 +136,19 @@ export function useChatInputState({
   const inputRef = useRef<TipTapInputHandle>(null);
   const valueRef = useRef(value);
   const pendingCommentsRef = useRef(pendingCommentsByFile);
+  const prevTextSessionIdRef = useRef(sessionId);
 
-  const {
-    attachments,
-    attachmentsRef,
-    prevSessionIdRef,
-    setAttachments,
-    addFiles,
-    handleRemoveAttachment,
-  } = useAttachments(sessionId);
+  const { attachments, attachmentsRef, setAttachments, addFiles, handleRemoveAttachment } =
+    useAttachments(sessionId);
 
+  // Reset text value from storage when session changes
   useEffect(() => {
-    if (sessionId === prevSessionIdRef.current) return;
-    prevSessionIdRef.current = sessionId;
+    if (sessionId === prevTextSessionIdRef.current) return;
+    prevTextSessionIdRef.current = sessionId;
     /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
     setValue(sessionId ? getChatDraftText(sessionId) : "");
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [sessionId, prevSessionIdRef]);
+  }, [sessionId]);
 
   useEffect(() => {
     valueRef.current = value;
