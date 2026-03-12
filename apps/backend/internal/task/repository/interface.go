@@ -178,6 +178,16 @@ type EnvironmentRepository interface {
 	ListEnvironments(ctx context.Context) ([]*models.Environment, error)
 }
 
+// TaskEnvironmentRepository handles per-task execution environment instances.
+type TaskEnvironmentRepository interface {
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	DeleteTaskEnvironment(ctx context.Context, id string) error
+	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error
+}
+
 // ReviewRepository handles session file review records.
 type ReviewRepository interface {
 	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error

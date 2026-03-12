@@ -140,6 +140,8 @@ func (r *Repository) runMigrations() error {
 	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	// Add default_config_agent_profile_id column to workspaces (ignore error if already exists)
 	_, _ = r.db.Exec(`ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
+	// Add task_environment_id column to task_sessions for shared environment reference (ignore error if already exists)
+	_, _ = r.db.Exec(`ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
 	// Remove FK constraint on workflow_id to allow ephemeral tasks without workflows
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
@@ -503,6 +505,30 @@ func (r *Repository) initSessionWorktreeSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state);
 	CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state);
+
+	CREATE TABLE IF NOT EXISTS task_environments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT DEFAULT '',
+		executor_type TEXT NOT NULL DEFAULT '',
+		executor_id TEXT DEFAULT '',
+		executor_profile_id TEXT DEFAULT '',
+		agent_execution_id TEXT DEFAULT '',
+		control_port INTEGER DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'creating',
+		worktree_id TEXT DEFAULT '',
+		worktree_path TEXT DEFAULT '',
+		worktree_branch TEXT DEFAULT '',
+		workspace_path TEXT DEFAULT '',
+		container_id TEXT DEFAULT '',
+		sandbox_id TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status);
 
 	CREATE TABLE IF NOT EXISTS task_session_worktrees (
 		id TEXT PRIMARY KEY,
