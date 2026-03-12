@@ -9,14 +9,14 @@ import (
 
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
-	executor *InferenceExecutor
+	executor *ACPInferenceExecutor
 	logger   *zap.Logger
 }
 
 // NewHandler creates a new inference handler.
-func NewHandler(workDir string, logger *zap.Logger) *Handler {
+func NewHandler(_ string, logger *zap.Logger) *Handler {
 	return &Handler{
-		executor: NewInferenceExecutor(workDir),
+		executor: NewACPInferenceExecutor(logger),
 		logger:   logger,
 	}
 }

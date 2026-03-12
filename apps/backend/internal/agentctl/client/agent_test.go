@@ -89,10 +89,11 @@ func newTestClientWithStream(t *testing.T, handler func(msg ws.Message) *ws.Mess
 
 	// Create client with the test server URL
 	c := &Client{
-		baseURL:         url,
-		httpClient:      &http.Client{Timeout: 5 * time.Second},
-		logger:          log,
-		pendingRequests: make(map[string]chan *ws.Message),
+		baseURL:               url,
+		httpClient:            &http.Client{Timeout: 5 * time.Second},
+		longRunningHTTPClient: &http.Client{Timeout: 5 * time.Minute},
+		logger:                log,
+		pendingRequests:       make(map[string]chan *ws.Message),
 	}
 
 	// Connect the stream

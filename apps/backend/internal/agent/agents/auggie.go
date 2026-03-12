@@ -152,14 +152,12 @@ func (a *Auggie) PermissionSettings() map[string]PermissionSetting {
 	return auggiePermSettings
 }
 
-// InferenceConfig returns configuration for one-shot inference.
+// InferenceConfig returns configuration for one-shot inference using ACP.
 func (a *Auggie) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
-		Supported:    true,
-		Command:      NewCommand("auggie", "--print", "--output-format", "json"),
-		ModelFlag:    NewParam("--model", "{model}"),
-		OutputFormat: "auggie-json",
-		StdinInput:   true,
+		Supported: true,
+		Command:   NewCommand("auggie", "--acp"),
+		ModelFlag: NewParam("--model", "{model}"),
 	}
 }
 

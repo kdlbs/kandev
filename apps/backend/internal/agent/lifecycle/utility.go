@@ -46,10 +46,9 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		AgentID: agentID,
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command:      cfg.Command.Args(),
-			ModelFlag:    cfg.ModelFlag.Args(),
-			OutputFormat: cfg.OutputFormat,
-			StdinInput:   cfg.StdinInput,
+			Command:   cfg.Command.Args(),
+			ModelFlag: cfg.ModelFlag.Args(),
+			WorkDir:   execution.WorkspacePath,
 		},
 	}
 

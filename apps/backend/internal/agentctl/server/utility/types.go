@@ -24,14 +24,13 @@ type PromptRequest struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the CLI command for one-shot inference (e.g., ["claude", "--print"]).
+	// Command is the ACP command for one-shot inference.
+	// e.g., ["npx", "-y", "@zed-industries/claude-agent-acp"]
 	Command []string `json:"command"`
-	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
+	// ModelFlag is the flag template for specifying the model.
 	ModelFlag []string `json:"model_flag,omitempty"`
-	// OutputFormat describes how to parse the output: "text", "stream-json".
-	OutputFormat string `json:"output_format"`
-	// StdinInput if true, prompt is sent via stdin; otherwise as a positional argument.
-	StdinInput bool `json:"stdin_input"`
+	// WorkDir is the working directory for the agent process.
+	WorkDir string `json:"work_dir"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

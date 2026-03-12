@@ -9,6 +9,8 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import {
   DiscardDialog,
   CommitDialog,
@@ -232,6 +234,12 @@ type ChangesPanelBodyProps = {
   stagedDeletions: number;
   displayBranch: string | null;
   baseBranch: string | undefined;
+  // Utility agent generators
+  onGenerateCommitMessage?: (onSuccess: (msg: string) => void) => void;
+  onGeneratePRDescription?: (onSuccess: (desc: string) => void) => void;
+  isGeneratingCommitMessage?: boolean;
+  isGeneratingPRDescription?: boolean;
+  isUtilityConfigured?: boolean;
 };
 
 function ChangesPanelDialogsSection({
@@ -243,6 +251,11 @@ function ChangesPanelDialogsSection({
   displayBranch,
   baseBranch,
   lastCommitMessage,
+  onGenerateCommitMessage,
+  onGeneratePRDescription,
+  isGeneratingCommitMessage,
+  isGeneratingPRDescription,
+  isUtilityConfigured,
 }: Pick<
   ChangesPanelBodyProps,
   | "dialogs"
@@ -252,7 +265,14 @@ function ChangesPanelDialogsSection({
   | "stagedDeletions"
   | "displayBranch"
   | "baseBranch"
-> & { lastCommitMessage?: string | null }) {
+> & {
+  lastCommitMessage?: string | null;
+  onGenerateCommitMessage?: (onSuccess: (msg: string) => void) => void;
+  onGeneratePRDescription?: (onSuccess: (desc: string) => void) => void;
+  isGeneratingCommitMessage?: boolean;
+  isGeneratingPRDescription?: boolean;
+  isUtilityConfigured?: boolean;
+}) {
   return (
     <>
       <DiscardDialog
@@ -274,6 +294,12 @@ function ChangesPanelDialogsSection({
         isAmend={dialogs.isAmendCommit}
         onAmendChange={dialogs.setIsAmendCommit}
         lastCommitMessage={lastCommitMessage}
+        onGenerateMessage={
+          isUtilityConfigured && onGenerateCommitMessage
+            ? () => onGenerateCommitMessage(dialogs.setCommitMessage)
+            : undefined
+        }
+        isGenerating={isGeneratingCommitMessage}
       />
       <PRDialog
         open={dialogs.prDialogOpen}
@@ -288,6 +314,12 @@ function ChangesPanelDialogsSection({
         isLoading={isLoading}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
+        onGenerateDescription={
+          isUtilityConfigured && onGeneratePRDescription
+            ? () => onGeneratePRDescription(dialogs.setPrBody)
+            : undefined
+        }
+        isGenerating={isGeneratingPRDescription}
       />
       <AmendDialog
         open={dialogs.amendDialogOpen}
@@ -471,6 +503,11 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         displayBranch={props.displayBranch}
         baseBranch={props.baseBranch}
         lastCommitMessage={lastCommitMessage}
+        onGenerateCommitMessage={props.onGenerateCommitMessage}
+        onGeneratePRDescription={props.onGeneratePRDescription}
+        isGeneratingCommitMessage={props.isGeneratingCommitMessage}
+        isGeneratingPRDescription={props.isGeneratingPRDescription}
+        isUtilityConfigured={props.isUtilityConfigured}
       />
     </PanelBody>
   );
@@ -535,6 +572,15 @@ const ChangesPanel = memo(function ChangesPanel({
     firstCommitMessage,
   });
 
+  // Utility agent generators
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const {
+    isGeneratingCommitMessage,
+    isGeneratingPRDescription,
+    generateCommitMessage,
+    generatePRDescription,
+  } = useUtilityAgentGenerator({ sessionId: activeSessionId ?? null, taskTitle });
+
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
   return (
@@ -591,6 +637,11 @@ const ChangesPanel = memo(function ChangesPanel({
         stagedDeletions={staged.stagedDeletions}
         displayBranch={git.branch}
         baseBranch={baseBranch}
+        onGenerateCommitMessage={generateCommitMessage}
+        onGeneratePRDescription={generatePRDescription}
+        isGeneratingCommitMessage={isGeneratingCommitMessage}
+        isGeneratingPRDescription={isGeneratingPRDescription}
+        isUtilityConfigured={isUtilityConfigured}
       />
     </PanelRoot>
   );

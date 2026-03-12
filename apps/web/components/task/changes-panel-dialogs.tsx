@@ -1,9 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
+import {
+  IconGitCommit,
+  IconGitPullRequest,
+  IconLoader2,
+  IconCheck,
+  IconSparkles,
+} from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -67,6 +74,39 @@ export function DiscardDialog({
   );
 }
 
+// --- Generate Button ---
+
+type GenerateButtonProps = {
+  onClick: () => void;
+  isGenerating: boolean;
+  disabled?: boolean;
+  tooltip: string;
+};
+
+function GenerateButton({ onClick, isGenerating, disabled, tooltip }: GenerateButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 cursor-pointer"
+          onClick={onClick}
+          disabled={disabled || isGenerating}
+        >
+          {isGenerating ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconSparkles className="h-4 w-4" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 // --- Commit Dialog ---
 
 type CommitDialogProps = {
@@ -82,6 +122,8 @@ type CommitDialogProps = {
   isAmend?: boolean;
   onAmendChange?: (amend: boolean) => void;
   lastCommitMessage?: string | null;
+  onGenerateMessage?: () => void;
+  isGenerating?: boolean;
 };
 
 export function CommitDialog({
@@ -97,6 +139,8 @@ export function CommitDialog({
   isAmend = false,
   onAmendChange,
   lastCommitMessage,
+  onGenerateMessage,
+  isGenerating,
 }: CommitDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,12 +175,25 @@ export function CommitDialog({
               </Label>
             </div>
           )}
-          <Textarea
-            placeholder={isAmend ? "Enter new commit message..." : "Enter commit message..."}
-            value={commitMessage}
-            onChange={(e) => onCommitMessageChange(e.target.value)}
-            autoFocus
-          />
+          <div className="relative">
+            <Textarea
+              placeholder={isAmend ? "Enter new commit message..." : "Enter commit message..."}
+              value={commitMessage}
+              onChange={(e) => onCommitMessageChange(e.target.value)}
+              autoFocus
+              className="pr-10"
+            />
+            {onGenerateMessage && (
+              <div className="absolute right-1.5 top-1.5">
+                <GenerateButton
+                  onClick={onGenerateMessage}
+                  isGenerating={isGenerating ?? false}
+                  disabled={stagedFileCount === 0}
+                  tooltip="Generate commit message with AI"
+                />
+              </div>
+            )}
+          </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
@@ -208,6 +265,8 @@ type PRDialogProps = {
   isLoading: boolean;
   displayBranch: string | null;
   baseBranch: string | undefined;
+  onGenerateDescription?: () => void;
+  isGenerating?: boolean;
 };
 
 export function PRDialog({
@@ -223,6 +282,8 @@ export function PRDialog({
   isLoading,
   displayBranch,
   baseBranch,
+  onGenerateDescription,
+  isGenerating,
 }: PRDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -253,14 +314,25 @@ export function PRDialog({
             <Label htmlFor="changes-pr-body" className="text-sm">
               Description
             </Label>
-            <Textarea
-              id="changes-pr-body"
-              placeholder="Describe your changes..."
-              value={prBody}
-              onChange={(e) => onPrBodyChange(e.target.value)}
-              rows={6}
-              className="resize-none max-h-[200px] overflow-y-auto"
-            />
+            <div className="relative">
+              <Textarea
+                id="changes-pr-body"
+                placeholder="Describe your changes..."
+                value={prBody}
+                onChange={(e) => onPrBodyChange(e.target.value)}
+                rows={6}
+                className="resize-none max-h-[200px] overflow-y-auto pr-10"
+              />
+              {onGenerateDescription && (
+                <div className="absolute right-1.5 top-1.5">
+                  <GenerateButton
+                    onClick={onGenerateDescription}
+                    isGenerating={isGenerating ?? false}
+                    tooltip="Generate PR description with AI"
+                  />
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center space-x-2">
             <Checkbox

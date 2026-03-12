@@ -272,19 +272,15 @@ var DefaultResourceLimits = ResourceLimits{
 	MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour,
 }
 
-// InferenceConfig describes how an agent executes one-shot prompts.
+// InferenceConfig describes how an agent executes one-shot prompts via ACP.
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the CLI command for one-shot inference (e.g., ["claude", "--print"]).
-	// Uses the local CLI directly since agents must be installed/authenticated to work.
+	// Command is the ACP command for one-shot inference.
+	// e.g., ["npx", "-y", "@zed-industries/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param
-	// OutputFormat describes how to parse the output: "text", "stream-json".
-	OutputFormat string
-	// StdinInput if true, prompt is sent via stdin; otherwise as a positional argument.
-	StdinInput bool
 }
 
 // InferenceModel describes a model available for inference.

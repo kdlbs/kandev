@@ -19,7 +19,6 @@ const copilotPkg = "@github/copilot@0.0.406"
 var (
 	_ Agent            = (*Copilot)(nil)
 	_ PassthroughAgent = (*Copilot)(nil)
-	_ InferenceAgent   = (*Copilot)(nil)
 )
 
 type Copilot struct {
@@ -123,22 +122,6 @@ func (a *Copilot) InstallScript() string {
 
 func (a *Copilot) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings
-}
-
-// InferenceConfig returns configuration for one-shot inference.
-func (a *Copilot) InferenceConfig() *InferenceConfig {
-	return &InferenceConfig{
-		Supported:    true,
-		Command:      NewCommand("github-copilot", "-p"),
-		ModelFlag:    NewParam("--model", "{model}"),
-		OutputFormat: "text",
-		StdinInput:   true,
-	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *Copilot) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(copilotStaticModels())
 }
 
 var copilotPermSettings = map[string]PermissionSetting{

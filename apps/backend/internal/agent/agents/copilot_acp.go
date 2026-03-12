@@ -19,6 +19,7 @@ const copilotACPPkg = "@github/copilot"
 var (
 	_ Agent            = (*CopilotACP)(nil)
 	_ PassthroughAgent = (*CopilotACP)(nil)
+	_ InferenceAgent   = (*CopilotACP)(nil)
 )
 
 // CopilotACP implements Agent for GitHub Copilot using ACP protocol mode.
@@ -123,4 +124,18 @@ func (a *CopilotACP) InstallScript() string {
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
 	return copilotPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference using ACP.
+func (a *CopilotACP) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("npx", "-y", copilotACPPkg, "--acp"),
+		ModelFlag: NewParam("--model", "{model}"),
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *CopilotACP) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(copilotStaticModels())
 }

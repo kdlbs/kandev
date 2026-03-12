@@ -19,6 +19,7 @@ const codexACPPkg = "@zed-industries/codex-acp"
 var (
 	_ Agent            = (*CodexACP)(nil)
 	_ PassthroughAgent = (*CodexACP)(nil)
+	_ InferenceAgent   = (*CodexACP)(nil)
 )
 
 // CodexACP implements Agent for the Zed Industries codex-acp package.
@@ -129,4 +130,18 @@ func (a *CodexACP) InstallScript() string {
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return codexPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference using ACP.
+func (a *CodexACP) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("npx", "-y", codexACPPkg),
+		ModelFlag: NewParam("-m", "{model}"),
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *CodexACP) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(codexStaticModels())
 }

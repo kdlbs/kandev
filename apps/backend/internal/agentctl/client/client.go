@@ -21,11 +21,14 @@ import (
 
 // Client communicates with agentctl via HTTP and WebSocket
 type Client struct {
-	baseURL     string
-	httpClient  *http.Client
-	logger      *logger.Logger
-	executionID string
-	sessionID   string
+	baseURL    string
+	httpClient *http.Client
+	// longRunningHTTPClient is used for long-running operations like inference prompts.
+	// It has a much longer timeout (5 minutes) to accommodate LLM API calls.
+	longRunningHTTPClient *http.Client
+	logger                *logger.Logger
+	executionID           string
+	sessionID             string
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -98,6 +101,11 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
+		},
+		// Long-running HTTP client for inference prompts and other operations that may take minutes.
+		// LLM inference calls can take 1-5 minutes depending on model, prompt complexity, and API load.
+		longRunningHTTPClient: &http.Client{
+			Timeout: 5 * time.Minute,
 		},
 		logger:          log.WithFields(zap.String("component", "agentctl-client")),
 		pendingRequests: make(map[string]chan *ws.Message),
@@ -537,7 +545,12 @@ type (
 func (c *Client) Close() {
 	c.CloseUpdatesStream()
 	c.CloseWorkspaceStream()
-	c.httpClient.CloseIdleConnections()
+	if c.httpClient != nil {
+		c.httpClient.CloseIdleConnections()
+	}
+	if c.longRunningHTTPClient != nil {
+		c.longRunningHTTPClient.CloseIdleConnections()
+	}
 }
 
 // readResponseBody reads and returns the response body

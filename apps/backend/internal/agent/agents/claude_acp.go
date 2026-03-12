@@ -19,6 +19,7 @@ const claudeACPPkg = "@zed-industries/claude-agent-acp"
 var (
 	_ Agent            = (*ClaudeACP)(nil)
 	_ PassthroughAgent = (*ClaudeACP)(nil)
+	_ InferenceAgent   = (*ClaudeACP)(nil)
 )
 
 // ClaudeACP implements Agent for the Zed Industries claude-agent-acp package.
@@ -64,12 +65,12 @@ func (a *ClaudeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithFileExists("~/.claude.json"))
+	// ACP agents use npx which auto-installs the package, so we just need npx available
+	result, err := Detect(ctx, WithCommand("npx"))
 	if err != nil {
 		return result, err
 	}
 	result.SupportsMCP = true
-	result.InstallationPaths = []string{expandHomePath("~/.claude.json")}
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}
@@ -137,4 +138,18 @@ func (a *ClaudeACP) InstallScript() string {
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
 	return claudeCodePermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference using ACP.
+func (a *ClaudeACP) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("npx", "-y", claudeACPPkg),
+		ModelFlag: NewParam("--model", "{model}"),
+	}
+}
+
+// InferenceModels returns models available for one-shot inference tasks.
+func (a *ClaudeACP) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(claudeCodeStaticModels())
 }

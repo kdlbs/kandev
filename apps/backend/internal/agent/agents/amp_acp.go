@@ -19,6 +19,7 @@ const ampACPPkg = "amp-acp"
 var (
 	_ Agent            = (*AmpACP)(nil)
 	_ PassthroughAgent = (*AmpACP)(nil)
+	_ InferenceAgent   = (*AmpACP)(nil)
 )
 
 // AmpACP implements Agent for Sourcegraph Amp using the ACP protocol.
@@ -118,4 +119,18 @@ func (a *AmpACP) InstallScript() string {
 
 func (a *AmpACP) PermissionSettings() map[string]PermissionSetting {
 	return ampPermSettings
+}
+
+// InferenceConfig returns configuration for one-shot inference using ACP.
+func (a *AmpACP) InferenceConfig() *InferenceConfig {
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("npx", "-y", ampACPPkg),
+		ModelFlag: NewParam("-m", "{model}"),
+	}
+}
+
+// InferenceModels returns models available for one-shot inference.
+func (a *AmpACP) InferenceModels() []InferenceModel {
+	return ModelsToInferenceModels(ampStaticModels())
 }

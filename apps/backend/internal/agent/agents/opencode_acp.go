@@ -109,13 +109,16 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings
 }
 
-// InferenceConfig returns configuration for one-shot inference.
-// Uses the same "opencode ask" command as the SSE variant.
+// InferenceConfig returns configuration for one-shot inference using ACP.
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
-	return (&OpenCode{}).InferenceConfig()
+	return &InferenceConfig{
+		Supported: true,
+		Command:   NewCommand("opencode", "acp"),
+		ModelFlag: NewParam("--model", "{model}"),
+	}
 }
 
 // InferenceModels returns models available for one-shot inference.
 func (a *OpenCodeACP) InferenceModels() []InferenceModel {
-	return (&OpenCode{}).InferenceModels()
+	return ModelsToInferenceModels(opencodeStaticModels())
 }

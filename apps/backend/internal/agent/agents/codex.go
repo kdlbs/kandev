@@ -19,7 +19,6 @@ const codexPkg = "@openai/codex@0.104.0"
 var (
 	_ Agent            = (*Codex)(nil)
 	_ PassthroughAgent = (*Codex)(nil)
-	_ InferenceAgent   = (*Codex)(nil)
 )
 
 type Codex struct {
@@ -130,23 +129,6 @@ func (a *Codex) InstallScript() string {
 
 func (a *Codex) PermissionSettings() map[string]PermissionSetting {
 	return codexPermSettings
-}
-
-// InferenceConfig returns configuration for one-shot inference.
-// Uses `exec` subcommand for non-interactive execution.
-func (a *Codex) InferenceConfig() *InferenceConfig {
-	return &InferenceConfig{
-		Supported:    true,
-		Command:      NewCommand("codex", "exec"),
-		ModelFlag:    NewParam("-m", "{model}"),
-		OutputFormat: "text",
-		StdinInput:   true,
-	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *Codex) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(codexStaticModels())
 }
 
 var codexPermSettings = map[string]PermissionSetting{

@@ -20,7 +20,6 @@ const opencodePkg = "opencode-ai@1.1.59"
 var (
 	_ Agent            = (*OpenCode)(nil)
 	_ PassthroughAgent = (*OpenCode)(nil)
-	_ InferenceAgent   = (*OpenCode)(nil)
 )
 
 type OpenCode struct {
@@ -123,22 +122,6 @@ func (a *OpenCode) InstallScript() string {
 
 func (a *OpenCode) PermissionSettings() map[string]PermissionSetting {
 	return opencodePermSettings
-}
-
-// InferenceConfig returns configuration for one-shot inference.
-func (a *OpenCode) InferenceConfig() *InferenceConfig {
-	return &InferenceConfig{
-		Supported:    true,
-		Command:      NewCommand("opencode", "ask"),
-		ModelFlag:    NewParam("--model", "{model}"),
-		OutputFormat: "text",
-		StdinInput:   true,
-	}
-}
-
-// InferenceModels returns models available for one-shot inference.
-func (a *OpenCode) InferenceModels() []InferenceModel {
-	return ModelsToInferenceModels(opencodeStaticModels())
 }
 
 var opencodePermSettings = map[string]PermissionSetting{

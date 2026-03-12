@@ -11,6 +11,7 @@ import (
 )
 
 // InferencePrompt executes a one-shot inference prompt via agentctl.
+// Uses the long-running HTTP client since LLM inference can take several minutes.
 func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -23,7 +24,9 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	// Use longRunningHTTPClient for inference prompts since LLM API calls
+	// can take 1-5 minutes depending on model and prompt complexity.
+	resp, err := c.longRunningHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
