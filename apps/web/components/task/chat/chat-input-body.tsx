@@ -312,7 +312,6 @@ export function ChatInputBody({
         {...resizeHandleProps}
       />
       <div
-        ref={containerRef}
         className={cn(
           "flex flex-col overflow-hidden border rounded ",
           "bg-background border-border",
@@ -326,7 +325,6 @@ export function ChatInputBody({
           hasPendingComments && "border-amber-500/50",
           isDragging && "border-primary ring-1 ring-primary/30",
         )}
-        style={{ height }}
         onDragOver={handleDragOver}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -334,7 +332,13 @@ export function ChatInputBody({
       >
         <ChatInputFocusHint visible={showFocusHint} />
         <ChatInputContextArea {...contextAreaProps} />
-        <ChatInputEditorArea {...editorAreaProps} />
+        <div
+          ref={containerRef}
+          style={{ height }}
+          className="flex flex-col min-h-0 overflow-hidden"
+        >
+          <ChatInputEditorArea {...editorAreaProps} />
+        </div>
       </div>
     </div>
   );

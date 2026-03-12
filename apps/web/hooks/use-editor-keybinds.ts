@@ -97,6 +97,7 @@ function handleLayoutToggle(e: KeyboardEvent): boolean {
 function handleBottomTerminal(
   e: KeyboardEvent,
   appStore: ReturnType<typeof useAppStoreApi>,
+  previousFocusRef: React.MutableRefObject<Element | null>,
 ): boolean {
   // Cmd/Ctrl+J — toggle bottom terminal panel
   // Note: no isEditableTarget guard here. Ctrl+J is not a standard text
@@ -106,7 +107,30 @@ function handleBottomTerminal(
   if (matchesShortcut(e, SHORTCUTS.BOTTOM_TERMINAL)) {
     e.preventDefault();
     e.stopPropagation();
+
+    const isOpen = appStore.getState().bottomTerminal.isOpen;
+
+    if (!isOpen) {
+      // Opening: save the currently focused element to restore later
+      previousFocusRef.current = document.activeElement;
+    }
+
     appStore.getState().toggleBottomTerminal();
+
+    if (isOpen) {
+      // Closing: restore focus to the previously focused element
+      const prev = previousFocusRef.current;
+      if (prev instanceof HTMLElement && prev.isConnected) {
+        prev.focus({ preventScroll: true });
+      } else {
+        // Fallback: focus the chat panel
+        const api = useDockviewStore.getState().api;
+        const chatPanel = api?.getPanel("chat");
+        if (chatPanel) chatPanel.api.setActive();
+      }
+      previousFocusRef.current = null;
+    }
+
     return true;
   }
 
@@ -122,6 +146,7 @@ function handleBottomTerminal(
  */
 export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
+  const previousFocusRef = useRef<Element | null>(null);
   const appStore = useAppStoreApi();
 
   useEffect(() => {
@@ -152,7 +177,7 @@ export function useEditorKeybinds() {
       }
 
       if (handleLayoutToggle(e)) return;
-      handleBottomTerminal(e, appStore);
+      handleBottomTerminal(e, appStore, previousFocusRef);
     };
 
     // Use capture phase so we receive events before xterm.js
