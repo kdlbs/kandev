@@ -103,6 +103,8 @@ WORKFLOW TOOLS:
 - list_workflow_steps_kandev: List workflow steps (columns) in a workflow. Required: workflow_id.
 - create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, events.
 - update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, events.
+- delete_workflow_step_kandev: Delete a workflow step (destructive). Required: step_id.
+- reorder_workflow_steps_kandev: Reorder workflow steps. Required: workflow_id, step_ids (ordered array of step IDs).
 
 AGENT TOOLS:
 - list_agents_kandev: List all configured agents and their profiles.

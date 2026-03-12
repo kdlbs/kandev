@@ -88,6 +88,21 @@ func (s *Server) registerConfigWorkflowTools() {
 		),
 		s.wrapHandler("update_workflow_step", s.updateWorkflowStepHandler()),
 	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_workflow_step",
+			mcp.WithDescription("Delete a workflow step. This is destructive and cannot be undone."),
+			mcp.WithString("step_id", mcp.Required(), mcp.Description("The workflow step ID to delete")),
+		),
+		s.wrapHandler("delete_workflow_step", s.deleteWorkflowStepHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("reorder_workflow_steps",
+			mcp.WithDescription("Reorder workflow steps by providing the full ordered list of step IDs."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order")),
+		),
+		s.wrapHandler("reorder_workflow_steps", s.reorderWorkflowStepsHandler()),
+	)
 }
 
 // --- Agent config tools ---
@@ -249,6 +264,14 @@ func (s *Server) registerConfigTaskTools() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task", s.archiveTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_state",
+			mcp.WithDescription("Update the state of a task."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("state", mcp.Required(), mcp.Description("New state: open, in_progress, complete, blocked, cancelled")),
+		),
+		s.wrapHandler("update_task_state", s.updateTaskStateHandler()),
 	)
 }
 
@@ -512,6 +535,50 @@ func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {
 		}
 		payload := map[string]string{"task_id": taskID}
 		return s.forwardToBackend(ctx, ws.ActionMCPDeleteTask, payload)
+	}
+}
+
+func (s *Server) updateTaskStateHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		state, err := req.RequireString("state")
+		if err != nil {
+			return mcp.NewToolResultError("state is required"), nil
+		}
+		payload := map[string]string{"task_id": taskID, "state": state}
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateTaskState, payload)
+	}
+}
+
+func (s *Server) deleteWorkflowStepHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		stepID, err := req.RequireString("step_id")
+		if err != nil {
+			return mcp.NewToolResultError("step_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkflowStep, map[string]string{"step_id": stepID})
+	}
+}
+
+func (s *Server) reorderWorkflowStepsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workflowID, err := req.RequireString("workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		args := req.GetArguments()
+		stepIDs := args["step_ids"]
+		if stepIDs == nil {
+			return mcp.NewToolResultError("step_ids is required"), nil
+		}
+		payload := map[string]interface{}{
+			"workflow_id": workflowID,
+			"step_ids":    stepIDs,
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPReorderWorkflowStep, payload)
 	}
 }
 

@@ -14,7 +14,7 @@ function useConfigChatStore() {
       activeSessionId: s.configChat.activeSessionId,
       workspaceId: s.configChat.workspaceId,
       openConfigChat: s.openConfigChat,
-      openConfigChatModal: s.openConfigChatModal,
+      startNewConfigChat: s.startNewConfigChat,
       closeConfigChat: s.closeConfigChat,
       closeConfigChatSession: s.closeConfigChatSession,
       setActiveConfigChatSession: s.setActiveConfigChatSession,
@@ -51,7 +51,7 @@ export function useConfigChat(workspaceId: string) {
       store.openConfigChat(store.activeSessionId, workspaceId);
       return;
     }
-    store.openConfigChatModal(workspaceId);
+    store.startNewConfigChat(workspaceId);
   }, [workspaceId, store]);
 
   const startSession = useCallback(
@@ -120,7 +120,7 @@ export function useConfigChat(workspaceId: string) {
   }, [store]);
 
   const newChat = useCallback(() => {
-    store.openConfigChatModal(workspaceId);
+    store.startNewConfigChat(workspaceId);
   }, [store, workspaceId]);
 
   const clearPendingPrompt = useCallback(() => setPendingPrompt(null), []);

@@ -20,29 +20,6 @@ func (h *Handlers) handleListAgents(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-func (h *Handlers) handleCreateAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		Name        string  `json:"name"`
-		WorkspaceID *string `json:"workspace_id"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if req.Name == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
-	}
-
-	agent, err := h.agentSettingsCtrl.CreateAgent(ctx, agentsettingscontroller.CreateAgentRequest{
-		Name:        req.Name,
-		WorkspaceID: req.WorkspaceID,
-	})
-	if err != nil {
-		h.logger.Error("failed to create agent", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create agent", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, agent)
-}
-
 func (h *Handlers) handleUpdateAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		AgentID       string  `json:"agent_id"`
@@ -66,22 +43,6 @@ func (h *Handlers) handleUpdateAgent(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update agent", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, agent)
-}
-
-func (h *Handlers) handleDeleteAgent(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	agentID, err := unmarshalStringField(msg.Payload, "agent_id")
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if agentID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_id is required", nil)
-	}
-
-	if err := h.agentSettingsCtrl.DeleteAgent(ctx, agentID); err != nil {
-		h.logger.Error("failed to delete agent", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent", nil)
-	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }
 
 func (h *Handlers) handleListAgentProfiles(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

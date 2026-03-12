@@ -138,14 +138,12 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
-		d.RegisterFunc(ws.ActionMCPCreateAgent, h.handleCreateAgent)
 		d.RegisterFunc(ws.ActionMCPUpdateAgent, h.handleUpdateAgent)
-		d.RegisterFunc(ws.ActionMCPDeleteAgent, h.handleDeleteAgent)
 		d.RegisterFunc(ws.ActionMCPListAgentProfiles, h.handleListAgentProfiles)
 		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
-		count += 8
+		count += 6
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)

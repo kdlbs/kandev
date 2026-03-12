@@ -123,7 +123,7 @@ export function GlobalCommands() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
   const openQuickChat = useAppStore((s) => s.openQuickChat);
-  const openConfigChatModal = useAppStore((s) => s.openConfigChatModal);
+  const startNewConfigChat = useAppStore((s) => s.startNewConfigChat);
   const openConfigChat = useAppStore((s) => s.openConfigChat);
   const configChatActiveSessionId = useAppStore((s) => s.configChat.activeSessionId);
   const configChatWorkspaceId = useAppStore((s) => s.configChat.workspaceId);
@@ -150,8 +150,8 @@ export function GlobalCommands() {
       openConfigChat(configChatActiveSessionId, activeWorkspaceId);
       return;
     }
-    openConfigChatModal(activeWorkspaceId);
-  }, [activeWorkspaceId, configChatActiveSessionId, configChatWorkspaceId, openConfigChat, openConfigChatModal]);
+    startNewConfigChat(activeWorkspaceId);
+  }, [activeWorkspaceId, configChatActiveSessionId, configChatWorkspaceId, openConfigChat, startNewConfigChat]);
 
   const quickChatCommand: CommandItem = useMemo(
     () => ({

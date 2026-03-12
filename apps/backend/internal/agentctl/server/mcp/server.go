@@ -225,7 +225,7 @@ func (s *Server) registerTools() {
 	switch s.mode {
 	case ModeConfig:
 		s.registerConfigWorkflowTools()
-		count += 8
+		count += 10
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -233,7 +233,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 4
+		count += 5
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++

@@ -314,9 +314,7 @@ const (
 	ActionMCPReorderWorkflowStep = "mcp.reorder_workflow_steps"
 
 	ActionMCPListAgents  = "mcp.list_agents"
-	ActionMCPCreateAgent = "mcp.create_agent"
 	ActionMCPUpdateAgent = "mcp.update_agent"
-	ActionMCPDeleteAgent = "mcp.delete_agent"
 
 	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
 	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"

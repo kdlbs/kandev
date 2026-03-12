@@ -166,29 +166,6 @@ func TestHandleReorderWorkflowSteps_InvalidPayload(t *testing.T) {
 
 // --- Agent handler tests ---
 
-func TestHandleCreateAgent_MissingName(t *testing.T) {
-	h := &Handlers{}
-	msg := makeWSMessage(t, ws.ActionMCPCreateAgent, map[string]interface{}{})
-
-	resp, err := h.handleCreateAgent(context.Background(), msg)
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
-}
-
-func TestHandleCreateAgent_InvalidPayload(t *testing.T) {
-	h := &Handlers{}
-	msg := &ws.Message{
-		ID:      "test-id",
-		Type:    ws.MessageTypeRequest,
-		Action:  ws.ActionMCPCreateAgent,
-		Payload: json.RawMessage(`invalid`),
-	}
-
-	resp, err := h.handleCreateAgent(context.Background(), msg)
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeBadRequest)
-}
-
 func TestHandleUpdateAgent_MissingAgentID(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPUpdateAgent, map[string]interface{}{
@@ -210,29 +187,6 @@ func TestHandleUpdateAgent_InvalidPayload(t *testing.T) {
 	}
 
 	resp, err := h.handleUpdateAgent(context.Background(), msg)
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeBadRequest)
-}
-
-func TestHandleDeleteAgent_MissingAgentID(t *testing.T) {
-	h := &Handlers{}
-	msg := makeWSMessage(t, ws.ActionMCPDeleteAgent, map[string]string{})
-
-	resp, err := h.handleDeleteAgent(context.Background(), msg)
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
-}
-
-func TestHandleDeleteAgent_InvalidPayload(t *testing.T) {
-	h := &Handlers{}
-	msg := &ws.Message{
-		ID:      "test-id",
-		Type:    ws.MessageTypeRequest,
-		Action:  ws.ActionMCPDeleteAgent,
-		Payload: json.RawMessage(`{bad}`),
-	}
-
-	resp, err := h.handleDeleteAgent(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
 }

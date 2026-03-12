@@ -131,7 +131,7 @@ function buildConfigChatActions(set: ImmerSet) {
         }
         draft.configChat.activeSessionId = sessionId;
       }),
-    openConfigChatModal: (workspaceId: string) =>
+    startNewConfigChat: (workspaceId: string) =>
       set((draft) => {
         draft.configChat.isOpen = true;
         draft.configChat.activeSessionId = null;
