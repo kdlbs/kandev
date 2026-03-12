@@ -27,6 +27,31 @@ func (s *Server) registerConfigWorkflowTools() {
 		s.wrapHandler("list_workflows", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewTool("create_workflow",
+			mcp.WithDescription("Create a new workflow in a workspace."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Workflow name")),
+			mcp.WithString("description", mcp.Description("Workflow description")),
+		),
+		s.wrapHandler("create_workflow", s.createWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_workflow",
+			mcp.WithDescription("Update an existing workflow."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+			mcp.WithString("name", mcp.Description("New workflow name")),
+			mcp.WithString("description", mcp.Description("New workflow description")),
+		),
+		s.wrapHandler("update_workflow", s.updateWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_workflow",
+			mcp.WithDescription("Delete a workflow and all its steps. This is destructive and cannot be undone."),
+			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID to delete")),
+		),
+		s.wrapHandler("delete_workflow", s.deleteWorkflowHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps",
 			mcp.WithDescription("List all workflow steps (columns) in a workflow."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
@@ -178,6 +203,54 @@ func (s *Server) registerConfigTaskTools() {
 }
 
 // --- Handler implementations ---
+
+func (s *Server) createWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		name, err := req.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError("name is required"), nil
+		}
+		payload := map[string]interface{}{
+			"workspace_id": workspaceID,
+			"name":         name,
+		}
+		if desc := req.GetString("description", ""); desc != "" {
+			payload["description"] = desc
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPCreateWorkflow, payload)
+	}
+}
+
+func (s *Server) updateWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workflowID, err := req.RequireString("workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		payload := map[string]interface{}{"workflow_id": workflowID}
+		if name := req.GetString("name", ""); name != "" {
+			payload["name"] = name
+		}
+		if desc := req.GetString("description", ""); desc != "" {
+			payload["description"] = desc
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPUpdateWorkflow, payload)
+	}
+}
+
+func (s *Server) deleteWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workflowID, err := req.RequireString("workflow_id")
+		if err != nil {
+			return mcp.NewToolResultError("workflow_id is required"), nil
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkflow, map[string]string{"workflow_id": workflowID})
+	}
+}
 
 func (s *Server) createWorkflowStepHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

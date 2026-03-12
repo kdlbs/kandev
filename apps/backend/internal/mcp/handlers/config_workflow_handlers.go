@@ -4,11 +4,80 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+func (h *Handlers) handleCreateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	if req.Name == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
+	}
+
+	workflow, err := h.taskSvc.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
+		WorkspaceID: req.WorkspaceID,
+		Name:        req.Name,
+		Description: req.Description,
+	})
+	if err != nil {
+		h.logger.Error("failed to create workflow", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create workflow", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, workflow)
+}
+
+func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkflowID  string  `json:"workflow_id"`
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
+	}
+
+	workflow, err := h.taskSvc.UpdateWorkflow(ctx, req.WorkflowID, &service.UpdateWorkflowRequest{
+		Name:        req.Name,
+		Description: req.Description,
+	})
+	if err != nil {
+		h.logger.Error("failed to update workflow", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, workflow)
+}
+
+func (h *Handlers) handleDeleteWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	workflowID, err := unmarshalStringField(msg.Payload, "workflow_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if workflowID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
+	}
+
+	if err := h.taskSvc.DeleteWorkflow(ctx, workflowID); err != nil {
+		h.logger.Error("failed to delete workflow", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {

@@ -65,6 +65,9 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	// Verify canonical constants in pkg/websocket match the expected WS action strings.
+	assert.Equal(t, "mcp.create_workflow", ws.ActionMCPCreateWorkflow)
+	assert.Equal(t, "mcp.update_workflow", ws.ActionMCPUpdateWorkflow)
+	assert.Equal(t, "mcp.delete_workflow", ws.ActionMCPDeleteWorkflow)
 	assert.Equal(t, "mcp.create_workflow_step", ws.ActionMCPCreateWorkflowStep)
 	assert.Equal(t, "mcp.update_workflow_step", ws.ActionMCPUpdateWorkflowStep)
 	assert.Equal(t, "mcp.delete_workflow_step", ws.ActionMCPDeleteWorkflowStep)
@@ -86,6 +89,99 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 }
 
 // --- Workflow handler tests ---
+
+func TestCreateWorkflowHandler_Success(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "wf-1", "name": "Sprint Board"},
+	}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "create_workflow", map[string]interface{}{
+		"workspace_id": "ws-123",
+		"name":         "Sprint Board",
+		"description":  "A sprint workflow",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCreateWorkflow, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ws-123", payload["workspace_id"])
+	assert.Equal(t, "Sprint Board", payload["name"])
+	assert.Equal(t, "A sprint workflow", payload["description"])
+}
+
+func TestCreateWorkflowHandler_MissingWorkspaceID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "create_workflow", map[string]interface{}{
+		"name": "Sprint Board",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestCreateWorkflowHandler_MissingName(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "create_workflow", map[string]interface{}{
+		"workspace_id": "ws-123",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestUpdateWorkflowHandler_Success(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "wf-1", "name": "Updated"},
+	}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "update_workflow", map[string]interface{}{
+		"workflow_id": "wf-1",
+		"name":        "Updated",
+		"description": "New description",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPUpdateWorkflow, backend.lastAction)
+}
+
+func TestUpdateWorkflowHandler_MissingWorkflowID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "update_workflow", map[string]interface{}{
+		"name": "Updated",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestDeleteWorkflowHandler_Success(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"success": true},
+	}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "delete_workflow", map[string]interface{}{
+		"workflow_id": "wf-1",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPDeleteWorkflow, backend.lastAction)
+}
+
+func TestDeleteWorkflowHandler_MissingWorkflowID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "delete_workflow", map[string]interface{}{})
+
+	assert.True(t, result.IsError)
+}
 
 func TestCreateWorkflowStepHandler_Success(t *testing.T) {
 	backend := &testBackend{

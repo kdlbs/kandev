@@ -97,6 +97,9 @@ Session ID: %s
 WORKFLOW TOOLS:
 - list_workspaces_kandev: List all workspaces to get workspace IDs.
 - list_workflows_kandev: List workflows in a workspace. Required: workspace_id.
+- create_workflow_kandev: Create a new workflow. Required: workspace_id, name. Optional: description.
+- update_workflow_kandev: Update a workflow. Required: workflow_id. Optional: name, description.
+- delete_workflow_kandev: Delete a workflow and all its steps (destructive). Required: workflow_id.
 - list_workflow_steps_kandev: List workflow steps (columns) in a workflow. Required: workflow_id.
 - create_workflow_step_kandev: Create a new workflow step. Required: workflow_id, name. Optional: position, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, events.
 - update_workflow_step_kandev: Update a workflow step. Required: step_id. Optional: name, color, prompt, is_start_step, allow_manual_move, show_in_command_panel, auto_archive_after_hours, events.
@@ -123,6 +126,7 @@ INTERACTION:
 - ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
 
 EXAMPLE REQUESTS the user might ask:
+- "Create a new workflow called 'Feature Development'"
 - "Add a 'Code Review' step to my workflow"
 - "Create a new agent profile for Claude with auto-approve enabled"
 - "Show me the current workflow steps"

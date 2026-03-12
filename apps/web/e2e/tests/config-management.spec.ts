@@ -123,6 +123,67 @@ test.describe("Config-mode MCP — workflow management", () => {
     expect(deploy!.events?.on_enter).toEqual([{ type: "auto_start_agent" }]);
   });
 
+  test("agent can create, update, and delete a workflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Create a workflow via MCP tool
+    const createSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Creating workflow...")',
+        `e2e:mcp:kandev:create_workflow({"workspace_id":"${seedData.workspaceId}","name":"E2E Workflow","description":"Created by E2E test"})`,
+        'e2e:message("Workflow created")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, createSession.session_id, "Workflow created");
+
+    // Verify workflow was created via API
+    const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+    const created = workflows.find((w) => w.name === "E2E Workflow");
+    expect(created).toBeTruthy();
+    expect(created!.description).toBe("Created by E2E test");
+
+    // Update the workflow via MCP tool
+    const updateSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Updating workflow...")',
+        `e2e:mcp:kandev:update_workflow({"workflow_id":"${created!.id}","name":"Updated Workflow","description":"Updated description"})`,
+        'e2e:message("Workflow updated")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, updateSession.session_id, "Workflow updated");
+
+    // Verify via API
+    const { workflows: afterUpdate } = await apiClient.listWorkflows(seedData.workspaceId);
+    const updated = afterUpdate.find((w) => w.id === created!.id);
+    expect(updated?.name).toBe("Updated Workflow");
+    expect(updated?.description).toBe("Updated description");
+
+    // Delete the workflow via MCP tool
+    const deleteSession = await startConfigSession(
+      apiClient,
+      seedData,
+      [
+        'e2e:message("Deleting workflow...")',
+        `e2e:mcp:kandev:delete_workflow({"workflow_id":"${created!.id}"})`,
+        'e2e:message("Workflow deleted")',
+      ].join("\n"),
+    );
+
+    await runAndWait(testPage, deleteSession.session_id, "Workflow deleted");
+
+    // Verify workflow was deleted via API
+    const { workflows: afterDelete } = await apiClient.listWorkflows(seedData.workspaceId);
+    expect(afterDelete.find((w) => w.id === created!.id)).toBeUndefined();
+  });
+
   test("agent can update a workflow step", async ({ testPage, apiClient, seedData }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Update Step Workflow");
     const step = await apiClient.createWorkflowStep(workflow.id, "Draft", 0);

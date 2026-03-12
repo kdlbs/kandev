@@ -225,7 +225,7 @@ func (s *Server) registerTools() {
 	switch s.mode {
 	case ModeConfig:
 		s.registerConfigWorkflowTools()
-		count += 5
+		count += 8
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()

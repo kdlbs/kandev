@@ -53,6 +53,9 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "ask_user_question")
 
 	// Task mode should NOT have config tools
+	assert.NotContains(t, tools, "create_workflow")
+	assert.NotContains(t, tools, "update_workflow")
+	assert.NotContains(t, tools, "delete_workflow")
 	assert.NotContains(t, tools, "create_workflow_step")
 	assert.NotContains(t, tools, "update_workflow_step")
 	assert.NotContains(t, tools, "list_agents")
@@ -81,6 +84,9 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	// Config mode should have workflow config tools
 	assert.Contains(t, tools, "list_workspaces")
 	assert.Contains(t, tools, "list_workflows")
+	assert.Contains(t, tools, "create_workflow")
+	assert.Contains(t, tools, "update_workflow")
+	assert.Contains(t, tools, "delete_workflow")
 	assert.Contains(t, tools, "list_workflow_steps")
 	assert.Contains(t, tools, "create_workflow_step")
 	assert.Contains(t, tools, "update_workflow_step")
@@ -172,8 +178,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 5 workflow + 4 agent + 4 mcp + 4 task + 1 interaction = 18
-	assert.Equal(t, 18, len(tools))
+	// 8 workflow + 4 agent + 4 mcp + 4 task + 1 interaction = 21
+	assert.Equal(t, 21, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
