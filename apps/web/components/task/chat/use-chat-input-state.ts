@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect, useMemo } from "react";
+import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo } from "react";
 import {
   getChatDraftText,
   setChatDraftText,
@@ -68,9 +68,10 @@ function useAttachments(sessionId: string | null) {
   );
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
+  const prevPersistSessionIdRef = useRef(sessionId);
 
-  // Reset attachments from storage when session changes
-  useEffect(() => {
+  // Reset attachments from storage when session changes (runs before paint)
+  useLayoutEffect(() => {
     if (sessionId === prevSessionIdRef.current) return;
     prevSessionIdRef.current = sessionId;
     const newAttachments = sessionId
@@ -84,6 +85,11 @@ function useAttachments(sessionId: string | null) {
 
   // Persist attachments to storage when they change (for the same session)
   useEffect(() => {
+    // Skip first invocation after session change to avoid overwriting freshly loaded attachments
+    if (sessionId !== prevPersistSessionIdRef.current) {
+      prevPersistSessionIdRef.current = sessionId;
+      return;
+    }
     attachmentsRef.current = attachments;
     if (sessionId) setChatDraftAttachments(sessionId, attachments);
   }, [attachments, sessionId]);
@@ -141,8 +147,8 @@ export function useChatInputState({
   const { attachments, attachmentsRef, setAttachments, addFiles, handleRemoveAttachment } =
     useAttachments(sessionId);
 
-  // Reset text value from storage when session changes
-  useEffect(() => {
+  // Reset text value from storage when session changes (runs before paint)
+  useLayoutEffect(() => {
     if (sessionId === prevTextSessionIdRef.current) return;
     prevTextSessionIdRef.current = sessionId;
     /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
