@@ -323,9 +323,6 @@ const (
 	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
-	ActionMCPCreateExecutor        = "mcp.create_executor"
-	ActionMCPUpdateExecutor        = "mcp.update_executor"
-	ActionMCPDeleteExecutor        = "mcp.delete_executor"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"
 	ActionMCPCreateExecutorProfile = "mcp.create_executor_profile"
 	ActionMCPUpdateExecutorProfile = "mcp.update_executor_profile"

@@ -177,35 +177,6 @@ func (s *Server) registerConfigExecutorTools() {
 		s.wrapHandler("list_executors", s.listExecutorsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("create_executor",
-			mcp.WithDescription("Create a new executor."),
-			mcp.WithString("name", mcp.Required(), mcp.Description("Executor name")),
-			mcp.WithString("type", mcp.Required(), mcp.Description("Executor type: local_pc, local_docker, sprites, worktree")),
-			mcp.WithString("status", mcp.Description("Executor status: active or disabled (default: active)")),
-			mcp.WithBoolean("resumable", mcp.Description("Whether sessions can be resumed on this executor")),
-			mcp.WithObject("config", mcp.Description("Key-value configuration map")),
-		),
-		s.wrapHandler("create_executor", s.createExecutorHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("update_executor",
-			mcp.WithDescription("Update an existing executor."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
-			mcp.WithString("name", mcp.Description("New executor name")),
-			mcp.WithString("status", mcp.Description("New status: active or disabled")),
-			mcp.WithBoolean("resumable", mcp.Description("Whether sessions can be resumed")),
-			mcp.WithObject("config", mcp.Description("Key-value configuration map")),
-		),
-		s.wrapHandler("update_executor", s.updateExecutorHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("delete_executor",
-			mcp.WithDescription("Delete an executor. Fails if active sessions exist."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID to delete")),
-		),
-		s.wrapHandler("delete_executor", s.deleteExecutorHandler()),
-	)
-	s.mcpServer.AddTool(
 		mcp.NewTool("list_executor_profiles",
 			mcp.WithDescription("List all profiles for an executor."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
@@ -560,68 +531,6 @@ func (s *Server) archiveTaskHandler() server.ToolHandlerFunc {
 func (s *Server) listExecutorsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return s.forwardToBackend(ctx, ws.ActionMCPListExecutors, nil)
-	}
-}
-
-func (s *Server) createExecutorHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name, err := req.RequireString("name")
-		if err != nil {
-			return mcp.NewToolResultError("name is required"), nil
-		}
-		execType, err := req.RequireString("type")
-		if err != nil {
-			return mcp.NewToolResultError("type is required"), nil
-		}
-		payload := map[string]interface{}{
-			"name": name,
-			"type": execType,
-		}
-		if status := req.GetString("status", ""); status != "" {
-			payload["status"] = status
-		}
-		args := req.GetArguments()
-		if args["resumable"] != nil {
-			payload["resumable"] = args["resumable"]
-		}
-		if args["config"] != nil {
-			payload["config"] = args["config"]
-		}
-		return s.forwardToBackend(ctx, ws.ActionMCPCreateExecutor, payload)
-	}
-}
-
-func (s *Server) updateExecutorHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		executorID, err := req.RequireString("executor_id")
-		if err != nil {
-			return mcp.NewToolResultError("executor_id is required"), nil
-		}
-		payload := map[string]interface{}{"executor_id": executorID}
-		if name := req.GetString("name", ""); name != "" {
-			payload["name"] = name
-		}
-		if status := req.GetString("status", ""); status != "" {
-			payload["status"] = status
-		}
-		args := req.GetArguments()
-		if args["resumable"] != nil {
-			payload["resumable"] = args["resumable"]
-		}
-		if args["config"] != nil {
-			payload["config"] = args["config"]
-		}
-		return s.forwardToBackend(ctx, ws.ActionMCPUpdateExecutor, payload)
-	}
-}
-
-func (s *Server) deleteExecutorHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		executorID, err := req.RequireString("executor_id")
-		if err != nil {
-			return mcp.NewToolResultError("executor_id is required"), nil
-		}
-		return s.forwardToBackend(ctx, ws.ActionMCPDeleteExecutor, map[string]string{"executor_id": executorID})
 	}
 }
 

@@ -162,14 +162,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		// Executor config handlers (gated on config-mode via workflowSvc)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
-			d.RegisterFunc(ws.ActionMCPCreateExecutor, h.handleCreateExecutor)
-			d.RegisterFunc(ws.ActionMCPUpdateExecutor, h.handleUpdateExecutor)
-			d.RegisterFunc(ws.ActionMCPDeleteExecutor, h.handleDeleteExecutor)
 			d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 8
+			count += 5
 		}
 	}
 

@@ -528,51 +528,14 @@ test.describe("Config-mode MCP — executor management", () => {
     await expect(page.chat.getByText("list_executors")).toBeVisible({ timeout: 10_000 });
   });
 
-  test("agent can create and delete an executor", async ({ testPage, apiClient, seedData }) => {
-    // Create executor via MCP
-    const createSession = await startConfigSession(
-      apiClient,
-      seedData,
-      [
-        'e2e:message("Creating executor...")',
-        'e2e:mcp:kandev:create_executor({"name":"E2E Docker Executor","type":"local_docker"})',
-        'e2e:message("Executor created")',
-      ].join("\n"),
-    );
-
-    await runAndWait(testPage, createSession.session_id, "Executor created");
-
-    // Verify via API
-    const { executors } = await apiClient.listExecutors();
-    const created = executors.find((e) => e.name === "E2E Docker Executor");
-    expect(created).toBeTruthy();
-    expect(created!.type).toBe("local_docker");
-
-    // Delete executor via MCP
-    const deleteSession = await startConfigSession(
-      apiClient,
-      seedData,
-      [
-        'e2e:message("Deleting executor...")',
-        `e2e:mcp:kandev:delete_executor({"executor_id":"${created!.id}"})`,
-        'e2e:message("Executor deleted")',
-      ].join("\n"),
-    );
-
-    await runAndWait(testPage, deleteSession.session_id, "Executor deleted");
-
-    // Verify deleted
-    const { executors: afterDelete } = await apiClient.listExecutors();
-    expect(afterDelete.find((e) => e.id === created!.id)).toBeUndefined();
-  });
-
   test("agent can create and delete an executor profile", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // Create an executor via API for the profile
-    const executor = await apiClient.createExecutor("Profile Test Executor", "local_docker");
+    // Use the system "Local" executor for the profile
+    const { executors } = await apiClient.listExecutors();
+    const executor = executors.find((e) => e.type === "local")!;
 
     // Create profile via MCP
     const createSession = await startConfigSession(

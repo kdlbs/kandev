@@ -32,9 +32,6 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_agent_profile_kandev",
 		"delete_agent_profile_kandev",
 		"list_executors_kandev",
-		"create_executor_kandev",
-		"update_executor_kandev",
-		"delete_executor_kandev",
 		"list_executor_profiles_kandev",
 		"create_executor_profile_kandev",
 		"update_executor_profile_kandev",
@@ -58,7 +55,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext, "WORKFLOW TOOLS:")
 	assert.Contains(t, ConfigContext, "AGENT TOOLS:")
-	assert.Contains(t, ConfigContext, "EXECUTOR TOOLS:")
+	assert.Contains(t, ConfigContext, "EXECUTOR PROFILE TOOLS:")
 	assert.Contains(t, ConfigContext, "MCP CONFIG TOOLS:")
 	assert.Contains(t, ConfigContext, "TASK TOOLS:")
 	assert.Contains(t, ConfigContext, "INTERACTION:")

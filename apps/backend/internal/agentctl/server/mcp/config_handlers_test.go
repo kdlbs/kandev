@@ -83,9 +83,6 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.get_mcp_config", ws.ActionMCPGetMcpConfig)
 	assert.Equal(t, "mcp.update_mcp_config", ws.ActionMCPUpdateMcpConfig)
 	assert.Equal(t, "mcp.list_executors", ws.ActionMCPListExecutors)
-	assert.Equal(t, "mcp.create_executor", ws.ActionMCPCreateExecutor)
-	assert.Equal(t, "mcp.update_executor", ws.ActionMCPUpdateExecutor)
-	assert.Equal(t, "mcp.delete_executor", ws.ActionMCPDeleteExecutor)
 	assert.Equal(t, "mcp.list_executor_profiles", ws.ActionMCPListExecutorProfiles)
 	assert.Equal(t, "mcp.create_executor_profile", ws.ActionMCPCreateExecutorProfile)
 	assert.Equal(t, "mcp.update_executor_profile", ws.ActionMCPUpdateExecutorProfile)
@@ -528,96 +525,6 @@ func TestListExecutorsHandler_Success(t *testing.T) {
 
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPListExecutors, backend.lastAction)
-}
-
-func TestCreateExecutorHandler_Success(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"id": "exec-1", "name": "My Docker"},
-	}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "create_executor", map[string]interface{}{
-		"name": "My Docker",
-		"type": "local_docker",
-	})
-
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPCreateExecutor, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "My Docker", payload["name"])
-	assert.Equal(t, "local_docker", payload["type"])
-}
-
-func TestCreateExecutorHandler_MissingName(t *testing.T) {
-	backend := &testBackend{}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "create_executor", map[string]interface{}{
-		"type": "local_docker",
-	})
-
-	assert.True(t, result.IsError)
-}
-
-func TestCreateExecutorHandler_MissingType(t *testing.T) {
-	backend := &testBackend{}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "create_executor", map[string]interface{}{
-		"name": "My Docker",
-	})
-
-	assert.True(t, result.IsError)
-}
-
-func TestUpdateExecutorHandler_Success(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"id": "exec-1", "name": "Updated"},
-	}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "update_executor", map[string]interface{}{
-		"executor_id": "exec-1",
-		"name":        "Updated",
-	})
-
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPUpdateExecutor, backend.lastAction)
-}
-
-func TestUpdateExecutorHandler_MissingExecutorID(t *testing.T) {
-	backend := &testBackend{}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "update_executor", map[string]interface{}{
-		"name": "Updated",
-	})
-
-	assert.True(t, result.IsError)
-}
-
-func TestDeleteExecutorHandler_Success(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"success": true},
-	}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "delete_executor", map[string]interface{}{
-		"executor_id": "exec-1",
-	})
-
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPDeleteExecutor, backend.lastAction)
-}
-
-func TestDeleteExecutorHandler_MissingExecutorID(t *testing.T) {
-	backend := &testBackend{}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "delete_executor", map[string]interface{}{})
-
-	assert.True(t, result.IsError)
 }
 
 func TestListExecutorProfilesHandler_Success(t *testing.T) {
