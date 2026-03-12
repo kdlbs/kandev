@@ -1,7 +1,14 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { IconStack2, IconPlus, IconStar } from "@tabler/icons-react";
+import {
+  IconStack2,
+  IconPlus,
+  IconStar,
+  IconPlayerStopFilled,
+  IconPlayerPlayFilled,
+  IconTrash,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -19,6 +26,7 @@ import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -87,7 +95,6 @@ type SessionsDropdownProps = {
   taskId: string | null;
   activeSessionId?: string | null;
   taskTitle?: string;
-  taskDescription?: string;
   primarySessionId?: string | null;
   onSetPrimary?: (sessionId: string) => void;
 };
@@ -124,11 +131,61 @@ function useSessionSelectionHandlers(taskId: string | null) {
   return { handleSelectSession };
 }
 
+function useSessionLifecycleActions(taskId: string | null, loadSessions: (force?: boolean) => void) {
+  const handleStopSession = useCallback(
+    async (sessionId: string) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request("session.stop", { session_id: sessionId }, 15000);
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to stop session:", error);
+      }
+    },
+    [loadSessions],
+  );
+
+  const handleResumeSession = useCallback(
+    async (sessionId: string) => {
+      if (!taskId) return;
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request(
+          "session.launch",
+          { task_id: taskId, intent: "resume", session_id: sessionId },
+          30000,
+        );
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to resume session:", error);
+      }
+    },
+    [taskId, loadSessions],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      try {
+        await client.request("session.delete", { session_id: sessionId }, 15000);
+        loadSessions(true);
+      } catch (error) {
+        console.error("Failed to delete session:", error);
+      }
+    },
+    [loadSessions],
+  );
+
+  return { handleStopSession, handleResumeSession, handleDeleteSession };
+}
+
 export const SessionsDropdown = memo(function SessionsDropdown({
   taskId,
   activeSessionId = null,
   taskTitle = "",
-  taskDescription = "",
   primarySessionId = null,
   onSetPrimary,
 }: SessionsDropdownProps) {
@@ -138,6 +195,8 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
   const currentTime = useRunningSessionsClock(sessions);
+  const { handleStopSession, handleResumeSession, handleDeleteSession } =
+    useSessionLifecycleActions(taskId, loadSessions);
 
   const agentLabelsById = useMemo(() => {
     return Object.fromEntries(
@@ -197,6 +256,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           onSelectSession={(sessionId) => handleSelectSession(sessionId, () => setOpen(false))}
           onSetPrimary={onSetPrimary}
           onNewSession={() => setShowNewSessionDialog(true)}
+          onStopSession={handleStopSession}
+          onResumeSession={handleResumeSession}
+          onDeleteSession={handleDeleteSession}
         />
       </DropdownMenu>
       <NewSessionDialog
@@ -204,11 +266,16 @@ export const SessionsDropdown = memo(function SessionsDropdown({
         onOpenChange={setShowNewSessionDialog}
         taskId={taskId}
         taskTitle={taskTitle}
-        taskDescription={taskDescription}
       />
     </>
   );
 });
+
+type SessionLifecycleCallbacks = {
+  onStopSession: (sessionId: string) => void;
+  onResumeSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+};
 
 /** Dropdown content with header and session list */
 function SessionDropdownContent({
@@ -220,6 +287,9 @@ function SessionDropdownContent({
   onSelectSession,
   onSetPrimary,
   onNewSession,
+  onStopSession,
+  onResumeSession,
+  onDeleteSession,
 }: {
   sortedSessions: TaskSession[];
   activeSessionId: string | null;
@@ -229,7 +299,7 @@ function SessionDropdownContent({
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
-}) {
+} & SessionLifecycleCallbacks) {
   return (
     <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
       <div className="flex items-center justify-between px-2 py-0">
@@ -252,24 +322,25 @@ function SessionDropdownContent({
         resolveAgentLabel={resolveAgentLabel}
         onSelectSession={onSelectSession}
         onSetPrimary={onSetPrimary}
+        onStopSession={onStopSession}
+        onResumeSession={onResumeSession}
+        onDeleteSession={onDeleteSession}
       />
     </DropdownMenuContent>
   );
 }
 
-/** New session dialog wrapper */
+/** New session dialog wrapper — prompt is intentionally empty (not pre-filled with the original task prompt) */
 function NewSessionDialog({
   open,
   onOpenChange,
   taskId,
   taskTitle,
-  taskDescription,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string | null;
   taskTitle: string;
-  taskDescription: string;
 }) {
   return (
     <TaskCreateDialog
@@ -281,7 +352,7 @@ function NewSessionDialog({
       defaultStepId={null}
       steps={[]}
       taskId={taskId}
-      initialValues={{ title: taskTitle, description: taskDescription }}
+      initialValues={{ title: taskTitle, description: "" }}
     />
   );
 }
@@ -295,6 +366,9 @@ function SessionDropdownList({
   resolveAgentLabel,
   onSelectSession,
   onSetPrimary,
+  onStopSession,
+  onResumeSession,
+  onDeleteSession,
 }: {
   sessions: TaskSession[];
   activeSessionId: string | null;
@@ -303,7 +377,7 @@ function SessionDropdownList({
   resolveAgentLabel: (session: TaskSession) => string;
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
-}) {
+} & SessionLifecycleCallbacks) {
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
@@ -325,11 +399,26 @@ function SessionDropdownList({
             agentLabel={resolveAgentLabel(session)}
             onSelect={onSelectSession}
             onSetPrimary={onSetPrimary}
+            onStop={onStopSession}
+            onResume={onResumeSession}
+            onDelete={onDeleteSession}
           />
         ))}
       </div>
     </div>
   );
+}
+
+function isSessionStoppable(state: TaskSessionState): boolean {
+  return state === "RUNNING" || state === "STARTING" || state === "WAITING_FOR_INPUT";
+}
+
+function isSessionResumable(state: TaskSessionState): boolean {
+  return state === "COMPLETED" || state === "FAILED" || state === "CANCELLED";
+}
+
+function isSessionDeletable(state: TaskSessionState): boolean {
+  return state !== "RUNNING" && state !== "STARTING";
 }
 
 /** Individual session row in the dropdown */
@@ -342,6 +431,9 @@ function SessionRow({
   agentLabel,
   onSelect,
   onSetPrimary,
+  onStop,
+  onResume,
+  onDelete,
 }: {
   session: TaskSession;
   number: number;
@@ -351,6 +443,9 @@ function SessionRow({
   agentLabel: string;
   onSelect: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
+  onStop: (sessionId: string) => void;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
 }) {
   const status = mapSessionStatus(session.state);
   const duration = formatDuration(session.started_at, status === "running", currentTime);
@@ -369,23 +464,14 @@ function SessionRow({
       {showDuration && (
         <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{duration}</span>
       )}
-      {!isPrimary && onSetPrimary && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSetPrimary(session.id);
-              }}
-              className="w-5 shrink-0 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors"
-            >
-              <IconStar className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left">Set as Primary</TooltipContent>
-        </Tooltip>
-      )}
+      <SessionRowActions
+        session={session}
+        isPrimary={isPrimary}
+        onSetPrimary={onSetPrimary}
+        onStop={onStop}
+        onResume={onResume}
+        onDelete={onDelete}
+      />
       <div className="w-5 shrink-0 flex items-center justify-center">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -394,6 +480,101 @@ function SessionRow({
           <TooltipContent side="left">{getStatusLabel(status)}</TooltipContent>
         </Tooltip>
       </div>
+    </div>
+  );
+}
+
+/** Inline action buttons for a session row */
+function SessionRowActions({
+  session,
+  isPrimary,
+  onSetPrimary,
+  onStop,
+  onResume,
+  onDelete,
+}: {
+  session: TaskSession;
+  isPrimary: boolean;
+  onSetPrimary?: (sessionId: string) => void;
+  onStop: (sessionId: string) => void;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
+}) {
+  const stopAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onStop(session.id);
+  };
+  const resumeAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onResume(session.id);
+  };
+  const deleteAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete(session.id);
+  };
+  const primaryAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSetPrimary?.(session.id);
+  };
+
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {!isPrimary && onSetPrimary && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={primaryAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-amber-500 transition-colors cursor-pointer"
+            >
+              <IconStar className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Set as Primary</TooltipContent>
+        </Tooltip>
+      )}
+      {isSessionStoppable(session.state) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={stopAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <IconPlayerStopFilled className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Stop session</TooltipContent>
+        </Tooltip>
+      )}
+      {isSessionResumable(session.state) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={resumeAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-green-500 transition-colors cursor-pointer"
+            >
+              <IconPlayerPlayFilled className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Resume session</TooltipContent>
+        </Tooltip>
+      )}
+      {isSessionDeletable(session.state) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={deleteAction}
+              className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <IconTrash className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Delete session</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }

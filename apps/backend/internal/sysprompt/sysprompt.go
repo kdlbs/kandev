@@ -196,6 +196,26 @@ func InjectPlanMode(prompt string) string {
 	return Wrap(PlanMode) + "\n\n" + prompt
 }
 
+// SessionHandoverContext is injected when a new session starts for a task that
+// already has previous sessions. It gives the agent awareness of prior work.
+const SessionHandoverContext = `CONTEXT FROM PREVIOUS SESSIONS:
+This task has had %d previous session(s). You are starting a new session on the same workspace.
+Any code changes from previous sessions are already present in the working directory.
+%s
+Review the current state of the codebase before making changes — previous sessions may have
+already completed part of the work. Do not repeat work that is already done.`
+
+// FormatSessionHandover formats the session handover context.
+// planSection should be pre-formatted (empty string if no plan exists).
+func FormatSessionHandover(sessionCount int, planSection string) string {
+	return fmt.Sprintf(SessionHandoverContext, sessionCount, planSection)
+}
+
+// InjectSessionHandover prepends session handover context to a prompt, wrapped in system tags.
+func InjectSessionHandover(sessionCount int, planSection, prompt string) string {
+	return Wrap(FormatSessionHandover(sessionCount, planSection)) + "\n\n" + prompt
+}
+
 // InterpolatePlaceholders replaces placeholders in prompt templates with actual values.
 // Supported placeholders:
 //   - {task_id} - the task ID
