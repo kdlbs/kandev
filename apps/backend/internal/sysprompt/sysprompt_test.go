@@ -44,6 +44,7 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"move_task_kandev",
 		"delete_task_kandev",
 		"archive_task_kandev",
+		"update_task_state_kandev",
 		"ask_user_question_kandev",
 	}
 

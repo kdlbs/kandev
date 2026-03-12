@@ -534,7 +534,7 @@ test.describe("Config-mode MCP — executor management", () => {
     seedData,
   }) => {
     // Use the system "Local" executor for the profile
-    const { executors } = await apiClient.listExecutors();
+    let { executors } = await apiClient.listExecutors();
     const executor = executors.find((e) => e.type === "local")!;
 
     // Create profile via MCP
@@ -551,7 +551,7 @@ test.describe("Config-mode MCP — executor management", () => {
     await runAndWait(testPage, createSession.session_id, "Executor profile created");
 
     // Verify via API
-    const { executors } = await apiClient.listExecutors();
+    ({ executors } = await apiClient.listExecutors());
     const exec = executors.find((e) => e.id === executor.id);
     const profile = exec?.profiles?.find((p) => p.name === "E2E Profile");
     expect(profile).toBeTruthy();

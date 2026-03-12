@@ -148,9 +148,12 @@ function buildConfigChatActions(set: ImmerSet) {
         );
         if (draft.configChat.activeSessionId === sessionId) {
           if (draft.configChat.sessions.length > 0) {
-            draft.configChat.activeSessionId = draft.configChat.sessions[0].sessionId;
+            const next = draft.configChat.sessions[0];
+            draft.configChat.activeSessionId = next.sessionId;
+            draft.configChat.workspaceId = next.workspaceId;
           } else {
             draft.configChat.activeSessionId = null;
+            draft.configChat.workspaceId = null;
           }
         }
       }),
