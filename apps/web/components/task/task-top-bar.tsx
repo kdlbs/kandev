@@ -2,11 +2,7 @@
 
 import { memo, useCallback } from "react";
 import Link from "next/link";
-import {
-  IconBug,
-  IconHome,
-  IconSettings,
-} from "@tabler/icons-react";
+import { IconBug, IconHome, IconSettings } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Breadcrumb,

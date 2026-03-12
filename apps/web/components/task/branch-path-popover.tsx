@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import {
-  IconGitBranch,
-  IconCopy,
-  IconCheck,
-  IconPencil,
-} from "@tabler/icons-react";
+import { IconGitBranch, IconCopy, IconCheck, IconPencil } from "@tabler/icons-react";
 import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
