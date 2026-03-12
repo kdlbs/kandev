@@ -344,7 +344,10 @@ function KanbanCardMenu({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => onDelete?.(task)}
+              onClick={() => {
+                onDelete?.(task);
+                setShowDeleteConfirm(false);
+              }}
             >
               {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
               Delete
