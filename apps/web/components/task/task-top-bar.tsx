@@ -324,6 +324,8 @@ function BranchPathPopover({
 }) {
   const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const recentlyClosedRef = useRef(false);
   const {
     isEditing,
     editValue,
@@ -341,6 +343,25 @@ function BranchPathPopover({
     [startEdit],
   );
 
+  const handlePopoverOpenChange = useCallback((open: boolean) => {
+    setPopoverOpen(open);
+    if (!open) {
+      recentlyClosedRef.current = true;
+      setTooltipOpen(false);
+      setTimeout(() => {
+        recentlyClosedRef.current = false;
+      }, 200);
+    }
+  }, []);
+
+  const handleTooltipOpenChange = useCallback(
+    (open: boolean) => {
+      if (open && (popoverOpen || recentlyClosedRef.current)) return;
+      setTooltipOpen(open);
+    },
+    [popoverOpen],
+  );
+
   if (!displayBranch) return null;
 
   if (isEditing) {
@@ -356,8 +377,8 @@ function BranchPathPopover({
   }
 
   return (
-    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-      <Tooltip>
+    <Popover open={popoverOpen} onOpenChange={handlePopoverOpenChange}>
+      <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-full">

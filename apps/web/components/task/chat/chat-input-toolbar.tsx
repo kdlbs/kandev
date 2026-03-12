@@ -34,7 +34,6 @@ import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
-import { ConfigOptionsDisplay } from "@/components/task/config-options-display";
 import { ContextPopover } from "./context-popover";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
@@ -344,9 +343,7 @@ function ToolbarRightSection({
         />
       )}
       <TokenUsageDisplay sessionId={sessionId} />
-      <ModeSelector sessionId={sessionId} />
       <ModelSelector sessionId={sessionId} />
-      <ConfigOptionsDisplay sessionId={sessionId} />
       {/* AuthMethodsIndicator hidden — UX needs rethinking */}
       {showEnhance && (
         <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />
@@ -447,6 +444,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
           contextFiles={contextFiles}
           onToggleFile={onToggleFile ?? (() => {})}
         />
+        <ModeSelector sessionId={sessionId} />
       </div>
 
       <div className="flex-1" />
