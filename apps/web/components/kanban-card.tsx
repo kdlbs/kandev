@@ -181,7 +181,7 @@ function KanbanCardActions({
   | "isArchiving"
 >) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const effectiveMenuOpen = menuOpen || isDeleting || isArchiving;
+  const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4");
   const hasKnownSession =
     Boolean(task.primarySessionId) ||
@@ -245,10 +245,12 @@ function DeleteConfirmDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            disabled={isDeleting}
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={() => {
+              if (isDeleting) return;
               onConfirm();
               onOpenChange(false);
             }}
@@ -317,7 +319,7 @@ function KanbanCardMenu({
   steps,
 }: {
   task: Task;
-  effectiveMenuOpen: boolean | undefined;
+  effectiveMenuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   isDeleting?: boolean;
   isArchiving?: boolean;
@@ -363,16 +365,18 @@ function KanbanCardMenu({
           {steps && steps.length > 1 && onMove && (
             <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
           )}
-          <DropdownMenuItem
-            disabled={isProcessing}
-            onClick={(event) => {
-              event.stopPropagation();
-              onArchive?.(task);
-            }}
-          >
-            {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Archive
-          </DropdownMenuItem>
+          {onArchive && (
+            <DropdownMenuItem
+              disabled={isProcessing}
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchive(task);
+              }}
+            >
+              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Archive
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={isProcessing}
