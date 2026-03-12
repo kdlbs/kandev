@@ -301,7 +301,14 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
 	// Load the target step to check auto-start and plan mode flags
 	step, err := s.workflowStepGetter.GetStep(ctx, data.ToStepID)
-	if err != nil || step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+	if err != nil {
+		s.logger.Warn("task.moved: failed to load target step",
+			zap.String("task_id", data.TaskID),
+			zap.String("to_step_id", data.ToStepID),
+			zap.Error(err))
+		return
+	}
+	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
 		s.logger.Debug("task.moved: no session and target step has no auto-start",
 			zap.String("task_id", data.TaskID),
 			zap.String("to_step_id", data.ToStepID))

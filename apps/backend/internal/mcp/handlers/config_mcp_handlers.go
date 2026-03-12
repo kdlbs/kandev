@@ -21,7 +21,7 @@ func (h *Handlers) handleGetMcpConfig(ctx context.Context, msg *ws.Message) (*ws
 	config, err := h.mcpConfigSvc.GetConfigByProfileID(ctx, profileID)
 	if err != nil {
 		h.logger.Error("failed to get MCP config", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get MCP config: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get MCP config", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, config)
 }
@@ -43,7 +43,7 @@ func (h *Handlers) handleUpdateMcpConfig(ctx context.Context, msg *ws.Message) (
 	existing, err := h.mcpConfigSvc.GetConfigByProfileID(ctx, req.ProfileID)
 	if err != nil {
 		h.logger.Error("failed to get existing MCP config", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get existing MCP config: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get existing MCP config", nil)
 	}
 
 	if req.Enabled != nil {
@@ -56,7 +56,7 @@ func (h *Handlers) handleUpdateMcpConfig(ctx context.Context, msg *ws.Message) (
 	updated, err := h.mcpConfigSvc.UpsertConfigByProfileID(ctx, req.ProfileID, existing)
 	if err != nil {
 		h.logger.Error("failed to update MCP config", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MCP config: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MCP config", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, updated)
 }

@@ -103,15 +103,21 @@ WORKFLOW TOOLS:
 
 AGENT TOOLS:
 - list_agents_kandev: List all configured agents and their profiles.
-- create_agent_kandev: Create a new agent. Required: name. Optional: workspace_id.
 - update_agent_kandev: Update agent settings. Required: agent_id. Optional: supports_mcp, mcp_config_path.
-- delete_agent_kandev: Delete an agent. Required: agent_id.
+- create_agent_profile_kandev: Create a new agent profile. Required: agent_id, name, model. Optional: auto_approve.
+- delete_agent_profile_kandev: Delete an agent profile. Required: profile_id.
 
 MCP CONFIG TOOLS:
 - list_agent_profiles_kandev: List profiles for an agent. Required: agent_id.
 - update_agent_profile_kandev: Update a profile. Required: profile_id. Optional: name, model, auto_approve.
 - get_mcp_config_kandev: Get MCP server config for a profile. Required: profile_id.
 - update_mcp_config_kandev: Update MCP config for a profile. Required: profile_id. Optional: enabled, servers.
+
+TASK TOOLS:
+- list_tasks_kandev: List all tasks in a workflow. Required: workflow_id.
+- move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id.
+- delete_task_kandev: Delete a task. Required: task_id.
+- archive_task_kandev: Archive a task. Required: task_id.
 
 INTERACTION:
 - ask_user_question_kandev: Ask the user a clarifying question with multiple-choice options. Required: prompt, options.
@@ -121,8 +127,10 @@ EXAMPLE REQUESTS the user might ask:
 - "Create a new agent profile for Claude with auto-approve enabled"
 - "Show me the current workflow steps"
 - "Update the MCP servers for the default agent profile"
+- "Move all completed tasks to the 'Done' column"
+- "Archive old tasks from last month"
 
-IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete) with the user first using ask_user_question_kandev.`
+IMPORTANT: Always list existing resources before creating or modifying. Confirm destructive operations (delete, archive) with the user first using ask_user_question_kandev.`
 
 // FormatConfigContext returns the config context prompt with the session ID injected.
 func FormatConfigContext(sessionID string) string {

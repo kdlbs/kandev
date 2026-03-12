@@ -25,13 +25,17 @@ func TestConfigContext_ContainsAllTools(t *testing.T) {
 		"create_workflow_step_kandev",
 		"update_workflow_step_kandev",
 		"list_agents_kandev",
-		"create_agent_kandev",
 		"update_agent_kandev",
-		"delete_agent_kandev",
+		"create_agent_profile_kandev",
+		"delete_agent_profile_kandev",
 		"list_agent_profiles_kandev",
 		"update_agent_profile_kandev",
 		"get_mcp_config_kandev",
 		"update_mcp_config_kandev",
+		"list_tasks_kandev",
+		"move_task_kandev",
+		"delete_task_kandev",
+		"archive_task_kandev",
 		"ask_user_question_kandev",
 	}
 
@@ -44,6 +48,7 @@ func TestConfigContext_ContainsSections(t *testing.T) {
 	assert.Contains(t, ConfigContext, "WORKFLOW TOOLS:")
 	assert.Contains(t, ConfigContext, "AGENT TOOLS:")
 	assert.Contains(t, ConfigContext, "MCP CONFIG TOOLS:")
+	assert.Contains(t, ConfigContext, "TASK TOOLS:")
 	assert.Contains(t, ConfigContext, "INTERACTION:")
 	assert.Contains(t, ConfigContext, "EXAMPLE REQUESTS")
 }

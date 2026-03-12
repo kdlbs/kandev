@@ -80,7 +80,7 @@ export function useConfigChat(workspaceId: string) {
         });
 
         // Store the prompt so QuickChatContent can send it via WS.
-        if (prompt) setPendingPrompt(prompt);
+        setPendingPrompt(prompt ?? null);
 
         store.openConfigChat(response.session_id, workspaceId);
         store.renameConfigChatSession(response.session_id, prompt?.slice(0, 40) || "Config Chat");
