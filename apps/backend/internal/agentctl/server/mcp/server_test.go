@@ -56,9 +56,9 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "create_workflow_step")
 	assert.NotContains(t, tools, "update_workflow_step")
 	assert.NotContains(t, tools, "list_agents")
-	assert.NotContains(t, tools, "create_agent")
 	assert.NotContains(t, tools, "update_agent")
-	assert.NotContains(t, tools, "delete_agent")
+	assert.NotContains(t, tools, "create_agent_profile")
+	assert.NotContains(t, tools, "delete_agent_profile")
 	assert.NotContains(t, tools, "list_agent_profiles")
 	assert.NotContains(t, tools, "update_agent_profile")
 	assert.NotContains(t, tools, "get_mcp_config")
@@ -87,9 +87,9 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 
 	// Config mode should have agent tools
 	assert.Contains(t, tools, "list_agents")
-	assert.Contains(t, tools, "create_agent")
 	assert.Contains(t, tools, "update_agent")
-	assert.Contains(t, tools, "delete_agent")
+	assert.Contains(t, tools, "create_agent_profile")
+	assert.Contains(t, tools, "delete_agent_profile")
 
 	// Config mode should have MCP config tools
 	assert.Contains(t, tools, "list_agent_profiles")
@@ -172,8 +172,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 5 workflow + 4 agent + 4 mcp + 1 interaction = 14
-	assert.Equal(t, 14, len(tools))
+	// 5 workflow + 4 agent + 4 mcp + 4 task + 1 interaction = 18
+	assert.Equal(t, 18, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {

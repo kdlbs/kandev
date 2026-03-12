@@ -74,7 +74,9 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.update_agent", ws.ActionMCPUpdateAgent)
 	assert.Equal(t, "mcp.delete_agent", ws.ActionMCPDeleteAgent)
 	assert.Equal(t, "mcp.list_agent_profiles", ws.ActionMCPListAgentProfiles)
+	assert.Equal(t, "mcp.create_agent_profile", ws.ActionMCPCreateAgentProfile)
 	assert.Equal(t, "mcp.update_agent_profile", ws.ActionMCPUpdateAgentProfile)
+	assert.Equal(t, "mcp.delete_agent_profile", ws.ActionMCPDeleteAgentProfile)
 	assert.Equal(t, "mcp.get_mcp_config", ws.ActionMCPGetMcpConfig)
 	assert.Equal(t, "mcp.update_mcp_config", ws.ActionMCPUpdateMcpConfig)
 	assert.Equal(t, "mcp.move_task", ws.ActionMCPMoveTask)
@@ -164,41 +166,44 @@ func TestListAgentsHandler_Success(t *testing.T) {
 	assert.Equal(t, ws.ActionMCPListAgents, backend.lastAction)
 }
 
-func TestCreateAgentHandler_Success(t *testing.T) {
+func TestCreateAgentProfileHandler_Success(t *testing.T) {
 	backend := &testBackend{
-		response: map[string]interface{}{"id": "agent-1", "name": "my-agent"},
+		response: map[string]interface{}{"id": "profile-1", "name": "My Profile"},
 	}
 	s := newTestServer(t, backend)
 
-	result := callTool(t, s, "create_agent", map[string]interface{}{
-		"name": "my-agent",
+	result := callTool(t, s, "create_agent_profile", map[string]interface{}{
+		"agent_id": "agent-1",
+		"name":     "My Profile",
+		"model":    "claude-sonnet-4-5-20250514",
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPCreateAgent, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPCreateAgentProfile, backend.lastAction)
 }
 
-func TestCreateAgentHandler_MissingName(t *testing.T) {
+func TestCreateAgentProfileHandler_MissingAgentID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
 
-	result := callTool(t, s, "create_agent", map[string]interface{}{})
+	result := callTool(t, s, "create_agent_profile", map[string]interface{}{
+		"name":  "My Profile",
+		"model": "claude-sonnet-4-5-20250514",
+	})
 
 	assert.True(t, result.IsError)
 }
 
-func TestCreateAgentHandler_WithWorkspaceID(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"id": "agent-1"},
-	}
+func TestCreateAgentProfileHandler_MissingModel(t *testing.T) {
+	backend := &testBackend{}
 	s := newTestServer(t, backend)
 
-	result := callTool(t, s, "create_agent", map[string]interface{}{
-		"name":         "my-agent",
-		"workspace_id": "ws-123",
+	result := callTool(t, s, "create_agent_profile", map[string]interface{}{
+		"agent_id": "agent-1",
+		"name":     "My Profile",
 	})
 
-	assert.False(t, result.IsError)
+	assert.True(t, result.IsError)
 }
 
 func TestUpdateAgentHandler_Success(t *testing.T) {
@@ -227,25 +232,25 @@ func TestUpdateAgentHandler_MissingAgentID(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
-func TestDeleteAgentHandler_Success(t *testing.T) {
+func TestDeleteAgentProfileHandler_Success(t *testing.T) {
 	backend := &testBackend{
-		response: map[string]interface{}{"success": true},
+		response: map[string]interface{}{"id": "profile-1"},
 	}
 	s := newTestServer(t, backend)
 
-	result := callTool(t, s, "delete_agent", map[string]interface{}{
-		"agent_id": "agent-1",
+	result := callTool(t, s, "delete_agent_profile", map[string]interface{}{
+		"profile_id": "profile-1",
 	})
 
 	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPDeleteAgent, backend.lastAction)
+	assert.Equal(t, ws.ActionMCPDeleteAgentProfile, backend.lastAction)
 }
 
-func TestDeleteAgentHandler_MissingAgentID(t *testing.T) {
+func TestDeleteAgentProfileHandler_MissingProfileID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
 
-	result := callTool(t, s, "delete_agent", map[string]interface{}{})
+	result := callTool(t, s, "delete_agent_profile", map[string]interface{}{})
 
 	assert.True(t, result.IsError)
 }
