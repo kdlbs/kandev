@@ -14,8 +14,10 @@ export type ViewContentProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
 };
 

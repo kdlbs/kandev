@@ -27,6 +27,7 @@ export type KanbanBoardGridProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveTask?: (task: Task, targetStepId: string) => void;
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
@@ -34,6 +35,7 @@ export type KanbanBoardGridProps = {
   activeTask: Task | null;
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
   onCreateTask?: () => void;
   isLoading?: boolean;
 };
@@ -46,9 +48,11 @@ type ColumnGridProps = Pick<
   | "onOpenTask"
   | "onEditTask"
   | "onDeleteTask"
+  | "onArchiveTask"
   | "onMoveTask"
   | "showMaximizeButton"
   | "deletingTaskId"
+  | "archivingTaskId"
 >;
 
 function getTasksForStep(tasks: Task[], stepId: string) {
@@ -73,9 +77,11 @@ function MobileLayout({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
   showLoading,
   activeTask,
   onCreateTask,
@@ -114,9 +120,11 @@ function MobileLayout({
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
+              onArchiveTask={onArchiveTask}
               onMoveTask={onMoveTask}
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
+              archivingTaskId={archivingTaskId}
             />
             <MobileDropTargets
               steps={steps}
@@ -143,9 +151,11 @@ function TabletLayout({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
   showLoading,
   activeTask,
 }: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
@@ -165,10 +175,12 @@ function TabletLayout({
                   onOpenTask={onOpenTask}
                   onEditTask={onEditTask}
                   onDeleteTask={onDeleteTask}
+                  onArchiveTask={onArchiveTask}
                   onMoveTask={onMoveTask}
                   steps={steps}
                   showMaximizeButton={showMaximizeButton}
                   deletingTaskId={deletingTaskId}
+                  archivingTaskId={archivingTaskId}
                 />
               </div>
             ))}
@@ -189,9 +201,11 @@ function DesktopLayout({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
   showLoading,
   activeTask,
 }: ColumnGridProps & { showLoading: boolean; activeTask: Task | null }) {
@@ -214,10 +228,12 @@ function DesktopLayout({
                 onOpenTask={onOpenTask}
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}
+                onArchiveTask={onArchiveTask}
                 onMoveTask={onMoveTask}
                 steps={steps}
                 showMaximizeButton={showMaximizeButton}
                 deletingTaskId={deletingTaskId}
+                archivingTaskId={archivingTaskId}
               />
             ))}
           </div>
@@ -248,6 +264,7 @@ export function KanbanBoardGrid({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   onDragStart,
   onDragEnd,
@@ -255,6 +272,7 @@ export function KanbanBoardGrid({
   activeTask,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
   onCreateTask,
   isLoading,
 }: KanbanBoardGridProps) {
@@ -311,9 +329,11 @@ export function KanbanBoardGrid({
     onOpenTask,
     onEditTask,
     onDeleteTask,
+    onArchiveTask,
     onMoveTask,
     showMaximizeButton,
     deletingTaskId,
+    archivingTaskId,
   };
 
   let layoutContent: React.ReactNode;

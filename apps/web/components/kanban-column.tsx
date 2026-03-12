@@ -25,10 +25,12 @@ interface KanbanColumnProps {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveTask?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
   hideHeader?: boolean;
 }
 
@@ -39,10 +41,12 @@ export function KanbanColumn({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   steps,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
   hideHeader = false,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
@@ -97,10 +101,12 @@ export function KanbanColumn({
             onOpenFullPage={onOpenTask}
             onEdit={onEditTask}
             onDelete={onDeleteTask}
+            onArchive={onArchiveTask}
             onMove={onMoveTask}
             steps={steps}
             showMaximizeButton={showMaximizeButton}
             isDeleting={deletingTaskId === task.id}
+            isArchiving={archivingTaskId === task.id}
           />
         ))}
       </div>
