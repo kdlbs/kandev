@@ -10,6 +10,7 @@ import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
+import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 
 export const metadata: Metadata = {
@@ -64,7 +65,9 @@ export default function RootLayout({
                     <WebSocketConnector />
                     <GlobalCommands />
                     <CommandPanel />
-                    <QuickChatProvider>{children}</QuickChatProvider>
+                    <ConfigChatProvider>
+                      <QuickChatProvider>{children}</QuickChatProvider>
+                    </ConfigChatProvider>
                   </CommandRegistryProvider>
                 </ToastProvider>
               </TooltipProvider>

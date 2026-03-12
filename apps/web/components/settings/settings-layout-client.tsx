@@ -6,12 +6,9 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList } from "@kan
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
-import { useAppStore } from "@/components/state-provider";
-import { ConfigChatPanel } from "@/components/config-chat/config-chat-panel";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
   const breadcrumbLabel = isAgentDetail ? "Agents" : "Home";
   const breadcrumbHref = isAgentDetail ? "/settings/agents" : "/";
@@ -37,7 +34,6 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
             </div>
           </header>
           <div className="flex flex-1 flex-col gap-4 p-4 pt-0">{children}</div>
-          {workspaceId && <ConfigChatPanel workspaceId={workspaceId} />}
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>
