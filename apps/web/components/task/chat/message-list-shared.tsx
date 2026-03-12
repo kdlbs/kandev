@@ -116,6 +116,8 @@ export function MessageItem({
         isLastGroup={isLastGroup}
         isTurnActive={isTurnActive}
         allMessages={messages}
+        sessionState={sessionState}
+        taskState={taskState}
         onScrollToMessage={onScrollToMessage}
       />
     );

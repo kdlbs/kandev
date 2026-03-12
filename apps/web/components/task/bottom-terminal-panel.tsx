@@ -22,7 +22,10 @@ export function BottomTerminalPanel({ sessionId }: Props) {
   const pendingCommand = useAppStore((s) => s.bottomTerminal.pendingCommand);
   const storeApi = useAppStoreApi();
   const toggle = useCallback(() => storeApi.getState().toggleBottomTerminal(), [storeApi]);
-  const clearCommand = useCallback(() => storeApi.getState().clearBottomTerminalCommand(), [storeApi]);
+  const clearCommand = useCallback(
+    () => storeApi.getState().clearBottomTerminalCommand(),
+    [storeApi],
+  );
 
   // Restore visibility state from localStorage on mount
   useEffect(() => {

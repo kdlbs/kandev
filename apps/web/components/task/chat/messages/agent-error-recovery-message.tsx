@@ -122,10 +122,34 @@ function ErrorActions({
   onRecover: (action: "resume" | "fresh_start") => void;
 }) {
   if (isAuthError) {
-    return authMethods && authMethods.length > 0 ? (
-      <AuthMethodsPanel methods={authMethods} onOpenTerminal={openTerminalWithCommand} />
-    ) : (
-      <GenericAuthPanel onOpenTerminal={openBottomTerminal} />
+    const disabled = state === "recovering" || !canRecover;
+    return (
+      <>
+        {authMethods && authMethods.length > 0 ? (
+          <AuthMethodsPanel methods={authMethods} onOpenTerminal={openTerminalWithCommand} />
+        ) : (
+          <GenericAuthPanel onOpenTerminal={openBottomTerminal} />
+        )}
+        <div className="mt-2 flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs cursor-pointer gap-1.5"
+                disabled={disabled}
+                onClick={() => onRecover("fresh_start")}
+                data-testid="recovery-restart-button"
+              >
+                <IconRefresh className="h-3 w-3" />
+                Restart session
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Restart the agent session after logging in</TooltipContent>
+          </Tooltip>
+          {state === "error" && <span className="text-xs text-red-500">Failed — try again</span>}
+        </div>
+      </>
     );
   }
   return (

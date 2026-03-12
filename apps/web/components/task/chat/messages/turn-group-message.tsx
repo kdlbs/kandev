@@ -4,7 +4,7 @@ import { useState, useCallback, memo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
-import type { Message } from "@/lib/types/http";
+import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
@@ -22,6 +22,8 @@ type TurnGroupMessageProps = {
   /** Whether the turn is still active (agent is running) */
   isTurnActive?: boolean;
   allMessages?: Message[];
+  sessionState?: TaskSessionState;
+  taskState?: TaskState;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -153,6 +155,8 @@ type TurnGroupContentProps = {
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
   allMessages?: Message[];
+  sessionState?: TaskSessionState;
+  taskState?: TaskState;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -165,6 +169,8 @@ function TurnGroupContent({
   worktreePath,
   onOpenFile,
   allMessages,
+  sessionState,
+  taskState,
   onScrollToMessage,
 }: TurnGroupContentProps) {
   return (
@@ -175,6 +181,8 @@ function TurnGroupContent({
           comment={msg}
           isTaskDescription={false}
           taskId={taskId}
+          sessionState={sessionState}
+          taskState={taskState}
           permissionsByToolCallId={permissionsByToolCallId}
           childrenByParentToolCallId={childrenByParentToolCallId}
           worktreePath={worktreePath}
@@ -199,6 +207,8 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   isLastGroup = false,
   isTurnActive = false,
   allMessages,
+  sessionState,
+  taskState,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
   const isGroupRunning = hasRunningTool(group.messages);
@@ -237,6 +247,8 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
           worktreePath={worktreePath}
           onOpenFile={onOpenFile}
           allMessages={allMessages}
+          sessionState={sessionState}
+          taskState={taskState}
           onScrollToMessage={onScrollToMessage}
         />
       )}

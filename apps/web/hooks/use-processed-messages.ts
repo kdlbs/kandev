@@ -105,12 +105,40 @@ function findPendingClarification(messages: Message[]): Message | null {
   return null;
 }
 
+function isRecoveryMessage(message: Message): boolean {
+  const meta = message.metadata as Record<string, unknown> | undefined;
+  return meta?.recovery_actions === true;
+}
+
+/** Hide recovery messages that have been superseded by later conversation activity
+ *  (user/agent messages prove the session recovered) or by a newer recovery message. */
+function deduplicateRecoveryMessages(messages: Message[]): Message[] {
+  let lastRecoveryIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isRecoveryMessage(messages[i])) {
+      lastRecoveryIdx = i;
+      break;
+    }
+  }
+  if (lastRecoveryIdx === -1) return messages;
+
+  const hasLaterActivity = messages
+    .slice(lastRecoveryIdx + 1)
+    .some((m) => m.type === "message" || m.type === "content");
+
+  return messages.filter((msg, i) => {
+    if (!isRecoveryMessage(msg)) return true;
+    if (hasLaterActivity) return false;
+    return i === lastRecoveryIdx;
+  });
+}
+
 function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
 ): Message[] {
-  return messages.filter((message) => {
+  const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id)) return false;
     if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
@@ -125,6 +153,8 @@ function filterVisibleMessages(
     if (message.type === "permission_request") return isPermissionVisible(message, toolCallIds);
     return false;
   });
+
+  return deduplicateRecoveryMessages(filtered);
 }
 
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {
