@@ -12,16 +12,17 @@ import (
 
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
-	OnAgentEvent    func(execution *AgentExecution, event agentctl.AgentEvent)
-	OnGitStatus     func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
-	OnGitCommit     func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
-	OnGitReset      func(execution *AgentExecution, reset *agentctl.GitResetNotification)
-	OnBranchSwitch  func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
-	OnFileChange    func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
-	OnShellOutput   func(execution *AgentExecution, data string)
-	OnShellExit     func(execution *AgentExecution, code int)
-	OnProcessOutput func(execution *AgentExecution, output *agentctl.ProcessOutput)
-	OnProcessStatus func(execution *AgentExecution, status *agentctl.ProcessStatusUpdate)
+	OnAgentEvent       func(execution *AgentExecution, event agentctl.AgentEvent)
+	OnStreamDisconnect func(execution *AgentExecution, err error)
+	OnGitStatus        func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
+	OnGitCommit        func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
+	OnGitReset         func(execution *AgentExecution, reset *agentctl.GitResetNotification)
+	OnBranchSwitch     func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
+	OnFileChange       func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnShellOutput      func(execution *AgentExecution, data string)
+	OnShellExit        func(execution *AgentExecution, code int)
+	OnProcessOutput    func(execution *AgentExecution, output *agentctl.ProcessOutput)
+	OnProcessStatus    func(execution *AgentExecution, status *agentctl.ProcessStatusUpdate)
 }
 
 // StreamManager manages WebSocket streams to agent executions
@@ -96,6 +97,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 				Error:   "agent stream disconnected: " + disconnectErr.Error(),
 			}:
 			default:
+			}
+			// Notify lifecycle manager so it can proactively update execution status
+			if sm.callbacks.OnStreamDisconnect != nil {
+				sm.callbacks.OnStreamDisconnect(execution, disconnectErr)
 			}
 		}
 	})

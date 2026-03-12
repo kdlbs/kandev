@@ -140,16 +140,17 @@ func NewManager(
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
-		OnAgentEvent:    mgr.handleAgentEvent,
-		OnGitStatus:     mgr.handleGitStatusUpdate,
-		OnGitCommit:     mgr.handleGitCommitCreated,
-		OnGitReset:      mgr.handleGitResetDetected,
-		OnBranchSwitch:  mgr.handleBranchSwitch,
-		OnFileChange:    mgr.handleFileChangeNotification,
-		OnShellOutput:   mgr.handleShellOutput,
-		OnShellExit:     mgr.handleShellExit,
-		OnProcessOutput: mgr.handleProcessOutput,
-		OnProcessStatus: mgr.handleProcessStatus,
+		OnAgentEvent:       mgr.handleAgentEvent,
+		OnStreamDisconnect: mgr.handleStreamDisconnect,
+		OnGitStatus:        mgr.handleGitStatusUpdate,
+		OnGitCommit:        mgr.handleGitCommitCreated,
+		OnGitReset:         mgr.handleGitResetDetected,
+		OnBranchSwitch:     mgr.handleBranchSwitch,
+		OnFileChange:       mgr.handleFileChangeNotification,
+		OnShellOutput:      mgr.handleShellOutput,
+		OnShellExit:        mgr.handleShellExit,
+		OnProcessOutput:    mgr.handleProcessOutput,
+		OnProcessStatus:    mgr.handleProcessStatus,
 	}, nil)
 
 	// Set session manager dependencies for full orchestration
