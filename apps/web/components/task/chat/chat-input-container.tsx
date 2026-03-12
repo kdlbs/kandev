@@ -139,6 +139,7 @@ function buildContextAreaProps(
 type EnhancePromptExtras = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
+  isUtilityConfigured?: boolean;
 };
 
 function buildEditorAreaProps(
@@ -181,6 +182,7 @@ function buildEditorAreaProps(
     onImplementPlan: p.onImplementPlan,
     onEnhancePrompt: extras.onEnhancePrompt,
     isEnhancingPrompt: extras.isEnhancingPrompt,
+    isUtilityConfigured: extras.isUtilityConfigured,
     hideSessionsDropdown: p.hideSessionsDropdown,
   };
 }
@@ -273,11 +275,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         needsRecovery={props.needsRecovery ?? false}
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}
-        editorAreaProps={buildEditorAreaProps(
-          s,
-          p,
-          isUtilityConfigured ? { onEnhancePrompt: handleEnhancePrompt, isEnhancingPrompt } : {},
-        )}
+        editorAreaProps={buildEditorAreaProps(s, p, {
+          onEnhancePrompt: handleEnhancePrompt,
+          isEnhancingPrompt,
+          isUtilityConfigured,
+        })}
       />
     );
   },

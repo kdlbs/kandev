@@ -65,6 +65,8 @@ export type ChatInputToolbarProps = {
   onEnhancePrompt?: () => void;
   /** Whether prompt enhancement is in progress */
   isEnhancingPrompt?: boolean;
+  /** Whether utility agent is configured for AI enhancement */
+  isUtilityConfigured?: boolean;
   /** Callback to open file picker for attaching files */
   onAttachFiles?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
@@ -181,7 +183,20 @@ function ImplementPlanButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLoading: boolean }) {
+function EnhancePromptButton({
+  onClick,
+  isLoading,
+  isConfigured = true,
+}: {
+  onClick: () => void;
+  isLoading: boolean;
+  isConfigured?: boolean;
+}) {
+  const isDisabled = !isConfigured || isLoading;
+  const tooltipText = isConfigured
+    ? "Enhance prompt with AI"
+    : "Configure a utility agent in settings to enable AI enhancement";
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -190,15 +205,15 @@ function EnhancePromptButton({ onClick, isLoading }: { onClick: () => void; isLo
           variant="ghost"
           size="icon"
           className="h-7 w-7 cursor-pointer hover:bg-muted/40 text-slate-400"
-          onClick={onClick}
-          disabled={isLoading}
+          onClick={isConfigured ? onClick : undefined}
+          disabled={isDisabled}
           aria-label="Enhance prompt with AI"
           aria-busy={isLoading}
         >
           {isLoading ? <GridSpinner className="h-4 w-4" /> : <IconSparkles className="h-4 w-4" />}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Enhance prompt with AI</TooltipContent>
+      <TooltipContent>{tooltipText}</TooltipContent>
     </Tooltip>
   );
 }
@@ -308,6 +323,7 @@ type ToolbarRightSectionProps = {
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
+  isUtilityConfigured?: boolean;
   onImplementPlan?: () => void;
   hideSessionsDropdown?: boolean;
 };
@@ -326,10 +342,11 @@ function ToolbarRightSection({
   submitShortcut,
   onEnhancePrompt,
   isEnhancingPrompt,
+  isUtilityConfigured,
   onImplementPlan,
   hideSessionsDropdown,
 }: ToolbarRightSectionProps) {
-  const showEnhance = onEnhancePrompt && !isAgentBusy;
+  const showEnhance = !isAgentBusy;
   const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
   const showResetContext = !!sessionId && !isAgentBusy;
   return (
@@ -349,7 +366,11 @@ function ToolbarRightSection({
       <ConfigOptionsDisplay sessionId={sessionId} />
       {/* AuthMethodsIndicator hidden — UX needs rethinking */}
       {showEnhance && (
-        <EnhancePromptButton onClick={onEnhancePrompt} isLoading={isEnhancingPrompt ?? false} />
+        <EnhancePromptButton
+          onClick={onEnhancePrompt ?? (() => {})}
+          isLoading={isEnhancingPrompt ?? false}
+          isConfigured={isUtilityConfigured}
+        />
       )}
       {showImplement && <ImplementPlanButton onClick={onImplementPlan} />}
       <div className="ml-1">
@@ -391,6 +412,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
   onImplementPlan,
   onEnhancePrompt,
   isEnhancingPrompt = false,
+  isUtilityConfigured = false,
   onAttachFiles,
   hideSessionsDropdown,
 }: ChatInputToolbarProps) {
@@ -465,6 +487,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
         submitShortcut={submitShortcut}
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
+        isUtilityConfigured={isUtilityConfigured}
         onImplementPlan={onImplementPlan}
         hideSessionsDropdown={hideSessionsDropdown}
       />

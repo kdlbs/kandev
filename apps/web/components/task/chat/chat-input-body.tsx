@@ -47,6 +47,7 @@ export type ChatInputEditorAreaProps = {
   onImplementPlan?: () => void;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
+  isUtilityConfigured?: boolean;
 };
 
 function EditorWithTooltip({
@@ -143,6 +144,7 @@ export function ChatInputEditorArea({
   onImplementPlan,
   onEnhancePrompt,
   isEnhancingPrompt,
+  isUtilityConfigured,
   hideSessionsDropdown,
 }: ChatInputEditorAreaProps) {
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
@@ -204,6 +206,7 @@ export function ChatInputEditorArea({
         onImplementPlan={onImplementPlan}
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
+        isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
         hideSessionsDropdown={hideSessionsDropdown}
       />
