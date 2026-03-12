@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   IconLoader2,
   IconMessageCircle,
@@ -154,9 +154,16 @@ function ConfigChatEmptyState({
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
   const [inputValue, setInputValue] = useState("");
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const needsProfileSelection = !selectedProfileId && !defaultProfileId && profileCount > 0;
   const effectiveProfileId = selectedProfileId || defaultProfileId || "";
   const canSubmit = inputValue.trim().length > 0 && !!effectiveProfileId && !isStarting;
+
+  useEffect(() => {
+    if (!needsProfileSelection && !isStarting && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [needsProfileSelection, isStarting]);
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim();
@@ -195,6 +202,7 @@ function ConfigChatEmptyState({
 
           <div className="flex items-end gap-2">
             <Textarea
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -281,7 +289,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/30">
           <div className="flex items-center gap-1.5">
             <IconSparkles className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-xs font-medium">Config Chat</span>
+            <span className="text-xs font-medium">Configuration Chat</span>
           </div>
           <Button
             size="sm"
