@@ -63,28 +63,7 @@ function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
   }));
 }
 
-type CumulativeDiffFiles = Record<
-  string,
-  { diff?: string; status?: string; additions?: number; deletions?: number }
->;
-
-function addUncommittedPaths(paths: Set<string>, files: FileInfo[]) {
-  for (const file of files) {
-    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
-  }
-}
-
-function addCumulativePaths(paths: Set<string>, files: CumulativeDiffFiles) {
-  for (const [path, file] of Object.entries(files)) {
-    if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
-  }
-}
-
-function addPRPaths(paths: Set<string>, files: PRDiffFile[]) {
-  for (const file of files) {
-    if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
-  }
-}
+type CumulativeDiffFiles = Record<string, { diff?: string; status?: string; additions?: number; deletions?: number }>;
 
 function collectReviewPaths(
   uncommittedFiles: FileInfo[],
@@ -92,9 +71,19 @@ function collectReviewPaths(
   prFiles?: PRDiffFile[],
 ): Set<string> {
   const paths = new Set<string>();
-  addUncommittedPaths(paths, uncommittedFiles);
-  if (cumulativeDiffFiles) addCumulativePaths(paths, cumulativeDiffFiles);
-  if (prFiles) addPRPaths(paths, prFiles);
+  for (const file of uncommittedFiles) {
+    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
+  }
+  if (cumulativeDiffFiles) {
+    for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
+      if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    }
+  }
+  if (prFiles) {
+    for (const file of prFiles) {
+      if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
+    }
+  }
   return paths;
 }
 
@@ -135,17 +124,9 @@ function computeReviewProgress(
 }
 
 function computeStagedStats(stagedFiles: FileInfo[]) {
-  let additions = 0;
-  let deletions = 0;
-  for (const file of stagedFiles) {
-    additions += file.additions || 0;
-    deletions += file.deletions || 0;
-  }
-  return {
-    stagedFileCount: stagedFiles.length,
-    stagedAdditions: additions,
-    stagedDeletions: deletions,
-  };
+  const adds = stagedFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
+  const dels = stagedFiles.reduce((sum, f) => sum + (f.deletions || 0), 0);
+  return { stagedFileCount: stagedFiles.length, stagedAdditions: adds, stagedDeletions: dels };
 }
 
 function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
@@ -234,11 +215,7 @@ type ChangesPanelBodyProps = {
   stagedDeletions: number;
   displayBranch: string | null;
   baseBranch: string | undefined;
-  // Utility agent generators
-  onGenerateCommitMessage?: (onSuccess: (msg: string) => void) => void;
-  onGeneratePRDescription?: (onSuccess: (desc: string) => void) => void;
-  isGeneratingCommitMessage?: boolean;
-  isGeneratingPRDescription?: boolean;
+  utilityGen?: ReturnType<typeof useUtilityAgentGenerator>;
   isUtilityConfigured?: boolean;
 };
 
@@ -251,28 +228,12 @@ function ChangesPanelDialogsSection({
   displayBranch,
   baseBranch,
   lastCommitMessage,
-  onGenerateCommitMessage,
-  onGeneratePRDescription,
-  isGeneratingCommitMessage,
-  isGeneratingPRDescription,
+  utilityGen,
   isUtilityConfigured,
 }: Pick<
   ChangesPanelBodyProps,
-  | "dialogs"
-  | "isLoading"
-  | "stagedFileCount"
-  | "stagedAdditions"
-  | "stagedDeletions"
-  | "displayBranch"
-  | "baseBranch"
-> & {
-  lastCommitMessage?: string | null;
-  onGenerateCommitMessage?: (onSuccess: (msg: string) => void) => void;
-  onGeneratePRDescription?: (onSuccess: (desc: string) => void) => void;
-  isGeneratingCommitMessage?: boolean;
-  isGeneratingPRDescription?: boolean;
-  isUtilityConfigured?: boolean;
-}) {
+  "dialogs" | "isLoading" | "stagedFileCount" | "stagedAdditions" | "stagedDeletions" | "displayBranch" | "baseBranch" | "utilityGen" | "isUtilityConfigured"
+> & { lastCommitMessage?: string | null }) {
   return (
     <>
       <DiscardDialog
@@ -295,11 +256,11 @@ function ChangesPanelDialogsSection({
         onAmendChange={dialogs.setIsAmendCommit}
         lastCommitMessage={lastCommitMessage}
         onGenerateMessage={
-          isUtilityConfigured && onGenerateCommitMessage
-            ? () => onGenerateCommitMessage(dialogs.setCommitMessage)
+          isUtilityConfigured && utilityGen
+            ? () => utilityGen.generateCommitMessage(dialogs.setCommitMessage)
             : undefined
         }
-        isGenerating={isGeneratingCommitMessage}
+        isGenerating={utilityGen?.isGeneratingCommitMessage}
       />
       <PRDialog
         open={dialogs.prDialogOpen}
@@ -315,11 +276,11 @@ function ChangesPanelDialogsSection({
         displayBranch={displayBranch}
         baseBranch={baseBranch}
         onGenerateDescription={
-          isUtilityConfigured && onGeneratePRDescription
-            ? () => onGeneratePRDescription(dialogs.setPrBody)
+          isUtilityConfigured && utilityGen
+            ? () => utilityGen.generatePRDescription(dialogs.setPrBody)
             : undefined
         }
-        isGenerating={isGeneratingPRDescription}
+        isGenerating={utilityGen?.isGeneratingPRDescription}
       />
       <AmendDialog
         open={dialogs.amendDialogOpen}
@@ -503,10 +464,7 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         displayBranch={props.displayBranch}
         baseBranch={props.baseBranch}
         lastCommitMessage={lastCommitMessage}
-        onGenerateCommitMessage={props.onGenerateCommitMessage}
-        onGeneratePRDescription={props.onGeneratePRDescription}
-        isGeneratingCommitMessage={props.isGeneratingCommitMessage}
-        isGeneratingPRDescription={props.isGeneratingPRDescription}
+        utilityGen={props.utilityGen}
         isUtilityConfigured={props.isUtilityConfigured}
       />
     </PanelBody>
@@ -571,15 +529,8 @@ const ChangesPanel = memo(function ChangesPanel({
     baseBranch,
     firstCommitMessage,
   });
-
-  // Utility agent generators
   const isUtilityConfigured = useIsUtilityConfigured();
-  const {
-    isGeneratingCommitMessage,
-    isGeneratingPRDescription,
-    generateCommitMessage,
-    generatePRDescription,
-  } = useUtilityAgentGenerator({ sessionId: activeSessionId ?? null, taskTitle });
+  const utilityGen = useUtilityAgentGenerator({ sessionId: activeSessionId ?? null, taskTitle });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -637,10 +588,7 @@ const ChangesPanel = memo(function ChangesPanel({
         stagedDeletions={staged.stagedDeletions}
         displayBranch={git.branch}
         baseBranch={baseBranch}
-        onGenerateCommitMessage={generateCommitMessage}
-        onGeneratePRDescription={generatePRDescription}
-        isGeneratingCommitMessage={isGeneratingCommitMessage}
-        isGeneratingPRDescription={isGeneratingPRDescription}
+        utilityGen={utilityGen}
         isUtilityConfigured={isUtilityConfigured}
       />
     </PanelRoot>
