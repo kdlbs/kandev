@@ -186,7 +186,9 @@ func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData)
 
 // retryClarificationAfterCancel handles the case where PromptTask fails because
 // the agent is stuck in RUNNING state (MCP client timed out during clarification).
-// It cancels the stuck turn and retries the prompt. Returns true if recovery succeeded.
+// It silently cancels the stuck turn and retries the prompt so the recovery is
+// seamless for the user (no "Turn cancelled" separator in the chat).
+// Returns true if recovery succeeded.
 func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarificationAnsweredData, prompt string, promptErr error) bool {
 	if !isAgentPromptInProgressError(promptErr) {
 		return false
@@ -196,7 +198,7 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 
-	if err := s.CancelAgent(ctx, data.SessionID); err != nil {
+	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
@@ -222,6 +224,18 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 	return true
+}
+
+// cancelAgentSilent cancels the agent turn without creating a visible message
+// in the chat. Used by clarification recovery so the cancel-and-retry is seamless.
+func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
+	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
+		return fmt.Errorf("cancel agent: %w", err)
+	}
+
+	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, nil)
+	s.completeTurnForSession(ctx, sessionID)
+	return nil
 }
 
 func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {
