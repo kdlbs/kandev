@@ -23,8 +23,10 @@ export type SwimlaneContainerProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
@@ -89,8 +91,10 @@ type WorkflowItemProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
   showMaximizeButton?: boolean;
 };
 
@@ -130,8 +134,10 @@ export function SwimlaneContainer({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveError,
   deletingTaskId,
+  archivingTaskId,
   showMaximizeButton,
   searchQuery,
   selectedRepositoryIds = [],
@@ -201,8 +207,10 @@ export function SwimlaneContainer({
             onOpenTask={onOpenTask}
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
+            onArchiveTask={onArchiveTask}
             onMoveError={onMoveError}
             deletingTaskId={deletingTaskId}
+            archivingTaskId={archivingTaskId}
             showMaximizeButton={showMaximizeButton}
           />
         );

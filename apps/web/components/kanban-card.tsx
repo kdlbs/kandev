@@ -7,6 +7,16 @@ import { IconDots, IconArrowsMaximize, IconLoader, IconAlertCircle } from "@tabl
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@kandev/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -15,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
   DropdownMenuPortal,
+  DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
 import type { TaskState, Repository } from "@/lib/types/http";
 import { cn, getRepositoryDisplayName } from "@/lib/utils";
@@ -56,11 +67,13 @@ interface KanbanCardProps {
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
+  onArchive?: (task: Task) => void;
   onOpenFullPage?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
   showMaximizeButton?: boolean;
   isDeleting?: boolean;
+  isArchiving?: boolean;
 }
 
 function KanbanCardBody({
@@ -149,9 +162,11 @@ function KanbanCardActions({
   onOpenFullPage,
   onEdit,
   onDelete,
+  onArchive,
   onMove,
   steps,
   isDeleting,
+  isArchiving,
 }: Pick<
   KanbanCardProps,
   | "task"
@@ -159,12 +174,14 @@ function KanbanCardActions({
   | "onOpenFullPage"
   | "onEdit"
   | "onDelete"
+  | "onArchive"
   | "onMove"
   | "steps"
   | "isDeleting"
+  | "isArchiving"
 >) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const effectiveMenuOpen = menuOpen || isDeleting;
+  const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const statusIcon = getTaskStateIcon(task.state, "h-4 w-4");
   const hasKnownSession =
     Boolean(task.primarySessionId) ||
@@ -194,12 +211,98 @@ function KanbanCardActions({
         effectiveMenuOpen={effectiveMenuOpen}
         setMenuOpen={setMenuOpen}
         isDeleting={isDeleting}
+        isArchiving={isArchiving}
         onEdit={onEdit}
         onDelete={onDelete}
+        onArchive={onArchive}
         onMove={onMove}
         steps={steps}
       />
     </div>
+  );
+}
+
+function DeleteConfirmDialog({
+  open,
+  onOpenChange,
+  taskTitle,
+  isDeleting,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  taskTitle: string;
+  isDeleting?: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete task</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete &quot;{taskTitle}&quot;? This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={isDeleting}
+            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              if (isDeleting) return;
+              onConfirm();
+              onOpenChange(false);
+            }}
+          >
+            {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function MoveToSubmenu({
+  task,
+  steps,
+  disabled,
+  onMove,
+}: {
+  task: Task;
+  steps: WorkflowStep[];
+  disabled?: boolean;
+  onMove: (task: Task, targetStepId: string) => void;
+}) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger
+        disabled={disabled}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        Move to
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent>
+          {steps
+            .filter((col) => col.id !== task.workflowStepId)
+            .map((col) => (
+              <DropdownMenuItem
+                key={col.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onMove(task, col.id);
+                }}
+              >
+                <div className={cn("w-2 h-2 rounded-full mr-2", col.color)} />
+                {col.title}
+              </DropdownMenuItem>
+            ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
   );
 }
 
@@ -208,90 +311,94 @@ function KanbanCardMenu({
   effectiveMenuOpen,
   setMenuOpen,
   isDeleting,
+  isArchiving,
   onEdit,
   onDelete,
+  onArchive,
   onMove,
   steps,
 }: {
   task: Task;
-  effectiveMenuOpen: boolean | undefined;
+  effectiveMenuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   isDeleting?: boolean;
+  isArchiving?: boolean;
   onEdit?: (task: Task) => void;
   onDelete?: (task: Task) => void;
+  onArchive?: (task: Task) => void;
   onMove?: (task: Task, targetStepId: string) => void;
   steps?: WorkflowStep[];
 }) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const isProcessing = isDeleting || isArchiving;
+
   return (
-    <DropdownMenu
-      open={effectiveMenuOpen}
-      onOpenChange={(open) => {
-        if (!open && isDeleting) return;
-        setMenuOpen(open);
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-          aria-label="More options"
-        >
-          <IconDots className="h-4 w-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          disabled={isDeleting}
-          onClick={(event) => {
-            event.stopPropagation();
-            onEdit?.(task);
-          }}
-        >
-          Edit
-        </DropdownMenuItem>
-        {steps && steps.length > 1 && onMove && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger
-              disabled={isDeleting}
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
+    <>
+      <DropdownMenu
+        open={effectiveMenuOpen}
+        onOpenChange={(open) => {
+          if (!open && isProcessing) return;
+          setMenuOpen(open);
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            aria-label="More options"
+          >
+            <IconDots className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            disabled={isProcessing}
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit?.(task);
+            }}
+          >
+            Edit
+          </DropdownMenuItem>
+          {steps && steps.length > 1 && onMove && (
+            <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
+          )}
+          {onArchive && (
+            <DropdownMenuItem
+              disabled={isProcessing}
+              onClick={(event) => {
+                event.stopPropagation();
+                onArchive(task);
+              }}
             >
-              Move to
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent>
-                {steps
-                  .filter((col) => col.id !== task.workflowStepId)
-                  .map((col) => (
-                    <DropdownMenuItem
-                      key={col.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onMove(task, col.id);
-                      }}
-                    >
-                      <div className={cn("w-2 h-2 rounded-full mr-2", col.color)} />
-                      {col.title}
-                    </DropdownMenuItem>
-                  ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
-        )}
-        <DropdownMenuItem
-          disabled={isDeleting}
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete?.(task);
-          }}
-        >
-          {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Archive
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={isProcessing}
+            className="text-destructive focus:text-destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowDeleteConfirm(true);
+            }}
+          >
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        taskTitle={task.title}
+        isDeleting={isDeleting}
+        onConfirm={() => onDelete?.(task)}
+      />
+    </>
   );
 }
 
@@ -301,11 +408,13 @@ export function KanbanCard({
   onClick,
   onEdit,
   onDelete,
+  onArchive,
   onOpenFullPage,
   onMove,
   steps,
   showMaximizeButton = false,
   isDeleting,
+  isArchiving,
 }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
@@ -343,9 +452,11 @@ export function KanbanCard({
               onOpenFullPage={onOpenFullPage}
               onEdit={onEdit}
               onDelete={onDelete}
+              onArchive={onArchive}
               onMove={onMove}
               steps={steps}
               isDeleting={isDeleting}
+              isArchiving={isArchiving}
             />
           }
         />

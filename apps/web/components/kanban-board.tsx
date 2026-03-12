@@ -150,11 +150,13 @@ function useKanbanBoardHooks(
     handleCreate,
     handleEdit,
     handleDelete,
+    handleArchive,
     handleDialogOpenChange,
     handleDialogSuccess,
     handleWorkspaceChange,
     handleWorkflowChange,
     deletingTaskId,
+    archivingTaskId,
   } = useKanbanActions({ workspaceState, workflowsState });
   const {
     enablePreviewOnClick,
@@ -176,9 +178,11 @@ function useKanbanBoardHooks(
     handleCreate,
     handleEdit,
     handleDelete,
+    handleArchive,
     handleDialogOpenChange,
     handleDialogSuccess,
     deletingTaskId,
+    archivingTaskId,
     enablePreviewOnClick,
     userSettings,
     commitSettings,
@@ -305,8 +309,10 @@ export function KanbanBoard({ onPreviewTask, onOpenTask }: KanbanBoardProps = {}
         onOpenTask={s.handleOpenTask}
         onEditTask={s.handleEdit}
         onDeleteTask={s.handleDelete}
+        onArchiveTask={s.handleArchive}
         onMoveError={s.handleMoveError}
         deletingTaskId={s.deletingTaskId}
+        archivingTaskId={s.archivingTaskId}
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}

@@ -14,9 +14,11 @@ type SwipeableColumnsProps = {
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
+  onArchiveTask?: (task: Task) => void;
   onMoveTask?: (task: Task, targetStepId: string) => void;
   showMaximizeButton?: boolean;
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
 };
 
 export function SwipeableColumns({
@@ -28,9 +30,11 @@ export function SwipeableColumns({
   onOpenTask,
   onEditTask,
   onDeleteTask,
+  onArchiveTask,
   onMoveTask,
   showMaximizeButton,
   deletingTaskId,
+  archivingTaskId,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -108,10 +112,12 @@ export function SwipeableColumns({
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}
               onDeleteTask={onDeleteTask}
+              onArchiveTask={onArchiveTask}
               onMoveTask={onMoveTask}
               steps={steps}
               showMaximizeButton={showMaximizeButton}
               deletingTaskId={deletingTaskId}
+              archivingTaskId={archivingTaskId}
               hideHeader
             />
           </div>

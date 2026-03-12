@@ -91,10 +91,12 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     handleCreate,
     handleEdit,
     handleDelete,
+    handleArchive,
     handleDialogOpenChange,
     setIsDialogOpen,
     setEditingTask,
     deletingTaskId,
+    archivingTaskId,
   } = useTaskCRUD();
 
   // Handle task dialog success (create/update)
@@ -153,11 +155,13 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     setIsDialogOpen,
     setEditingTask,
     deletingTaskId,
+    archivingTaskId,
 
     // CRUD actions
     handleCreate,
     handleEdit,
     handleDelete,
+    handleArchive,
     handleDialogOpenChange,
     handleDialogSuccess,
 
