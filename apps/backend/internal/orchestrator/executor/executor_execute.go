@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/lifecycle"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -319,6 +320,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 
+	// Inject session handover context if there are previous sessions for this task.
+	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
+
 	// Fast path: workspace already launched (e.g., from PrepareSession with workspace).
 	// Only start the agent subprocess if requested; otherwise return early.
 	if session.AgentExecutionID != "" {
@@ -340,6 +344,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.McpMode = opts.McpMode
 	}
 
+	// Check for an existing task environment to reuse its worktree
+	existingEnv, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if existingEnv != nil && existingEnv.WorktreeID != "" && req.UseWorktree {
+		req.WorktreeID = existingEnv.WorktreeID
+		e.logger.Info("reusing existing task environment worktree",
+			zap.String("task_id", task.ID),
+			zap.String("worktree_id", existingEnv.WorktreeID))
+	}
+
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", sessionID),
@@ -354,6 +367,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, err)
 	}
+
+	// Create or update the task environment with launch results
+	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
 	// This allows us to filter git log to only show commits made during the session.
@@ -621,4 +637,95 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 		zap.String("session_id", sessionID),
 		zap.String("base_commit", baseCommit),
 		zap.String("head_commit", status.HeadCommit))
+}
+
+// injectHandoverIfNeeded prepends session handover context to the prompt when the task
+// already has previous sessions. The context includes the session count and the task plan
+// (if one exists) so the new agent avoids repeating already-completed work.
+func (e *Executor) injectHandoverIfNeeded(ctx context.Context, taskID, currentSessionID, prompt string) string {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list sessions for handover context",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return prompt
+	}
+
+	// Count previous sessions (exclude the current one being launched).
+	var previousCount int
+	for _, s := range sessions {
+		if s.ID != currentSessionID {
+			previousCount++
+		}
+	}
+	if previousCount == 0 {
+		return prompt
+	}
+
+	// Build the plan section if a plan exists.
+	var planSection string
+	plan, err := e.repo.GetTaskPlan(ctx, taskID)
+	if err == nil && plan != nil && plan.Content != "" {
+		planSection = fmt.Sprintf("\nThe task has an implementation plan:\n\n%s\n", plan.Content)
+	}
+
+	e.logger.Info("injecting session handover context",
+		zap.String("task_id", taskID),
+		zap.String("session_id", currentSessionID),
+		zap.Int("previous_sessions", previousCount))
+
+	return sysprompt.InjectSessionHandover(previousCount, planSection, prompt)
+}
+
+// persistTaskEnvironment creates or updates the task environment record after a successful launch.
+// It also links the session to the environment via TaskEnvironmentID.
+func (e *Executor) persistTaskEnvironment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	execCfg executorConfig,
+) {
+	if existingEnv != nil {
+		// Update the existing environment with new execution info
+		existingEnv.AgentExecutionID = resp.AgentExecutionID
+		existingEnv.Status = models.TaskEnvironmentStatusReady
+		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
+			e.logger.Warn("failed to update task environment",
+				zap.String("task_id", taskID),
+				zap.String("env_id", existingEnv.ID),
+				zap.Error(err))
+		}
+		session.TaskEnvironmentID = existingEnv.ID
+		return
+	}
+
+	// Create a new task environment
+	workspacePath := resp.WorktreePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryPath
+	}
+	env := &models.TaskEnvironment{
+		TaskID:            taskID,
+		RepositoryID:      req.RepositoryID,
+		ExecutorType:      req.ExecutorType,
+		ExecutorID:        execCfg.ExecutorID,
+		ExecutorProfileID: session.ExecutorProfileID,
+		AgentExecutionID:  resp.AgentExecutionID,
+		Status:            models.TaskEnvironmentStatusReady,
+		WorktreeID:        resp.WorktreeID,
+		WorktreePath:      resp.WorktreePath,
+		WorktreeBranch:    resp.WorktreeBranch,
+		WorkspacePath:     workspacePath,
+		ContainerID:       resp.ContainerID,
+	}
+	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
+		e.logger.Warn("failed to create task environment",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	session.TaskEnvironmentID = env.ID
 }
