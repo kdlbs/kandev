@@ -257,7 +257,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
       }}
     >
       {showFab ? (
-        <Tooltip>
+        <Tooltip open={chat.isOpen ? false : undefined}>
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>
               <Button
