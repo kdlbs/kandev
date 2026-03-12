@@ -73,7 +73,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	// Fetch the completed turn to get the completed_at timestamp
 	turn, err := s.turns.GetTurn(ctx, turnID)
 	if err != nil {
-		s.logger.Warn("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
+		s.logger.Debug("failed to refetch completed turn", zap.String("turn_id", turnID), zap.Error(err))
 		// Turn was likely deleted (task deletion race), skip publishing
 		return nil
 	}
