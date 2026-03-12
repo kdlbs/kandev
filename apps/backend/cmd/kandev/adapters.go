@@ -190,6 +190,10 @@ func (a *lifecycleAdapter) WasSessionInitialized(executionID string) bool {
 	return a.mgr.WasSessionInitialized(executionID)
 }
 
+func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
+	return a.mgr.GetSessionAuthMethods(sessionID)
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment) (*executor.PromptResult, error) {

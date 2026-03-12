@@ -31,43 +31,41 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   const canRecover = Boolean(metadata?.task_id && metadata?.session_id);
   const storeApi = useAppStoreApi();
 
-  // Hide entirely once recovery succeeded or session is active again (handles page refresh)
-  const isSessionActive =
-    sessionState === "RUNNING" || sessionState === "STARTING" || sessionState === "COMPLETED";
-  if (state === "recovered" || isSessionActive) {
-    return null;
-  }
-
-  const handleRecover = async (action: "resume" | "fresh_start") => {
-    if (!canRecover || !metadata) return;
-
-    const client = getWebSocketClient();
-    if (!client) {
-      console.error("WebSocket client not available");
-      return;
-    }
-
-    setState("recovering");
-    try {
-      await client.request("session.recover", {
-        task_id: metadata.task_id,
-        session_id: metadata.session_id,
-        action,
-      });
-      setState("recovered");
-    } catch (error) {
-      console.error("Failed to recover session:", error);
-      setState("error");
-      setTimeout(() => setState("pending"), 3000);
-    }
-  };
-
   const openBottomTerminal = useCallback(() => {
     const store = storeApi.getState();
     if (!store.bottomTerminal.isOpen) {
       store.toggleBottomTerminal();
     }
   }, [storeApi]);
+
+  const handleRecover = useCallback(
+    async (action: "resume" | "fresh_start") => {
+      if (!canRecover || !metadata) return;
+      const client = getWebSocketClient();
+      if (!client) return;
+      setState("recovering");
+      try {
+        await client.request("session.recover", {
+          task_id: metadata.task_id,
+          session_id: metadata.session_id,
+          action,
+        });
+        setState("recovered");
+      } catch (error) {
+        console.error("Failed to recover session:", error);
+        setState("error");
+        setTimeout(() => setState("pending"), 3000);
+      }
+    },
+    [canRecover, metadata],
+  );
+
+  // Hide once recovery succeeded or session is active again (handles page refresh)
+  const isSessionActive =
+    sessionState === "RUNNING" || sessionState === "STARTING" || sessionState === "COMPLETED";
+  if (state === "recovered" || isSessionActive) {
+    return null;
+  }
 
   const isAuthError = metadata?.is_auth_error === true;
   const authMethods = metadata?.auth_methods;
@@ -79,71 +77,99 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
         <div className="flex-shrink-0 mt-0.5">
           <IconAlertTriangle className="h-4 w-4 text-red-500" />
         </div>
-
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="text-xs font-mono text-red-600 dark:text-red-400">{message}</div>
-
           {isAuthError && authMethods && authMethods.length > 0 && (
-            <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
-              <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                Authentication required — log in before resuming
-              </div>
-              {authMethods.map((method) => (
-                <AuthMethodRow
-                  key={method.id}
-                  method={method}
-                  onOpenTerminal={openBottomTerminal}
-                />
-              ))}
-            </div>
+            <AuthMethodsPanel methods={authMethods} onOpenTerminal={openBottomTerminal} />
           )}
-
-          <div className="mt-2 flex items-center gap-2">
-            {metadata?.has_resume_token && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn("h-7 text-xs cursor-pointer gap-1.5")}
-                    disabled={state === "recovering" || !canRecover}
-                    onClick={() => handleRecover("resume")}
-                    data-testid="recovery-resume-button"
-                  >
-                    <IconRefresh className="h-3 w-3" />
-                    Resume session
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  Re-launch with resume flag — keeps all previous messages and context
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn("h-7 text-xs cursor-pointer gap-1.5")}
-                  disabled={state === "recovering" || !canRecover}
-                  onClick={() => handleRecover("fresh_start")}
-                  data-testid="recovery-fresh-button"
-                >
-                  <IconPlayerPlay className="h-3 w-3" />
-                  Start fresh session
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                New agent process on the same workspace — no previous conversation context
-              </TooltipContent>
-            </Tooltip>
-            {state === "error" && <span className="text-xs text-red-500">Failed — try again</span>}
-          </div>
+          <RecoveryActions
+            state={state}
+            canRecover={canRecover}
+            hasResumeToken={metadata?.has_resume_token}
+            onRecover={handleRecover}
+          />
         </div>
       </div>
     </div>
   );
 });
+
+function AuthMethodsPanel({
+  methods,
+  onOpenTerminal,
+}: {
+  methods: RecoveryAuthMethod[];
+  onOpenTerminal: () => void;
+}) {
+  return (
+    <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+      <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
+        Authentication required — log in before resuming
+      </div>
+      {methods.map((method) => (
+        <AuthMethodRow key={method.id} method={method} onOpenTerminal={onOpenTerminal} />
+      ))}
+    </div>
+  );
+}
+
+function RecoveryActions({
+  state,
+  canRecover,
+  hasResumeToken,
+  onRecover,
+}: {
+  state: RecoveryState;
+  canRecover: boolean;
+  hasResumeToken?: boolean;
+  onRecover: (action: "resume" | "fresh_start") => void;
+}) {
+  const disabled = state === "recovering" || !canRecover;
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      {hasResumeToken && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("h-7 text-xs cursor-pointer gap-1.5")}
+              disabled={disabled}
+              onClick={() => onRecover("resume")}
+              data-testid="recovery-resume-button"
+            >
+              <IconRefresh className="h-3 w-3" />
+              Resume session
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            Re-launch with resume flag — keeps all previous messages and context
+          </TooltipContent>
+        </Tooltip>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn("h-7 text-xs cursor-pointer gap-1.5")}
+            disabled={disabled}
+            onClick={() => onRecover("fresh_start")}
+            data-testid="recovery-fresh-button"
+          >
+            <IconPlayerPlay className="h-3 w-3" />
+            Start fresh session
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          New agent process on the same workspace — no previous conversation context
+        </TooltipContent>
+      </Tooltip>
+      {state === "error" && <span className="text-xs text-red-500">Failed — try again</span>}
+    </div>
+  );
+}
 
 function AuthMethodRow({
   method,
@@ -169,10 +195,6 @@ function AuthMethodRow({
       // clipboard API unavailable
     }
   }, [fullCommand]);
-
-  const handleRunInTerminal = useCallback(() => {
-    onOpenTerminal();
-  }, [onOpenTerminal]);
 
   return (
     <div className="space-y-1">
@@ -206,7 +228,7 @@ function AuthMethodRow({
                 variant="outline"
                 size="sm"
                 className="h-6 text-[11px] cursor-pointer gap-1 px-2 shrink-0"
-                onClick={handleRunInTerminal}
+                onClick={onOpenTerminal}
               >
                 <IconTerminal2 className="h-3 w-3" />
                 Open terminal
