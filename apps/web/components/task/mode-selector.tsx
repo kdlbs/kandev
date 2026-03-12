@@ -93,7 +93,7 @@ export const ModeSelector = memo(function ModeSelector({ sessionId }: ModeSelect
           <DropdownMenuItem
             key={mode.id}
             onClick={() => handleModeChange(mode.id)}
-            className={mode.id === modeState.currentModeId ? "bg-muted" : ""}
+            className={`cursor-pointer ${mode.id === modeState.currentModeId ? "bg-muted" : ""}`}
           >
             <div>
               <div>{mode.name}</div>

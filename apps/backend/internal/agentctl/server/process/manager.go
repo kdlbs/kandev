@@ -913,6 +913,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 			zap.String("pending_id", pendingID),
 			zap.String("option_id", resp.OptionID),
 			zap.Bool("cancelled", resp.Cancelled))
+		if resp.Cancelled {
+			m.sendPermissionCancelledNotification(pending)
+		}
 		return resp, nil
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",

@@ -6,17 +6,7 @@ import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { formatUserHomePath } from "@/lib/utils";
-
-/** Copies text to clipboard with a brief "copied" state */
-function useCopyToClipboard(): [boolean, (text: string) => void] {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = (text: string) => {
-    navigator.clipboard?.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 500);
-  };
-  return [copied, handleCopy];
-}
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
 /** Copy button with check/copy icon toggle */
 function CopyIconButton({
@@ -29,7 +19,12 @@ function CopyIconButton({
   className?: string;
 }) {
   return (
-    <button type="button" onClick={onClick} className={className}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`cursor-pointer ${className ?? ""}`}
+      aria-label={copied ? "Copied" : "Copy to clipboard"}
+    >
       {copied ? (
         <IconCheck className="h-3 w-3 text-green-500" />
       ) : (
@@ -41,7 +36,7 @@ function CopyIconButton({
 
 /** Copiable path row used in the branch popover */
 function PathRow({ label, path }: { label: string; path: string }) {
-  const [copied, handleCopy] = useCopyToClipboard();
+  const { copied, copy: handleCopy } = useCopyToClipboard();
   return (
     <div className="space-y-0.5">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -214,7 +209,7 @@ export function BranchPathPopover({
   worktreePath?: string | null;
   onRenameBranch?: (newName: string) => Promise<void>;
 }) {
-  const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
+  const { copied: copiedBranch, copy: handleCopyBranch } = useCopyToClipboard();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const recentlyClosedRef = useRef(false);

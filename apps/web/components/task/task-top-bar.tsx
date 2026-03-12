@@ -187,7 +187,7 @@ function TopBarLeft({
             <BreadcrumbLink asChild>
               <Link
                 href="/"
-                className="text-muted-foreground hover:text-foreground transition-colors"
+                className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
               >
                 <IconHome className="h-4 w-4" />
               </Link>
