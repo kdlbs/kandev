@@ -735,7 +735,13 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		}
 	}
 
+	sessionID := string(n.SessionId)
+
 	event := a.convertNotification(n)
+	if event == nil {
+		// Try untyped updates not yet supported by the ACP SDK.
+		event = a.tryConvertUntypedUpdate(rawData, sessionID)
+	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -743,7 +749,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		a.sendUpdate(*event)
 	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
 		a.logger.Warn("unhandled ACP session notification",
-			zap.String("session_id", string(n.SessionId)),
+			zap.String("session_id", sessionID),
 			zap.String("update_json", string(updateJSON)))
 	}
 }
@@ -802,6 +808,47 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 	}
 
 	return nil
+}
+
+// acpUsageUpdate represents the ACP "usage_update" session notification.
+// TODO: Replace with acp.SessionUsageUpdate when the ACP SDK adds native support.
+type acpUsageUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	Size          int64  `json:"size"`
+	Used          int64  `json:"used"`
+	Cost          *struct {
+		Amount   float64 `json:"amount"`
+		Currency string  `json:"currency"`
+	} `json:"cost,omitempty"`
+}
+
+// tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
+// When the SDK adds native support, move the handling into convertNotification and delete this.
+func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
+	var envelope struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
+		return nil
+	}
+
+	var usage acpUsageUpdate
+	if err := json.Unmarshal(envelope.Update, &usage); err != nil {
+		return nil
+	}
+	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
+		return nil
+	}
+
+	remaining := max(usage.Size-usage.Used, 0)
+	return &AgentEvent{
+		Type:                   streams.EventTypeContextWindow,
+		SessionID:              sessionID,
+		ContextWindowSize:      usage.Size,
+		ContextWindowUsed:      usage.Used,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      float64(usage.Used) / float64(usage.Size) * 100,
+	}
 }
 
 // convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.
