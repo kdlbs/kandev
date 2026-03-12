@@ -504,6 +504,13 @@ func (sm *SessionManager) SendPrompt(
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 
+	// Signal when this prompt completes so CancelAgent can wait for it.
+	promptDone := make(chan struct{})
+	execution.promptFinishedMu.Lock()
+	execution.promptFinished = promptDone
+	execution.promptFinishedMu.Unlock()
+	defer close(promptDone)
+
 	// Inject session trace context so prompt spans become children of the session span
 	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
 		ctx = trace.ContextWithSpan(ctx, sessionSpan)

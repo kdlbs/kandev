@@ -96,6 +96,11 @@ type AgentExecution struct {
 	// Buffered (size 1) so the sender never blocks.
 	promptDoneCh chan PromptCompletionSignal
 
+	// Closed when the current SendPrompt returns, so CancelAgent can wait
+	// for the in-flight prompt to finish before the caller retries.
+	promptFinished   chan struct{}
+	promptFinishedMu sync.Mutex
+
 	// Last time an agent event was received (for stall detection)
 	lastActivityAt   time.Time
 	lastActivityAtMu sync.Mutex

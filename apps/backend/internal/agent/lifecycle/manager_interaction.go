@@ -69,6 +69,25 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
+	// Wait for the in-flight SendPrompt to finish processing the cancel completion.
+	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
+	execution.promptFinishedMu.Lock()
+	ch := execution.promptFinished
+	execution.promptFinishedMu.Unlock()
+
+	if ch != nil {
+		select {
+		case <-ch:
+			m.logger.Debug("in-flight prompt finished after cancel",
+				zap.String("execution_id", executionID))
+		case <-time.After(10 * time.Second):
+			m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel",
+				zap.String("execution_id", executionID))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
 	return nil
 }
 
