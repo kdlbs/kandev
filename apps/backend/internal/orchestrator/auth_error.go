@@ -8,6 +8,7 @@ import (
 // authErrorPatterns are substrings that indicate an authentication-related error.
 var authErrorPatterns = []string{
 	"authentication_error",
+	"authentication required",
 	"token has expired",
 	"Failed to authenticate",
 	"authorization_error",

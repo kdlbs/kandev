@@ -15,6 +15,8 @@ func TestIsAuthError(t *testing.T) {
 		{"failed to authenticate", `Internal error: Failed to authenticate. API Error: 401`, true},
 		{"rate limit", `rate_limit_error: too many requests`, false},
 		{"mixed case", `AUTHENTICATION_ERROR occurred`, true},
+		{"authentication required JSON-RPC", `{"code":-32000,"message":"Authentication required"}`, true},
+		{"authentication required plain", `Authentication required`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,6 +47,11 @@ func TestExtractReadableAuthError(t *testing.T) {
 			name: "JSON-RPC without inner JSON",
 			raw:  `{"code":-32603,"message":"Failed to authenticate"}`,
 			want: "Failed to authenticate",
+		},
+		{
+			name: "JSON-RPC -32000 authentication required",
+			raw:  `{"code":-32000,"message":"Authentication required"}`,
+			want: "Authentication required",
 		},
 	}
 	for _, tt := range tests {
