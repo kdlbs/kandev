@@ -222,6 +222,88 @@ function KanbanCardActions({
   );
 }
 
+function DeleteConfirmDialog({
+  open,
+  onOpenChange,
+  taskTitle,
+  isDeleting,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  taskTitle: string;
+  isDeleting?: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete task</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete &quot;{taskTitle}&quot;? This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              onConfirm();
+              onOpenChange(false);
+            }}
+          >
+            {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function MoveToSubmenu({
+  task,
+  steps,
+  disabled,
+  onMove,
+}: {
+  task: Task;
+  steps: WorkflowStep[];
+  disabled?: boolean;
+  onMove: (task: Task, targetStepId: string) => void;
+}) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger
+        disabled={disabled}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        Move to
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent>
+          {steps
+            .filter((col) => col.id !== task.workflowStepId)
+            .map((col) => (
+              <DropdownMenuItem
+                key={col.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onMove(task, col.id);
+                }}
+              >
+                <div className={cn("w-2 h-2 rounded-full mr-2", col.color)} />
+                {col.title}
+              </DropdownMenuItem>
+            ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
+  );
+}
+
 function KanbanCardMenu({
   task,
   effectiveMenuOpen,
@@ -279,33 +361,7 @@ function KanbanCardMenu({
             Edit
           </DropdownMenuItem>
           {steps && steps.length > 1 && onMove && (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger
-                disabled={isProcessing}
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                Move to
-              </DropdownMenuSubTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuSubContent>
-                  {steps
-                    .filter((col) => col.id !== task.workflowStepId)
-                    .map((col) => (
-                      <DropdownMenuItem
-                        key={col.id}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onMove(task, col.id);
-                        }}
-                      >
-                        <div className={cn("w-2 h-2 rounded-full mr-2", col.color)} />
-                        {col.title}
-                      </DropdownMenuItem>
-                    ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuPortal>
-            </DropdownMenuSub>
+            <MoveToSubmenu task={task} steps={steps} disabled={isProcessing} onMove={onMove} />
           )}
           <DropdownMenuItem
             disabled={isProcessing}
@@ -331,30 +387,13 @@ function KanbanCardMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete task</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete &quot;{task.title}&quot;? This action cannot be
-              undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                onDelete?.(task);
-                setShowDeleteConfirm(false);
-              }}
-            >
-              {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        taskTitle={task.title}
+        isDeleting={isDeleting}
+        onConfirm={() => onDelete?.(task)}
+      />
     </>
   );
 }
