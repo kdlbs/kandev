@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { requestFileContentAtRef } from "@/lib/ws/workspace-files";
+import { requestFileContent, requestFileContentAtRef } from "@/lib/ws/workspace-files";
 
 /** Must match @pierre/diffs SPLIT_WITH_NEWLINES — splits preserving trailing \n */
 const SPLIT_WITH_NEWLINES = /(?<=\n)/;
@@ -52,18 +52,19 @@ async function fetchOldContent(
   }
 }
 
-/** Fetch new file content at HEAD. Returns empty string for deleted files. */
+/** Fetch new file content from the working tree. Returns empty string for deleted files. */
 async function fetchNewContent(
   client: WsClient,
   sessionId: string,
   filePath: string,
 ): Promise<string> {
   try {
-    // Use get_at_ref with HEAD to ensure we get the committed version
-    const res = await requestFileContentAtRef(client, sessionId, filePath, "HEAD");
+    // Fetch from working tree (current file on disk), not HEAD.
+    // The diff shows working tree changes, so newLines must match.
+    const res = await requestFileContent(client, sessionId, filePath);
     if (res.is_binary) throw new Error("Cannot expand binary files");
     if (!res.error) return res.content;
-    // File not found at HEAD is expected for deleted files - return empty string
+    // File not found is expected for deleted files - return empty string
     if (isFileNotFoundError(res.error)) return "";
     throw new Error(res.error);
   } catch (err) {
