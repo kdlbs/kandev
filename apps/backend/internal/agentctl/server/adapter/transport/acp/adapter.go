@@ -836,8 +836,13 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 // convertAvailableCommands converts an ACP AvailableCommandsUpdate to an AgentEvent,
 // including input hints when available.
 func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.SessionAvailableCommandsUpdate) *AgentEvent {
-	commands := make([]streams.AvailableCommand, len(update.AvailableCommands))
-	for i, cmd := range update.AvailableCommands {
+	seen := make(map[string]struct{}, len(update.AvailableCommands))
+	commands := make([]streams.AvailableCommand, 0, len(update.AvailableCommands))
+	for _, cmd := range update.AvailableCommands {
+		if _, dup := seen[cmd.Name]; dup {
+			continue
+		}
+		seen[cmd.Name] = struct{}{}
 		ac := streams.AvailableCommand{
 			Name:        cmd.Name,
 			Description: cmd.Description,
@@ -845,7 +850,7 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint
 		}
-		commands[i] = ac
+		commands = append(commands, ac)
 	}
 	return &AgentEvent{
 		Type:              streams.EventTypeAvailableCommands,

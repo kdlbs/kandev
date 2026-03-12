@@ -702,6 +702,67 @@ func TestConvertAvailableCommands_Empty(t *testing.T) {
 	}
 }
 
+func TestConvertAvailableCommands_Dedup(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "pr-comments", Description: "Address PR review comments"},
+			{Name: "push-pr", Description: "Push and open PR"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-dedup", update)
+
+	if len(result.AvailableCommands) != 2 {
+		t.Fatalf("expected 2 commands after dedup, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Name != "pr-comments" {
+		t.Errorf("command[0].Name = %q, want %q", result.AvailableCommands[0].Name, "pr-comments")
+	}
+	if result.AvailableCommands[1].Name != "push-pr" {
+		t.Errorf("command[1].Name = %q, want %q", result.AvailableCommands[1].Name, "push-pr")
+	}
+}
+
+func TestConvertAvailableCommands_DedupPreservesFirst(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "review", Description: "First description"},
+			{Name: "review", Description: "Second description"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-first", update)
+
+	if len(result.AvailableCommands) != 1 {
+		t.Fatalf("expected 1 command after dedup, got %d", len(result.AvailableCommands))
+	}
+	if result.AvailableCommands[0].Description != "First description" {
+		t.Errorf("Description = %q, want %q (first occurrence should win)",
+			result.AvailableCommands[0].Description, "First description")
+	}
+}
+
+func TestConvertAvailableCommands_NoDuplicates(t *testing.T) {
+	a := newTestAdapter()
+	update := &acp.SessionAvailableCommandsUpdate{
+		AvailableCommands: []acp.AvailableCommand{
+			{Name: "commit", Description: "Commit changes"},
+			{Name: "review", Description: "Review code"},
+			{Name: "push-pr", Description: "Push and open PR"},
+		},
+	}
+
+	result := a.convertAvailableCommands("session-nodup", update)
+
+	if len(result.AvailableCommands) != 3 {
+		t.Fatalf("expected 3 commands (no dedup needed), got %d", len(result.AvailableCommands))
+	}
+}
+
 // --- emitInitialModeState ---
 
 func TestEmitInitialModeState(t *testing.T) {
