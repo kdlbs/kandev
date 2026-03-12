@@ -317,7 +317,6 @@ type ToolbarRightSectionProps = {
   taskId: string | null;
   sessionId: string | null;
   taskTitle?: string;
-  taskDescription: string;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
   isDisabled: boolean;
@@ -336,7 +335,6 @@ function ToolbarRightSection({
   taskId,
   sessionId,
   taskTitle,
-  taskDescription,
   planModeEnabled,
   isAgentBusy,
   isDisabled,
@@ -361,7 +359,6 @@ function ToolbarRightSection({
           taskId={taskId}
           activeSessionId={sessionId}
           taskTitle={taskTitle}
-          taskDescription={taskDescription}
         />
       )}
       <TokenUsageDisplay sessionId={sessionId} />
@@ -509,7 +506,6 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         taskId={props.taskId}
         sessionId={props.sessionId}
         taskTitle={props.taskTitle}
-        taskDescription={props.taskDescription}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
         isDisabled={props.isDisabled}
