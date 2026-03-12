@@ -364,6 +364,25 @@ function ToolbarRightSection({
   );
 }
 
+function AttachFilesButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
+          onClick={onClick}
+        >
+          <IconPaperclip className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Attach files</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export const ChatInputToolbar = memo(function ChatInputToolbar({
   planModeEnabled,
   planModeAvailable = true,
@@ -404,22 +423,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar({
 
         <McpIndicator mcpServers={mcpServers} />
 
-        {onAttachFiles && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
-                onClick={onAttachFiles}
-              >
-                <IconPaperclip className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Attach files</TooltipContent>
-          </Tooltip>
-        )}
+        {onAttachFiles && <AttachFilesButton onClick={onAttachFiles} />}
 
         <ContextPopover
           open={contextPopoverOpen}
