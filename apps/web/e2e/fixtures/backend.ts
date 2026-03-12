@@ -193,7 +193,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         KANDEV_WORKTREE_ENABLED: "false",
         KANDEV_WORKTREE_BASEPATH: worktreeBase,
         KANDEV_REPOCLONE_BASEPATH: repoCloneBase,
-        KANDEV_LOG_LEVEL: "warn",
+        KANDEV_LOG_LEVEL: process.env.KANDEV_LOG_LEVEL ?? "warn",
         AGENTCTL_INSTANCE_PORT_BASE: String(agentctlPortBase),
         AGENTCTL_INSTANCE_PORT_MAX: String(agentctlPortMax),
         GIT_AUTHOR_NAME: "E2E Test",

@@ -227,6 +227,8 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerConfigMcpTools()
 		count += 4
+		s.registerConfigTaskTools()
+		count += 4
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++

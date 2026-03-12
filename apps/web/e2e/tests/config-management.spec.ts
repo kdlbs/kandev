@@ -25,6 +25,19 @@ function startConfigSession(
   return apiClient.startConfigChat(seedData.workspaceId, seedData.agentProfileId, prompt);
 }
 
+/** Navigate to session page and wait for the final marker message. */
+async function runAndWait(
+  testPage: import("@playwright/test").Page,
+  sessionId: string,
+  marker: string,
+) {
+  await testPage.goto(`/s/${sessionId}`);
+  const page = new SessionPage(testPage);
+  await page.waitForLoad();
+  await expect(page.chat.getByText(marker, { exact: true })).toBeVisible({ timeout: 30_000 });
+  return page;
+}
+
 // ---------------------------------------------------------------------------
 // Workflow management
 // ---------------------------------------------------------------------------
@@ -38,13 +51,7 @@ test.describe("Config-mode MCP — workflow management", () => {
       'e2e:message("Done listing")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("Done listing", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    const page = await runAndWait(testPage, session.session_id, "Done listing");
     await expect(page.chat.getByText("list_workspaces")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("list_workflows")).toBeVisible({ timeout: 10_000 });
   });
@@ -59,18 +66,36 @@ test.describe("Config-mode MCP — workflow management", () => {
       'e2e:message("Steps listed")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("Steps listed", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await runAndWait(testPage, session.session_id, "Steps listed");
 
     // Verify via API
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
     const qaStep = steps.find((s) => s.name === "QA Review");
     expect(qaStep).toBeTruthy();
+  });
+
+  test("agent can create a step with all optional fields", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Full Fields Workflow");
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Creating step with all fields...")',
+      `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Deploy","position":0,"color":"#22c55e","prompt":"Deploy to production","is_start_step":true})`,
+      'e2e:message("Step created")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Step created");
+
+    // Verify all fields via API
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const deploy = steps.find((s) => s.name === "Deploy");
+    expect(deploy).toBeTruthy();
+    expect(deploy!.color).toBe("#22c55e");
+    expect(deploy!.prompt).toBe("Deploy to production");
+    expect(deploy!.is_start_step).toBe(true);
   });
 
   test("agent can update a workflow step", async ({ testPage, apiClient, seedData }) => {
@@ -83,18 +108,13 @@ test.describe("Config-mode MCP — workflow management", () => {
       'e2e:message("Step updated")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("Step updated", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await runAndWait(testPage, session.session_id, "Step updated");
 
     // Verify via API
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
     const updated = steps.find((s) => s.id === step.id);
     expect(updated?.name).toBe("In Review");
+    expect(updated?.color).toBe("#3b82f6");
   });
 });
 
@@ -114,16 +134,15 @@ test.describe("Config-mode MCP — agent management", () => {
       'e2e:message("Agents listed")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("Agents listed", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    const page = await runAndWait(testPage, session.session_id, "Agents listed");
     await expect(page.chat.getByText("list_agents")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("list_agent_profiles")).toBeVisible({ timeout: 10_000 });
   });
+
+  // NOTE: create_agent and delete_agent require a registered agent type name (e.g.
+  // "mock-agent") which is already configured in E2E mode, so they cannot be tested
+  // with novel agent names. The tools themselves are exercised indirectly by the
+  // list_agents / update_agent tests which prove the pipeline works.
 
   test("agent can update an agent", async ({ testPage, apiClient, seedData }) => {
     const { agents } = await apiClient.listAgents();
@@ -131,33 +150,51 @@ test.describe("Config-mode MCP — agent management", () => {
 
     const session = await startConfigSession(apiClient, seedData, [
       'e2e:message("Updating agent...")',
-      `e2e:mcp:kandev:update_agent({"agent_id":"${agent.id}","workspace_id":"${seedData.workspaceId}"})`,
+      `e2e:mcp:kandev:update_agent({"agent_id":"${agent.id}","supports_mcp":true})`,
       'e2e:message("Agent updated")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
+    await runAndWait(testPage, session.session_id, "Agent updated");
 
-    await expect(page.chat.getByText("Agent updated", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    // Verify via API
+    const { agents: updated } = await apiClient.listAgents();
+    const updatedAgent = updated.find((a) => a.id === agent.id);
+    expect(updatedAgent?.supports_mcp).toBe(true);
   });
 
-  test("agent can update an agent profile", async ({ testPage, apiClient, seedData }) => {
+  test("agent can update an agent profile name", async ({ testPage, apiClient, seedData }) => {
     const session = await startConfigSession(apiClient, seedData, [
       'e2e:message("Updating profile...")',
       `e2e:mcp:kandev:update_agent_profile({"profile_id":"${seedData.agentProfileId}","name":"Renamed Profile"})`,
       'e2e:message("Profile updated")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
+    await runAndWait(testPage, session.session_id, "Profile updated");
 
-    await expect(page.chat.getByText("Profile updated", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    // Verify via API
+    const { agents } = await apiClient.listAgents();
+    const profile = agents.flatMap((a) => a.profiles ?? []).find((p) => p.id === seedData.agentProfileId);
+    expect(profile?.name).toBe("Renamed Profile");
+  });
+
+  test("agent can update agent profile model and auto_approve", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Updating profile settings...")',
+      `e2e:mcp:kandev:update_agent_profile({"profile_id":"${seedData.agentProfileId}","model":"claude-sonnet-4-5-20250514","auto_approve":false})`,
+      'e2e:message("Profile settings updated")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Profile settings updated");
+
+    // Verify via API
+    const { agents } = await apiClient.listAgents();
+    const profile = agents.flatMap((a) => a.profiles ?? []).find((p) => p.id === seedData.agentProfileId);
+    expect(profile?.model).toBe("claude-sonnet-4-5-20250514");
+    expect(profile?.auto_approve).toBe(false);
   });
 });
 
@@ -174,20 +211,105 @@ test.describe("Config-mode MCP — MCP server configuration", () => {
       'e2e:message("MCP config updated")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("MCP config updated", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    const page = await runAndWait(testPage, session.session_id, "MCP config updated");
     await expect(page.chat.getByText("get_mcp_config")).toBeVisible({ timeout: 10_000 });
     await expect(page.chat.getByText("update_mcp_config")).toBeVisible({ timeout: 10_000 });
+
+    // Verify via API
+    const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
+    expect(config.enabled).toBe(true);
+    expect(config.servers).toHaveProperty("test-server");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Multi-tool workflow
+// Task management
+// ---------------------------------------------------------------------------
+
+test.describe("Config-mode MCP — task management", () => {
+  test("agent can list tasks in a workflow", async ({ testPage, apiClient, seedData }) => {
+    // Create a task so there's something to list
+    await apiClient.createTask(seedData.workspaceId, "Listable Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Listing tasks...")',
+      `e2e:mcp:kandev:list_tasks({"workflow_id":"${seedData.workflowId}"})`,
+      'e2e:message("Tasks listed")',
+    ].join("\n"));
+
+    const page = await runAndWait(testPage, session.session_id, "Tasks listed");
+    await expect(page.chat.getByText("list_tasks").first()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("agent can move a task to a different step", async ({ testPage, apiClient, seedData }) => {
+    // Find a target step that is NOT the start step
+    const targetStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
+    expect(targetStep).toBeTruthy();
+
+    // Create a task in the start step
+    const task = await apiClient.createTask(seedData.workspaceId, "Movable Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Moving task...")',
+      `e2e:mcp:kandev:move_task({"task_id":"${task.id}","workflow_id":"${seedData.workflowId}","workflow_step_id":"${targetStep!.id}"})`,
+      'e2e:message("Task moved")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Task moved");
+
+    // Verify the task is now in the target step
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    const moved = tasks.find((t) => t.id === task.id);
+    expect(moved?.workflow_step_id).toBe(targetStep!.id);
+  });
+
+  test("agent can archive a task", async ({ testPage, apiClient, seedData }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Archivable Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Archiving task...")',
+      `e2e:mcp:kandev:archive_task({"task_id":"${task.id}"})`,
+      'e2e:message("Task archived")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Task archived");
+
+    // Verify the task no longer appears in active task list
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasks.find((t) => t.id === task.id)).toBeUndefined();
+  });
+
+  test("agent can delete a task", async ({ testPage, apiClient, seedData }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Deletable Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Deleting task...")',
+      `e2e:mcp:kandev:delete_task({"task_id":"${task.id}"})`,
+      'e2e:message("Task deleted")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Task deleted");
+
+    // Verify the task is gone
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    expect(tasks.find((t) => t.id === task.id)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-tool workflows
 // ---------------------------------------------------------------------------
 
 test.describe("Config-mode MCP — multi-tool workflow", () => {
@@ -207,17 +329,44 @@ test.describe("Config-mode MCP — multi-tool workflow", () => {
       'e2e:message("Multi-tool config complete")',
     ].join("\n"));
 
-    await testPage.goto(`/s/${session.session_id}`);
-    const page = new SessionPage(testPage);
-    await page.waitForLoad();
-
-    await expect(page.chat.getByText("Multi-tool config complete", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await runAndWait(testPage, session.session_id, "Multi-tool config complete");
 
     // Verify the step was actually created
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
     const createdStep = steps.find((s) => s.name === "Agent Created Step");
     expect(createdStep).toBeTruthy();
+  });
+
+  test("agent performs full workflow setup with steps, agent, and MCP config", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Full Setup Workflow");
+
+    const session = await startConfigSession(apiClient, seedData, [
+      'e2e:message("Setting up full workflow...")',
+      // Create 3 steps
+      `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Build","position":0,"color":"#3b82f6"})`,
+      `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Test","position":1,"color":"#eab308"})`,
+      `e2e:mcp:kandev:create_workflow_step({"workflow_id":"${workflow.id}","name":"Deploy","position":2,"color":"#22c55e"})`,
+      // List agents to see what we have
+      "e2e:mcp:kandev:list_agents({})",
+      // Update MCP config on the test profile
+      `e2e:mcp:kandev:update_mcp_config({"profile_id":"${seedData.agentProfileId}","enabled":true,"servers":{"ci-tools":{"command":"npx","args":["-y","@ci/tools"]}}})`,
+      'e2e:message("Full setup complete")',
+    ].join("\n"));
+
+    await runAndWait(testPage, session.session_id, "Full setup complete");
+
+    // Verify steps
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    expect(steps.length).toBe(3);
+    expect(steps.map((s) => s.name).sort()).toEqual(["Build", "Deploy", "Test"]);
+
+    // Verify MCP config
+    const config = await apiClient.getAgentProfileMcpConfig(seedData.agentProfileId);
+    expect(config.enabled).toBe(true);
+    expect(config.servers).toHaveProperty("ci-tools");
   });
 });
