@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -451,5 +452,8 @@ func (s *SimulatedAgentManagerClient) GetGitStatus(_ context.Context, _ string) 
 	}, nil
 }
 func (s *SimulatedAgentManagerClient) WaitForAgentctlReady(_ context.Context, _ string) error {
+	return nil
+}
+func (s *SimulatedAgentManagerClient) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
 	return nil
 }
