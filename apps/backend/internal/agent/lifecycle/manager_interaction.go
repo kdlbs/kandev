@@ -27,14 +27,42 @@ func (m *Manager) WasSessionInitialized(executionID string) bool {
 	return exec.sessionInitialized
 }
 
-// GetSessionAuthMethods returns the cached auth methods for a session's execution.
-// Returns nil if the session has no execution or no auth methods were received.
+// GetSessionAuthMethods returns auth methods for a session's execution.
+// It first checks cached methods from agent_capabilities events. When the agent
+// failed before reporting capabilities (e.g., immediate auth error), it falls
+// back to static auth methods derived from the agent type.
 func (m *Manager) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
 	exec, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return nil
 	}
-	return exec.GetAuthMethods()
+	if methods := exec.GetAuthMethods(); len(methods) > 0 {
+		return methods
+	}
+	return fallbackAuthMethods(exec.AgentID)
+}
+
+// fallbackAuthMethods returns static auth methods for known agent types.
+// Used when the agent failed before sending agent_capabilities (e.g., auth error
+// on first prompt before the agent could report its own auth methods).
+func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
+	switch agentID {
+	case "claude-acp":
+		return []streams.AuthMethodInfo{
+			{
+				ID:          "claude-auth-login",
+				Name:        "Anthropic Authentication",
+				Description: "Log in to your Anthropic account",
+				TerminalAuth: &streams.TerminalAuth{
+					Command: "claude",
+					Args:    []string{"auth", "login"},
+					Label:   "Log in with Claude CLI",
+				},
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 // PromptAgent sends a follow-up prompt to a running agent

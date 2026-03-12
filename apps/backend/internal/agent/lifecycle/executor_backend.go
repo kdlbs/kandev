@@ -227,7 +227,9 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	}
 
 	var historyEnabled bool
+	var agentID string
 	if req.AgentConfig != nil {
+		agentID = req.AgentConfig.ID()
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			historyEnabled = rt.SessionConfig.HistoryContextInjection
 		}
@@ -238,6 +240,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		AgentProfileID:       req.AgentProfileID,
+		AgentID:              agentID,
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,
 		WorkspacePath:        workspacePath,

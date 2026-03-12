@@ -19,8 +19,10 @@ type Props = {
 
 export function BottomTerminalPanel({ sessionId }: Props) {
   const visible = useAppStore((s) => s.bottomTerminal.isOpen);
+  const pendingCommand = useAppStore((s) => s.bottomTerminal.pendingCommand);
   const storeApi = useAppStoreApi();
   const toggle = useCallback(() => storeApi.getState().toggleBottomTerminal(), [storeApi]);
+  const clearCommand = useCallback(() => storeApi.getState().clearBottomTerminalCommand(), [storeApi]);
 
   // Restore visibility state from localStorage on mount
   useEffect(() => {
@@ -96,6 +98,8 @@ export function BottomTerminalPanel({ sessionId }: Props) {
           mode="shell"
           terminalId="bottom-panel"
           autoFocus
+          pendingCommand={pendingCommand}
+          onCommandSent={clearCommand}
         />
       </div>
     </div>

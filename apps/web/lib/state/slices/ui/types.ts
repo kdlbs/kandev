@@ -71,6 +71,7 @@ export type SessionFailureNotification = {
 
 export type BottomTerminalState = {
   isOpen: boolean;
+  pendingCommand: string | null;
 };
 
 export type UISliceState = {
@@ -114,6 +115,8 @@ export type UISliceActions = {
   renameQuickChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   toggleBottomTerminal: () => void;
+  openBottomTerminalWithCommand: (command: string) => void;
+  clearBottomTerminalCommand: () => void;
 };
 
 export type UISlice = UISliceState & UISliceActions;

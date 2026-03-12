@@ -21,7 +21,7 @@ export const defaultUIState: UISliceState = {
   systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
-  bottomTerminal: { isOpen: false },
+  bottomTerminal: { isOpen: false, pendingCommand: null },
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -97,12 +97,38 @@ function buildMobileActions(set: ImmerSet) {
   };
 }
 
+function buildBottomTerminalActions(set: ImmerSet) {
+  return {
+    toggleBottomTerminal: () =>
+      set((draft) => {
+        const newValue = !draft.bottomTerminal.isOpen;
+        draft.bottomTerminal.isOpen = newValue;
+        if (typeof window !== "undefined") {
+          localStorage.setItem("bottom-terminal-open", String(newValue));
+        }
+      }),
+    openBottomTerminalWithCommand: (command: string) =>
+      set((draft) => {
+        draft.bottomTerminal.isOpen = true;
+        draft.bottomTerminal.pendingCommand = command;
+        if (typeof window !== "undefined") {
+          localStorage.setItem("bottom-terminal-open", "true");
+        }
+      }),
+    clearBottomTerminalCommand: () =>
+      set((draft) => {
+        draft.bottomTerminal.pendingCommand = null;
+      }),
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
 ) => ({
   ...defaultUIState,
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
+  ...buildBottomTerminalActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -188,14 +214,5 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setSessionFailureNotification: (n) =>
     set((draft) => {
       draft.sessionFailureNotification = n;
-    }),
-  toggleBottomTerminal: () =>
-    set((draft) => {
-      const newValue = !draft.bottomTerminal.isOpen;
-      draft.bottomTerminal.isOpen = newValue;
-      // Persist to localStorage
-      if (typeof window !== "undefined") {
-        localStorage.setItem("bottom-terminal-open", String(newValue));
-      }
     }),
 });

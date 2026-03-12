@@ -38,6 +38,13 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
     }
   }, [storeApi]);
 
+  const openTerminalWithCommand = useCallback(
+    (command: string) => {
+      storeApi.getState().openBottomTerminalWithCommand(command);
+    },
+    [storeApi],
+  );
+
   const handleRecover = useCallback(
     async (action: "resume" | "fresh_start") => {
       if (!canRecover || !metadata) return;
@@ -79,10 +86,11 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="text-xs font-mono text-red-600 dark:text-red-400">{message}</div>
-          {isAuthError && authMethods && authMethods.length > 0 && (
-            <AuthMethodsPanel methods={authMethods} onOpenTerminal={openBottomTerminal} />
-          )}
-          <RecoveryActions
+          <ErrorActions
+            isAuthError={isAuthError}
+            authMethods={authMethods}
+            openTerminalWithCommand={openTerminalWithCommand}
+            openBottomTerminal={openBottomTerminal}
             state={state}
             canRecover={canRecover}
             hasResumeToken={metadata?.has_resume_token}
@@ -94,17 +102,53 @@ export const AgentErrorRecoveryMessage = memo(function AgentErrorRecoveryMessage
   );
 });
 
+function ErrorActions({
+  isAuthError,
+  authMethods,
+  openTerminalWithCommand,
+  openBottomTerminal,
+  state,
+  canRecover,
+  hasResumeToken,
+  onRecover,
+}: {
+  isAuthError: boolean;
+  authMethods: RecoveryAuthMethod[] | undefined;
+  openTerminalWithCommand: (command: string) => void;
+  openBottomTerminal: () => void;
+  state: RecoveryState;
+  canRecover: boolean;
+  hasResumeToken?: boolean;
+  onRecover: (action: "resume" | "fresh_start") => void;
+}) {
+  if (isAuthError) {
+    return authMethods && authMethods.length > 0 ? (
+      <AuthMethodsPanel methods={authMethods} onOpenTerminal={openTerminalWithCommand} />
+    ) : (
+      <GenericAuthPanel onOpenTerminal={openBottomTerminal} />
+    );
+  }
+  return (
+    <RecoveryActions
+      state={state}
+      canRecover={canRecover}
+      hasResumeToken={hasResumeToken}
+      onRecover={onRecover}
+    />
+  );
+}
+
 function AuthMethodsPanel({
   methods,
   onOpenTerminal,
 }: {
   methods: RecoveryAuthMethod[];
-  onOpenTerminal: () => void;
+  onOpenTerminal: (command: string) => void;
 }) {
   return (
     <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
       <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
-        Authentication required — log in before resuming
+        Authentication required, log in before resuming
       </div>
       {methods.map((method) => (
         <AuthMethodRow key={method.id} method={method} onOpenTerminal={onOpenTerminal} />
@@ -171,12 +215,31 @@ function RecoveryActions({
   );
 }
 
+function GenericAuthPanel({ onOpenTerminal }: { onOpenTerminal: () => void }) {
+  return (
+    <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
+      <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
+        Authentication required — please log in via the terminal
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-6 text-[11px] cursor-pointer gap-1 px-2"
+        onClick={onOpenTerminal}
+      >
+        <IconTerminal2 className="h-3 w-3" />
+        Open terminal
+      </Button>
+    </div>
+  );
+}
+
 function AuthMethodRow({
   method,
   onOpenTerminal,
 }: {
   method: RecoveryAuthMethod;
-  onOpenTerminal: () => void;
+  onOpenTerminal: (command: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const termAuth = method.terminal_auth;
@@ -228,14 +291,14 @@ function AuthMethodRow({
                 variant="outline"
                 size="sm"
                 className="h-6 text-[11px] cursor-pointer gap-1 px-2 shrink-0"
-                onClick={onOpenTerminal}
+                onClick={() => fullCommand && onOpenTerminal(fullCommand)}
               >
                 <IconTerminal2 className="h-3 w-3" />
-                Open terminal
+                Run in terminal
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              Open the bottom terminal (Cmd+J) to run this command
+              Open the bottom terminal and paste this command
             </TooltipContent>
           </Tooltip>
         </div>

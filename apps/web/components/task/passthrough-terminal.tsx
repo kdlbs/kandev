@@ -25,6 +25,8 @@ import {
 type BaseProps = {
   sessionId?: string | null;
   autoFocus?: boolean;
+  pendingCommand?: string | null;
+  onCommandSent?: () => void;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; label?: string };
 type ShellTerminalProps = BaseProps & { mode: "shell"; terminalId: string; label?: string };
@@ -41,10 +43,8 @@ type PassthroughTerminalProps = AgentTerminalProps | ShellTerminalProps;
  * - Resize commands sent via binary protocol: [0x01][JSON {cols, rows}]
  */
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
-  const { sessionId: propSessionId, mode, label, autoFocus } = props;
+  const { sessionId: propSessionId, mode, label, autoFocus, pendingCommand, onCommandSent } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
-  log("Render - props:", { propSessionId, mode, terminalId, label });
-
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -131,6 +131,8 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     onConnected,
   });
 
+  usePendingCommand(pendingCommand, isConnected, wsRef, onCommandSent);
+
   return (
     <div
       data-testid={mode === "agent" ? "passthrough-terminal" : undefined}
@@ -153,4 +155,24 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
       )}
     </div>
   );
+}
+
+/** Sends a pending command to the terminal WS once connected. */
+function usePendingCommand(
+  pendingCommand: string | null | undefined,
+  isConnected: boolean,
+  wsRef: React.RefObject<WebSocket | null>,
+  onCommandSent?: () => void,
+) {
+  React.useEffect(() => {
+    if (!pendingCommand || !isConnected) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Small delay to ensure the shell prompt is ready after WS connect.
+    const timer = setTimeout(() => {
+      ws.send(new TextEncoder().encode(pendingCommand));
+      onCommandSent?.();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [pendingCommand, isConnected, wsRef, onCommandSent]);
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -617,5 +618,65 @@ func TestIsRemoteSession(t *testing.T) {
 		store := NewExecutionStore()
 		mgr := &Manager{executionStore: store}
 		require.False(t, mgr.IsRemoteSession(context.Background(), "nonexistent"))
+	})
+}
+
+func TestFallbackAuthMethods(t *testing.T) {
+	t.Run("claude-acp returns auth login method", func(t *testing.T) {
+		methods := fallbackAuthMethods("claude-acp")
+		require.Len(t, methods, 1)
+		require.Equal(t, "claude-auth-login", methods[0].ID)
+		require.Equal(t, "Anthropic Authentication", methods[0].Name)
+		require.NotNil(t, methods[0].TerminalAuth)
+		require.Equal(t, "claude", methods[0].TerminalAuth.Command)
+		require.Equal(t, []string{"auth", "login"}, methods[0].TerminalAuth.Args)
+	})
+
+	t.Run("unknown agent returns nil", func(t *testing.T) {
+		require.Nil(t, fallbackAuthMethods("unknown-agent"))
+	})
+
+	t.Run("empty agent ID returns nil", func(t *testing.T) {
+		require.Nil(t, fallbackAuthMethods(""))
+	})
+}
+
+func TestGetSessionAuthMethodsFallback(t *testing.T) {
+	t.Run("returns cached methods when available", func(t *testing.T) {
+		store := NewExecutionStore()
+		exec := &AgentExecution{
+			ID:        "exec-1",
+			SessionID: "session-1",
+			AgentID:   "claude-acp",
+		}
+		exec.SetAuthMethods([]streams.AuthMethodInfo{
+			{ID: "custom-method", Name: "Custom"},
+		})
+		store.Add(exec)
+		mgr := &Manager{executionStore: store}
+
+		methods := mgr.GetSessionAuthMethods("session-1")
+		require.Len(t, methods, 1)
+		require.Equal(t, "custom-method", methods[0].ID)
+	})
+
+	t.Run("falls back to static methods when cache is empty", func(t *testing.T) {
+		store := NewExecutionStore()
+		store.Add(&AgentExecution{
+			ID:        "exec-2",
+			SessionID: "session-2",
+			AgentID:   "claude-acp",
+		})
+		mgr := &Manager{executionStore: store}
+
+		methods := mgr.GetSessionAuthMethods("session-2")
+		require.Len(t, methods, 1)
+		require.Equal(t, "claude-auth-login", methods[0].ID)
+	})
+
+	t.Run("returns nil for unknown session", func(t *testing.T) {
+		store := NewExecutionStore()
+		mgr := &Manager{executionStore: store}
+		require.Nil(t, mgr.GetSessionAuthMethods("nonexistent"))
 	})
 }

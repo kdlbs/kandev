@@ -25,6 +25,7 @@ type AgentExecution struct {
 	TaskID          string
 	SessionID       string
 	AgentProfileID  string
+	AgentID         string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID     string
 	ContainerIP     string // IP address of the container for agentctl communication
 	WorkspacePath   string // Path to the workspace (worktree or repository path)
