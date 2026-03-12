@@ -110,23 +110,26 @@ function GenerateButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          type="button"
-          size={size}
-          variant="ghost"
-          className={
-            size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
-          }
-          onClick={isConfigured ? onClick : undefined}
-          disabled={isDisabled}
-        >
-          {isGenerating ? (
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <IconSparkles className="h-4 w-4" />
-          )}
-          {showLabel && "Generate"}
-        </Button>
+        {/* Wrap in span so tooltip works even when button is disabled */}
+        <span className="inline-flex">
+          <Button
+            type="button"
+            size={size}
+            variant="ghost"
+            className={
+              size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
+            }
+            onClick={isConfigured ? onClick : undefined}
+            disabled={isDisabled}
+          >
+            {isGenerating ? (
+              <IconLoader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <IconSparkles className="h-4 w-4" />
+            )}
+            {showLabel && "Generate"}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{tooltipText}</TooltipContent>
     </Tooltip>
