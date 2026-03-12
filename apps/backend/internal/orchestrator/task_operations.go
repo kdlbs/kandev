@@ -1012,6 +1012,30 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	return s.executor.Stop(ctx, sessionID, reason, force)
 }
 
+// DeleteSession deletes a session that is not currently running.
+func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Prevent deleting active sessions
+	switch session.State {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return fmt.Errorf("cannot delete session in %s state — stop it first", session.State)
+	}
+
+	s.logger.Info("deleting session",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", session.TaskID),
+		zap.String("state", string(session.State)))
+
+	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+	return nil
+}
+
 // StopExecution stops agent execution for a specific execution ID.
 func (s *Service) StopExecution(ctx context.Context, executionID string, reason string, force bool) error {
 	s.logger.Info("stopping execution",

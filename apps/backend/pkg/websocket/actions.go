@@ -78,6 +78,8 @@ const (
 	ActionSessionLaunch       = "session.launch"
 	ActionSessionRecover      = "session.recover"
 	ActionSessionResetContext = "session.reset_context"
+	ActionSessionStop         = "session.stop"
+	ActionSessionDelete       = "session.delete"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
