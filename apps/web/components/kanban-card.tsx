@@ -307,7 +307,6 @@ function KanbanCardMenu({
               </DropdownMenuPortal>
             </DropdownMenuSub>
           )}
-          <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={isProcessing}
             onClick={(event) => {
@@ -318,6 +317,7 @@ function KanbanCardMenu({
             {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
             Archive
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={isProcessing}
             className="text-destructive focus:text-destructive"
