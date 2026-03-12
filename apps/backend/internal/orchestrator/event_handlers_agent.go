@@ -513,6 +513,26 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 }
 
+// handleAgentStartFailed is called by the executor when StartAgentProcess fails.
+// It detects auth errors and routes them through the recoverable failure path so
+// the frontend shows login guidance instead of a terminal failure.
+// Returns true if the failure was handled (caller should skip default FAILED logic).
+func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) bool {
+	if !isAuthError(err.Error()) {
+		return false
+	}
+	s.logger.Info("agent start failure is auth error, treating as recoverable",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	s.handleRecoverableFailure(ctx, watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     err.Error(),
+	})
+	return true
+}
+
 // handleAgentStopped handles agent stopped events (manual stop or cancellation)
 func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Info("handling agent stopped",

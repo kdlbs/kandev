@@ -632,6 +632,16 @@ func TestFallbackAuthMethods(t *testing.T) {
 		require.Equal(t, []string{"auth", "login"}, methods[0].TerminalAuth.Args)
 	})
 
+	t.Run("auggie returns login method", func(t *testing.T) {
+		methods := fallbackAuthMethods("auggie")
+		require.Len(t, methods, 1)
+		require.Equal(t, "auggie-login", methods[0].ID)
+		require.Equal(t, "Auggie Authentication", methods[0].Name)
+		require.NotNil(t, methods[0].TerminalAuth)
+		require.Equal(t, "auggie", methods[0].TerminalAuth.Command)
+		require.Equal(t, []string{"login"}, methods[0].TerminalAuth.Args)
+	})
+
 	t.Run("unknown agent returns nil", func(t *testing.T) {
 		require.Nil(t, fallbackAuthMethods("unknown-agent"))
 	})

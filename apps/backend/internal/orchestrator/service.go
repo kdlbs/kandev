@@ -278,6 +278,7 @@ func NewService(
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
+	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}

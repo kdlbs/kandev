@@ -30,6 +30,10 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 				zap.String("session_id", sessionID),
 				zap.String("agent_execution_id", agentExecutionID),
 				zap.Error(err))
+			// Let the orchestrator handle auth errors as recoverable failures.
+			if e.onAgentStartFailed != nil && e.onAgentStartFailed(updateCtx, taskID, sessionID, agentExecutionID, err) {
+				return
+			}
 			if updateErr := e.updateSessionState(updateCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error()); updateErr != nil {
 				e.logger.Warn("failed to mark session as failed after start error",
 					zap.String("session_id", sessionID),

@@ -60,6 +60,19 @@ func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 				},
 			},
 		}
+	case "auggie":
+		return []streams.AuthMethodInfo{
+			{
+				ID:          "auggie-login",
+				Name:        "Auggie Authentication",
+				Description: "Log in to your Auggie account",
+				TerminalAuth: &streams.TerminalAuth{
+					Command: "auggie",
+					Args:    []string{"login"},
+					Label:   "Log in with Auggie CLI",
+				},
+			},
+		}
 	default:
 		return nil
 	}
