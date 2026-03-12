@@ -267,6 +267,7 @@ type LaunchRequest struct {
 
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")

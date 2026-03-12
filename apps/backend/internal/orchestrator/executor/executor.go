@@ -43,6 +43,13 @@ type executorStore interface {
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
+	// Task environment
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// Session history + plan (for context handover)
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
 // Common errors
@@ -232,6 +239,7 @@ type LaunchAgentRequest struct {
 
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
+	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	RepositoryID         string // Repository ID for worktree tracking
 	RepositoryPath       string // Path to the main repository (for worktree creation)
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
